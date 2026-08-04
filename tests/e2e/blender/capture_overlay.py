@@ -133,7 +133,7 @@ def configure_state():
             assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
             assert bpy.context.window_manager.operating_line_overlay_enabled is False
     elif STATE == "operator":
-        while session.active_index < 11:
+        while session.active_index < 13:
             assert bpy.ops.operating_line.next() == {"FINISHED"}
         next_step = session.steps[session.active_index + 1]
         assert next_step.id == "snowman.render.preview"
@@ -145,6 +145,7 @@ def configure_state():
         assert factory_objects["Cube"] not in tuple(render_scene.objects)
         if bpy.context.window is not None:
             bpy.context.window.scene = render_scene
+        render_scene.frame_set(20)
     assert_factory_objects_preserved()
 
 

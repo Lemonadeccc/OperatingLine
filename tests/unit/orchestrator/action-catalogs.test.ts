@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalog, blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 import { createActionCatalogRegistry } from '@operatingline/orchestrator';
 
 describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
-    const earlier = { ...structuredClone(blenderActionCatalog), catalogVersion: '0.9.0' };
-    const registry = createActionCatalogRegistry([blenderActionCatalog, earlier]);
+    const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.0.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.1.0');
     expect(
-      registry.get({ targetAdapterId: 'blender', catalogVersion: '0.9.0' }).catalogVersion,
-    ).toBe('0.9.0');
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.0.0' }).catalogVersion,
+    ).toBe('1.0.0');
   });
 
   it('fails closed for duplicate, missing, and unavailable catalog versions', () => {

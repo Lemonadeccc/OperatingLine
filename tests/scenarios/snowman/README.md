@@ -1,13 +1,14 @@
 # 场景 001：创建完整雪人预览
 
 这是 OperatingLine 的第一条可执行产品场景规范。规范对应
-`protocol/fixtures/v1/snowman.plan.json` 的 `snowman-demo` revision 3，用来冻结任务树、动作参数、
+`protocol/fixtures/v1/snowman.plan.json` 的 `snowman-demo` revision 4，用来冻结任务树、动作参数、
 观察证据和回退边界；它不是要求 AI 每次都照抄的固定建模教程。
 
 ## 用户目标
 
 用户输入“创建雪人”后，可以按顺序理解、执行和回退以下过程：准备地面，建立三段身体，补充
-面部、纽扣和手臂，应用材质，创建隔离的渲染场景与灯光相机，最后生成 PNG 预览。
+面部、纽扣和手臂，应用材质，创建刚性骨架和挥手关键帧，创建隔离的渲染场景与灯光相机，
+最后生成 PNG 预览。
 
 ```text
 1 创建雪人
@@ -25,23 +26,27 @@
     1.4.1 应用雪材质
     1.4.2 应用煤、胡萝卜和木头材质组
     1.4.3 应用地面材质
-  1.5 设置灯光与相机
-    1.5.1 创建隔离的 Scene、World 和 Collection
-    1.5.2 创建两个 Area Light 和一台相机
-  1.6 渲染
-    1.6.1 生成 320 × 320 Eevee PNG 预览
+  1.5 绑定并动画化雪人
+    1.5.1 创建四骨骼 Armature 并刚性绑定头部组件与手臂
+    1.5.2 在第 1、20、40 帧创建休止、挥手、休止姿态
+  1.6 设置灯光与相机
+    1.6.1 创建隔离的 Scene、World 和 Collection
+    1.6.2 创建两个 Area Light 和一台相机
+  1.7 渲染
+    1.7.1 生成第 20 帧的 320 × 320 Eevee PNG 预览
 ```
 
-## revision 3 已完成的协议范围
+## revision 4 已完成的协议范围
 
-- 13 个可执行叶节点组成严格线性 DAG；每个叶节点只依赖前一个叶节点。
+- 15 个可执行叶节点组成严格线性 DAG；每个叶节点只依赖前一个叶节点。
 - 动作全部绑定 `blender` 适配器的通用 catalog，不包含雪人专用执行函数。
-- 几何、材质、场景、灯光、相机和渲染产物都通过稳定的逻辑资源 ID 关联。
+- 几何、材质、骨架、Action、场景、灯光、相机和渲染产物都通过稳定的逻辑资源 ID 关联。
 - 所有 Blender datablock 名使用 `OperatingLine.` 命名空间，避免静默覆盖用户资源。
 - 每个可执行叶节点都有语义锚点、可序列化的 `operatorId + menuPath` 操作参考、预期观察和
   `compensating_action` 回退声明；操作参考用于教学，不冒充数据 API 实际点击记录。
-- 观察类型限定为 `resource_exists`、`material_assigned`、`render_scene_ready`、
-  `render_rig_ready` 和 `render_artifact_exists`。
+- 观察类型限定为 `resource_exists`、`material_assigned`、`armature_ready`、
+  `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
+  `render_artifact_exists`。
 - 渲染参数只允许扩展管理的 `extension_temp` 目标，不接受任意文件路径。
 - Fixture 同时经过 GuidePlan schema 和领域 DAG 校验；单元测试冻结步骤 ID、遍历顺序、阶段覆盖、
   动作 catalog、操作路径数组、观察类型、命名空间和无文件路径约束。
@@ -56,17 +61,18 @@ Blender Companion 对这些通用动作的实际执行与补偿必须由 Blender
 2. 默认启动文件中的 Cube、Camera 和 Light 不因执行本场景被隐式删除。
 3. 每次 `Next` 只执行当前叶节点；失败时停止后续步骤并回传错误证据。
 4. `Back` 只补偿当前运行产生且 receipt 身份一致的资源，不按名称删除用户对象。
-5. 完成第 13 步后，扩展管理的临时目录中存在 PNG 预览，并能通过逻辑 `renderId` 观察到。
-6. 自有 Mesh/Material/Collection 出现计划外用户或内容时，`Back` 在修改任何资源前拒绝执行，
+5. 完成第 15 步后，扩展管理的临时目录中存在第 20 帧 PNG 预览，并能通过逻辑 `renderId` 观察到。
+6. 自有 Mesh/Material/Collection/Armature/Action 出现计划外用户或内容时，`Back` 在修改任何资源前拒绝执行，
    保留当前步骤与 receipt；解除冲突后可重试并完整回退。
 
 ## 后续产品能力（本次不包含）
 
 - **AI 动态规划**：根据任意用户目标生成或修改这类任务树，而不是选择内置雪人 fixture。
-- **节点聊天与局部重规划**：在聊天框引用例如 `1.4.1`，生成可审阅 diff，只使受影响节点和
-  下游节点变为 stale。
+- **连续节点对话与差异审查**：在当前一次性节点引用与不可变重规划之上增加多轮历史、可审阅
+  diff 和参数编辑。
 - **人工确认策略**：对高风险动作、失败重试和无法补偿的步骤提供明确审批点。
-- **Eval 与训练导出**：脱敏导出计划、动作、观察、验证、耗时和回退记录，并建立质量指标。
+- **Eval 评分与训练治理**：在已完成的原始证据导出之上增加脱敏、同意、保留、质量指标和数据集
+  切分。
 - **跨宿主复用**：在第二个开源软件适配同一协议，验证通用 action/anchor/observation 边界。
 
-上述能力完成前，不应把本 revision 3 fixture 描述为“AI 已能自动完成任意 Blender 任务”。
+上述能力完成前，不应把本 revision 4 fixture 描述为“AI 已能自动完成任意 Blender 任务”。

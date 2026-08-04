@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import pino from 'pino';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 
 import { startRuntime } from './index.js';
 
@@ -19,7 +19,7 @@ const runtime = await startRuntime({
   databasePath,
   accessToken,
   adapters: [],
-  actionCatalogs: [blenderActionCatalog],
+  actionCatalogs: blenderActionCatalogs,
   port: Number(process.env.OPERATINGLINE_PORT ?? 0),
 });
 

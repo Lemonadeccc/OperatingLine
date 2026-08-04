@@ -14,7 +14,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.0.0');
+    expect(catalog.catalogVersion).toBe('1.1.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -22,6 +22,8 @@ describe('action catalog protocol', () => {
       'blender.mesh.create_primitive_batch',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
+      'blender.rig.create_armature',
+      'blender.animation.create_pose_keyframes',
       'blender.render_scene.create',
       'blender.render_rig.create',
       'blender.render.execute_preview',

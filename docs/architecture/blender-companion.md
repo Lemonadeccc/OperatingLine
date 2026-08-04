@@ -83,20 +83,23 @@ action；Reject 只清除预览。两种决策由网络线程异步回传且按�
 Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blender 在主线程再次核对后才建立
 只读预览。输入区明确称为 Revision request，因为当前没有内置模型、流式回复或聊天记录。
 
-## revision 3 雪人执行切片
+## revision 4 雪人执行切片
 
-打包内的 `snowman-demo` revision 3 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
-执行 6 个阶段、13 个叶子步骤：创建地面和三段身体，批量创建脸部、纽扣和手臂，分配雪、煤、
-胡萝卜、木头和地面材质，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light
-和一台 Camera，最后在扩展管理的临时目录生成 320 × 320 Eevee PNG。
+打包内的 `snowman-demo` revision 4 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
+执行 7 个阶段、15 个叶子步骤：创建地面和三段身体，批量创建脸部、纽扣和手臂，分配雪、煤、
+胡萝卜、木头和地面材质，创建四骨骼 Armature 并把头部组件与两条手臂刚性绑定，写入第 1、20、40
+帧姿态，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light 和一台 Camera，
+最后在扩展管理的临时目录生成帧 20 的 320 × 320 Eevee PNG。
 
-动作目录允许以下 8 类 action：
+动作目录 `1.1.0` 允许以下 10 类 action，并保留不可变 `1.0.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_uv_sphere`
 - `blender.mesh.create_primitive_batch`
 - `blender.material.create_and_assign`
 - `blender.material.create_palette_and_assign`
+- `blender.rig.create_armature`
+- `blender.animation.create_pose_keyframes`
 - `blender.render_scene.create`
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
@@ -105,23 +108,30 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 Blender datablock、mutation 和渲染产物；资源解析同时核对 pointer、receipt token、logical ID、
 步骤 ID 和 action 名。复合动作先对整批对象、数据和逻辑 ID 做预检，执行异常时补偿已经创建或
 修改的部分。回退 mutation 前执行 compare-and-restore：当前值不再等于该动作写入的值时拒绝
-覆盖，并保留当前步骤和 receipt。`Next`/`Back` 因而可以完成 13 步正向执行与完整反向补偿，
+覆盖，并保留当前步骤和 receipt。`Next`/`Back` 因而可以完成 15 步正向执行与完整反向补偿，
 但这种补偿不是 Blender 原生 Undo。
 
-回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera data 存在额外用户、Material
-被计划外对象使用、Object 被链接到计划外 Collection，或自有 Collection/Scene 增加了未跟踪
-内容时，回退以零写入失败并保留 receipt 与步骤索引；用户解除冲突后可以原地重试。扩展在同一
-Blender 进程内被禁用时也不会因为该冲突而卸载失败或丢弃 receipt。模块重载后仍不会仅凭可复制
-标签接管旧资源。
+回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera/Armature data 存在额外
+用户、Material 或 Action 被计划外对象使用、Object 被链接到计划外 Collection，或自有
+Collection/Scene 增加了未跟踪内容时，回退以零写入失败并保留 receipt 与步骤索引；用户解除
+冲突后可以原地重试。扩展在同一 Blender 进程内被禁用时也不会因为该冲突而卸载失败或丢弃
+receipt。模块重载后仍不会仅凭可复制标签接管旧资源。
+
+骨架 action 只接受 1–32 个具名骨骼和 1–64 个既有自有对象绑定；父骨引用必须存在且无环，
+绑定目标必须未被父级占用。当前使用 rigid bone parenting，不做权重绘制或网格变形，并在绑定时
+保留对象世界矩阵。动画 action 只接受 2–64 个严格递增帧和范围在 ±2π 内的 Euler 旋转，创建
+一个自有 Action 后写入 pose keyframe。失败补偿会先解除 Action，再恢复 pose 与父子关系，最后
+删除自有 Action、Armature object 和 data；不会调用任意 Python 或任意 Blender operator。
 
 隔离渲染 Scene 只链接 OperatingLine 自有 Collection。默认启动文件中的 Cube、Camera 和 Light
 既不会被删除，也不会进入该渲染 Scene；创建的相机和两盏 Area Light 只属于这次执行记录。
-预览 action 只接受扩展临时目录，单边分辨率上限为 1024，采样上限为 128，防止远端计划以合法
-参数长时间同步阻塞 Blender 主线程。
+预览 action 只接受扩展临时目录、1–100000 的显式帧，单边分辨率上限为 1024，采样上限为 128，
+防止远端计划以合法参数长时间同步阻塞 Blender 主线程。
 
-revision 3 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
-`render_rig_ready` 和 `render_artifact_exists` 五类 observation。它们读取 receipt 身份与当前
-Blender 状态，并随 Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
+revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+`pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
+`render_artifact_exists` 七类 observation。它们读取 receipt 身份与当前 Blender 状态，并随
+Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
 `step_succeeded` 的提交门，也不会因 `satisfied: false` 自动回退 action。
 
 ## 与现有 Blender MCP 的边界

@@ -169,7 +169,7 @@ def main() -> None:
         assert not session.started and not session.receipts
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
-        assert controller.proposed_plan["catalogVersion"] == "1.0.0"
+        assert controller.proposed_plan["catalogVersion"] == "1.1.0"
         assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
         session = operating_line.get_session()
         assert session.revision == expected_revision + 1
@@ -194,7 +194,7 @@ def main() -> None:
             assert item.as_pointer() == factory_object_pointers[item.name]
 
         step_count = len(session.steps)
-        assert step_count == 13
+        assert step_count == 15
         for expected_index, expected_step in enumerate(session.steps):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
             assert session.active_index == expected_index
@@ -265,9 +265,11 @@ def main() -> None:
             bpy.data.worlds,
             bpy.data.lights,
             bpy.data.cameras,
+            bpy.data.armatures,
+            bpy.data.actions,
         ):
             assert all(
-                item.get("operating_line_owner") != "snowman_demo_v3"
+                not item.get("operating_line_action_owned")
                 for item in collection
             )
 

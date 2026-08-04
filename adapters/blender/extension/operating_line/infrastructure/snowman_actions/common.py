@@ -11,6 +11,7 @@ from typing import Any
 import uuid
 
 import bpy
+from mathutils import Matrix
 
 from ...application import ActionReceipt
 from ...application.session import (
@@ -23,7 +24,7 @@ from ...application.session import (
 COLLECTION_LOGICAL_ID = "snowman.collection"
 COLLECTION_NAME = "OperatingLine Snowman"
 OWNER_KEY = "operating_line_owner"
-OWNER_VALUE = "snowman_demo_v3"
+OWNER_VALUE = "operating_line_blender_v1"
 ACTION_KEY = "operating_line_action"
 STEP_KEY = "operating_line_step_id"
 ROLLBACK_TOKEN_KEY = "operating_line_rollback_token"
@@ -133,6 +134,8 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.create_plane",
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",
+        "blender.rig.create_armature",
+        "blender.animation.create_pose_keyframes",
         "blender.render_scene.create",
         "blender.render_rig.create",
         "blender.render.execute_preview",
@@ -201,6 +204,8 @@ def tag_resource(
                 ("WORLD", bpy.types.World),
                 ("LIGHT", bpy.types.Light),
                 ("CAMERA", bpy.types.Camera),
+                ("ARMATURE", bpy.types.Armature),
+                ("ACTION", bpy.types.Action),
             )
             if isinstance(resource, blender_type)
         ),
@@ -228,6 +233,8 @@ _RESOURCE_COLLECTIONS = {
     "WORLD": lambda: bpy.data.worlds,
     "LIGHT": lambda: bpy.data.lights,
     "CAMERA": lambda: bpy.data.cameras,
+    "ARMATURE": lambda: bpy.data.armatures,
+    "ACTION": lambda: bpy.data.actions,
 }
 
 
@@ -359,6 +366,106 @@ def _resolve_stored(value: Any) -> Any:
     return value
 
 
+def _matrix_rows(value: Any) -> tuple[tuple[float, ...], ...]:
+    return tuple(tuple(float(component) for component in row) for row in value)
+
+
+def action_fcurves(action: bpy.types.Action) -> tuple[Any, ...]:
+    """Return Action FCurves across Blender's legacy and layered APIs."""
+    legacy = getattr(action, "fcurves", None)
+    if legacy is not None:
+        return tuple(legacy)
+    curves: list[Any] = []
+    for layer in action.layers:
+        for strip in layer.strips:
+            for channelbag in getattr(strip, "channelbags", ()):
+                curves.extend(channelbag.fcurves)
+    return tuple(curves)
+
+
+def action_keyframe_signature(action: bpy.types.Action) -> tuple[Any, ...]:
+    """Capture the bounded curve content so later edits block compensation."""
+    curves = []
+    for curve in action_fcurves(action):
+        points = tuple(
+            (
+                tuple(float(value) for value in point.co),
+                point.interpolation,
+                point.easing,
+                point.handle_left_type,
+                tuple(float(value) for value in point.handle_left),
+                point.handle_right_type,
+                tuple(float(value) for value in point.handle_right),
+                point.type,
+            )
+            for point in curve.keyframe_points
+        )
+        curves.append(
+            (
+                curve.data_path,
+                curve.array_index,
+                curve.extrapolation,
+                curve.mute,
+                curve.group.name if curve.group is not None else None,
+                tuple(modifier.type for modifier in curve.modifiers),
+                points,
+            )
+        )
+    return tuple(sorted(curves, key=lambda item: (item[0], item[1])))
+
+
+def _bone_parent_matches(target: bpy.types.Object, recorded: Any) -> bool:
+    if not isinstance(recorded, tuple) or len(recorded) != 5:
+        return False
+    parent, parent_type, parent_bone, parent_inverse, matrix_basis = recorded
+    return (
+        _same_value(target.parent, parent)
+        and target.parent_type == parent_type
+        and target.parent_bone == parent_bone
+        and _matrix_rows(target.matrix_parent_inverse) == parent_inverse
+        and _matrix_rows(target.matrix_basis) == matrix_basis
+    )
+
+
+def _animation_action_matches(target: bpy.types.Object, recorded: Any) -> bool:
+    animation_data = target.animation_data
+    if isinstance(recorded, ResourceIdentity):
+        return (
+            animation_data is not None
+            and animation_data.action is resolve_resource(recorded)
+        )
+    if not isinstance(recorded, tuple) or len(recorded) != 2:
+        return False
+    had_animation_data, action = recorded
+    return (
+        (animation_data is not None) is had_animation_data
+        and (
+            animation_data.action if animation_data is not None else None
+        ) is _resolve_stored(action)
+    )
+
+
+def _pose_bone_matches(
+    target: bpy.types.Object,
+    attribute: str,
+    recorded: Any,
+) -> bool:
+    bone_name = attribute.partition(":")[2]
+    pose_bone = target.pose.bones.get(bone_name) if target.pose is not None else None
+    if pose_bone is None:
+        return False
+    if isinstance(recorded, ResourceIdentity):
+        return _animation_action_matches(target, recorded)
+    if not isinstance(recorded, tuple) or len(recorded) != 2:
+        return False
+    rotation_mode, rotation_euler = recorded
+    return (
+        pose_bone.rotation_mode == rotation_mode
+        and tuple(float(value) for value in pose_bone.rotation_euler)
+        == rotation_euler
+    )
+
+
 def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
     target = resolve_resource(mutation.resource)
     if target is None:
@@ -375,6 +482,18 @@ def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
         current = tuple(slot.material for slot in target.material_slots)
         expected = tuple(_resolve_stored(item) for item in recorded)
         return current == expected
+    if mutation.attribute == "bone_parent":
+        return _bone_parent_matches(target, recorded)
+    if mutation.attribute == "animation_action":
+        return _animation_action_matches(target, recorded)
+    if mutation.attribute.startswith("pose_bone_state:"):
+        return _pose_bone_matches(target, mutation.attribute, recorded)
+    if mutation.attribute == "action_keyframes":
+        return (
+            isinstance(target, bpy.types.Action)
+            and recorded is not None
+            and action_keyframe_signature(target) == recorded
+        )
     owner = target
     parts = mutation.attribute.split(".")
     for part in parts[:-1]:
@@ -429,6 +548,34 @@ def _restore_mutation(mutation: MutationRecord) -> None:
             resolved = _resolve_stored(material)
             if resolved is not None:
                 target.data.materials.append(resolved)
+        return
+    if mutation.attribute == "bone_parent":
+        parent, parent_type, parent_bone, parent_inverse, matrix_basis = (
+            mutation.before
+        )
+        target.parent = _resolve_stored(parent)
+        target.parent_type = parent_type
+        target.parent_bone = parent_bone
+        target.matrix_parent_inverse = Matrix(parent_inverse)
+        target.matrix_basis = Matrix(matrix_basis)
+        return
+    if mutation.attribute == "animation_action":
+        had_animation_data, action = mutation.before
+        animation_data = target.animation_data_create()
+        animation_data.action = _resolve_stored(action)
+        if not had_animation_data:
+            target.animation_data_clear()
+        return
+    if mutation.attribute.startswith("pose_bone_state:"):
+        bone_name = mutation.attribute.partition(":")[2]
+        pose_bone = target.pose.bones.get(bone_name)
+        if pose_bone is None:
+            raise RuntimeError(f"Pose bone is unavailable: {bone_name}")
+        rotation_mode, rotation_euler = mutation.before
+        pose_bone.rotation_mode = rotation_mode
+        pose_bone.rotation_euler = rotation_euler
+        return
+    if mutation.attribute == "action_keyframes":
         return
     owner = target
     parts = mutation.attribute.split(".")
@@ -511,18 +658,34 @@ def _preflight_created_resources(
                     f"Cannot rollback externally linked object: {identity.logical_id}"
                 )
             if resource.data is not None and not any(
-                data_identity.resource_type in {"MESH", "LIGHT", "CAMERA"}
+                data_identity.resource_type
+                in {"MESH", "LIGHT", "CAMERA", "ARMATURE"}
                 and resolve_resource(data_identity) is resource.data
                 for data_identity in receipt.created
             ):
                 raise RuntimeError(
                     f"Cannot rollback object with replaced data: {identity.logical_id}"
                 )
-        elif identity.resource_type in {"MESH", "LIGHT", "CAMERA"}:
+        elif identity.resource_type in {"MESH", "LIGHT", "CAMERA", "ARMATURE"}:
             internal_users = sum(obj.data is resource for obj in created_objects)
             if resource.users != internal_users:
                 raise RuntimeError(
                     f"Cannot rollback externally used data: {identity.logical_id}"
+                )
+        elif identity.resource_type == "ACTION":
+            action_users = {
+                obj.as_pointer()
+                for obj in bpy.data.objects
+                if obj.animation_data is not None
+                and obj.animation_data.action is resource
+            }
+            if not action_users.issubset(mutation_target_pointers):
+                raise RuntimeError(
+                    f"Cannot rollback externally used action: {identity.logical_id}"
+                )
+            if resource.users != len(action_users):
+                raise RuntimeError(
+                    f"Cannot rollback externally used action: {identity.logical_id}"
                 )
         elif identity.resource_type == "MATERIAL":
             internal_users = 0
@@ -604,6 +767,10 @@ def _remove_resource(identity: ResourceIdentity) -> None:
         bpy.data.lights.remove(resource)
     elif identity.resource_type == "CAMERA":
         bpy.data.cameras.remove(resource)
+    elif identity.resource_type == "ARMATURE":
+        bpy.data.armatures.remove(resource)
+    elif identity.resource_type == "ACTION":
+        bpy.data.actions.remove(resource)
     elif identity.resource_type == "COLLECTION":
         bpy.data.collections.remove(resource)
     elif identity.resource_type == "WORLD":
@@ -649,6 +816,8 @@ def rollback_receipt(
         "MATERIAL": 1,
         "LIGHT": 1,
         "CAMERA": 1,
+        "ARMATURE": 1,
+        "ACTION": 1,
         "WORLD": 1,
         "COLLECTION": 2,
     }

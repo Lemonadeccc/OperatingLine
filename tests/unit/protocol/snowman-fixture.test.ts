@@ -21,6 +21,8 @@ const executableStepIds = [
   'snowman.materials.snow',
   'snowman.materials.accessories',
   'snowman.materials.ground',
+  'snowman.animation.rig',
+  'snowman.animation.pose',
   'snowman.lighting.scene',
   'snowman.lighting.rig',
   'snowman.render.preview',
@@ -31,6 +33,7 @@ const stageIds = [
   'snowman.model',
   'snowman.details',
   'snowman.materials',
+  'snowman.animation',
   'snowman.lighting',
   'snowman.render',
 ] as const;
@@ -62,18 +65,18 @@ const collectKeys = (value: unknown): string[] => {
 };
 
 describe('complete snowman guide fixture', () => {
-  it('validates as GuidePlan revision 3 and covers the six ordered stages', () => {
+  it('validates as GuidePlan revision 4 and covers the seven ordered stages', () => {
     const plan = readPlan();
     const rootChildren = plan.steps
       .filter((step) => step.parentId === plan.rootStepId)
       .sort((left, right) => left.order - right.order)
       .map((step) => step.id);
 
-    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 3, rootStepId: 'snowman' });
+    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 4, rootStepId: 'snowman' });
     expect(rootChildren).toEqual(stageIds);
   });
 
-  it('freezes the thirteen executable leaves as one strict dependency chain', () => {
+  it('freezes the fifteen executable leaves as one strict dependency chain', () => {
     const plan = readPlan();
     const executableSteps = plan.steps.filter((step) => step.action !== null);
 
@@ -101,7 +104,7 @@ describe('complete snowman guide fixture', () => {
     );
     const executableSteps = plan.steps.filter((step) => step.action !== null);
 
-    expect(executableSteps).toHaveLength(13);
+    expect(executableSteps).toHaveLength(15);
     for (const step of executableSteps) {
       expect(parentIds.has(step.id), step.id).toBe(false);
       expect(step.action?.adapterId, step.id).toBe('blender');
@@ -145,12 +148,16 @@ describe('complete snowman guide fixture', () => {
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
       'blender.material.create_and_assign',
+      'blender.rig.create_armature',
+      'blender.animation.create_pose_keyframes',
       'blender.render_scene.create',
       'blender.render_rig.create',
       'blender.render.execute_preview',
     ]);
     expect([...observationKinds].sort()).toEqual([
+      'armature_ready',
       'material_assigned',
+      'pose_animation_ready',
       'render_artifact_exists',
       'render_rig_ready',
       'render_scene_ready',
@@ -171,6 +178,7 @@ describe('complete snowman guide fixture', () => {
       resolutionX: 320,
       resolutionY: 320,
       resolutionPercentage: 100,
+      frame: 20,
       format: 'PNG',
       destination: 'extension_temp',
       samples: 32,
@@ -194,7 +202,17 @@ describe('complete snowman guide fixture', () => {
           return;
         }
         for (const [key, nested] of Object.entries(value)) {
-          if (['objectName', 'materialName', 'sceneName', 'worldName', 'dataName'].includes(key)) {
+          if (
+            [
+              'objectName',
+              'materialName',
+              'sceneName',
+              'worldName',
+              'dataName',
+              'actionName',
+              'boneName',
+            ].includes(key)
+          ) {
             entries.push([key, nested]);
           }
           visit(nested);

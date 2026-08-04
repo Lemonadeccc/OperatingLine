@@ -88,6 +88,7 @@ class RenderDefinition:
     resolution_x: int
     resolution_y: int
     resolution_percentage: int
+    frame: int
     samples: int
 
 
@@ -271,6 +272,7 @@ def validate_render(arguments: Mapping[str, Any]) -> RenderDefinition:
         "resolutionX",
         "resolutionY",
         "resolutionPercentage",
+        "frame",
         "format",
         "destination",
         "samples",
@@ -304,6 +306,7 @@ def validate_render(arguments: Mapping[str, Any]) -> RenderDefinition:
             "arguments.resolutionPercentage",
             maximum=100,
         ),
+        integer(arguments["frame"], "arguments.frame", maximum=100_000),
         integer(
             arguments["samples"],
             "arguments.samples",
@@ -614,6 +617,14 @@ def execute_render(
             definition.resolution_percentage,
             mutations,
         )
+        _set_recorded(
+            scene_identity,
+            scene,
+            "frame_current",
+            definition.frame,
+            mutations,
+        )
+        scene.frame_set(definition.frame)
         _set_recorded(
             scene_identity,
             scene,

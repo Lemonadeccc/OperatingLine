@@ -8,9 +8,9 @@
 > Blender 内预览任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.0.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
+> Orchestrator 现在可以查询 Blender `1.1.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
 > 与内容哈希的 Eval/replay 原始证据；任意目标质量基线、连续对话/差异审查、自动评分/训练治理、
-> 骨骼动画和第二宿主仍在路线图中。
+> 第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -48,9 +48,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
   Orchestrator，非阻塞拉取新计划或提案并回传步骤结果。提案会显示独立的只读任务树、
   `Accept Plan` 与 `Reject Plan`；接受前 Start/Next 不可执行，且场景与活动计划不会改变。
-- **完整雪人预览垂直切片**：内置 revision 3 计划包含 6 个阶段、13 个可执行步骤，依次完成
-  地面、三段身体、脸部、纽扣、手臂、材质、隔离渲染场景、双 Area Light、相机和
-  320 × 320 Eevee PNG；`Back` 可以逐步反向补偿整条执行链。
+- **完整雪人预览垂直切片**：内置 revision 4 计划包含 7 个阶段、15 个可执行步骤，依次完成
+  地面、三段身体、脸部、纽扣、手臂、材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
+  隔离渲染场景、双 Area Light、相机和帧 20 的 320 × 320 Eevee PNG；`Back` 可以逐步反向补偿
+  整条执行链。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
   触发 OperatingLine 控件。
 
@@ -62,9 +63,9 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，以及“外部 AI 生成计划 → Blender 内
 > 预览 → 人工接受/拒绝”的通用审批基础，不是“AI 已能自动完成任意 Blender 任务”。
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先调用
-> `operatingline.planning.context` 再生成任意目标的 GuideProposal，但当前 Blender 目录只覆盖 8 个
+> `operatingline.planning.context` 再生成任意目标的 GuideProposal，但当前 Blender 目录只覆盖 10 个
 > 已验证动作，尚未建立跨目标质量基线。当前修订输入是异步、一次性的不可变请求，不是内置模型
-> 或流式聊天；连续对话、Plan diff、自动评分/训练数据治理、骨骼动画和第二宿主尚未完成。
+> 或流式聊天；连续对话、Plan diff、自动评分/训练数据治理和第二宿主尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -94,9 +95,10 @@ native extension      native companion
 任务树的 `parentId + order` 负责展示和编号，`dependsOn` 形成实际执行 DAG。每个叶子节点
 可包含动作名、经校验的参数、语义锚点、预期观察和回退方式。
 
-Blender 当前允许 8 类通用 action：创建平面、创建 UV 球、批量创建基础体、创建并分配单个
-材质、创建并分配材质组、创建隔离渲染场景、创建灯光相机组，以及生成受限临时目录中的渲染
-预览。动作注册表按步骤 ID 绑定执行器；同一种 action 可以安全地出现在多个步骤中。
+Blender 当前允许 10 类通用 action：创建平面、创建 UV 球、批量创建基础体、创建并分配单个
+材质、创建并分配材质组、创建并刚性绑定骨架、创建姿态关键帧、创建隔离渲染场景、创建灯光
+相机组，以及生成受限临时目录中的指定帧渲染预览。动作注册表按步骤 ID 绑定执行器；同一种
+action 可以安全地出现在多个步骤中。
 
 这些动作的规范描述位于 `adapters/blender/catalog/v1/action-catalog.json`。目录版本与协议版本
 分别演进；Orchestrator composition root 安装真实目录，而不是在通用规划代码中复制 Blender
@@ -106,6 +108,8 @@ Blender 当前允许 8 类通用 action：创建平面、创建 UV 球、批量�
 [ADR 0006](docs/adr/0006-immutable-node-revision-requests.md)。
 稳定事件序列与版本化 Eval 证据包见
 [ADR 0007](docs/adr/0007-versioned-eval-evidence-export.md)。
+刚性骨架与姿态关键帧的安全边界见
+[ADR 0008](docs/adr/0008-bounded-rigid-rig-animation.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -200,8 +204,8 @@ pnpm dev
 ```
 
 如果只需要目录，调用 `operatingline.action_catalog.get`；可选 `catalogVersion` 用于精确重放。
-PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、骨骼或任意 Python 操作必须
-明确保留为人工步骤。
+PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、权重绘制、modifier 或
+任意 Python 操作必须明确保留为人工步骤。
 
 计划安装、Start/Next/Back 和步骤观察可以通过
 `operatingline.companions.list` 或 `GET /api/v1/companions` 查询。所有 `/mcp` 和 `/api/`
@@ -218,13 +222,14 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    保留活动计划和场景。活动会话已有结果时，必须先用 Back 回到起点才能接受。
 2. `Start` 重置已接受的演示会话、展示 Overlay，并将计划置于第一个可执行步骤之前；待审提案
    存在时 Start/Next 会被门禁，避免在审批期间继续修改场景。
-3. `Next` 按 13 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，建立
-   隔离 Scene、World、双 Area Light 和 Camera，最后生成 320 × 320 Eevee PNG。
-4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 13 步，不删除用户对象。
+3. `Next` 按 15 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，创建并
+   刚性绑定四骨骼 Armature，插入第 1/20/40 帧姿态，建立隔离 Scene、World、双 Area Light 和
+   Camera，最后生成帧 20 的 320 × 320 Eevee PNG。
+4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 15 步，不删除用户对象。
 5. `Hide Guidance` 会一起隐藏视口卡片、彩色数字、引导线、状态详情和任务树，但保留
    Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失当前步骤。
 6. 任务树分支可以独立展开或折叠。蓝色 `OK` 表示已完成，红色 `BACK` 表示当前可补偿步骤，
-   绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`13`。
+   绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`15`。
 7. 树中每个节点的 `Ref` 会把 `@1.2.3` 一类引用加入 Revision request。一次请求可以引用同一
    活动计划或同一待审计划中的最多 8 个节点；发送只入队，不修改模型，返回的新计划仍需审批。
 8. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划更新
@@ -250,9 +255,10 @@ Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形
 遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
 外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
 
-revision 3 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
-`render_rig_ready` 和 `render_artifact_exists` 五类新增 observation 检查资源、材质、场景、
-灯光相机和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
+revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+`pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
+`render_artifact_exists` 七类 observation 检查资源、材质、骨架绑定、关键帧、场景、灯光相机
+和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
 但不会把 action 的 `step_succeeded` 自动改判为失败，也不会触发自动补偿。
 
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
@@ -322,7 +328,8 @@ pnpm package:blender
 
 `pnpm test:blender` 会先用独立 Python 进程运行纯引导状态单元测试，再在每个检测到的 Blender
 4.5+ 可执行文件中运行基础 Extension 回归和完整雪人测试；后者验证复合动作冲突不会留下部分结果、外部
-Mesh/Material/Collection 引用会安全阻止回退、320 × 320 PNG、隔离 Scene，以及 13 步完整
+Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 320 PNG、隔离 Scene，
+以及 15 步完整
 前进/回退。`pnpm test:blender:companion`
 会启动真实 Orchestrator 进程和 Blender，经过 MCP 提交初版提案、Blender 节点引用与修订请求、
 MCP 请求关联重规划、实例定向 Proposal、两次人工接受、Start/Next/Back、决策与状态回传，验证
@@ -373,14 +380,13 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 1. 建立跨目标规划质量基线与可选 planner 集成，使“创建机器人”等任意目标在现有目录范围内
    稳定生成高质量 GuidePlan；当前由 Codex/Claude 等外部 MCP 客户端负责生成。
-2. 在确定性雪人预览之外增加骨骼动画，并扩展经过验证的通用 Blender 动作目录。
-3. 在已完成的节点引用与不可变重规划上增加连续对话、计划差异确认和用户可编辑参数。
-4. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
+2. 在已完成的节点引用与不可变重规划上增加连续对话、计划差异确认和用户可编辑参数。
+3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
    `undo_post`/`redo_post` 后再声明原生 Undo 能力。
-5. 在已完成的原始 eval/replay 证据导出之上增加显式评分器、数据脱敏与同意/保留策略、数据集切分
+4. 在已完成的原始 eval/replay 证据导出之上增加显式评分器、数据脱敏与同意/保留策略、数据集切分
    和训练流水线；当前导出不自动评分，也不应未经审核直接分享。
-6. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
-7. 在首个稳定发布前引入 Changesets 与自动发布流程。
+5. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
+6. 在首个稳定发布前引入 Changesets 与自动发布流程。
 
 首版只保证自有面板控件、三维对象和世界坐标锚点，不承诺精确标注任意 Blender 内置按钮。
 对没有官方扩展 API 的宿主，只提供能力画像明确允许的降级体验。

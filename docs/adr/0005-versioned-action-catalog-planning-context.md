@@ -55,11 +55,17 @@ package 提供给 Orchestrator composition root。打包脚本还会把同一文
 目录版本与 Guide protocol 版本分离：协议版本描述目录的结构，`catalogVersion` 描述某个适配器的
 动作集合及契约。目录变更不会静默覆盖旧版本；调用者可以把精确版本记录进后续 Eval 数据。
 
-## 当前限制
+## 后续目录演进
 
-Blender catalog `1.0.0` 只描述已经真实验证的 8 个通用动作。几何目前仍共享历史逻辑资源
-`snowman.collection`；目录明确披露这一约束。拓扑编辑、雕刻、modifier、骨骼、动画和任意 Python
-执行不在目录中，规划器必须把它们保留为 actionless/manual 节点，而不能捏造可执行能力。
+Blender catalog `1.0.0` 冻结最初验证的 8 个通用动作。catalog `1.1.0` 在不修改历史文件的前提下
+加入 `blender.rig.create_armature`、`blender.animation.create_pose_keyframes`，并要求渲染 action
+显式选择帧。Orchestrator 同时安装两个版本，默认返回最高语义版本；Eval/replay 仍能按历史记录
+解析精确 `1.0.0`。
+
+几何目前仍共享历史逻辑资源 `snowman.collection`；目录明确披露这一约束。拓扑编辑、雕刻、
+modifier、权重绘制、deform rig 和任意 Python 执行仍不在目录中，规划器必须把它们保留为
+actionless/manual 节点，而不能捏造可执行能力。`1.1.0` 的动画仅覆盖有界的刚性骨骼父子绑定与
+Euler 姿态关键帧，详细边界见 ADR 0008。
 
 ## 后果
 
@@ -67,4 +73,4 @@ Blender catalog `1.0.0` 只描述已经真实验证的 8 个通用动作。几�
 - Orchestrator 仍然是无界面、模型供应商无关的协议服务。
 - 新宿主必须交付真实目录，才能参与 AI Proposal 规划；只有 capability profile 不足以证明动作。
 - 任意目标的质量仍取决于外部模型和目录覆盖范围。节点引用与不可变重规划已由 ADR 0006 落地；
-  连续对话、Eval 导出、骨骼动画和第二宿主仍是独立后续里程碑。
+  连续对话、Eval 评分与治理和第二宿主仍是独立后续里程碑。

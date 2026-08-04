@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { startRuntime } from '@operatingline/orchestrator';
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
@@ -109,7 +109,7 @@ const databasePath = join(temporaryDirectory, 'events.db');
 const runtime = await startRuntime({
   databasePath,
   accessToken,
-  actionCatalogs: [blenderActionCatalog],
+  actionCatalogs: blenderActionCatalogs,
 });
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
@@ -264,12 +264,12 @@ try {
     },
   );
   assert.ok(result.maximumPumpSeconds < 0.15);
-  assert.equal(result.stepCount, 13);
+  assert.equal(result.stepCount, 15);
   assert.equal(result.proposalReviewedBeforeExecution, true);
   assert.equal(result.requestLinkedProposalReviewedBeforeExecution, true);
   assert.equal(revisionRequests.length, 1);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.0.0');
+  assert.equal(revisionRequests[0].catalogVersion, '1.1.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -362,9 +362,9 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.0.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.1.0');
   assert.equal(evalBundle.page.hasMore, false);
-  assert.equal(evalBundle.summary.matchedEventCount, 36);
+  assert.equal(evalBundle.summary.matchedEventCount, 10 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 2 });
   assert.equal(evalBundle.summary.transitionCounts.connected, undefined);
   assert.equal(evalBundle.summary.transitionCounts.step_succeeded, result.stepCount);

@@ -38,6 +38,12 @@ from operating_line_renderable_extension.operating_line.infrastructure.snowman_a
     material as material_actions,
     model as model_actions,
     render as render_actions,
+    rigging as rigging_actions,
+)
+from operating_line_renderable_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
+    OWNER_KEY,
+    OWNER_VALUE,
+    action_fcurves,
 )
 
 
@@ -47,8 +53,6 @@ with RESOURCE_PATH.open(encoding="utf-8") as resource:
 ACTION_STEPS = [step for step in PLAN["steps"] if step["action"] is not None]
 ACTION_BY_ID = {step["id"]: step for step in ACTION_STEPS}
 ACTION_INDEX = {step["id"]: index for index, step in enumerate(ACTION_STEPS)}
-OWNER_VALUE = f"snowman_demo_v{PLAN['revision']}"
-OWNER_KEY = "operating_line_owner"
 
 
 def assert_pointer(resource, pointer: int, label: str) -> None:
@@ -95,6 +99,8 @@ def owned_resources() -> list[object]:
         bpy.data.worlds,
         bpy.data.lights,
         bpy.data.cameras,
+        bpy.data.armatures,
+        bpy.data.actions,
     )
     return [
         resource
@@ -137,6 +143,19 @@ def assert_vector_close(actual, expected) -> None:
     assert all(
         math.isclose(actual_value, expected_value, abs_tol=1e-6)
         for actual_value, expected_value in zip(actual, expected)
+    )
+
+
+def assert_matrix_close(actual, expected) -> None:
+    for actual_row, expected_row in zip(actual, expected):
+        assert_vector_close(actual_row, expected_row)
+
+
+def matrices_differ(actual, expected) -> bool:
+    return any(
+        not math.isclose(actual_value, expected_value, abs_tol=1e-6)
+        for actual_row, expected_row in zip(actual, expected)
+        for actual_value, expected_value in zip(actual_row, expected_row)
     )
 
 
@@ -290,7 +309,7 @@ def execute_through(session, last_step_id: str) -> None:
 
 def main() -> None:
     assert PLAN["id"] == "snowman-demo"
-    assert len(ACTION_STEPS) == 13
+    assert len(ACTION_STEPS) == 15
     assert os.environ.get("OPERATINGLINE_RENDER_OUTPUT_DIR")
     assert_localized_node_access()
 
@@ -424,6 +443,100 @@ def main() -> None:
 
         execute_through(session, "snowman.materials.ground")
 
+        # Armature preflight rejects name conflicts before creating data or
+        # changing any target parent. Successful binding preserves world space.
+        rig_arguments = ACTION_BY_ID["snowman.animation.rig"]["action"]["arguments"]
+        registry = build_resource_registry(session.receipts)
+        binding_world_matrices = {
+            binding["targetId"]: resolve_resource(
+                registry[binding["targetId"]]
+            ).matrix_world.copy()
+            for binding in rig_arguments["bindings"]
+        }
+        armature_conflict_mesh = bpy.data.meshes.new(
+            f"{rig_arguments['objectName']}.UserMesh"
+        )
+        armature_conflict = bpy.data.objects.new(
+            rig_arguments["objectName"], armature_conflict_mesh
+        )
+        factory_scene.collection.objects.link(armature_conflict)
+        call_next_expect_failure(
+            f"Cannot replace existing object: {rig_arguments['objectName']}"
+        )
+        assert session.active_index == ACTION_INDEX["snowman.materials.ground"]
+        assert bpy.data.armatures.get(rig_arguments["dataName"]) is None
+        remove_object_and_data(armature_conflict)
+
+        execute_through(session, "snowman.animation.rig")
+        registry = build_resource_registry(session.receipts)
+        armature = resolve_resource(registry[rig_arguments["armatureId"]])
+        assert armature.type == "ARMATURE"
+        for binding in rig_arguments["bindings"]:
+            target = resolve_resource(registry[binding["targetId"]])
+            assert target.parent is armature
+            assert target.parent_type == "BONE"
+            assert target.parent_bone == binding["boneName"]
+            assert_matrix_close(
+                target.matrix_world,
+                binding_world_matrices[binding["targetId"]],
+            )
+
+        # Partial keyframe failure must clear the assigned Action, restore all
+        # pose values, and leave the completed rig receipt intact.
+        animation_arguments = ACTION_BY_ID["snowman.animation.pose"]["action"][
+            "arguments"
+        ]
+        armature_pose_before = {
+            bone.name: (
+                bone.rotation_mode,
+                tuple(bone.rotation_euler),
+            )
+            for bone in armature.pose.bones
+        }
+        original_insert_pose_keyframe = rigging_actions._insert_pose_keyframe
+        insertion_count = [0]
+
+        def fail_during_keyframe_insert(pose_bone, frame, bone_name):
+            insertion_count[0] += 1
+            if insertion_count[0] == 2:
+                raise RuntimeError("Injected failure during pose keyframes")
+            return original_insert_pose_keyframe(pose_bone, frame, bone_name)
+
+        rigging_actions._insert_pose_keyframe = fail_during_keyframe_insert
+        try:
+            call_next_expect_failure("Injected failure during pose keyframes")
+        finally:
+            rigging_actions._insert_pose_keyframe = original_insert_pose_keyframe
+        assert session.active_index == ACTION_INDEX["snowman.animation.rig"]
+        assert bpy.data.actions.get(animation_arguments["actionName"]) is None
+        assert armature.animation_data is None
+        for bone in armature.pose.bones:
+            rotation_mode, rotation_euler = armature_pose_before[bone.name]
+            assert bone.rotation_mode == rotation_mode
+            assert_vector_close(bone.rotation_euler, rotation_euler)
+
+        execute_through(session, "snowman.animation.pose")
+        animation_scene = bpy.context.scene
+        original_frame = animation_scene.frame_current
+        animated_targets = {
+            logical_id: resolve_resource(registry[logical_id])
+            for logical_id in ("snowman.face.nose", "snowman.arm.left")
+        }
+        animation_scene.frame_set(1)
+        rest_matrices = {
+            logical_id: target.matrix_world.copy()
+            for logical_id, target in animated_targets.items()
+        }
+        animation_scene.frame_set(20)
+        assert all(
+            matrices_differ(target.matrix_world, rest_matrices[logical_id])
+            for logical_id, target in animated_targets.items()
+        )
+        animation_scene.frame_set(40)
+        for logical_id, target in animated_targets.items():
+            assert_matrix_close(target.matrix_world, rest_matrices[logical_id])
+        animation_scene.frame_set(original_frame)
+
         # A scene action can fail after both Scene and World datablocks exist
         # but before the World is assigned. Partial compensation accepts that
         # incomplete internal relation while still removing both datablocks.
@@ -441,7 +554,7 @@ def main() -> None:
             call_next_expect_failure("Injected failure before world assignment")
         finally:
             render_actions._configure_world = original_configure_world
-        assert session.active_index == ACTION_INDEX["snowman.materials.ground"]
+        assert session.active_index == ACTION_INDEX["snowman.animation.pose"]
         assert len(session.receipts) == session.active_index + 1
         assert bpy.data.scenes.get(scene_arguments["sceneName"]) is None
         assert bpy.data.worlds.get(scene_arguments["worldName"]) is None
@@ -517,6 +630,7 @@ def main() -> None:
             render_scene.render.resolution_x,
             render_scene.render.resolution_y,
             render_scene.render.resolution_percentage,
+            render_scene.frame_current,
             render_scene.render.image_settings.file_format,
             render_scene.render.filepath,
             render_scene.eevee.taa_render_samples,
@@ -543,6 +657,7 @@ def main() -> None:
             render_scene.render.resolution_x,
             render_scene.render.resolution_y,
             render_scene.render.resolution_percentage,
+            render_scene.frame_current,
             render_scene.render.image_settings.file_format,
             render_scene.render.filepath,
             render_scene.eevee.taa_render_samples,
@@ -578,8 +693,28 @@ def main() -> None:
         assert render_scene.world is render_world
         assert render_scene.camera is active_camera
         assert render_scene.eevee.taa_render_samples == render_arguments["samples"]
+        assert render_scene.frame_current == render_arguments["frame"]
         assert factory_objects["Cube"].name not in render_scene.objects
         assert all(obj.get(OWNER_KEY) == OWNER_VALUE for obj in render_scene.objects)
+
+        armature_arguments = ACTION_BY_ID["snowman.animation.rig"]["action"][
+            "arguments"
+        ]
+        animation_arguments = ACTION_BY_ID["snowman.animation.pose"]["action"][
+            "arguments"
+        ]
+        armature = resolve_resource(registry[armature_arguments["armatureId"]])
+        animation = resolve_resource(registry[animation_arguments["actionId"]])
+        assert armature.type == "ARMATURE"
+        assert armature.animation_data.action is animation
+        assert tuple(animation.frame_range) == (1.0, 40.0)
+        assert {bone.name for bone in armature.data.bones} == {
+            item["boneName"] for item in armature_arguments["bones"]
+        }
+        for binding in armature_arguments["bindings"]:
+            target = resolve_resource(registry[binding["targetId"]])
+            assert target.parent is armature
+            assert target.parent_bone == binding["boneName"]
 
         light_objects = [
             resolve_resource(registry[logical_id])
@@ -649,6 +784,47 @@ def main() -> None:
             factory_scene_pointer,
             "factory scene",
         )
+
+        # Editing a generated keyframe changes the recorded Action signature.
+        # Back must preserve that user edit and retain the animation receipt.
+        session.start()
+        execute_through(session, "snowman.animation.pose")
+        registry = build_resource_registry(session.receipts)
+        wave_action = resolve_resource(registry["snowman.animation.wave"])
+        edited_point = action_fcurves(wave_action)[0].keyframe_points[0]
+        original_interpolation = edited_point.interpolation
+        edited_point.interpolation = "LINEAR"
+        call_back_expect_failure(
+            "Cannot rollback modified resource: "
+            "snowman.animation.wave.action_keyframes"
+        )
+        assert session.active_index == ACTION_INDEX["snowman.animation.pose"]
+        assert resolve_resource(registry["snowman.animation.wave"]) is wave_action
+        edited_point.interpolation = original_interpolation
+        assert bpy.ops.operating_line.back() == {"FINISHED"}
+        session.reset()
+        assert owned_resources() == []
+
+        # An owned Action assigned to a user object is an external reference.
+        # Back retains the complete animation receipt until that link is removed.
+        session.start()
+        execute_through(session, "snowman.animation.pose")
+        registry = build_resource_registry(session.receipts)
+        wave_action = resolve_resource(registry["snowman.animation.wave"])
+        factory_cube = factory_objects["Cube"]
+        factory_cube.animation_data_create().action = wave_action
+        animation_index = session.active_index
+        animation_receipts = dict(session.receipts)
+        call_back_expect_failure(
+            "Cannot rollback externally used action: snowman.animation.wave"
+        )
+        assert session.active_index == animation_index
+        assert dict(session.receipts) == animation_receipts
+        assert factory_cube.animation_data.action is wave_action
+        factory_cube.animation_data_clear()
+        assert bpy.ops.operating_line.back() == {"FINISHED"}
+        session.reset()
+        assert owned_resources() == []
 
         # A material used by an object outside the walkthrough is user-owned
         # state. Back must make no changes and retain the receipt until that

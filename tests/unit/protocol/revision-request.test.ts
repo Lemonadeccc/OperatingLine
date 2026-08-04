@@ -27,7 +27,7 @@ describe('guide revision request protocol', () => {
   it('binds a user message to an immutable base plan and stable node references', () => {
     const request = guideRevisionRequestSchema.parse(revisionRequest());
 
-    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 3 });
+    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 4 });
     expect(request.catalogVersion).toBe('1.0.0');
     expect(request.references).toEqual([{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }]);
   });
@@ -65,13 +65,13 @@ describe('guide revision request protocol', () => {
       guideReplanSubmissionSchema.safeParse({
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
-        plan: { ...plan, revision: 4 },
+        plan: { ...plan, revision: 5 },
       }).success,
     ).toBe(true);
     expect(
       guideReplanSubmissionSchema.safeParse({
         requestId: randomUUID(),
-        plan: { ...plan, revision: 4 },
+        plan: { ...plan, revision: 5 },
       }).success,
     ).toBe(false);
   });

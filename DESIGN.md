@@ -6,7 +6,7 @@
 - Last refreshed: 2026-08-04
 - Primary product surfaces: Blender 3D View Sidebar, Blender 3D View guidance overlay, the headless Orchestrator MCP/HTTP API, and the host-neutral GuidePlan/GuideProposal protocol that supplies their content.
 - Evidence reviewed: `README.md`, `docs/architecture/overview.md`, `docs/architecture/blender-companion.md`, `packages/protocol/src/guide.ts`, `packages/protocol/src/proposal.ts`, `packages/protocol/src/catalog.ts`, `packages/protocol/src/eval.ts`, `services/orchestrator/src/index.ts`, `services/orchestrator/src/eval-export.ts`, `packages/persistence/src/index.ts`, `adapters/blender/catalog/v1/action-catalog.json`, `adapters/blender/extension/operating_line/application/companion.py`, `adapters/blender/extension/operating_line/application/session.py`, `adapters/blender/extension/operating_line/presentation/panel.py`, `adapters/blender/extension/operating_line/presentation/operators.py`, `adapters/blender/extension/operating_line/infrastructure/overlay.py`, `adapters/blender/extension/operating_line/resources/snowman.plan.json`, `tests/e2e/blender/capture_overlay.py`, and `docs/assets/blender-guidance.png`.
-- Product boundary: the shipped baseline is a deterministic 13-step Blender snowman vertical slice plus model-neutral ActionCatalog/PlanningContext, human-approved GuideProposal, node references, immutable revision requests, and versioned raw Eval/replay export. A Blender user may reference nodes in an active or proposed tree and queue a change request for Codex, Claude, or another MCP client; a replan always returns as a complete new GuideProposal revision. OperatingLine does not embed a model, stream a chat response, infer a quality score, or automatically sanitize exported evidence. Scoring/training governance, rigging/animation, and a second software host remain later milestones.
+- Product boundary: the shipped baseline is a deterministic 15-step Blender snowman vertical slice, including bounded rigid armature binding and pose keyframes, plus model-neutral ActionCatalog/PlanningContext, human-approved GuideProposal, node references, immutable revision requests, and versioned raw Eval/replay export. A Blender user may reference nodes in an active or proposed tree and queue a change request for Codex, Claude, or another MCP client; a replan always returns as a complete new GuideProposal revision. OperatingLine does not embed a model, stream a chat response, infer a quality score, or automatically sanitize exported evidence. Scoring/training governance, deform/weight-painted rigs, and a second software host remain later milestones.
 
 ## Brand
 
@@ -17,7 +17,7 @@
 ## Product goals
 
 - Goals: show what has completed, what Back will undo, what Next will execute, and what remains locked; keep the task hierarchy readable; let users inspect and explicitly accept or reject an AI-authored plan without scene mutation; let a user add stable references from active or proposed nodes to one revision-request composer; return every requested change as a reviewable full Plan revision; preserve a single hide/show control.
-- Non-goals: an embedded model or automatic task-decomposition engine, streaming assistant chat, in-place mutation of an accepted/proposed Plan, applying a partial JSON patch directly in Blender, automatic Eval scoring or data sanitization, arbitrary built-in UI-element detection, arbitrary MCP execution, native Blender Undo integration, animation, and cross-host parity in this milestone.
+- Non-goals: an embedded model or automatic task-decomposition engine, streaming assistant chat, in-place mutation of an accepted/proposed Plan, applying a partial JSON patch directly in Blender, automatic Eval scoring or data sanitization, arbitrary built-in UI-element detection, arbitrary MCP execution, native Blender Undo integration, deform rigs/weight painting or arbitrary animation editing, and cross-host parity in this milestone.
 - Success signals: a referenced revision request contains the exact base Plan, stable node IDs plus display numbers, and user message; exact retries are idempotent; an MCP client can list pending requests and attach one to a strictly newer full GuideProposal; request submission and replan creation do not mutate the scene or active session; the replacement proposal still requires explicit in-host acceptance; replay export preserves target, exact catalog, proposal, decision, observation and rollback with a stable cursor and deterministic content hash; Blender 4.5 LTS and 5.1 tests pass.
 
 ## Personas and jobs
@@ -45,10 +45,10 @@
 ## Visual language
 
 - Color: `surface #101820`, `halo #071018`, `text #F5F7FA`, `completed #2F9BFF`, `current #FFC857`, `next #2DD881`, `back #FF5C6C`, and `locked #7B8494`. Black/dark halo may outline a colored line but is never the primary line.
-- Typography: inherit Blender UI fonts in the Sidebar; use Blender's `blf` default font in the viewport. Global executable ordinals use two digits (`01`–`13`); tree nodes retain hierarchy numbers (`1.2.1`).
+- Typography: inherit Blender UI fonts in the Sidebar; use Blender's `blf` default font in the viewport. Global executable ordinals use two digits (`01`–`15`); tree nodes retain hierarchy numbers (`1.2.1`).
 - Spacing/layout rhythm: use Blender-native row/box spacing. The viewport card keeps at least 16 px from an edge, uses a 32 px circular step marker, and prioritizes one Back and one Next item.
 - Shape/radius/elevation: native Sidebar surfaces; flat, high-contrast viewport cards; circular ordinal badges with a dark outer ring and colored inner fill.
-- Motion: no required animation in the deterministic slice. Any later transition must respect reduced-motion settings and must not delay execution feedback.
+- Motion: the scene may contain explicit plan-authored keyframes, but the guidance UI has no required motion. Any later UI transition must respect reduced-motion settings and must not delay execution feedback.
 - Imagery/iconography: `✓`/check for completed, `↶`/Back for the reversible active step, `▶`/Next for the next executable step, and an open circle for locked. Text labels duplicate all icon meaning.
 
 ## Components
@@ -64,12 +64,12 @@
 - Keyboard/focus behavior: retain native Blender operators so keyboard search and focus behavior remain host-managed. The overlay itself is informational and non-interactive.
 - Contrast/readability: colored lines receive a 10 px dark halo below a 4 px state-colored stroke; markers combine color, ordinal, and symbol; text uses high-contrast light foreground on the dark card.
 - Screen-reader semantics: Blender's Python UI API has limited assistive-semantic controls. Operator labels and descriptions must remain explicit (`Back: ...`, `Next: ...`) and avoid icon-only controls.
-- Reduced motion and sensory considerations: no flashing or required animation; status changes are immediate and persistent.
+- Reduced motion and sensory considerations: no flashing or required guidance animation; status changes are immediate and persistent. Scene animation is a user-visible output and can be inspected as discrete keyframes.
 
 ## Responsive behavior
 
 - Supported breakpoints/devices: Blender desktop UI at supported 4.5 LTS and 5.1 versions; mouse/keyboard workflows; no mobile or touch target in this milestone.
-- Layout adaptations: labels truncate through Blender-native behavior in a narrow Sidebar; viewport anchors clamp to its visible region; the card avoids the Sidebar edge and limits contextual items instead of rendering all 13 lines.
+- Layout adaptations: labels truncate through Blender-native behavior in a narrow Sidebar; viewport anchors clamp to its visible region; the card avoids the Sidebar edge and limits contextual items instead of rendering all 15 lines.
 - Touch/hover differences: none for this milestone. Operator descriptions provide native hover tooltips.
 
 ## Interaction states
@@ -104,7 +104,7 @@
 - Compatibility constraints: use public Blender 4.5/5.1 APIs; keep host-neutral protocol anchors semantic; do not require a Blender Core PR.
 - Proposal/request constraints: proposal delivery shares the existing authenticated loopback poll; proposal, decision, and revision-request payloads are strict, versioned, persisted, and idempotent per companion instance. A request carries the complete immutable base Plan so bundled/offline-origin plans can be replanned without an undocumented server cache. The background thread handles HTTP only; reference selection, request construction, plan validation, preview-session construction, acceptance, rejection, and session replacement occur on Blender's main thread.
 - Eval constraints: export is an authenticated, paginated Orchestrator surface rather than Blender UI state. It scopes instance-specific decisions and reports, includes exact referenced catalogs, marks raw content as unredacted, and never upgrades observation telemetry into a quality score. Random export envelope metadata is excluded from the deterministic content digest.
-- Test/screenshot expectations: targeted protocol/persistence/integration coverage for request idempotency, node/base-plan validation, pending MCP listing, and replan-to-proposal linkage; Blender coverage proving node reference and request submission do not execute actions or replace sessions; full Blender regressions; real GUI captures for a populated revision composer and linked replan proposal in addition to existing visual states.
+- Test/screenshot expectations: targeted protocol/persistence/integration coverage for request idempotency, node/base-plan validation, pending MCP listing, and replan-to-proposal linkage; Blender coverage proving node reference and request submission do not execute actions or replace sessions; Blender 4.5/5.1 regressions for armature binding, keyframe creation, selected-frame rendering, failure compensation, and full rollback; real GUI captures for a populated revision composer and linked replan proposal in addition to existing visual states.
 
 ## Open questions
 

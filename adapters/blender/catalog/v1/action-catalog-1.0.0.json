@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.0.0",
-  "catalogVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "This adapter revision uses the managed logical collection snowman.collection for geometry and isolated preview rendering, even when the user goal is not a snowman.",
-    "The catalog can construct scenes from planes, UV spheres, cones, and cylinders, assign Principled materials, create and bind a rigid armature, author pose keyframes, create an isolated scene, add Area lights and a camera, and render a managed PNG preview at a selected frame. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from planes, UV spheres, cones, and cylinders, assign Principled materials, create an isolated scene, add Area lights and a camera, and render a managed PNG preview. Unsupported topology, sculpting, rigging, animation, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item."
   ],
   "actions": [
@@ -405,220 +405,6 @@
       }
     },
     {
-      "name": "blender.rig.create_armature",
-      "title": "Create and bind a rigid armature",
-      "description": "Creates one owned armature with 1 to 32 bones and bone-parents previously created unparented owned objects while preserving their world transforms.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["armatureId", "objectName", "dataName", "collectionId", "bones", "bindings"],
-        "properties": {
-          "armatureId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "objectName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
-          "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
-          "collectionId": { "const": "snowman.collection" },
-          "bones": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 32,
-            "uniqueBoneNames": true,
-            "acyclicParents": true,
-            "items": {
-              "type": "object",
-              "required": ["boneName", "head", "tail", "parentName"],
-              "properties": {
-                "boneName": {
-                  "type": "string",
-                  "pattern": "^OperatingLine\\.",
-                  "maxLength": 180
-                },
-                "head": {
-                  "type": "array",
-                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
-                  "minItems": 3,
-                  "maxItems": 3
-                },
-                "tail": {
-                  "type": "array",
-                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
-                  "minItems": 3,
-                  "maxItems": 3
-                },
-                "parentName": {
-                  "anyOf": [
-                    { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
-                    { "type": "null" }
-                  ]
-                }
-              },
-              "additionalProperties": false
-            },
-            "description": "Bone head and tail must differ; every non-null parentName must reference another bone without forming a cycle."
-          },
-          "bindings": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 64,
-            "uniqueTargetIds": true,
-            "items": {
-              "type": "object",
-              "required": ["targetId", "boneName"],
-              "properties": {
-                "targetId": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                },
-                "boneName": {
-                  "type": "string",
-                  "pattern": "^OperatingLine\\.",
-                  "maxLength": 180
-                }
-              },
-              "additionalProperties": false
-            },
-            "description": "Each target must be an owned unparented object and each boneName must exist in bones."
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "read",
-          "resourceType": "COLLECTION",
-          "argumentPath": "collectionId",
-          "derivedResourceTypes": [],
-          "description": "Requires the tracked adapter-managed collection."
-        },
-        {
-          "access": "read",
-          "resourceType": "OBJECT[]",
-          "argumentPath": "bindings[].targetId",
-          "derivedResourceTypes": [],
-          "description": "Requires previously created owned, unparented objects."
-        },
-        {
-          "access": "create",
-          "resourceType": "ARMATURE_OBJECT",
-          "argumentPath": "armatureId",
-          "derivedResourceTypes": ["ARMATURE_DATA"],
-          "description": "Creates the armature object and armatureId.data datablock."
-        },
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT[]",
-          "argumentPath": "bindings[].targetId",
-          "derivedResourceTypes": [],
-          "description": "Bone-parents the targets with compare-and-restore rollback."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "operator", "unavailable"],
-      "supportedObservationKinds": ["armature_ready"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.animation.create_pose_keyframes",
-      "title": "Create armature pose keyframes",
-      "description": "Creates one owned Action and inserts bounded Euler-rotation keyframes on bones of a previously created owned armature.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["actionId", "actionName", "armatureId", "keyframes"],
-        "properties": {
-          "actionId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "actionName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
-          "armatureId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "keyframes": {
-            "type": "array",
-            "minItems": 2,
-            "maxItems": 64,
-            "strictlyIncreasingFrames": true,
-            "items": {
-              "type": "object",
-              "required": ["frame", "poses"],
-              "properties": {
-                "frame": { "type": "integer", "minimum": 1, "maximum": 100000 },
-                "poses": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 32,
-                  "uniqueBoneNames": true,
-                  "items": {
-                    "type": "object",
-                    "required": ["boneName", "rotationEuler"],
-                    "properties": {
-                      "boneName": {
-                        "type": "string",
-                        "pattern": "^OperatingLine\\.",
-                        "maxLength": 180
-                      },
-                      "rotationEuler": {
-                        "type": "array",
-                        "items": {
-                          "type": "number",
-                          "minimum": -6.283185307179586,
-                          "maximum": 6.283185307179586
-                        },
-                        "minItems": 3,
-                        "maxItems": 3
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              },
-              "additionalProperties": false
-            }
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "read",
-          "resourceType": "ARMATURE_OBJECT",
-          "argumentPath": "armatureId",
-          "derivedResourceTypes": [],
-          "description": "Requires an owned armature created by an earlier catalog action."
-        },
-        {
-          "access": "create",
-          "resourceType": "ACTION",
-          "argumentPath": "actionId",
-          "derivedResourceTypes": [],
-          "description": "Creates one owned Blender Action datablock."
-        },
-        {
-          "access": "mutate",
-          "resourceType": "POSE_BONE[]",
-          "argumentPath": "keyframes[].poses[]",
-          "derivedResourceTypes": [],
-          "description": "Assigns the owned action and inserts bounded pose rotations with compensating rollback."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "operator", "unavailable"],
-      "supportedObservationKinds": ["pose_animation_ready"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
       "name": "blender.render_scene.create",
       "title": "Create an isolated render scene",
       "description": "Creates an owned Scene and World, configures the world background, and links only the managed collection into the new scene.",
@@ -824,7 +610,6 @@
           "resolutionX",
           "resolutionY",
           "resolutionPercentage",
-          "frame",
           "format",
           "destination",
           "samples"
@@ -836,7 +621,6 @@
           "resolutionX": { "type": "integer", "minimum": 1, "maximum": 1024 },
           "resolutionY": { "type": "integer", "minimum": 1, "maximum": 1024 },
           "resolutionPercentage": { "type": "integer", "minimum": 1, "maximum": 100 },
-          "frame": { "type": "integer", "minimum": 1, "maximum": 100000 },
           "format": { "const": "PNG" },
           "destination": { "const": "extension_temp" },
           "samples": { "type": "integer", "minimum": 1, "maximum": 128 }

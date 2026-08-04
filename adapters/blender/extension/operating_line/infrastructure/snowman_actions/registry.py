@@ -22,6 +22,12 @@ from .render import (
     validate_rig,
     validate_scene,
 )
+from .rigging import (
+    execute_armature,
+    execute_pose_animation,
+    validate_armature,
+    validate_pose_animation,
+)
 
 Execute = Callable[[Mapping[str, ActionReceipt]], ActionReceipt]
 Rollback = Callable[[ActionReceipt], None]
@@ -104,6 +110,22 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definitions = MATERIAL_VALIDATORS[action.name](arguments)
             reserve(step.id, tuple(item.logical_id for item in definitions))
             execute = _bind_action(execute_materials, step.id, action, definitions)
+        elif action.name == "blender.rig.create_armature":
+            definition = validate_armature(arguments)
+            reserve(
+                step.id,
+                (definition.logical_id, f"{definition.logical_id}.data"),
+            )
+            execute = _bind_action(execute_armature, step.id, action, definition)
+        elif action.name == "blender.animation.create_pose_keyframes":
+            definition = validate_pose_animation(arguments)
+            reserve(step.id, (definition.logical_id,))
+            execute = _bind_action(
+                execute_pose_animation,
+                step.id,
+                action,
+                definition,
+            )
         elif action.name == "blender.render_scene.create":
             definition = validate_scene(arguments)
             reserve(step.id, (definition.scene_id, definition.world_id))

@@ -11,6 +11,7 @@ import bpy
 
 from ..application.session import ActionReceipt
 from .snowman_actions.common import (
+    action_fcurves,
     build_resource_registry,
     find_artifact,
     resolve_resource,
@@ -150,6 +151,153 @@ def _render_scene_ready(
     }
 
 
+def _armature_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    armature_id = parameters.get("armatureId")
+    raw_bone_names = parameters.get("boneNames")
+    raw_bindings = parameters.get("bindings")
+    bone_names = (
+        tuple(raw_bone_names)
+        if isinstance(raw_bone_names, list)
+        and all(isinstance(item, str) and item for item in raw_bone_names)
+        else ()
+    )
+    bindings = (
+        tuple(raw_bindings)
+        if isinstance(raw_bindings, list)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("targetId"), str)
+            and isinstance(item.get("boneName"), str)
+            for item in raw_bindings
+        )
+        else ()
+    )
+    registry = build_resource_registry(receipts)
+
+    def resolve_id(value: Any) -> Any | None:
+        identity = registry.get(value) if isinstance(value, str) else None
+        return resolve_resource(identity) if identity is not None else None
+
+    armature = resolve_id(armature_id)
+    available_bones = (
+        [name for name in bone_names if armature.data.bones.get(name) is not None]
+        if isinstance(armature, bpy.types.Object) and armature.type == "ARMATURE"
+        else []
+    )
+    bound_targets: list[str] = []
+    if isinstance(armature, bpy.types.Object) and armature.type == "ARMATURE":
+        for binding in bindings:
+            target = resolve_id(binding["targetId"])
+            if (
+                isinstance(target, bpy.types.Object)
+                and target.parent is armature
+                and target.parent_type == "BONE"
+                and target.parent_bone == binding["boneName"]
+            ):
+                bound_targets.append(binding["targetId"])
+    satisfied = (
+        isinstance(armature, bpy.types.Object)
+        and armature.type == "ARMATURE"
+        and bool(bone_names)
+        and len(available_bones) == len(bone_names)
+        and bool(bindings)
+        and len(bound_targets) == len(bindings)
+    )
+    return satisfied, {
+        "armatureId": armature_id if isinstance(armature_id, str) else None,
+        "boneNames": list(bone_names),
+        "availableBoneNames": available_bones,
+        "boundTargetIds": bound_targets,
+    }
+
+
+def _pose_animation_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    armature_id = parameters.get("armatureId")
+    action_id = parameters.get("actionId")
+    raw_frames = parameters.get("frames")
+    raw_bone_names = parameters.get("boneNames")
+    frames = (
+        tuple(raw_frames)
+        if isinstance(raw_frames, list)
+        and all(isinstance(item, int) and not isinstance(item, bool) for item in raw_frames)
+        else ()
+    )
+    bone_names = (
+        tuple(raw_bone_names)
+        if isinstance(raw_bone_names, list)
+        and all(isinstance(item, str) and item for item in raw_bone_names)
+        else ()
+    )
+    registry = build_resource_registry(receipts)
+
+    def resolve_id(value: Any) -> Any | None:
+        identity = registry.get(value) if isinstance(value, str) else None
+        return resolve_resource(identity) if identity is not None else None
+
+    armature = resolve_id(armature_id)
+    animation = resolve_id(action_id)
+    assigned = (
+        isinstance(armature, bpy.types.Object)
+        and armature.type == "ARMATURE"
+        and armature.animation_data is not None
+        and armature.animation_data.action is animation
+    )
+    available_bones = (
+        [name for name in bone_names if armature.pose.bones.get(name) is not None]
+        if isinstance(armature, bpy.types.Object) and armature.type == "ARMATURE"
+        else []
+    )
+    actual_range = (
+        tuple(float(value) for value in animation.frame_range)
+        if isinstance(animation, bpy.types.Action)
+        else ()
+    )
+    expected_range = (
+        (float(min(frames)), float(max(frames))) if len(frames) >= 2 else ()
+    )
+    curve_frames: dict[tuple[str, int], set[float]] = {}
+    if isinstance(animation, bpy.types.Action):
+        curve_frames = {
+            (curve.data_path, curve.array_index): {
+                float(point.co[0]) for point in curve.keyframe_points
+            }
+            for curve in action_fcurves(animation)
+        }
+    expected_frames = {float(frame) for frame in frames}
+    channels_complete = (
+        isinstance(armature, bpy.types.Object)
+        and armature.type == "ARMATURE"
+        and len(available_bones) == len(bone_names)
+        and all(
+            curve_frames.get((armature.pose.bones[name].path_from_id("rotation_euler"), index))
+            == expected_frames
+            for name in bone_names
+            for index in range(3)
+        )
+    )
+    satisfied = (
+        isinstance(animation, bpy.types.Action)
+        and assigned
+        and bool(bone_names)
+        and len(available_bones) == len(bone_names)
+        and actual_range == expected_range
+        and channels_complete
+    )
+    return satisfied, {
+        "armatureId": armature_id if isinstance(armature_id, str) else None,
+        "actionId": action_id if isinstance(action_id, str) else None,
+        "assigned": assigned,
+        "frameRange": list(actual_range),
+        "expectedFrameRange": list(expected_range),
+        "availableBoneNames": available_bones,
+        "channelsComplete": channels_complete,
+    }
+
+
 def _render_rig_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
@@ -238,6 +386,8 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "object_exists": _object_exists,
     "resource_exists": _resource_exists,
     "material_assigned": _material_assigned,
+    "armature_ready": _armature_ready,
+    "pose_animation_ready": _pose_animation_ready,
     "render_scene_ready": _render_scene_ready,
     "render_rig_ready": _render_rig_ready,
     "render_artifact_exists": _render_artifact_exists,

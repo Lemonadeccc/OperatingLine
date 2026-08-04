@@ -1,7 +1,7 @@
 {
   "protocolVersion": "1.0.0",
   "id": "snowman-demo",
-  "revision": 3,
+  "revision": 4,
   "title": "Create a complete snowman preview",
   "rootStepId": "snowman",
   "steps": [
@@ -12,7 +12,7 @@
       "dependsOn": [],
       "title": "Create a snowman",
       "intent": "Create and verify a complete snowman preview",
-      "explanation": "The root groups scene preparation, modeling, details, materials, composition, and rendering.",
+      "explanation": "The root groups scene preparation, modeling, details, materials, rigid animation, composition, and rendering.",
       "state": "ready",
       "action": null,
       "anchors": [],
@@ -564,9 +564,264 @@
       "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
     {
-      "id": "snowman.lighting",
+      "id": "snowman.animation",
       "parentId": "snowman",
       "order": 5,
+      "dependsOn": [],
+      "title": "Rig and animate the snowman",
+      "intent": "Create a small rigid control rig and a visible waving pose",
+      "explanation": "The bounded animation stage bone-parents the head and arms without weight painting, then authors three reversible pose keyframes.",
+      "state": "draft",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.animation.rig",
+      "parentId": "snowman.animation",
+      "order": 1,
+      "dependsOn": ["snowman.materials.ground"],
+      "title": "Create and bind the armature",
+      "intent": "Create four bones and rigidly bind the head assembly and arms",
+      "explanation": "Rigid bone parenting keeps this first animation slice deterministic and reversible while preserving each object's world transform.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.rig.create_armature",
+        "arguments": {
+          "armatureId": "snowman.rig.armature",
+          "objectName": "OperatingLine.Rig.Snowman",
+          "dataName": "OperatingLine.ArmatureData.Snowman",
+          "collectionId": "snowman.collection",
+          "bones": [
+            {
+              "boneName": "OperatingLine.Root",
+              "head": [0, 0, 0.2],
+              "tail": [0, 0, 4.15],
+              "parentName": null
+            },
+            {
+              "boneName": "OperatingLine.Head",
+              "head": [0, 0, 4.65],
+              "tail": [0, 0, 5.95],
+              "parentName": "OperatingLine.Root"
+            },
+            {
+              "boneName": "OperatingLine.ArmLeft",
+              "head": [-0.95, 0, 3.9],
+              "tail": [-2.25, 0, 4.55],
+              "parentName": "OperatingLine.Root"
+            },
+            {
+              "boneName": "OperatingLine.ArmRight",
+              "head": [0.95, 0, 3.9],
+              "tail": [2.25, 0, 4.55],
+              "parentName": "OperatingLine.Root"
+            }
+          ],
+          "bindings": [
+            { "targetId": "snowman.head", "boneName": "OperatingLine.Head" },
+            {
+              "targetId": "snowman.face.eye.left",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.eye.right",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.nose",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.mouth.1",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.mouth.2",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.mouth.3",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.mouth.4",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.face.mouth.5",
+              "boneName": "OperatingLine.Head"
+            },
+            {
+              "targetId": "snowman.arm.left",
+              "boneName": "OperatingLine.ArmLeft"
+            },
+            {
+              "targetId": "snowman.arm.right",
+              "boneName": "OperatingLine.ArmRight"
+            }
+          ]
+        }
+      },
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.Rig.Snowman" },
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.rig.create_armature",
+          "menuPath": ["Add", "Armature", "Edit Bones and Parent"]
+        }
+      ],
+      "expectedObservations": [
+        {
+          "kind": "armature_ready",
+          "parameters": {
+            "armatureId": "snowman.rig.armature",
+            "boneNames": [
+              "OperatingLine.Root",
+              "OperatingLine.Head",
+              "OperatingLine.ArmLeft",
+              "OperatingLine.ArmRight"
+            ],
+            "bindings": [
+              { "targetId": "snowman.head", "boneName": "OperatingLine.Head" },
+              {
+                "targetId": "snowman.face.eye.left",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.eye.right",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.nose",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.mouth.1",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.mouth.2",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.mouth.3",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.mouth.4",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.face.mouth.5",
+                "boneName": "OperatingLine.Head"
+              },
+              {
+                "targetId": "snowman.arm.left",
+                "boneName": "OperatingLine.ArmLeft"
+              },
+              {
+                "targetId": "snowman.arm.right",
+                "boneName": "OperatingLine.ArmRight"
+              }
+            ]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.animation.pose",
+      "parentId": "snowman.animation",
+      "order": 2,
+      "dependsOn": ["snowman.animation.rig"],
+      "title": "Animate a wave",
+      "intent": "Author a rest, wave, and return pose",
+      "explanation": "Three bounded Euler-keyframe poses make the result inspectable in the timeline and render frame 20 as the visible wave.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.animation.create_pose_keyframes",
+        "arguments": {
+          "actionId": "snowman.animation.wave",
+          "actionName": "OperatingLine.Action.SnowmanWave",
+          "armatureId": "snowman.rig.armature",
+          "keyframes": [
+            {
+              "frame": 1,
+              "poses": [
+                { "boneName": "OperatingLine.Head", "rotationEuler": [0, 0, 0] },
+                {
+                  "boneName": "OperatingLine.ArmLeft",
+                  "rotationEuler": [0, 0, 0]
+                },
+                {
+                  "boneName": "OperatingLine.ArmRight",
+                  "rotationEuler": [0, 0, 0]
+                }
+              ]
+            },
+            {
+              "frame": 20,
+              "poses": [
+                {
+                  "boneName": "OperatingLine.Head",
+                  "rotationEuler": [0, 0, 0.12]
+                },
+                {
+                  "boneName": "OperatingLine.ArmLeft",
+                  "rotationEuler": [0, 0, 0.55]
+                },
+                {
+                  "boneName": "OperatingLine.ArmRight",
+                  "rotationEuler": [0, 0, -0.55]
+                }
+              ]
+            },
+            {
+              "frame": 40,
+              "poses": [
+                { "boneName": "OperatingLine.Head", "rotationEuler": [0, 0, 0] },
+                {
+                  "boneName": "OperatingLine.ArmLeft",
+                  "rotationEuler": [0, 0, 0]
+                },
+                {
+                  "boneName": "OperatingLine.ArmRight",
+                  "rotationEuler": [0, 0, 0]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.Rig.Snowman" },
+        {
+          "kind": "operator",
+          "operatorId": "anim.keyframe_insert",
+          "menuPath": ["Dope Sheet", "Action Editor", "Insert Keyframe"]
+        }
+      ],
+      "expectedObservations": [
+        {
+          "kind": "pose_animation_ready",
+          "parameters": {
+            "armatureId": "snowman.rig.armature",
+            "actionId": "snowman.animation.wave",
+            "frames": [1, 20, 40],
+            "boneNames": ["OperatingLine.Head", "OperatingLine.ArmLeft", "OperatingLine.ArmRight"]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.lighting",
+      "parentId": "snowman",
+      "order": 6,
       "dependsOn": [],
       "title": "Set lighting and camera",
       "intent": "Create an isolated render scene and compose the preview",
@@ -581,7 +836,7 @@
       "id": "snowman.lighting.scene",
       "parentId": "snowman.lighting",
       "order": 1,
-      "dependsOn": ["snowman.materials.ground"],
+      "dependsOn": ["snowman.animation.pose"],
       "title": "Create the render scene",
       "intent": "Create an isolated scene, world, and snowman collection",
       "explanation": "Isolation protects the user's existing render scene and gives the preview deterministic ownership.",
@@ -687,7 +942,7 @@
     {
       "id": "snowman.render",
       "parentId": "snowman",
-      "order": 6,
+      "order": 7,
       "dependsOn": [],
       "title": "Render the preview",
       "intent": "Render and verify the completed snowman",
@@ -717,6 +972,7 @@
           "resolutionX": 320,
           "resolutionY": 320,
           "resolutionPercentage": 100,
+          "frame": 20,
           "format": "PNG",
           "destination": "extension_temp",
           "samples": 32

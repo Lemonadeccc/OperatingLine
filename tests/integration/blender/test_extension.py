@@ -55,6 +55,7 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
     ALLOWED_ACTIONS,
+    OWNER_VALUE,
 )
 
 
@@ -92,7 +93,6 @@ ACTION_STEPS = [step for step in BUNDLED_PLAN["steps"] if step["action"] is not 
 EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_STEPS)
 PLAN_REVISION = BUNDLED_PLAN["revision"]
 DYNAMIC_REVISION = PLAN_REVISION + 1
-OWNER_VALUE = f"snowman_demo_v{PLAN_REVISION}"
 
 
 def assert_absent(name: str) -> None:
@@ -338,7 +338,7 @@ def assert_companion_and_plan_semantics() -> None:
         uuid.UUID(revision_request["requestId"])
         assert revision_request["protocolVersion"] == "1.0.0"
         assert revision_request["adapterId"] == "blender"
-        assert revision_request["catalogVersion"] == "1.0.0"
+        assert revision_request["catalogVersion"] == "1.1.0"
         assert revision_request["instanceId"] == companion.instance_id
         assert revision_request["basePlan"] == dynamic_plan
         assert revision_request["references"] == [
@@ -550,6 +550,36 @@ def assert_companion_and_plan_semantics() -> None:
             "Created logical resource IDs must be unique",
         ),
         (
+            "cyclic armature parents",
+            "blender.rig.create_armature",
+            lambda arguments: arguments["bones"][0].update(
+                {"parentName": arguments["bones"][1]["boneName"]}
+            ),
+            "Armature bone parents must be acyclic",
+        ),
+        (
+            "duplicate armature binding target",
+            "blender.rig.create_armature",
+            lambda arguments: arguments["bindings"][1].update(
+                {"targetId": arguments["bindings"][0]["targetId"]}
+            ),
+            "Armature binding targetId values must be unique",
+        ),
+        (
+            "non-increasing animation frames",
+            "blender.animation.create_pose_keyframes",
+            lambda arguments: arguments["keyframes"][1].update(
+                {"frame": arguments["keyframes"][0]["frame"]}
+            ),
+            "arguments.keyframes frames must be strictly increasing",
+        ),
+        (
+            "render frame budget",
+            "blender.render.execute_preview",
+            lambda arguments: arguments.update({"frame": 100_001}),
+            "arguments.frame must be an integer in [1, 100000]",
+        ),
+        (
             "render artifact logical ID collision",
             "blender.render.execute_preview",
             lambda arguments: arguments.update({"renderId": "snowman.render.scene"}),
@@ -615,7 +645,7 @@ def assert_companion_and_plan_semantics() -> None:
         "targetAdapterId": "blender",
         "targetInstanceId": companion.instance_id,
         "revisionRequestId": str(uuid.uuid4()),
-        "catalogVersion": "1.0.0",
+        "catalogVersion": "1.1.0",
         "plan": reviewed_plan,
         "proposedAt": "2026-08-04T12:00:00Z",
     }
