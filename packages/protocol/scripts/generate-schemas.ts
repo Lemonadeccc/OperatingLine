@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 
 import {
+  actionCatalogSchema,
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
@@ -12,6 +13,7 @@ import {
   guideProposalDecisionSchema,
   guideProposalSchema,
   guideProposalSubmissionSchema,
+  planningContextSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
@@ -19,6 +21,16 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'action-catalog.schema.json',
+    'https://operatingline.dev/schema/v1/action-catalog.json',
+    actionCatalogSchema,
+  ],
+  [
+    'planning-context.schema.json',
+    'https://operatingline.dev/schema/v1/planning-context.json',
+    planningContextSchema,
+  ],
   [
     'guide-plan.schema.json',
     'https://operatingline.dev/schema/v1/guide-plan.json',

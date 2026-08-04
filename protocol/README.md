@@ -11,6 +11,11 @@
 `guide-proposal-*` 定义 AI 提案、服务端信封和宿主决策。它们与 GuidePlan Schema 一样由
 `packages/protocol` 生成；任何宿主不得自行增加未版本化字段。
 
+`action-catalog.schema.json` 定义宿主发布的版本化允许动作目录；`planning-context.schema.json`
+定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。
+目录规范数据由适配器拥有，例如 Blender 位于
+`adapters/blender/catalog/v1/action-catalog.json`，不放进通用协议包硬编码。
+
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
@@ -23,6 +28,9 @@
   `accepted` 决策才能把它安装为活动计划。`rejected` 不得修改宿主场景或活动计划。
 - Proposal 决策以 `proposalId + adapterId + instanceId` 唯一；同一实例的同值重试幂等，
   相反决策是 conflict。其他实例仍可独立审查同一提案。
+- AI 在生成可执行步骤前应读取目标宿主的精确 ActionCatalog/PlanningContext。Proposal 的动作名、
+  顶层参数、anchor、observation 和 rollback 必须属于该目录；宿主仍对嵌套参数和实际资源执行
+  最终校验。
 - Companion protocol v1 的单个 GuidePlan 中，所有非空 action 必须使用同一 `adapterId`；
   混合宿主计划必须拒绝，不能通过删减步骤破坏树、依赖、编号或 revision 语义。
 - 没有 action 的计划缺少宿主路由信息，当前可发布和查询，但不会投递给 Companion。

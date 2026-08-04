@@ -1,4 +1,5 @@
 packages:
+  - adapters/*/catalog
   - adapters/*/bridge
   - services/*
   - packages/*

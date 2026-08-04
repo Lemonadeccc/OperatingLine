@@ -8,6 +8,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 import {
+  actionCatalogRequestSchema,
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
@@ -17,19 +18,28 @@ import {
   guideProposalSchema,
   guideProposalSubmissionSchema,
   guideProtocolVersion,
+  planningContextRequestSchema,
+  planningContextSchema,
+  type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
 
-import { validateGuidePlanStructure, validateProposalTarget } from './guide-validation.js';
+import { createActionCatalogRegistry } from './action-catalogs.js';
+import {
+  validateGuidePlanAgainstActionCatalog,
+  validateGuidePlanStructure,
+  validateProposalTarget,
+} from './guide-validation.js';
 import { closeAll, throwAfterCleanup, type CleanupStep } from './lifecycle.js';
 
 export interface StartRuntimeOptions {
   databasePath: string;
   accessToken: string;
   adapters?: readonly AppAdapter[];
+  actionCatalogs?: readonly ActionCatalog[];
   port?: number;
 }
 
@@ -54,14 +64,24 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     throw new Error('OperatingLine port must be an integer between 0 and 65535');
   }
 
-  const adapterStatuses = await Promise.all(
-    (options.adapters ?? []).map((adapter) => adapter.getStatus()),
-  );
+  const configuredAdapters = options.adapters ?? [];
+  const [adapterStatuses, adapterCatalogs] = await Promise.all([
+    Promise.all(configuredAdapters.map((adapter) => adapter.getStatus())),
+    Promise.all(
+      configuredAdapters.map((adapter) =>
+        adapter.getActionCatalog === undefined ? null : adapter.getActionCatalog(),
+      ),
+    ),
+  ]);
   const adapters = adapterStatuses.map((adapter) => adapterStatusSchema.parse(adapter));
   const adapterIds = new Set(adapters.map((adapter) => adapter.id));
   if (adapterIds.size !== adapters.length) {
     throw new Error('OperatingLine adapter ids must be unique');
   }
+  const actionCatalogRegistry = createActionCatalogRegistry([
+    ...(options.actionCatalogs ?? []),
+    ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
+  ]);
   const database = openOperatingLineDatabase(options.databasePath);
   let app: ReturnType<typeof createMcpFastifyApp> | undefined;
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
@@ -108,6 +128,45 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         .listLatestCompanionStates()
         .map((report) => companionStateReportSchema.parse(report));
 
+    const getPlanningContext = (request: ReturnType<typeof planningContextRequestSchema.parse>) => {
+      const catalog = actionCatalogRegistry.get(request);
+      const latestRevision =
+        request.planId === undefined
+          ? null
+          : Math.max(
+              latestPublishedRevisionByPlanId.get(request.planId) ?? 0,
+              latestProposedRevisionByPlanId.get(request.planId) ?? 0,
+              activePlan?.id === request.planId ? activePlan.revision : 0,
+            );
+      return planningContextSchema.parse({
+        protocolVersion: guideProtocolVersion,
+        targetAdapterId: request.targetAdapterId,
+        goal: request.goal ?? null,
+        requestedPlanId: request.planId ?? null,
+        recommendedRevision: latestRevision === null ? null : latestRevision + 1,
+        catalog,
+        companionStates: listCompanionStates().filter(
+          (state) => state.adapterId === request.targetAdapterId,
+        ),
+        constraints: {
+          singleAdapterPlan: true,
+          executableActionsMustBeLeaves: true,
+          dependenciesMustReferenceExecutableActions: true,
+          unknownActionsMustBeRejected: true,
+          semanticAnchorsOnly: true,
+          immutablePlanRevisions: true,
+          humanApprovalRequired: true,
+          executionOrder: 'dependsOn_topology_then_order_then_id',
+        },
+        submission: {
+          toolName: 'operatingline.guide.propose',
+          targetAdapterId: request.targetAdapterId,
+          description:
+            'Submit one complete GuidePlan revision for in-host preview and explicit human acceptance.',
+        },
+      });
+    };
+
     const runtimeMcpHandler = createMcpHandler(() => {
       const server = new McpServer({ name: 'operating-line', version: runtimeVersion });
 
@@ -143,6 +202,36 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         async () => ({
           content: [{ type: 'text', text: JSON.stringify(listCompanionStates()) }],
         }),
+      );
+
+      server.registerTool(
+        'operatingline.action_catalog.get',
+        {
+          description:
+            'Return the selected version of the real allowlisted action catalog for a target host. Call this before authoring executable guide actions.',
+          inputSchema: actionCatalogRequestSchema,
+        },
+        async (requestInput) => {
+          const request = actionCatalogRequestSchema.parse(requestInput);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.planning.context',
+        {
+          description:
+            'Return a vendor-neutral planning context containing the real host action catalog, live companion state, immutable revision hint, and GuidePlan constraints.',
+          inputSchema: planningContextRequestSchema,
+        },
+        async (requestInput) => {
+          const request = planningContextRequestSchema.parse(requestInput);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(getPlanningContext(request)) }],
+          };
+        },
       );
 
       server.registerTool(
@@ -192,6 +281,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         async (submissionInput) => {
           const submission = guideProposalSubmissionSchema.parse(submissionInput);
           validateProposalTarget(submission.plan, submission.targetAdapterId);
+          validateGuidePlanAgainstActionCatalog(
+            submission.plan,
+            actionCatalogRegistry.get({ targetAdapterId: submission.targetAdapterId }),
+          );
           const latestRevision = latestProposedRevisionByPlanId.get(submission.plan.id);
           if (latestRevision !== undefined && submission.plan.revision <= latestRevision) {
             throw new Error(
@@ -244,6 +337,38 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
+    runtimeApp.get('/api/v1/action-catalog', async (request, reply) => {
+      const parsedRequest = actionCatalogRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return actionCatalogRegistry.get(parsedRequest.data);
+      } catch (error) {
+        return reply.code(404).send({
+          error: 'catalog_not_found',
+          message: error instanceof Error ? error.message : 'Unknown action catalog error',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/planning/context', async (request, reply) => {
+      const parsedRequest = planningContextRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return getPlanningContext(parsedRequest.data);
+      } catch (error) {
+        return reply.code(404).send({
+          error: 'planning_context_unavailable',
+          message: error instanceof Error ? error.message : 'Unknown planning context error',
+        });
+      }
+    });
     runtimeApp.get('/api/v1/companion/guide', async (request, reply) => {
       const parsedRequest = companionGuideRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -320,6 +445,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       eventType: 'runtime.started',
       payload: {
         adapters: adapters.map((adapter) => ({ id: adapter.id, version: adapter.version })),
+        actionCatalogs: actionCatalogRegistry.list().map((catalog) => ({
+          adapterId: catalog.adapterId,
+          catalogVersion: catalog.catalogVersion,
+        })),
         mcpEndpoint,
       },
     });
@@ -347,3 +476,5 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     return throwAfterCleanup(error, cleanupSteps);
   }
 }
+
+export { createActionCatalogRegistry };

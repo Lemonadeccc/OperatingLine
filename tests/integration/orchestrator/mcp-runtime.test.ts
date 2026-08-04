@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
+import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { FakeBlenderAdapter } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 
@@ -147,6 +148,8 @@ describe('OperatingLine runtime', () => {
               name: 'operatingline.companions.list',
               description: 'List the latest known state reported by each host companion.',
             },
+            { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.planning.context' },
             { name: 'operatingline.guide.publish' },
             { name: 'operatingline.guide.propose' },
           ],
@@ -180,6 +183,115 @@ describe('OperatingLine runtime', () => {
       await expect(guideResponse.json()).resolves.toMatchObject({
         plan: { id: plan.id, revision: plan.revision },
       });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('serves a versioned action catalog and goal-specific planning context', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
+    try {
+      const catalogResponse = await callMcpTool(runtime, 10, 'operatingline.action_catalog.get', {
+        targetAdapterId: 'blender',
+      });
+      expect(catalogResponse.result?.isError).not.toBe(true);
+      const catalog = JSON.parse(catalogResponse.result?.content?.[0]?.text ?? '{}') as {
+        catalogVersion?: string;
+        actions?: Array<{ name?: string }>;
+      };
+      expect(catalog).toMatchObject({ catalogVersion: '1.0.0' });
+      expect(catalog.actions).toHaveLength(8);
+
+      const goal = 'Create a simple three-part mascot and render a preview';
+      const contextResponse = await callMcpTool(runtime, 11, 'operatingline.planning.context', {
+        targetAdapterId: 'blender',
+        goal,
+        planId: 'mascot-demo',
+      });
+      const context = JSON.parse(contextResponse.result?.content?.[0]?.text ?? '{}') as {
+        goal?: string;
+        recommendedRevision?: number;
+        constraints?: { humanApprovalRequired?: boolean };
+        submission?: { toolName?: string };
+      };
+      expect(context).toMatchObject({
+        goal,
+        recommendedRevision: 1,
+        constraints: { humanApprovalRequired: true },
+        submission: { toolName: 'operatingline.guide.propose' },
+      });
+
+      const fixture = JSON.parse(
+        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      const plan = { ...fixture, id: 'mascot-demo', revision: 1 };
+      expect(
+        (
+          await callMcpTool(runtime, 12, 'operatingline.guide.propose', {
+            targetAdapterId: 'blender',
+            plan,
+          })
+        ).result?.isError,
+      ).not.toBe(true);
+      const revisedContext = await callMcpTool(runtime, 13, 'operatingline.planning.context', {
+        targetAdapterId: 'blender',
+        goal,
+        planId: 'mascot-demo',
+      });
+      expect(JSON.parse(revisedContext.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        recommendedRevision: 2,
+      });
+
+      const httpContext = await fetch(
+        `${runtime.baseUrl}/api/v1/planning/context?targetAdapterId=blender&goal=${encodeURIComponent(goal)}`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      expect(httpContext.status).toBe(200);
+      await expect(httpContext.json()).resolves.toMatchObject({
+        targetAdapterId: 'blender',
+        catalog: { catalogVersion: '1.0.0' },
+      });
+
+      const unavailable = await callMcpTool(runtime, 14, 'operatingline.action_catalog.get', {
+        targetAdapterId: 'gimp',
+      });
+      expect(unavailable.result).toMatchObject({ isError: true });
+      expect(unavailable.result?.content?.[0]?.text).toContain('No action catalog is installed');
+
+      const planWithUnknownAction = structuredClone(plan) as {
+        id: string;
+        revision: number;
+        steps: Array<{ action: { name: string; arguments: Record<string, unknown> } | null }>;
+      };
+      planWithUnknownAction.id = 'unknown-action-demo';
+      planWithUnknownAction.steps.find((step) => step.action !== null)!.action!.name =
+        'blender.python.execute';
+      const unknownAction = await callMcpTool(runtime, 15, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        plan: planWithUnknownAction,
+      });
+      expect(unknownAction.result).toMatchObject({ isError: true });
+      expect(unknownAction.result?.content?.[0]?.text).toContain('absent from blender@1.0.0');
+
+      const planWithUnknownArgument = structuredClone(plan) as {
+        id: string;
+        revision: number;
+        steps: Array<{ action: { name: string; arguments: Record<string, unknown> } | null }>;
+      };
+      planWithUnknownArgument.id = 'unknown-argument-demo';
+      planWithUnknownArgument.steps.find((step) => step.action !== null)!.action!.arguments[
+        'python'
+      ] = 'bpy.ops.wm.quit_blender()';
+      const unknownArgument = await callMcpTool(runtime, 16, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        plan: planWithUnknownArgument,
+      });
+      expect(unknownArgument.result).toMatchObject({ isError: true });
+      expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
     } finally {
       await runtime.stop();
     }
@@ -249,7 +361,11 @@ describe('OperatingLine runtime', () => {
   });
 
   it('delivers AI proposals for explicit in-host decisions without publishing them', async () => {
-    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
     const instanceId = randomUUID();
     const otherInstanceId = randomUUID();
     const headers = {
@@ -347,7 +463,11 @@ describe('OperatingLine runtime', () => {
     ) as { id: string; revision: number };
     let runtime: RunningRuntime | undefined;
     try {
-      runtime = await startRuntime({ databasePath, accessToken });
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+      });
       const proposed = await callMcpTool(runtime, 40, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
         plan,
@@ -355,7 +475,11 @@ describe('OperatingLine runtime', () => {
       expect(proposed.result?.isError).not.toBe(true);
       await runtime.stop();
 
-      runtime = await startRuntime({ databasePath, accessToken });
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+      });
       const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
       guideUrl.searchParams.set('adapterId', 'blender');
       guideUrl.searchParams.set('instanceId', randomUUID());

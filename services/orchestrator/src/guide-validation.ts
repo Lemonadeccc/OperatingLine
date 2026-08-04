@@ -1,5 +1,5 @@
 import { validateExecutableTaskPlan } from '@operatingline/domain';
-import type { GuidePlan } from '@operatingline/protocol';
+import type { ActionCatalog, GuidePlan } from '@operatingline/protocol';
 
 export function validateGuidePlanStructure(plan: GuidePlan): string | null {
   const root = plan.steps.find((step) => step.id === plan.rootStepId);
@@ -39,5 +39,59 @@ export function validateProposalTarget(plan: GuidePlan, targetAdapterId: string)
     throw new Error(
       `Guide plan actions target adapter ${actionAdapterId}, not proposal target ${targetAdapterId}`,
     );
+  }
+}
+
+export function validateGuidePlanAgainstActionCatalog(
+  plan: GuidePlan,
+  catalog: ActionCatalog,
+): void {
+  const entries = new Map(catalog.actions.map((action) => [action.name, action]));
+  for (const step of plan.steps) {
+    if (step.action === null) {
+      continue;
+    }
+    const entry = entries.get(step.action.name);
+    if (entry === undefined) {
+      throw new Error(
+        `Guide step ${step.id} uses action ${step.action.name}, which is absent from ${catalog.adapterId}@${catalog.catalogVersion}`,
+      );
+    }
+
+    const argumentNames = new Set(Object.keys(step.action.arguments));
+    const declaredNames = new Set(Object.keys(entry.argumentsSchema.properties));
+    const missingNames = (entry.argumentsSchema.required ?? []).filter(
+      (name) => !argumentNames.has(name),
+    );
+    const unknownNames = [...argumentNames].filter((name) => !declaredNames.has(name));
+    if (missingNames.length > 0 || unknownNames.length > 0) {
+      const details = [
+        missingNames.length > 0 ? `missing ${missingNames.sort().join(', ')}` : null,
+        unknownNames.length > 0 ? `unknown ${unknownNames.sort().join(', ')}` : null,
+      ]
+        .filter((value): value is string => value !== null)
+        .join('; ');
+      throw new Error(`Guide step ${step.id} arguments violate ${step.action.name}: ${details}`);
+    }
+
+    if (!entry.rollbackModes.includes(step.rollback.mode)) {
+      throw new Error(
+        `Guide step ${step.id} rollback mode ${step.rollback.mode} is unsupported by ${step.action.name}`,
+      );
+    }
+    for (const anchor of step.anchors) {
+      if (!entry.supportedAnchorKinds.includes(anchor.kind)) {
+        throw new Error(
+          `Guide step ${step.id} anchor kind ${anchor.kind} is unsupported by ${step.action.name}`,
+        );
+      }
+    }
+    for (const observation of step.expectedObservations) {
+      if (!entry.supportedObservationKinds.includes(observation.kind)) {
+        throw new Error(
+          `Guide step ${step.id} observation ${observation.kind} is unsupported by ${step.action.name}`,
+        );
+      }
+    }
   }
 }

@@ -103,7 +103,7 @@
 
 - [ ] Should a later interactive milestone use a `GizmoGroup` for clickable OperatingLine-owned viewport controls? / Product / Changes interaction architecture, not this vertical slice.
 - [ ] Which second open-source host will validate the protocol's cross-host semantics? / Product and adapter research / Required before claiming general host support.
-- [ ] Which versioned action-catalog schema should planners query before generating plans for a host? / Protocol and adapter architecture / Required before claiming arbitrary-goal automatic planning.
+- [x] Which versioned action-catalog schema should planners query before generating plans for a host? / Resolved by adapter-owned ActionCatalog plus `operatingline.planning.context`; see ADR 0005.
 - [ ] How should a node reference such as `1.1.5` become an immutable patch request and a new proposal revision? / Product and protocol / Required for node chat and local replanning.
 - [ ] Should localization begin with Chinese/English UI strings or wait for the second host? / Product / Affects string ownership and screenshot baselines.
 - [ ] Can a future Blender-version-specific locator safely resolve selected built-in menu items without fixed pixels? / Blender adapter research / Required before promising native-menu arrows.

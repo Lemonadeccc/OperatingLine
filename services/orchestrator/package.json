@@ -13,6 +13,7 @@
     "@modelcontextprotocol/fastify": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@operatingline/blender-action-catalog": "workspace:*",
     "@operatingline/adapter-sdk": "workspace:*",
     "@operatingline/domain": "workspace:*",
     "@operatingline/persistence": "workspace:*",

@@ -20,6 +20,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.8.0(jiti@2.7.0))
+      '@operatingline/blender-action-catalog':
+        specifier: workspace:*
+        version: link:adapters/blender/catalog
       '@operatingline/blender-mcp-bridge':
         specifier: workspace:*
         version: link:adapters/blender/bridge
@@ -71,6 +74,12 @@ importers:
 
   adapters/blender/bridge: {}
 
+  adapters/blender/catalog:
+    dependencies:
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../../../packages/protocol
+
   packages/adapter-sdk:
     dependencies:
       '@operatingline/protocol':
@@ -110,6 +119,9 @@ importers:
       '@operatingline/adapter-sdk':
         specifier: workspace:*
         version: link:../../packages/adapter-sdk
+      '@operatingline/blender-action-catalog':
+        specifier: workspace:*
+        version: link:../../adapters/blender/catalog
       '@operatingline/domain':
         specifier: workspace:*
         version: link:../../packages/domain

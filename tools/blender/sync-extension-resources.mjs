@@ -6,6 +6,10 @@ const resourceMappings = [
     resolve('protocol/fixtures/v1/snowman.plan.json'),
     resolve('adapters/blender/extension/operating_line/resources/snowman.plan.json'),
   ],
+  [
+    resolve('adapters/blender/catalog/v1/action-catalog.json'),
+    resolve('adapters/blender/extension/operating_line/resources/action-catalog.json'),
+  ],
   [resolve('LICENSE'), resolve('adapters/blender/extension/LICENSE')],
 ];
 

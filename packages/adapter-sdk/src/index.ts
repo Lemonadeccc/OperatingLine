@@ -1,5 +1,6 @@
 import type {
   ActionBinding,
+  ActionCatalog,
   AdapterCapabilities,
   AdapterStatus,
   ObservationExpectation,
@@ -20,6 +21,7 @@ export interface AppAdapter {
   readonly version: string;
   readonly capabilities: AdapterCapabilities;
   getStatus(): Promise<AdapterStatus>;
+  getActionCatalog?(): Promise<ActionCatalog>;
   execute?(action: ActionBinding): Promise<AdapterActionResult>;
   resolveAnchor?(anchor: SemanticAnchor): Promise<unknown>;
   observe?(expectation: ObservationExpectation): Promise<unknown>;

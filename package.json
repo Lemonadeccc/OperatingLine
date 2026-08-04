@@ -43,6 +43,7 @@
     "@commitlint/cz-commitlint": "21.2.0",
     "@eslint/js": "10.0.1",
     "@operatingline/blender-mcp-bridge": "workspace:*",
+    "@operatingline/blender-action-catalog": "workspace:*",
     "@operatingline/domain": "workspace:*",
     "@operatingline/orchestrator": "workspace:*",
     "@operatingline/persistence": "workspace:*",

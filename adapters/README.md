@@ -18,6 +18,11 @@ adapters/<host>/
 不得把宿主 API 类型泄漏到 `packages/domain`，也不得用固定屏幕坐标替代语义锚点。新适配器
 首先复制 `_template/capabilities.example.json`，逐项确认能力和限制。
 
+可供 AI 规划的适配器还必须发布版本化 ActionCatalog，并在 composition root 安装它。目录应由
+适配器维护，逐项描述真实实现的参数 Schema、资源 effect、anchor、observation、rollback 和安全
+边界；不得把文档中尚未实现的命令列为可执行 action。Blender 的目录结构可作为参考：
+`adapters/blender/catalog/v1/action-catalog.json`。
+
 支持实时计划的 Companion 应复用 `protocol/schemas/v1/companion-*`：网络/IPC 线程只交换
 协议数据，通过宿主主线程队列安装计划和执行 action。计划拉取不能产生宿主数据副作用；
 运行中的计划更新必须等待安全边界或显式用户操作。

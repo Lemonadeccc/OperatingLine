@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path';
 
 import pino from 'pino';
 
+import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+
 import { startRuntime } from './index.js';
 
 const logger = pino({ name: 'operating-line-runtime' });
@@ -17,6 +19,7 @@ const runtime = await startRuntime({
   databasePath,
   accessToken,
   adapters: [],
+  actionCatalogs: [blenderActionCatalog],
   port: Number(process.env.OPERATINGLINE_PORT ?? 0),
 });
 

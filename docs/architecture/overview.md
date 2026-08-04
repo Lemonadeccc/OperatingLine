@@ -6,7 +6,7 @@ OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主
 锚点翻译成 Blender Operator、VS Code Command、GIMP Procedure 等实际能力。
 无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
 AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
-事件/最新快照持久化和能力描述。MCP 客户端、
+事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表和 PlanningContext。MCP 客户端、
 CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内视觉呈现。
 
 ```text
@@ -23,6 +23,12 @@ GuideProposal
   ├─ proposalId + targetAdapterId
   ├─ immutable GuidePlan revision
   └─ per-companion accepted/rejected decision
+
+ActionCatalog
+  ├─ adapterId + catalogVersion
+  ├─ strict argument schemas + resource effects
+  ├─ supported anchors + observations + rollback
+  └─ declared safety and host-version boundaries
 ```
 
 ## 接入等级
@@ -75,8 +81,10 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 
 当前“AI 规划”边界是 model-neutral：Codex、Claude 或其他 MCP 客户端生成完整 GuidePlan 并调用
 `operatingline.guide.propose`，OperatingLine 负责结构/单宿主校验、持久化、宿主内预览和人工
-门禁。Orchestrator 还没有内置模型，也没有可供规划器查询每个 action 参数约束的版本化 catalog，
-因此不能声称已经支持任意自然语言目标的自动规划。
+门禁。客户端在规划前调用 `operatingline.planning.context`，取得目标宿主的精确版本化目录、
+Companion 状态、revision 提示和计划约束；Proposal 还会依据目录拒绝未知 action、顶层参数和
+未声明的 anchor/observation/rollback。Orchestrator 不内置模型，因此目录提供的是可靠能力边界，
+不是任意自然语言目标已经达到质量基线的声明。
 
 ## 宿主执行记录与补偿
 
@@ -96,6 +104,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 
 当前 HTTP transport 与升级边界见 [ADR 0003](../adr/0003-loopback-companion-polling.md)，
 提案审批决策见 [ADR 0004](../adr/0004-human-approved-guide-proposals.md)。
+目录与规划上下文决策见
+[ADR 0005](../adr/0005-versioned-action-catalog-planning-context.md)。
 
 ## 新宿主适配流程
 

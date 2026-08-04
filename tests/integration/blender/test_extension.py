@@ -53,10 +53,15 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
     executable_steps,
     load_task_tree,
 )
+from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
+    ALLOWED_ACTIONS,
+)
 
 
 with RESOURCE_PATH.open(encoding="utf-8") as resource:
     FULL_PLAN = json.load(resource)
+with (RESOURCE_PATH.parent / "action-catalog.json").open(encoding="utf-8") as resource:
+    ACTION_CATALOG = json.load(resource)
 
 
 def geometry_regression_plan(plan: dict) -> dict:
@@ -821,6 +826,11 @@ def assert_companion_and_plan_semantics() -> None:
 
 
 def main() -> None:
+    catalog_actions = {item["name"] for item in ACTION_CATALOG["actions"]}
+    implemented_catalog_actions = {
+        name for name in ALLOWED_ACTIONS if name.startswith("blender.")
+    }
+    assert catalog_actions == implemented_catalog_actions
     assert (ADAPTER_ROOT / "LICENSE").read_text(encoding="utf-8") == (
         REPO_ROOT / "LICENSE"
     ).read_text(encoding="utf-8")

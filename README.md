@@ -6,7 +6,8 @@
 > 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
 > 计划投递/状态回传闭环已可运行；AI/MCP 客户端还可以提交待审 GuideProposal，由用户在
 > Blender 内预览任务树并明确接受或拒绝。内置计划可完成并回退一张确定性的雪人渲染预览。
-> 任意目标自动拆解、节点聊天、训练/Eval 和第二宿主仍在路线图中。
+> Orchestrator 现在可以查询 Blender `1.0.0` ActionCatalog 和 PlanningContext；任意目标的质量
+> 基线、节点聊天、训练/Eval、骨骼动画和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -30,6 +31,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   把追加式事件与每个实例的最新快照写入本地数据库。
 - **版本化协议**：定义 GuidePlan、GuideProposal/Decision、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
+- **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
+  Schema、资源读写、观察、回退、安全边界、最新 Companion 状态和下一 Plan revision；未知动作、
+  顶层未知参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
   视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
@@ -48,10 +52,15 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > [!IMPORTANT]
 > 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，以及“外部 AI 生成计划 → Blender 内
 > 预览 → 人工接受/拒绝”的通用审批基础，不是“AI 已能自动完成任意 Blender 任务”。
-> OperatingLine 尚未内置模型或可查询的版本化 action catalog；任意目标自动拆解、节点聊天引用、
-> Eval/训练导出、骨骼动画和第二宿主尚未完成。
+> OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先调用
+> `operatingline.planning.context` 再生成任意目标的 GuideProposal，但当前 Blender 目录只覆盖 8 个
+> 已验证动作，尚未建立跨目标质量基线。节点聊天引用、局部重规划、Eval/训练导出、骨骼动画和
+> 第二宿主尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
+
+实现状态与后续验收条件统一记录在[项目路线图](docs/roadmap.md)；因当前运行表面能力不足而待补的
+正式 OMX 双通道审查记录在[审查待办](docs/quality/omx-code-review.md)。
 
 ## 工作原理
 
@@ -60,7 +69,7 @@ Codex / Claude / another MCP client
                  │ MCP
                  ▼
 services/orchestrator
-计划验证 · Proposal 审批 · Companion 投递 · 状态/事件记录 · 能力描述
+目录/规划上下文 · 计划验证 · Proposal 审批 · Companion 投递 · 状态/事件记录
                  │ authenticated loopback HTTP
                  │ plan/proposal pull · decision/state report
         ┌────────┴─────────┐
@@ -79,6 +88,11 @@ native extension      native companion
 Blender 当前允许 8 类通用 action：创建平面、创建 UV 球、批量创建基础体、创建并分配单个
 材质、创建并分配材质组、创建隔离渲染场景、创建灯光相机组，以及生成受限临时目录中的渲染
 预览。动作注册表按步骤 ID 绑定执行器；同一种 action 可以安全地出现在多个步骤中。
+
+这些动作的规范描述位于 `adapters/blender/catalog/v1/action-catalog.json`。目录版本与协议版本
+分别演进；Orchestrator composition root 安装真实目录，而不是在通用规划代码中复制 Blender
+私有知识。完整决策见
+[ADR 0005](docs/adr/0005-versioned-action-catalog-planning-context.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -148,9 +162,25 @@ pnpm dev
 3. `Bearer token` 填写同一个 Token；该字段使用 `SKIP_SAVE`，不会写入 `.blend`。
 4. 点击 `Connect`。连接成功后，Extension 会保留当前离线计划，并只拉取 ID/revision 更新的计划。
 5. 把 Codex、Claude 或其他 MCP Client 连接到 `http://127.0.0.1:43123/mcp`。AI 生成的计划
-   应调用 `operatingline.guide.propose`，传入 `{ targetAdapterId, plan }`；Blender 内会出现待审树，
+   应先调用 `operatingline.planning.context`，传入目标宿主、自然语言 `goal` 和稳定 `planId`；根据
+   返回的精确 catalog 和 `recommendedRevision` 构造完整 GuidePlan，再调用
+   `operatingline.guide.propose`，传入 `{ targetAdapterId, plan }`。Blender 内会出现待审树，
    用户点击 `Accept Plan` 后它才成为活动计划。`operatingline.guide.publish` 保留为受信任调用方
    直接发布确定性计划的兼容路径，不经过人工审批。
+
+例如，MCP 客户端在规划前使用：
+
+```json
+{
+  "targetAdapterId": "blender",
+  "goal": "创建一个由基础体组成的机器人并渲染 PNG 预览",
+  "planId": "robot-preview"
+}
+```
+
+如果只需要目录，调用 `operatingline.action_catalog.get`；可选 `catalogVersion` 用于精确重放。
+PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、骨骼或任意 Python 操作必须
+明确保留为人工步骤。
 
 计划安装、Start/Next/Back 和步骤观察可以通过
 `operatingline.companions.list` 或 `GET /api/v1/companions` 查询。所有 `/mcp` 和 `/api/`

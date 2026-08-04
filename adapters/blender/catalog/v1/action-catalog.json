@@ -1,0 +1,657 @@
+{
+  "protocolVersion": "1.0.0",
+  "catalogVersion": "1.0.0",
+  "adapterId": "blender",
+  "adapterVersionRange": ">=0.1.0 <0.2.0",
+  "hostVersionRange": ">=4.5.0 <5.2.0",
+  "title": "OperatingLine Blender action catalog",
+  "description": "Allowlisted deterministic Blender actions implemented by the OperatingLine 0.1 Companion.",
+  "planningNotes": [
+    "Use only actions present in this catalog; arbitrary Python, bpy expressions, screen coordinates, and unlisted Blender operators are unsupported.",
+    "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
+    "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
+    "This adapter revision uses the managed logical collection snowman.collection for geometry and isolated preview rendering, even when the user goal is not a snowman.",
+    "The catalog can construct scenes from planes, UV spheres, cones, and cylinders, assign Principled materials, create an isolated scene, add Area lights and a camera, and render a managed PNG preview. Unsupported topology, sculpting, rigging, animation, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
+    "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item."
+  ],
+  "actions": [
+    {
+      "name": "blender.mesh.create_uv_sphere",
+      "title": "Create one UV sphere",
+      "description": "Creates one owned UV sphere mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "radius", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "description": "Sphere radius in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_plane",
+      "title": "Create one plane",
+      "description": "Creates one owned square plane mesh object in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["resourceId", "objectName", "size", "location"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "size": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "description": "Full edge length in Blender units."
+          },
+          "location": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_primitive_batch",
+      "title": "Create a primitive batch",
+      "description": "Atomically creates 1 to 16 owned spheres, cones, or cylinders after validating all IDs and names.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueResourceIds": true,
+            "uniqueObjectNames": true,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": ["primitive", "resourceId", "objectName", "radius", "location"],
+                  "properties": {
+                    "primitive": { "enum": ["sphere", "uv_sphere"] },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+                    "location": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "primitive",
+                    "resourceId",
+                    "objectName",
+                    "radiusStart",
+                    "radiusEnd",
+                    "start",
+                    "end"
+                  ],
+                  "properties": {
+                    "primitive": { "const": "cone" },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radiusStart": { "type": "number", "minimum": 0, "maximum": 1000 },
+                    "radiusEnd": { "type": "number", "minimum": 0, "maximum": 1000 },
+                    "start": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "end": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": ["primitive", "resourceId", "objectName", "radius", "start", "end"],
+                  "properties": {
+                    "primitive": { "const": "cylinder" },
+                    "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                    "objectName": {
+                      "type": "string",
+                      "pattern": "^OperatingLine\\.",
+                      "maxLength": 180
+                    },
+                    "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+                    "start": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "end": {
+                      "type": "array",
+                      "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "description": "start and end must differ; cone radii cannot both be zero."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "items[].resourceId",
+          "derivedResourceTypes": ["MESH[]"],
+          "description": "Creates every object and its resourceId.mesh datablock atomically."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.material.create_and_assign",
+      "title": "Create and assign one material",
+      "description": "Creates one owned Principled material and replaces material slots on 1 to 64 previously created owned mesh objects.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["materialId", "materialName", "targets", "baseColor", "roughness", "metallic"],
+        "properties": {
+          "materialId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "materialName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "targets": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "description": "Logical IDs of owned mesh objects created by earlier actions."
+          },
+          "baseColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "Linear RGBA channels in [0, 1]."
+          },
+          "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "metallic": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "MATERIAL",
+          "argumentPath": "materialId",
+          "derivedResourceTypes": [],
+          "description": "Creates one owned material."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "targets[]",
+          "derivedResourceTypes": [],
+          "description": "Replaces the material slots of existing owned mesh targets with compare-and-restore rollback."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["material_assigned"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.material.create_palette_and_assign",
+      "title": "Create and assign a material palette",
+      "description": "Atomically creates 1 to 8 owned Principled materials and assigns each target at most once.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["materials"],
+        "properties": {
+          "materials": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "required": [
+                "materialId",
+                "materialName",
+                "targets",
+                "baseColor",
+                "roughness",
+                "metallic"
+              ],
+              "properties": {
+                "materialId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                "materialName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                },
+                "targets": {
+                  "type": "array",
+                  "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "uniqueItems": true
+                },
+                "baseColor": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "minItems": 4,
+                  "maxItems": 4
+                },
+                "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+                "metallic": { "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "additionalProperties": false
+            },
+            "description": "materialId, materialName, and all targets must be unique across the palette."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "MATERIAL[]",
+          "argumentPath": "materials[].materialId",
+          "derivedResourceTypes": [],
+          "description": "Creates every palette material atomically."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT[]",
+          "argumentPath": "materials[].targets[]",
+          "derivedResourceTypes": [],
+          "description": "Assigns the palette to previously created owned mesh objects."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["material_assigned"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render_scene.create",
+      "title": "Create an isolated render scene",
+      "description": "Creates an owned Scene and World, configures the world background, and links only the managed collection into the new scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "sceneId",
+          "sceneName",
+          "worldId",
+          "worldName",
+          "collectionId",
+          "backgroundColor",
+          "strength"
+        ],
+        "properties": {
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "sceneName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "worldId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "worldName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+          "collectionId": {
+            "const": "snowman.collection",
+            "description": "Current adapter-managed geometry collection."
+          },
+          "backgroundColor": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "strength": { "type": "number", "minimum": 0, "maximum": 1000 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the managed collection created by an earlier geometry action and rejects untracked contents."
+        },
+        {
+          "access": "create",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Creates an isolated render scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "WORLD",
+          "argumentPath": "worldId",
+          "derivedResourceTypes": [],
+          "description": "Creates and assigns a world to the new scene."
+        }
+      ],
+      "supportedAnchorKinds": ["operator", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["render_scene_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render_rig.create",
+      "title": "Create Area lights and a camera",
+      "description": "Creates 1 to 4 owned Area lights and one owned camera in an existing isolated render scene.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["sceneId", "collectionId", "lights", "camera"],
+        "properties": {
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "collectionId": { "const": "snowman.collection" },
+          "lights": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "required": [
+                "resourceId",
+                "objectName",
+                "dataName",
+                "location",
+                "target",
+                "color",
+                "energy",
+                "size"
+              ],
+              "properties": {
+                "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+                "objectName": {
+                  "type": "string",
+                  "pattern": "^OperatingLine\\.",
+                  "maxLength": 180
+                },
+                "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+                "location": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "target": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "color": {
+                  "type": "array",
+                  "items": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "energy": { "type": "number", "minimum": 0, "maximum": 10000000 },
+                "size": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+              },
+              "additionalProperties": false
+            },
+            "description": "Resource IDs, object names, and data names must be unique; location must differ from target."
+          },
+          "camera": {
+            "type": "object",
+            "required": ["resourceId", "objectName", "dataName", "location", "target", "lens"],
+            "properties": {
+              "resourceId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+              "objectName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+              "dataName": { "type": "string", "pattern": "^OperatingLine\\.", "maxLength": 180 },
+              "location": {
+                "type": "array",
+                "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "target": {
+                "type": "array",
+                "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "lens": { "type": "number", "minimum": 1, "maximum": 1000 }
+            },
+            "additionalProperties": false,
+            "description": "location must differ from target."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Requires an isolated scene created by an earlier catalog action."
+        },
+        {
+          "access": "read",
+          "resourceType": "COLLECTION",
+          "argumentPath": "collectionId",
+          "derivedResourceTypes": [],
+          "description": "Requires the managed collection linked into the scene."
+        },
+        {
+          "access": "create",
+          "resourceType": "LIGHT[]",
+          "argumentPath": "lights[].resourceId",
+          "derivedResourceTypes": ["LIGHT_DATA[]"],
+          "description": "Creates Area light objects and resourceId.data datablocks."
+        },
+        {
+          "access": "create",
+          "resourceType": "CAMERA",
+          "argumentPath": "camera.resourceId",
+          "derivedResourceTypes": ["CAMERA_DATA"],
+          "description": "Creates and activates the camera and its resourceId.data datablock."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["render_rig_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.render.execute_preview",
+      "title": "Render a managed PNG preview",
+      "description": "Renders an existing owned scene to a PNG under the extension-managed temporary directory.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "renderId",
+          "sceneId",
+          "engine",
+          "resolutionX",
+          "resolutionY",
+          "resolutionPercentage",
+          "format",
+          "destination",
+          "samples"
+        ],
+        "properties": {
+          "renderId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "sceneId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+          "engine": { "const": "auto_eevee" },
+          "resolutionX": { "type": "integer", "minimum": 1, "maximum": 1024 },
+          "resolutionY": { "type": "integer", "minimum": 1, "maximum": 1024 },
+          "resolutionPercentage": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "format": { "const": "PNG" },
+          "destination": { "const": "extension_temp" },
+          "samples": { "type": "integer", "minimum": 1, "maximum": 128 }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "SCENE",
+          "argumentPath": "sceneId",
+          "derivedResourceTypes": [],
+          "description": "Requires an owned scene with an active camera."
+        },
+        {
+          "access": "artifact",
+          "resourceType": "PNG",
+          "argumentPath": "renderId",
+          "derivedResourceTypes": [],
+          "description": "Creates a digest-tracked PNG only inside the managed temporary output root."
+        }
+      ],
+      "supportedAnchorKinds": ["operator", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["render_artifact_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "managed_file_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "managed_temp"
+      }
+    }
+  ]
+}
