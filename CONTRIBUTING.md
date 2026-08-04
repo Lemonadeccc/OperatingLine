@@ -1,9 +1,10 @@
 # 贡献指南
 
 感谢你改进 OperatingLine。提交代码前，请先了解项目当前边界：协议、Headless Orchestrator、
-Blender Extension 和受限 Blender MCP Bridge 已可分别运行，但实时 Orchestrator ↔ Blender
-配对、计划投递、执行队列和观察回传尚未打通。请勿在 issue、文档或实现中把这条链路描述为
-已经可用。
+Blender Extension、受限 Blender MCP Bridge，以及实时 Orchestrator ↔ Blender 的计划投递与
+状态回传闭环已经可运行。内置 revision 2 计划可以完成并回退 13 步雪人渲染预览；通用 AI
+自动规划、节点聊天、训练/Eval、骨骼动画和第二宿主仍未完成。请勿把确定性验收场景描述成
+“AI 已能自动完成任意 Blender 任务”。
 
 ## 开始之前
 
@@ -71,11 +72,14 @@ pnpm audit:prod
 
 ```bash
 pnpm test:blender
+pnpm test:blender:companion
 pnpm package:blender
 ```
 
-`pnpm test:blender` 会对检测到的 Blender 可执行文件运行无界面集成测试；
-`pnpm package:blender` 会在 `artifacts/blender/` 生成安装包。
+`pnpm test:blender` 会对检测到的 Blender 可执行文件运行基础 Extension 回归和完整雪人无界面
+集成测试，包括复合动作冲突预检、隔离渲染、PNG 产物与 13 步完整回退。
+`pnpm test:blender:companion` 会启动真实 Orchestrator 与 Blender，验证 MCP 发布、回环计划拉取、
+状态回传和跨进程前进/回退。`pnpm package:blender` 会在 `artifacts/blender/` 生成安装包。
 
 改动 Panel、Overlay、引导线或其他可视行为时，还应在有图形界面的环境运行：
 
@@ -84,7 +88,9 @@ pnpm test:blender:visual
 ```
 
 该命令启动第一个检测到的 Blender，并生成
-`artifacts/blender/overlay-smoke.png`。如果本机没有检测到 Blender，命令会失败并提示设置
+`artifacts/blender/overlay-smoke.png`。脚本从工厂场景启动，确认默认 Cube、Camera 和 Light
+仍存在，执行完整计划后切换到隔离的雪人渲染 Scene，调用真实 OperatingLine Panel，再捕获
+任务树、控制按钮与 Overlay。如果本机没有检测到 Blender，命令会失败并提示设置
 `BLENDER_BIN`。请在拉取请求中说明无法运行的检查及原因，不要把未运行的检查标记为通过。
 
 ## 提交信息

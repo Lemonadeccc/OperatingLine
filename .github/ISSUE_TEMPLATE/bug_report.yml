@@ -6,9 +6,9 @@ body:
     attributes:
       value: |
         感谢报告问题。安全漏洞请勿在此公开；请改用仓库 Security 页面中的私密报告入口。
-        实时 Orchestrator ↔ Blender 链路尚未打通，请勿将缺少该能力作为缺陷提交。
+        当前只保证内置 GuidePlan 与受支持 action；通用 AI 自动规划和任意 Blender 操作仍在路线图中。
         Thank you for reporting a problem. Do not disclose security vulnerabilities here; use the private Security reporting form.
-        The live Orchestrator ↔ Blender link is not implemented yet, so its absence is not currently a bug.
+        Only the bundled GuidePlan and supported actions are currently guaranteed; general AI planning and arbitrary Blender operations remain on the roadmap.
   - type: checkboxes
     id: checks
     attributes:

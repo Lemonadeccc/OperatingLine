@@ -2,6 +2,8 @@
 
 from .task_tree import (
     RESOURCE_PATH,
+    SNOWMAN_PLAN_ID,
+    SNOWMAN_PLAN_REVISION,
     SNOWMAN_TASK_TREE,
     ActionSpec,
     TaskNode,
@@ -12,6 +14,8 @@ from .task_tree import (
 
 __all__ = (
     "RESOURCE_PATH",
+    "SNOWMAN_PLAN_ID",
+    "SNOWMAN_PLAN_REVISION",
     "SNOWMAN_TASK_TREE",
     "ActionSpec",
     "TaskNode",

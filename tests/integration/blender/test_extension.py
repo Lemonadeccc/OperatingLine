@@ -36,6 +36,13 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
     remove_factory_startup_objects,
     validate_companion_url,
 )
+from operating_line_extension.operating_line.infrastructure import (  # noqa: E402
+    observations as observation_module,
+)
+from operating_line_extension.operating_line.application import (  # noqa: E402
+    ActionReceipt,
+    DemoSession,
+)
 from operating_line_extension.operating_line.presentation.operators import (  # noqa: E402
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_next,
@@ -49,9 +56,38 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
 
 
 with RESOURCE_PATH.open(encoding="utf-8") as resource:
-    BUNDLED_PLAN = json.load(resource)
+    FULL_PLAN = json.load(resource)
+
+
+def geometry_regression_plan(plan: dict) -> dict:
+    """Derive the original three-sphere safety slice from the canonical fixture."""
+    selected_ids = {
+        "snowman",
+        "snowman.model",
+        "snowman.model.body_lower",
+        "snowman.model.body_upper",
+        "snowman.model.head",
+    }
+    derived = {
+        **deepcopy(plan),
+        "id": "snowman-geometry-regression",
+        "title": "Snowman geometry safety regression",
+        "steps": [
+            deepcopy(item) for item in plan["steps"] if item["id"] in selected_ids
+        ],
+    }
+    by_id = {item["id"]: item for item in derived["steps"]}
+    by_id["snowman.model"]["order"] = 1
+    by_id["snowman.model.body_lower"]["dependsOn"] = []
+    return derived
+
+
+BUNDLED_PLAN = geometry_regression_plan(FULL_PLAN)
 ACTION_STEPS = [step for step in BUNDLED_PLAN["steps"] if step["action"] is not None]
 EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_STEPS)
+PLAN_REVISION = BUNDLED_PLAN["revision"]
+DYNAMIC_REVISION = PLAN_REVISION + 1
+OWNER_VALUE = f"snowman_demo_v{PLAN_REVISION}"
 
 
 def assert_absent(name: str) -> None:
@@ -140,7 +176,7 @@ def assert_companion_and_plan_semantics() -> None:
 
     dynamic_plan = deepcopy(BUNDLED_PLAN)
     dynamic_plan["id"] = "live-snowman"
-    dynamic_plan["revision"] = 2
+    dynamic_plan["revision"] = DYNAMIC_REVISION
     dynamic_plan["title"] = "Live snowman"
     token = "integration-token-123456"
     requests: list[dict] = []
@@ -183,7 +219,7 @@ def assert_companion_and_plan_semantics() -> None:
             requests.append(query)
             known = query.get("knownPlanId") == ["live-snowman"] and query.get(
                 "knownRevision"
-            ) == ["2"]
+            ) == [str(DYNAMIC_REVISION)]
             self._reply(
                 {
                     "protocolVersion": "1.0.0",
@@ -211,8 +247,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
-            known_plan_id="snowman-demo",
-            known_revision=1,
+            known_plan_id=BUNDLED_PLAN["id"],
+            known_revision=PLAN_REVISION,
         )
         try:
             redirect_transport._request_json("GET", "/redirect")
@@ -245,15 +281,15 @@ def assert_companion_and_plan_semantics() -> None:
                 operating_line.get_session().plan_id == "live-snowman"
                 and any(
                     query.get("knownPlanId") == ["live-snowman"]
-                    and query.get("knownRevision") == ["2"]
+                    and query.get("knownRevision") == [str(DYNAMIC_REVISION)]
                     for query in requests
                 )
             ):
                 break
             time.sleep(0.02)
         assert operating_line.get_session().plan_id == "live-snowman"
-        assert requests[0].get("knownPlanId") == ["snowman-demo"]
-        assert requests[0].get("knownRevision") == ["1"]
+        assert requests[0].get("knownPlanId") == [BUNDLED_PLAN["id"]]
+        assert requests[0].get("knownRevision") == [str(PLAN_REVISION)]
         assert all(query["adapterId"] == ["blender"] for query in requests)
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert server_thread.ident != main_thread_id
@@ -296,7 +332,10 @@ def assert_companion_and_plan_semantics() -> None:
             "occurredAt",
         }
         uuid.UUID(report["reportId"])
-        assert report["plan"] == {"id": "live-snowman", "revision": 2}
+        assert report["plan"] == {
+            "id": "live-snowman",
+            "revision": DYNAMIC_REVISION,
+        }
         assert report["phase"] == "ready" and report["error"] is None
 
         # A stale/unknown acknowledgement is an error and cannot advance the
@@ -307,7 +346,7 @@ def assert_companion_and_plan_semantics() -> None:
             token,
             companion.instance_id,
             known_plan_id="live-snowman",
-            known_revision=2,
+            known_revision=DYNAMIC_REVISION,
             timeout=0.2,
         )
         rejected_transport.send_report({"sequence": 99, "transition": "connected"})
@@ -336,7 +375,7 @@ def assert_companion_and_plan_semantics() -> None:
             token,
             companion.instance_id,
             known_plan_id="live-snowman",
-            known_revision=2,
+            known_revision=DYNAMIC_REVISION,
             timeout=5.0,
         )
         companion._transport = slow_transport
@@ -348,7 +387,7 @@ def assert_companion_and_plan_semantics() -> None:
         if slow_transport.running:
             assert companion.status == "Disconnecting"
             assert slow_transport in companion._stopping_transports
-        assert slow_transport.wait_stopped(1.0)
+        assert slow_transport.wait_stopped(2.0)
         companion.pump()
         assert not slow_transport.running
         assert companion.status == "Offline"
@@ -363,7 +402,7 @@ def assert_companion_and_plan_semantics() -> None:
             token,
             companion.instance_id,
             known_plan_id="live-snowman",
-            known_revision=2,
+            known_revision=DYNAMIC_REVISION,
         )
         companion._transport = probe_transport
         before_malformed = companion.last_report["sequence"]
@@ -389,7 +428,7 @@ def assert_companion_and_plan_semantics() -> None:
         probe_transport.incoming.put({"kind": "recovered"})
         companion.pump()
         assert companion.error == ""
-        assert companion.status == "Plan live-snowman r2"
+        assert companion.status == f"Plan live-snowman r{DYNAMIC_REVISION}"
         companion._transport = None
     finally:
         companion.disconnect()
@@ -399,7 +438,7 @@ def assert_companion_and_plan_semantics() -> None:
 
     installed_session = operating_line.get_session()
     invalid_plan = deepcopy(dynamic_plan)
-    invalid_plan["revision"] = 3
+    invalid_plan["revision"] = DYNAMIC_REVISION + 1
     invalid_plan["steps"][2]["action"]["name"] = "unsafe.execute_python"
     try:
         companion.install_plan(invalid_plan)
@@ -409,9 +448,97 @@ def assert_companion_and_plan_semantics() -> None:
         raise AssertionError("Unsupported live action should be rejected")
     assert operating_line.get_session() is installed_session
 
+    invalid_cases = (
+        (
+            "preview resolution budget",
+            "blender.render.execute_preview",
+            lambda arguments: arguments.update({"resolutionX": 1025}),
+            "arguments.resolutionX must be an integer in [1, 1024]",
+        ),
+        (
+            "non-portable logical ID",
+            "blender.mesh.create_uv_sphere",
+            lambda arguments: arguments.update({"resourceId": "snowman body"}),
+            "must be a portable logical resource ID",
+        ),
+        (
+            "derived mesh logical ID collision",
+            "blender.mesh.create_primitive_batch",
+            lambda arguments: arguments["items"][1].update(
+                {"resourceId": f'{arguments["items"][0]["resourceId"]}.mesh'}
+            ),
+            "Created logical resource IDs must be unique",
+        ),
+        (
+            "cross-step logical ID collision",
+            "blender.mesh.create_uv_sphere",
+            lambda arguments: arguments.update({"resourceId": "snowman.ground"}),
+            "Duplicate planned logical resource ID",
+        ),
+        (
+            "material target logical ID collision",
+            "blender.material.create_and_assign",
+            lambda arguments: arguments.update(
+                {"materialId": arguments["targets"][0]}
+            ),
+            "Material logical ID cannot also be an assignment target",
+        ),
+        (
+            "derived rig data logical ID collision",
+            "blender.render_rig.create",
+            lambda arguments: arguments["lights"][1].update(
+                {"resourceId": f'{arguments["lights"][0]["resourceId"]}.data'}
+            ),
+            "Created logical resource IDs must be unique",
+        ),
+        (
+            "render artifact logical ID collision",
+            "blender.render.execute_preview",
+            lambda arguments: arguments.update({"renderId": "snowman.render.scene"}),
+            "Duplicate planned logical resource ID",
+        ),
+    )
+    for label, action_name, mutate, expected_message in invalid_cases:
+        invalid_case = deepcopy(FULL_PLAN)
+        invalid_case["id"] = f"invalid-{label.replace(' ', '-')}"
+        target = next(
+            item
+            for item in invalid_case["steps"]
+            if (item.get("action") or {}).get("name") == action_name
+        )
+        mutate(target["action"]["arguments"])
+        try:
+            companion.install_plan(invalid_case)
+        except ValueError as error:
+            assert expected_message in str(error)
+        else:
+            raise AssertionError(f"Plan should reject {label}")
+        assert operating_line.get_session() is installed_session
+
+    duplicate_artifact_plan = deepcopy(FULL_PLAN)
+    duplicate_artifact_plan["id"] = "invalid-duplicate-render-artifact"
+    render_step = next(
+        item
+        for item in duplicate_artifact_plan["steps"]
+        if (item.get("action") or {}).get("name")
+        == "blender.render.execute_preview"
+    )
+    duplicate_render_step = deepcopy(render_step)
+    duplicate_render_step["id"] = "snowman.render.preview.copy"
+    duplicate_render_step["order"] = render_step["order"] + 1
+    duplicate_render_step["dependsOn"] = [render_step["id"]]
+    duplicate_artifact_plan["steps"].append(duplicate_render_step)
+    try:
+        companion.install_plan(duplicate_artifact_plan)
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Plan should reject duplicate render artifact IDs")
+    assert operating_line.get_session() is installed_session
+
     # Restore the bundled fallback for the remainder of the offline test.
     companion.install_plan(deepcopy(BUNDLED_PLAN))
-    assert operating_line.get_session().plan_id == "snowman-demo"
+    assert operating_line.get_session().plan_id == BUNDLED_PLAN["id"]
 
     # A newer revision is cached without scene mutation while receipts exist,
     # reported once, then installed automatically after Back reaches the start.
@@ -421,7 +548,7 @@ def assert_companion_and_plan_semantics() -> None:
     lower = bpy.data.objects[EXPECTED[0]]
     lower_pointer = lower.as_pointer()
     newer_plan = deepcopy(BUNDLED_PLAN)
-    newer_plan["revision"] = 2
+    newer_plan["revision"] = PLAN_REVISION + 1
     assert companion.install_plan(newer_plan) is False
     pending_error_sequence = companion.last_report["sequence"]
     assert companion.last_report["transition"] == "error"
@@ -430,7 +557,7 @@ def assert_companion_and_plan_semantics() -> None:
     assert companion.last_report["sequence"] == pending_error_sequence
     alternate_plan = deepcopy(BUNDLED_PLAN)
     alternate_plan["id"] = "alternate-live-plan"
-    alternate_plan["revision"] = 1
+    alternate_plan["revision"] = PLAN_REVISION
     assert companion.install_plan(alternate_plan) is False
     assert companion.pending_plan["id"] == "alternate-live-plan"
     assert bpy.data.objects[EXPECTED[0]].as_pointer() == lower_pointer
@@ -439,7 +566,7 @@ def assert_companion_and_plan_semantics() -> None:
     assert bpy.data.objects.get(EXPECTED[0]) is None
     assert companion.pending_plan is None
     assert operating_line.get_session().plan_id == "alternate-live-plan"
-    assert operating_line.get_session().revision == 1
+    assert operating_line.get_session().revision == PLAN_REVISION
     assert companion.last_report["transition"] == "plan_loaded"
 
     # Disconnect is an explicit boundary: a queued remote plan must not install
@@ -483,10 +610,40 @@ def assert_companion_and_plan_semantics() -> None:
             "details": {
                 "parameters": {"name": "OperatingLine.IntentionallyMissing"},
                 "objectName": "OperatingLine.IntentionallyMissing",
+                "supported": True,
             },
         }
     ]
     telemetry_session.back()
+
+    original_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
+        "test_evaluation_error"
+    )
+    observation_module.OBSERVATION_EVALUATORS["test_evaluation_error"] = (
+        lambda _parameters, _receipts: (_ for _ in ()).throw(ValueError("private"))
+    )
+    try:
+        assert observation_module.evaluate_observations(
+            ({"kind": "test_evaluation_error", "parameters": {}},),
+            {},
+        ) == [
+            {
+                "kind": "test_evaluation_error",
+                "satisfied": False,
+                "details": {
+                    "parameters": {},
+                    "supported": True,
+                    "evaluationError": "ValueError",
+                },
+            }
+        ]
+    finally:
+        if original_evaluator is None:
+            del observation_module.OBSERVATION_EVALUATORS["test_evaluation_error"]
+        else:
+            observation_module.OBSERVATION_EVALUATORS[
+                "test_evaluation_error"
+            ] = original_evaluator
     assert companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
 
     dependent = step(
@@ -517,6 +674,30 @@ def assert_companion_and_plan_semantics() -> None:
         "action.z-first",
         "action.a-second",
     )
+
+    strict_root = load_temporary_plan(
+        [root, step("action.strict", "root", 1, step_action=action("test.strict"))]
+    )
+    strict_session = DemoSession(
+        strict_root,
+        {
+            "test.strict": (
+                lambda _receipts: ActionReceipt(
+                    "receipt",
+                    "action.strict",
+                    "test.strict",
+                ),
+                lambda _receipt: None,
+            )
+        },
+    )
+    strict_session.start()
+    try:
+        strict_session.next()
+    except KeyError as error:
+        assert error.args == ("action.strict",)
+    else:
+        raise AssertionError("Session must not resolve actions by action name")
 
     assert_plan_rejected(
         [
@@ -577,7 +758,7 @@ def main() -> None:
     ).read_text(encoding="utf-8")
     canonical_path = REPO_ROOT / "protocol" / "fixtures" / "v1" / "snowman.plan.json"
     with canonical_path.open(encoding="utf-8") as canonical_resource:
-        assert BUNDLED_PLAN == json.load(canonical_resource)
+        assert FULL_PLAN == json.load(canonical_resource)
 
     session_before_registration = operating_line.get_session()
     operating_line.register()
@@ -586,6 +767,7 @@ def main() -> None:
     registered_companion = operating_line.get_companion()
     assert registered_companion.timer_registered
     assert bpy.app.timers.is_registered(registered_companion.timer_callback)
+    assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
     assert_companion_and_plan_semantics()
     assert all(
         "UNDO" not in operator.bl_options
@@ -653,7 +835,9 @@ def main() -> None:
         assert nodes["snowman"].number == "1"
         assert nodes["snowman.model"].number == "1.1"
         assert nodes["snowman.model.body_lower"].number == "1.1.1"
-        assert nodes["snowman.details"].number == "1.2"
+        assert tuple(step.id for step in session.steps) == tuple(
+            step["id"] for step in ACTION_STEPS
+        )
         assert session.is_expanded("snowman")
         assert bpy.ops.operating_line.toggle_branch(node_id="snowman") == {"FINISHED"}
         assert not session.is_expanded("snowman")
@@ -722,13 +906,14 @@ def main() -> None:
             assert obj.get("operating_line_action") == step_data["action"]["name"]
             rollback_token = obj.get("operating_line_rollback_token")
             assert isinstance(rollback_token, str) and rollback_token
-            receipt = session.receipts[step_data["action"]["name"]]
+            receipt = session.receipts[step_data["id"]]
             assert receipt.display_name == name
             assert receipt.rollback_token == rollback_token
             assert receipt.object_pointer == obj.as_pointer()
             owned_collection = obj.users_collection[0]
-            assert receipt.collection_pointer == owned_collection.as_pointer()
-            assert owned_collection.get("operating_line_owner") == "snowman_demo_v1"
+            if index == 0:
+                assert receipt.collection_pointer == owned_collection.as_pointer()
+            assert owned_collection.get("operating_line_owner") == OWNER_VALUE
             arguments = step_data["action"]["arguments"]
             assert all(
                 math.isclose(actual, expected, abs_tol=1e-5)
@@ -793,16 +978,35 @@ def main() -> None:
         assert bpy.ops.operating_line.next() == {"FINISHED"}
         assert bpy.data.objects.get(EXPECTED[-1]) is not None
 
-        # Reset must also use exact receipts rather than cloneable metadata.
-        assert bpy.ops.operating_line.start() == {"FINISHED"}
-        for name in EXPECTED:
-            assert_absent(name)
+        # Reset rolls back later steps, then fails closed before touching the
+        # lower step whose collection now contains a copied user object.
+        try:
+            bpy.ops.operating_line.start()
+        except RuntimeError as error:
+            assert "Cannot rollback collection with external contents" in str(error)
+        else:
+            raise AssertionError("Reset must retain an unsafe collection receipt")
+        assert session.active_index == 0
+        assert tuple(session.receipts) == (ACTION_STEPS[0]["id"],)
+        assert bpy.data.objects.get(EXPECTED[0]) is not None
+        assert_absent(EXPECTED[1])
+        assert_absent(EXPECTED[2])
         assert bpy.data.objects.get("UserDuplicateSnowmanHead") is duplicate_head
         assert bpy.data.collections.get("UserDuplicateCollection") is duplicate_collection
+        conflict_report = operating_line.get_companion().last_report
+        assert conflict_report["transition"] == "error"
+        assert conflict_report["stepId"] == ACTION_STEPS[0]["id"]
 
+        # Moving the copied object to its copied collection resolves the
+        # ownership conflict. Retrying Start completes the retained receipt.
+        managed_collection.objects.unlink(duplicate_head)
+        duplicate_collection.objects.link(duplicate_head)
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        assert session.active_index == -1
+        assert not session.receipts
+        assert bpy.data.collections.get("OperatingLine Snowman") is None
         assert bpy.ops.operating_line.next() == {"FINISHED"}
-        renamed_lower = bpy.data.objects[EXPECTED[0]]
-        renamed_lower.name = "UserRenamedSnowmanLowerBody"
+        assert session.active_index == 0
     finally:
         operating_line.unregister()
 
@@ -814,21 +1018,16 @@ def main() -> None:
     duplicate_collection = bpy.data.collections.get("UserDuplicateCollection")
     assert duplicate_collection is not None
     assert bpy.data.objects.get("UserObject") is user_object
-    owned_collection = next(
-        collection
-        for collection in bpy.data.collections
-        if collection.get("operating_line_owner") == "snowman_demo_v1"
-    )
-    assert duplicate_head.name in owned_collection.objects
+    assert bpy.data.collections.get("OperatingLine Snowman") is None
+    assert duplicate_head.name in duplicate_collection.objects
 
     duplicate_mesh = duplicate_head.data
     bpy.data.objects.remove(duplicate_head, do_unlink=True)
     if duplicate_mesh.users == 0:
         bpy.data.meshes.remove(duplicate_mesh)
-    bpy.data.collections.remove(owned_collection)
     bpy.data.collections.remove(duplicate_collection)
     assert not any(
-        collection.get("operating_line_owner") == "snowman_demo_v1"
+        collection.get("operating_line_owner") == OWNER_VALUE
         for collection in bpy.data.collections
     )
     assert overlay_enabled() is False

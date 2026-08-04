@@ -4,7 +4,7 @@ import bpy
 
 from .application import DemoSession
 from .application.companion import CompanionController
-from .domain import SNOWMAN_TASK_TREE
+from .domain import SNOWMAN_PLAN_ID, SNOWMAN_PLAN_REVISION, SNOWMAN_TASK_TREE
 from .infrastructure import (
     action_registry,
     disable_overlay,
@@ -19,7 +19,12 @@ _companion: CompanionController | None = None
 def get_session() -> DemoSession:
     global _session
     if _session is None:
-        _session = DemoSession(SNOWMAN_TASK_TREE, action_registry(SNOWMAN_TASK_TREE))
+        _session = DemoSession(
+            SNOWMAN_TASK_TREE,
+            action_registry(SNOWMAN_TASK_TREE),
+            plan_id=SNOWMAN_PLAN_ID,
+            revision=SNOWMAN_PLAN_REVISION,
+        )
     return _session
 
 
@@ -71,7 +76,12 @@ def register() -> None:
             options={"SKIP_SAVE"},
         )
     if _session is None:
-        _session = DemoSession(SNOWMAN_TASK_TREE, action_registry(SNOWMAN_TASK_TREE))
+        _session = DemoSession(
+            SNOWMAN_TASK_TREE,
+            action_registry(SNOWMAN_TASK_TREE),
+            plan_id=SNOWMAN_PLAN_ID,
+            revision=SNOWMAN_PLAN_REVISION,
+        )
     get_companion().register_timer()
 
 
@@ -80,8 +90,16 @@ def unregister() -> None:
     if _companion is not None:
         _companion.unregister_timer()
     disable_overlay()
+    reset_completed = True
     if _session is not None:
-        _session.reset()
+        try:
+            _session.reset()
+        except (OSError, RuntimeError, ValueError) as error:
+            reset_completed = False
+            print(
+                "OperatingLine kept conflicted resources and their rollback "
+                f"receipts during unregister: {error}"
+            )
     forget_managed_collection()
     for property_name in (
         "operating_line_overlay_enabled",
@@ -98,5 +116,6 @@ def unregister() -> None:
     for cls in reversed(CLASSES):
         if getattr(cls, "is_registered", False):
             bpy.utils.unregister_class(cls)
-    _session = None
+    if reset_completed:
+        _session = None
     _companion = None

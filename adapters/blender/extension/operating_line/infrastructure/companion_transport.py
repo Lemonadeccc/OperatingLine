@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
-from http.client import HTTPConnection, HTTPException
+from http.client import HTTPConnection, HTTPException, HTTPResponse
 from queue import Empty, Queue
+import socket
 import threading
 import time
 from typing import Any
@@ -98,6 +99,7 @@ class CompanionTransport:
         self._base_path = parsed_base_url.path.rstrip("/")
         self._connection_lock = threading.Lock()
         self._active_connection: HTTPConnection | None = None
+        self._active_socket: socket.socket | None = None
 
     @property
     def running(self) -> bool:
@@ -144,7 +146,12 @@ class CompanionTransport:
         )
 
     def _request_json(
-        self, method: str, path: str, payload: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        abort_on_stop: bool = False,
     ) -> dict[str, Any]:
         if not path.startswith("/"):
             raise ValueError("Runtime request path must be absolute")
@@ -168,6 +175,14 @@ class CompanionTransport:
         deadline.start()
         try:
             connection.request(method, request_path, body=data, headers=headers)
+            with self._connection_lock:
+                if self._active_connection is connection:
+                    # HTTPConnection may clear ``sock`` as soon as a
+                    # Connection: close response is parsed. Retain the exact
+                    # socket so stop() can still interrupt a blocked body read.
+                    self._active_socket = connection.sock
+            if abort_on_stop and self._stop.is_set():
+                self._abort_connection(connection)
             response = connection.getresponse()
             if not 200 <= response.status < 300:
                 raise HTTPError(
@@ -177,19 +192,40 @@ class CompanionTransport:
                     response.headers,
                     None,
                 )
-            body = response.read(MAX_RESPONSE_BYTES + 1)
+            body = self._read_response_body(
+                response,
+                abort_on_stop=abort_on_stop,
+            )
         finally:
             deadline.cancel()
             connection.close()
             with self._connection_lock:
                 if self._active_connection is connection:
                     self._active_connection = None
+                    self._active_socket = None
         if len(body) > MAX_RESPONSE_BYTES:
             raise ValueError("Runtime response exceeds 4 MiB limit")
         decoded = json.loads(body.decode("utf-8")) if body else {}
         if not isinstance(decoded, dict):
             raise ValueError("Runtime response must be a JSON object")
         return decoded
+
+    def _read_response_body(
+        self,
+        response: HTTPResponse,
+        *,
+        abort_on_stop: bool,
+    ) -> bytes:
+        body = bytearray()
+        while len(body) <= MAX_RESPONSE_BYTES:
+            if abort_on_stop and self._stop.is_set():
+                raise OSError("Companion transport stopped")
+            remaining = MAX_RESPONSE_BYTES + 1 - len(body)
+            chunk = response.read1(min(64 * 1024, remaining))
+            if not chunk:
+                break
+            body.extend(chunk)
+        return bytes(body)
 
     def _close_active_connection(self) -> None:
         with self._connection_lock:
@@ -201,7 +237,7 @@ class CompanionTransport:
         with self._connection_lock:
             if self._active_connection is not connection:
                 return
-            sock = connection.sock
+            sock = self._active_socket or connection.sock
         if sock is not None:
             try:
                 sock.shutdown(2)
@@ -219,7 +255,9 @@ class CompanionTransport:
         if self._known_revision is not None:
             query["knownRevision"] = str(self._known_revision)
         response = self._request_json(
-            "GET", f"/api/v1/companion/guide?{urlencode(query)}"
+            "GET",
+            f"/api/v1/companion/guide?{urlencode(query)}",
+            abort_on_stop=True,
         )
         if response.get("protocolVersion") != "1.0.0":
             raise ValueError("Unsupported companion protocol version")

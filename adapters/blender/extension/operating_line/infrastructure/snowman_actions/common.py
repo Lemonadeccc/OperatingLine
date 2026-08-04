@@ -1,0 +1,721 @@
+"""Shared ownership, identity, validation, and rollback primitives."""
+
+from collections.abc import Iterable, Mapping
+import hashlib
+import math
+import os
+from pathlib import Path
+import re
+import tempfile
+from typing import Any
+import uuid
+
+import bpy
+
+from ...application import ActionReceipt
+from ...application.session import (
+    ArtifactIdentity,
+    MutationRecord,
+    ParentIdentity,
+    ResourceIdentity,
+)
+
+COLLECTION_LOGICAL_ID = "snowman.collection"
+COLLECTION_NAME = "OperatingLine Snowman"
+OWNER_KEY = "operating_line_owner"
+OWNER_VALUE = "snowman_demo_v2"
+ACTION_KEY = "operating_line_action"
+STEP_KEY = "operating_line_step_id"
+ROLLBACK_TOKEN_KEY = "operating_line_rollback_token"
+LOGICAL_ID_KEY = "operating_line_resource_id"
+OWNED_KEY = "operating_line_action_owned"
+LOGICAL_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
+
+
+def new_receipt_id() -> str:
+    return str(uuid.uuid4())
+
+
+def require_object(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    return value
+
+
+def require_keys(
+    value: Mapping[str, Any],
+    required: set[str],
+    allowed: set[str],
+    label: str,
+) -> None:
+    missing = required - value.keys()
+    unknown = value.keys() - allowed
+    if missing:
+        raise ValueError(f"{label} is missing: {', '.join(sorted(missing))}")
+    if unknown:
+        raise ValueError(f"{label} has unsupported fields: {', '.join(sorted(unknown))}")
+
+
+def text(value: Any, label: str, *, prefix: str | None = None) -> str:
+    if not isinstance(value, str) or not value or len(value) > 180:
+        raise ValueError(f"{label} must be a non-empty string")
+    if prefix is not None and not value.startswith(prefix):
+        raise ValueError(f"{label} must start with {prefix}")
+    return value
+
+
+def logical_id(value: Any, label: str) -> str:
+    result = text(value, label)
+    if LOGICAL_ID_PATTERN.fullmatch(result) is None:
+        raise ValueError(f"{label} must be a portable logical resource ID")
+    return result
+
+
+def number(
+    value: Any,
+    label: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be a finite number")
+    result = float(value)
+    if (
+        not math.isfinite(result)
+        or (minimum is not None and result < minimum)
+        or (maximum is not None and result > maximum)
+    ):
+        raise ValueError(f"{label} is outside the supported range")
+    return result
+
+
+def integer(
+    value: Any,
+    label: str,
+    *,
+    minimum: int = 1,
+    maximum: int = 16384,
+) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not minimum <= value <= maximum
+    ):
+        raise ValueError(f"{label} must be an integer in [{minimum}, {maximum}]")
+    return value
+
+
+def vector(
+    value: Any,
+    label: str,
+    length: int,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> tuple[float, ...]:
+    if not isinstance(value, list) or len(value) != length:
+        raise ValueError(f"{label} must contain {length} numbers")
+    return tuple(number(item, label, minimum=minimum, maximum=maximum) for item in value)
+
+
+def validate_adapter(adapter_id: str, action_name: str) -> None:
+    if adapter_id != "blender":
+        raise ValueError(f"Unsupported adapter for Blender action: {adapter_id}")
+    if action_name not in ALLOWED_ACTIONS:
+        raise ValueError(f"Unsupported Blender action: {action_name}")
+
+
+ALLOWED_ACTIONS = frozenset(
+    {
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_primitive_batch",
+        "blender.mesh.create_plane",
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign",
+        "blender.render_scene.create",
+        "blender.render_rig.create",
+        "blender.render.execute_preview",
+        # Compatibility with the original bundled plan.
+        "snowman.body_lower",
+        "snowman.body_upper",
+        "snowman.head",
+    }
+)
+
+
+def parent_identity(resource: Any) -> ParentIdentity:
+    if isinstance(resource, bpy.types.Scene):
+        return ParentIdentity("SCENE", resource.session_uid)
+    if isinstance(resource, bpy.types.Collection):
+        return ParentIdentity("COLLECTION", resource.session_uid)
+    raise TypeError(f"Unsupported Collection parent type: {type(resource).__name__}")
+
+
+def _collection_parent_links(
+    collection: bpy.types.Collection,
+) -> tuple[ParentIdentity, ...]:
+    collection_uid = collection.session_uid
+    links = [
+        parent_identity(scene)
+        for scene in bpy.data.scenes
+        if any(
+            child.session_uid == collection_uid
+            for child in scene.collection.children
+        )
+    ]
+    links.extend(
+        parent_identity(parent)
+        for parent in bpy.data.collections
+        if any(
+            child.session_uid == collection_uid for child in parent.children
+        )
+    )
+    return tuple(
+        sorted(links, key=lambda item: (item.resource_type, item.session_uid))
+    )
+
+
+def tag_resource(
+    resource: Any,
+    logical_id: str,
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+) -> ResourceIdentity:
+    resource[OWNED_KEY] = True
+    resource[OWNER_KEY] = OWNER_VALUE
+    resource[ACTION_KEY] = action_name
+    resource[STEP_KEY] = step_id
+    resource[ROLLBACK_TOKEN_KEY] = receipt_id
+    resource[LOGICAL_ID_KEY] = logical_id
+    resource_type = next(
+        (
+            kind
+            for kind, blender_type in (
+                ("OBJECT", bpy.types.Object),
+                ("MESH", bpy.types.Mesh),
+                ("MATERIAL", bpy.types.Material),
+                ("COLLECTION", bpy.types.Collection),
+                ("SCENE", bpy.types.Scene),
+                ("WORLD", bpy.types.World),
+                ("LIGHT", bpy.types.Light),
+                ("CAMERA", bpy.types.Camera),
+            )
+            if isinstance(resource, blender_type)
+        ),
+        "",
+    )
+    if not resource_type:
+        raise TypeError(f"Unsupported Blender resource type: {type(resource).__name__}")
+    return ResourceIdentity(
+        resource_type=resource_type,
+        logical_id=logical_id,
+        display_name=resource.name,
+        pointer=resource.as_pointer(),
+        receipt_token=receipt_id,
+        step_id=step_id,
+        action_name=action_name,
+    )
+
+
+_RESOURCE_COLLECTIONS = {
+    "OBJECT": lambda: bpy.data.objects,
+    "MESH": lambda: bpy.data.meshes,
+    "MATERIAL": lambda: bpy.data.materials,
+    "COLLECTION": lambda: bpy.data.collections,
+    "SCENE": lambda: bpy.data.scenes,
+    "WORLD": lambda: bpy.data.worlds,
+    "LIGHT": lambda: bpy.data.lights,
+    "CAMERA": lambda: bpy.data.cameras,
+}
+
+
+def resolve_resource(identity: ResourceIdentity) -> Any | None:
+    resource = _resource_at_pointer(identity)
+    if resource is None:
+        return None
+    if (
+        resource.get(OWNER_KEY) == OWNER_VALUE
+        and resource.get(ROLLBACK_TOKEN_KEY) == identity.receipt_token
+        and resource.get(LOGICAL_ID_KEY) == identity.logical_id
+        and (not identity.step_id or resource.get(STEP_KEY) == identity.step_id)
+        and (not identity.action_name or resource.get(ACTION_KEY) == identity.action_name)
+    ):
+        return resource
+    return None
+
+
+def _resource_at_pointer(identity: ResourceIdentity) -> Any | None:
+    collection_factory = _RESOURCE_COLLECTIONS.get(identity.resource_type)
+    if collection_factory is None:
+        return None
+    for resource in collection_factory():
+        if resource.as_pointer() == identity.pointer:
+            return resource
+    return None
+
+
+def build_resource_registry(
+    receipts: Mapping[str, ActionReceipt] | Iterable[ActionReceipt],
+) -> dict[str, ResourceIdentity]:
+    values = receipts.values() if isinstance(receipts, Mapping) else receipts
+    registry: dict[str, ResourceIdentity] = {}
+    for receipt in values:
+        for resource in receipt.created:
+            if resolve_resource(resource) is not None:
+                if resource.logical_id in registry:
+                    raise RuntimeError(
+                        f"Duplicate logical resource identity: {resource.logical_id}"
+                    )
+                registry[resource.logical_id] = resource
+    return registry
+
+
+def resolve_receipt_anchor(receipt: ActionReceipt) -> bpy.types.Object | None:
+    if receipt.anchor is None or receipt.anchor.resource_type != "OBJECT":
+        return None
+    resource = resolve_resource(receipt.anchor)
+    return resource if isinstance(resource, bpy.types.Object) else None
+
+
+def find_artifact(
+    receipts: Mapping[str, ActionReceipt] | Iterable[ActionReceipt],
+    logical_id: str,
+) -> ArtifactIdentity | None:
+    values = receipts.values() if isinstance(receipts, Mapping) else receipts
+    for receipt in reversed(tuple(values)):
+        for artifact in receipt.artifacts:
+            if artifact.logical_id == logical_id:
+                return artifact
+    return None
+
+
+def owned_resource(
+    registry: Mapping[str, ResourceIdentity],
+    logical_id: str,
+    expected_type: str,
+) -> tuple[ResourceIdentity, Any]:
+    identity = registry.get(logical_id)
+    if identity is None or identity.resource_type != expected_type:
+        raise ValueError(f"Unknown owned {expected_type.lower()} resource: {logical_id}")
+    resource = resolve_resource(identity)
+    if resource is None:
+        raise RuntimeError(f"Owned resource is no longer available: {logical_id}")
+    return identity, resource
+
+
+def ensure_name_available(collection: Any, name: str, label: str) -> None:
+    if collection.get(name) is not None:
+        raise RuntimeError(f"Cannot replace existing {label}: {name}")
+
+
+def ensure_logical_ids_available(
+    registry: Mapping[str, ResourceIdentity],
+    logical_ids: Iterable[str],
+) -> None:
+    """Reject duplicate, derived, or previously owned logical resource IDs."""
+    requested = tuple(logical_ids)
+    if len(set(requested)) != len(requested):
+        raise ValueError("Created logical resource IDs must be unique")
+    for logical_id in requested:
+        if logical_id in registry:
+            raise RuntimeError(f"Logical resource already exists: {logical_id}")
+
+
+def ensure_collection_contents_tracked(
+    collection: bpy.types.Collection,
+    registry: Mapping[str, ResourceIdentity],
+) -> None:
+    """Reject user or copied resources before an owned collection is rendered."""
+    tracked_object_pointers = {
+        resource.as_pointer()
+        for identity in registry.values()
+        if identity.resource_type == "OBJECT"
+        for resource in (resolve_resource(identity),)
+        if isinstance(resource, bpy.types.Object)
+    }
+    if collection.children or any(
+        obj.as_pointer() not in tracked_object_pointers
+        for obj in collection.all_objects
+    ):
+        raise RuntimeError(
+            "OperatingLine collection contains an untracked object or child collection"
+        )
+
+
+def _same_value(current: Any, expected: Any) -> bool:
+    if isinstance(expected, ResourceIdentity):
+        resolved = resolve_resource(expected)
+        return current is resolved
+    if isinstance(expected, tuple):
+        return tuple(current) == expected
+    return current == expected
+
+
+def _resolve_stored(value: Any) -> Any:
+    if isinstance(value, ResourceIdentity):
+        return resolve_resource(value)
+    return value
+
+
+def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
+    target = resolve_resource(mutation.resource)
+    if target is None:
+        return False
+    if mutation.attribute == "collection_children":
+        current = tuple(target.collection.children)
+        expected = tuple(_resolve_stored(item) for item in recorded)
+        return current == expected
+    if mutation.attribute == "users_collection":
+        current = tuple(target.users_collection)
+        expected = tuple(_resolve_stored(item) for item in recorded)
+        return current == expected
+    if mutation.attribute == "material_slots":
+        current = tuple(slot.material for slot in target.material_slots)
+        expected = tuple(_resolve_stored(item) for item in recorded)
+        return current == expected
+    owner = target
+    parts = mutation.attribute.split(".")
+    for part in parts[:-1]:
+        owner = getattr(owner, part)
+    return _same_value(getattr(owner, parts[-1]), recorded)
+
+
+def _mutation_matches_after(mutation: MutationRecord) -> bool:
+    return _mutation_matches_value(mutation, mutation.after)
+
+
+def _mutation_matches_before(mutation: MutationRecord) -> bool:
+    raw_target = _resource_at_pointer(mutation.resource)
+    if raw_target is None:
+        return True
+    return _mutation_matches_value(mutation, mutation.before)
+
+
+def _restore_mutation(mutation: MutationRecord) -> None:
+    target = resolve_resource(mutation.resource)
+    if target is None:
+        raise RuntimeError(
+            f"Mutation target is unavailable: {mutation.resource.logical_id}"
+        )
+    if mutation.attribute == "collection_children":
+        for child in tuple(target.collection.children):
+            target.collection.children.unlink(child)
+        for identity in mutation.before:
+            collection = _resolve_stored(identity)
+            if collection is None:
+                raise RuntimeError(
+                    "Collection mutation dependency is unavailable: "
+                    f"{mutation.resource.logical_id}"
+                )
+            target.collection.children.link(collection)
+        return
+    if mutation.attribute == "users_collection":
+        for collection in tuple(target.users_collection):
+            collection.objects.unlink(target)
+        for identity in mutation.before:
+            collection = _resolve_stored(identity)
+            if collection is None:
+                raise RuntimeError(
+                    "Object collection dependency is unavailable: "
+                    f"{mutation.resource.logical_id}"
+                )
+            collection.objects.link(target)
+        return
+    if mutation.attribute == "material_slots":
+        target.data.materials.clear()
+        for material in mutation.before:
+            resolved = _resolve_stored(material)
+            if resolved is not None:
+                target.data.materials.append(resolved)
+        return
+    owner = target
+    parts = mutation.attribute.split(".")
+    for part in parts[:-1]:
+        owner = getattr(owner, part)
+    setattr(owner, parts[-1], _resolve_stored(mutation.before))
+
+
+def ensure_receipts_intact(receipts: Mapping[str, ActionReceipt]) -> None:
+    """Fail closed when a completed step no longer matches its receipt."""
+    for receipt in receipts.values():
+        for identity in receipt.created:
+            if resolve_resource(identity) is None:
+                raise RuntimeError(
+                    f"Completed resource is no longer available: {identity.logical_id}"
+                )
+        for mutation in receipt.mutations:
+            if not _mutation_matches_after(mutation):
+                raise RuntimeError(
+                    "Completed resource was modified: "
+                    f"{mutation.resource.logical_id}.{mutation.attribute}"
+                )
+        for artifact in receipt.artifacts:
+            path = Path(artifact.path)
+            if (
+                not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != artifact.sha256
+            ):
+                raise RuntimeError(
+                    f"Completed artifact is no longer available: {artifact.logical_id}"
+                )
+
+
+def _created_objects(receipt: ActionReceipt) -> tuple[bpy.types.Object, ...]:
+    return tuple(
+        resource
+        for identity in receipt.created
+        if identity.resource_type == "OBJECT"
+        for resource in (resolve_resource(identity),)
+        if isinstance(resource, bpy.types.Object)
+    )
+
+
+def _preflight_created_resources(
+    receipt: ActionReceipt,
+    *,
+    allow_incomplete: bool = False,
+) -> None:
+    created_objects = _created_objects(receipt)
+    created_object_pointers = {obj.as_pointer() for obj in created_objects}
+    mutation_target_pointers = {
+        target.as_pointer()
+        for mutation in receipt.mutations
+        for target in (resolve_resource(mutation.resource),)
+        if isinstance(target, bpy.types.Object)
+    }
+    created_scenes = {
+        scene.as_pointer()
+        for identity in receipt.created
+        if identity.resource_type == "SCENE"
+        for scene in (resolve_resource(identity),)
+        if isinstance(scene, bpy.types.Scene)
+    }
+
+    for identity in receipt.created:
+        raw = _resource_at_pointer(identity)
+        if raw is None:
+            continue
+        resource = resolve_resource(identity)
+        if resource is None:
+            raise RuntimeError(
+                f"Cannot rollback modified resource identity: {identity.logical_id}"
+            )
+        if identity.resource_type == "OBJECT":
+            if any(
+                collection.get(OWNER_KEY) != OWNER_VALUE
+                for collection in resource.users_collection
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback externally linked object: {identity.logical_id}"
+                )
+            if resource.data is not None and not any(
+                data_identity.resource_type in {"MESH", "LIGHT", "CAMERA"}
+                and resolve_resource(data_identity) is resource.data
+                for data_identity in receipt.created
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback object with replaced data: {identity.logical_id}"
+                )
+        elif identity.resource_type in {"MESH", "LIGHT", "CAMERA"}:
+            internal_users = sum(obj.data is resource for obj in created_objects)
+            if resource.users != internal_users:
+                raise RuntimeError(
+                    f"Cannot rollback externally used data: {identity.logical_id}"
+                )
+        elif identity.resource_type == "MATERIAL":
+            internal_users = 0
+            for obj in bpy.data.objects:
+                uses_material = any(
+                    slot.material is resource for slot in obj.material_slots
+                )
+                if not uses_material:
+                    continue
+                if obj.as_pointer() not in mutation_target_pointers:
+                    raise RuntimeError(
+                        f"Cannot rollback externally used material: {identity.logical_id}"
+                    )
+                internal_users += 1
+            if resource.users != internal_users:
+                raise RuntimeError(
+                    f"Cannot rollback externally used material: {identity.logical_id}"
+                )
+        elif identity.resource_type == "WORLD":
+            world_scenes = {
+                scene.as_pointer()
+                for scene in bpy.data.scenes
+                if scene.world is resource
+            }
+            scene_links_are_internal = (
+                world_scenes.issubset(created_scenes)
+                if allow_incomplete
+                else world_scenes == created_scenes
+            )
+            if not scene_links_are_internal or resource.users != len(world_scenes):
+                raise RuntimeError(
+                    f"Cannot rollback externally used world: {identity.logical_id}"
+                )
+        elif identity.resource_type == "COLLECTION":
+            if resource.children or any(
+                obj.as_pointer() not in created_object_pointers
+                for obj in resource.all_objects
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback collection with external contents: {identity.logical_id}"
+                )
+            actual_parent_links = _collection_parent_links(resource)
+            expected_parent_links = set(identity.parent_links)
+            parent_links_are_expected = (
+                set(actual_parent_links).issubset(expected_parent_links)
+                if allow_incomplete
+                else set(actual_parent_links) == expected_parent_links
+            )
+            if (
+                not parent_links_are_expected
+                or resource.users != len(actual_parent_links)
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback externally linked collection: {identity.logical_id}"
+                )
+        elif identity.resource_type == "SCENE":
+            if len(bpy.data.scenes) <= 1:
+                raise RuntimeError("Cannot rollback the only Blender scene")
+            if resource.collection.objects or any(
+                collection.get(OWNER_KEY) != OWNER_VALUE
+                for collection in resource.collection.children
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback scene with external contents: {identity.logical_id}"
+                )
+
+
+def _remove_resource(identity: ResourceIdentity) -> None:
+    resource = resolve_resource(identity)
+    if resource is None:
+        return
+    if identity.resource_type == "OBJECT":
+        bpy.data.objects.remove(resource, do_unlink=True)
+    elif identity.resource_type == "MESH":
+        bpy.data.meshes.remove(resource)
+    elif identity.resource_type == "MATERIAL":
+        bpy.data.materials.remove(resource)
+    elif identity.resource_type == "LIGHT":
+        bpy.data.lights.remove(resource)
+    elif identity.resource_type == "CAMERA":
+        bpy.data.cameras.remove(resource)
+    elif identity.resource_type == "COLLECTION":
+        bpy.data.collections.remove(resource)
+    elif identity.resource_type == "WORLD":
+        bpy.data.worlds.remove(resource)
+    elif identity.resource_type == "SCENE":
+        bpy.data.scenes.remove(resource)
+
+
+def rollback_receipt(
+    receipt: ActionReceipt,
+    *,
+    allow_incomplete: bool = False,
+) -> None:
+    mutations_to_restore: list[MutationRecord] = []
+    for mutation in receipt.mutations:
+        if _mutation_matches_after(mutation):
+            mutations_to_restore.append(mutation)
+            continue
+        if _mutation_matches_before(mutation):
+            continue
+        logical_attribute = f"{mutation.resource.logical_id}.{mutation.attribute}"
+        raise RuntimeError(f"Cannot rollback modified resource: {logical_attribute}")
+    for artifact in receipt.artifacts:
+        path = Path(artifact.path)
+        if (
+            path.is_file()
+            and hashlib.sha256(path.read_bytes()).hexdigest() != artifact.sha256
+        ):
+            raise RuntimeError(f"Cannot rollback modified artifact: {artifact.logical_id}")
+    _preflight_created_resources(receipt, allow_incomplete=allow_incomplete)
+    for mutation in reversed(mutations_to_restore):
+        _restore_mutation(mutation)
+    for artifact in reversed(receipt.artifacts):
+        path = Path(artifact.path)
+        if not path.is_file():
+            continue
+        if hashlib.sha256(path.read_bytes()).hexdigest() == artifact.sha256:
+            path.unlink()
+    deletion_priority = {
+        "OBJECT": 0,
+        "SCENE": 0,
+        "MESH": 1,
+        "MATERIAL": 1,
+        "LIGHT": 1,
+        "CAMERA": 1,
+        "WORLD": 1,
+        "COLLECTION": 2,
+    }
+    ordered = sorted(
+        reversed(receipt.created),
+        key=lambda item: deletion_priority.get(item.resource_type, 1),
+    )
+    for resource in ordered:
+        _remove_resource(resource)
+    remaining = [
+        identity.logical_id
+        for identity in receipt.created
+        if _resource_at_pointer(identity) is not None
+    ]
+    if remaining:
+        raise RuntimeError(
+            f"Rollback left owned resources behind: {', '.join(remaining)}"
+        )
+
+
+def make_receipt(
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+    created: list[ResourceIdentity],
+    mutations: list[MutationRecord],
+    artifacts: list[ArtifactIdentity],
+    anchor: ResourceIdentity | None,
+) -> ActionReceipt:
+    return ActionReceipt(
+        receipt_id=receipt_id,
+        step_id=step_id,
+        action_name=action_name,
+        created=tuple(created),
+        mutations=tuple(mutations),
+        artifacts=tuple(artifacts),
+        anchor=anchor,
+    )
+
+
+def rollback_partial(
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+    created: list[ResourceIdentity],
+    mutations: list[MutationRecord],
+    artifacts: list[ArtifactIdentity],
+) -> None:
+    receipt = make_receipt(
+        receipt_id,
+        step_id,
+        action_name,
+        created,
+        mutations,
+        artifacts,
+        None,
+    )
+    rollback_receipt(receipt, allow_incomplete=True)
+
+
+def render_output_root() -> Path:
+    configured = os.environ.get("OPERATINGLINE_RENDER_OUTPUT_DIR")
+    if configured:
+        root = Path(configured).expanduser().resolve()
+    else:
+        root = Path(tempfile.gettempdir()).resolve() / "operating-line" / "renders"
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise RuntimeError("OperatingLine render output root is not a directory")
+    return root

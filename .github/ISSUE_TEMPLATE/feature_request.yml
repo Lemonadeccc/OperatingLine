@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        请描述要解决的用户问题，而不只是指定实现方式。实时 Orchestrator ↔ Blender 链路当前仍在路线图中。
-        Describe the user problem, not only an implementation. The live Orchestrator ↔ Blender link remains on the roadmap.
+        请描述要解决的用户问题，而不只是指定实现方式；提交前请核对 README 中的当前边界与路线图。
+        Describe the user problem, not only an implementation, and review the current boundaries and roadmap in README first.
   - type: checkboxes
     id: checks
     attributes:

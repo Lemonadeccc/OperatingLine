@@ -25,6 +25,7 @@ class TaskNode:
     order: int
     depends_on: tuple[str, ...] = ()
     action: ActionSpec | None = None
+    anchors: tuple[dict[str, Any], ...] = ()
     expected_observations: tuple[dict[str, Any], ...] = ()
     children: tuple["TaskNode", ...] = ()
 
@@ -144,6 +145,12 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         title = raw.get("title")
         if not isinstance(title, str):
             raise ValueError(f"Invalid title on step: {step_id}")
+        anchors = raw.get("anchors", [])
+        if not isinstance(anchors, list) or not all(
+            isinstance(anchor, dict) and isinstance(anchor.get("kind"), str)
+            for anchor in anchors
+        ):
+            raise ValueError(f"Invalid anchors on step: {step_id}")
         expected_observations = raw.get("expectedObservations", [])
         if not isinstance(expected_observations, list) or not all(
             isinstance(observation, dict)
@@ -159,6 +166,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             order=raw["order"],
             depends_on=tuple(raw["dependsOn"]),
             action=action,
+            anchors=tuple(dict(item) for item in anchors),
             expected_observations=tuple(dict(item) for item in expected_observations),
             children=children,
         )
@@ -168,8 +176,19 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         raise ValueError("Plan contains steps disconnected from rootStepId")
     return root
 
-
-SNOWMAN_TASK_TREE = load_task_tree()
+with RESOURCE_PATH.open(encoding="utf-8") as _bundled_resource:
+    _BUNDLED_PLAN = json.load(_bundled_resource)
+SNOWMAN_PLAN_ID = _BUNDLED_PLAN.get("id")
+SNOWMAN_PLAN_REVISION = _BUNDLED_PLAN.get("revision")
+if not isinstance(SNOWMAN_PLAN_ID, str) or not SNOWMAN_PLAN_ID:
+    raise ValueError("Bundled plan id must be a non-empty string")
+if (
+    isinstance(SNOWMAN_PLAN_REVISION, bool)
+    or not isinstance(SNOWMAN_PLAN_REVISION, int)
+    or SNOWMAN_PLAN_REVISION <= 0
+):
+    raise ValueError("Bundled plan revision must be a positive integer")
+SNOWMAN_TASK_TREE = load_task_tree_data(_BUNDLED_PLAN)
 
 
 def executable_steps(root: TaskNode = SNOWMAN_TASK_TREE) -> tuple[TaskNode, ...]:

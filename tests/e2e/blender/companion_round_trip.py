@@ -71,8 +71,20 @@ def main() -> None:
 
     try:
         factory_cube = bpy.data.objects.get("Cube")
-        assert factory_cube is not None
-        factory_cube_pointer = factory_cube.as_pointer()
+        factory_camera = bpy.data.objects.get("Camera")
+        factory_light = bpy.data.objects.get("Light")
+        assert factory_cube is not None and factory_camera is not None
+        assert factory_light is not None
+        factory_objects = (factory_cube, factory_camera, factory_light)
+        factory_object_pointers = {
+            item.name: item.as_pointer() for item in factory_objects
+        }
+        factory_data_pointers = {
+            item.name: item.data.as_pointer() for item in factory_objects
+        }
+        factory_scene = bpy.context.scene
+        factory_scene_pointer = factory_scene.as_pointer()
+        factory_scene_camera = factory_scene.camera
         assert bpy.context.scene.operating_line_replace_factory_scene is False
 
         window_manager = bpy.context.window_manager
@@ -103,42 +115,87 @@ def main() -> None:
             ),
             "walkthrough_started report delivery",
         )
-        assert bpy.data.objects.get("Cube") is factory_cube
-        assert factory_cube.as_pointer() == factory_cube_pointer
+        for item in factory_objects:
+            assert bpy.data.objects.get(item.name) is item
+            assert item.as_pointer() == factory_object_pointers[item.name]
 
-        assert bpy.ops.operating_line.next() == {"FINISHED"}
-        next_sequence = controller.last_report["sequence"]
-        wait_until(
-            lambda: (
-                controller._transport is not None
-                and controller._transport.last_delivered_sequence >= next_sequence
-            ),
-            "step_succeeded report delivery",
-        )
-        assert bpy.data.objects.get("OperatingLine.BodyLower") is not None
-        assert controller.last_report["observations"] == [
-            {
-                "kind": "object_exists",
-                "satisfied": True,
-                "details": {
-                    "parameters": {"name": "OperatingLine.BodyLower"},
-                    "objectName": "OperatingLine.BodyLower",
-                },
-            }
-        ]
+        step_count = len(session.steps)
+        assert step_count == 13
+        for expected_index, expected_step in enumerate(session.steps):
+            assert bpy.ops.operating_line.next() == {"FINISHED"}
+            assert session.active_index == expected_index
+            assert session.active_step is expected_step
+            assert controller.last_report["stepId"] == expected_step.id
+            assert controller.last_report["observations"]
+            assert all(
+                observation["satisfied"]
+                for observation in controller.last_report["observations"]
+            )
+            sequence = controller.last_report["sequence"]
+            wait_until(
+                lambda sequence=sequence: (
+                    controller._transport is not None
+                    and controller._transport.last_delivered_sequence >= sequence
+                ),
+                f"step_succeeded delivery for {expected_step.id}",
+            )
 
-        assert bpy.ops.operating_line.back() == {"FINISHED"}
-        back_sequence = controller.last_report["sequence"]
-        wait_until(
-            lambda: (
-                controller._transport is not None
-                and controller._transport.last_delivered_sequence >= back_sequence
-            ),
-            "step_rolled_back report delivery",
-        )
-        assert bpy.data.objects.get("OperatingLine.BodyLower") is None
-        assert bpy.data.objects.get("Cube") is factory_cube
-        assert factory_cube.as_pointer() == factory_cube_pointer
+        render_receipt = session.receipts["snowman.render.preview"]
+        assert len(render_receipt.artifacts) == 1
+        render_artifact = render_receipt.artifacts[0]
+        render_path = Path(render_artifact.path)
+        assert render_path.is_file()
+        assert render_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        assert (render_artifact.width, render_artifact.height) == (320, 320)
+
+        render_scene = bpy.data.scenes.get("OperatingLine.Scene.Snowman")
+        owned_collection = bpy.data.collections.get("OperatingLine Snowman")
+        owned_camera = bpy.data.objects.get("OperatingLine.Camera.Preview")
+        assert render_scene is not None and owned_collection is not None
+        assert owned_camera is not None and render_scene.camera is owned_camera
+        assert render_scene.collection.children.get(owned_collection.name) is owned_collection
+        assert factory_cube not in tuple(render_scene.objects)
+        assert bpy.context.scene is factory_scene
+        assert factory_scene.as_pointer() == factory_scene_pointer
+        assert factory_scene.camera is factory_scene_camera
+
+        for expected_index in reversed(range(step_count)):
+            expected_step = session.steps[expected_index]
+            assert bpy.ops.operating_line.back() == {"FINISHED"}
+            assert controller.last_report["stepId"] == expected_step.id
+            sequence = controller.last_report["sequence"]
+            wait_until(
+                lambda sequence=sequence: (
+                    controller._transport is not None
+                    and controller._transport.last_delivered_sequence >= sequence
+                ),
+                f"step_rolled_back delivery for {expected_step.id}",
+            )
+
+        assert session.active_index == -1
+        assert not session.receipts
+        assert not render_path.exists()
+        for item in factory_objects:
+            assert bpy.data.objects.get(item.name) is item
+            assert item.as_pointer() == factory_object_pointers[item.name]
+            assert item.data.as_pointer() == factory_data_pointers[item.name]
+        assert bpy.context.scene is factory_scene
+        assert factory_scene.as_pointer() == factory_scene_pointer
+        assert factory_scene.camera is factory_scene_camera
+        for collection in (
+            bpy.data.objects,
+            bpy.data.meshes,
+            bpy.data.materials,
+            bpy.data.collections,
+            bpy.data.scenes,
+            bpy.data.worlds,
+            bpy.data.lights,
+            bpy.data.cameras,
+        ):
+            assert all(
+                item.get("operating_line_owner") != "snowman_demo_v2"
+                for item in collection
+            )
 
         result_path.write_text(
             json.dumps(
@@ -147,7 +204,8 @@ def main() -> None:
                     "revision": session.revision,
                     "rootTitle": session.root.title,
                     "maximumPumpSeconds": maximum_pump_seconds,
-                    "factoryCubePointer": factory_cube_pointer,
+                    "stepCount": step_count,
+                    "factoryCubePointer": factory_object_pointers["Cube"],
                     "lastTransition": controller.last_report["transition"],
                     "lastSequence": controller.last_report["sequence"],
                 },

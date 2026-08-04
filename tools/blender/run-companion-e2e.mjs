@@ -14,7 +14,7 @@ const accessToken = 'operatingline-companion-e2e-token-0001';
 const planId = 'snowman-companion-e2e';
 const planRevision = 41;
 const rootTitle = 'Create a snowman through the live Companion';
-const childTimeoutMs = 20_000;
+const childTimeoutMs = 60_000;
 
 function listen(server) {
   return new Promise((resolveListen, reject) => {
@@ -173,6 +173,7 @@ try {
     OPERATINGLINE_E2E_PLAN_ID: planId,
     OPERATINGLINE_E2E_PLAN_REVISION: String(planRevision),
     OPERATINGLINE_E2E_ROOT_TITLE: rootTitle,
+    OPERATINGLINE_RENDER_OUTPUT_DIR: join(temporaryDirectory, 'renders'),
   });
 
   const result = JSON.parse(readFileSync(resultPath, 'utf8'));
@@ -186,6 +187,7 @@ try {
     { planId, revision: planRevision, rootTitle, lastTransition: 'step_rolled_back' },
   );
   assert.ok(result.maximumPumpSeconds < 0.15);
+  assert.equal(result.stepCount, 13);
 
   const reports = [...reportsById.values()];
   const transitions = reports.map((report) => report.transition);
@@ -193,13 +195,20 @@ try {
     'connected',
     'plan_loaded',
     'walkthrough_started',
-    'step_succeeded',
-    'step_rolled_back',
+    ...Array.from({ length: result.stepCount }, () => 'step_succeeded'),
+    ...Array.from({ length: result.stepCount }, () => 'step_rolled_back'),
   ]);
   assert.deepEqual(
     reports.map((report) => report.sequence),
-    [1, 2, 3, 4, 5],
+    Array.from({ length: reports.length }, (_unused, index) => index + 1),
   );
+  for (const report of reports.filter((candidate) => candidate.transition === 'step_succeeded')) {
+    assert.ok(report.observations.length > 0, `${report.stepId} returned no observations`);
+    assert.ok(
+      report.observations.every((observation) => observation.satisfied === true),
+      `${report.stepId} returned an unsatisfied observation`,
+    );
+  }
   assert.equal(mcpVisibleReportIds.size, reportsById.size);
 
   const companionsResponse = await fetch(`${runtime.baseUrl}/api/v1/companions`, {
@@ -224,7 +233,7 @@ try {
   );
 
   console.log(
-    `OperatingLine live Companion E2E passed with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine live Companion E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

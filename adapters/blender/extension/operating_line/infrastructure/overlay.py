@@ -6,7 +6,11 @@ import gpu
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
 
-from .blender_actions import resolve_receipt_object
+from .snowman_actions import (
+    build_resource_registry,
+    resolve_receipt_anchor,
+    resolve_resource,
+)
 
 _draw_handle = None
 _session_provider = None
@@ -47,11 +51,41 @@ def _tag_redraw() -> None:
 
 def _anchor(region, region_3d, session):
     step = session.active_step
-    action_name = step.action.name if step and step.action else ""
-    receipt = session.receipts.get(action_name)
-    obj = resolve_receipt_object(receipt) if receipt is not None else None
-    world_location = obj.matrix_world.translation if obj else (0.0, 0.0, 0.0)
-    return view3d_utils.location_3d_to_region_2d(region, region_3d, world_location)
+    if step is None:
+        return None
+    registry = build_resource_registry(session.receipts)
+    for anchor in step.anchors:
+        kind = anchor.get("kind")
+        if kind == "object":
+            object_name = anchor.get("objectName")
+            for identity in registry.values():
+                if identity.resource_type != "OBJECT" or identity.display_name != object_name:
+                    continue
+                obj = resolve_resource(identity)
+                if isinstance(obj, bpy.types.Object):
+                    return view3d_utils.location_3d_to_region_2d(
+                        region, region_3d, obj.matrix_world.translation
+                    )
+        elif kind == "world_position":
+            position = anchor.get("position")
+            if (
+                isinstance(position, list)
+                and len(position) == 3
+                and all(
+                    isinstance(value, (int, float)) and not isinstance(value, bool)
+                    for value in position
+                )
+            ):
+                return view3d_utils.location_3d_to_region_2d(
+                    region, region_3d, tuple(float(value) for value in position)
+                )
+    receipt = session.receipts.get(step.id)
+    obj = resolve_receipt_anchor(receipt) if receipt is not None else None
+    if obj is None:
+        return None
+    return view3d_utils.location_3d_to_region_2d(
+        region, region_3d, obj.matrix_world.translation
+    )
 
 
 def _draw_overlay() -> None:

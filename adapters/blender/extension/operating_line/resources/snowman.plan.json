@@ -1,8 +1,8 @@
 {
   "protocolVersion": "1.0.0",
   "id": "snowman-demo",
-  "revision": 1,
-  "title": "Create a snowman",
+  "revision": 2,
+  "title": "Create a complete snowman preview",
   "rootStepId": "snowman",
   "steps": [
     {
@@ -11,8 +11,8 @@
       "order": 0,
       "dependsOn": [],
       "title": "Create a snowman",
-      "intent": "Create and verify a complete snowman scene",
-      "explanation": "The root groups modeling, materials, lighting and rendering work.",
+      "intent": "Create and verify a complete snowman preview",
+      "explanation": "The root groups scene preparation, modeling, details, materials, composition, and rendering.",
       "state": "ready",
       "action": null,
       "anchors": [],
@@ -20,14 +20,53 @@
       "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
     },
     {
-      "id": "snowman.model",
+      "id": "snowman.scene",
       "parentId": "snowman",
       "order": 1,
       "dependsOn": [],
-      "title": "Build base model",
-      "intent": "Create the main snowman volumes",
-      "explanation": "Three overlapping spheres establish the silhouette before details and materials.",
+      "title": "Prepare the scene",
+      "intent": "Create a ground plane for the snowman",
+      "explanation": "A dedicated ground establishes scale and receives the snowman's shadow.",
       "state": "ready",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.scene.ground",
+      "parentId": "snowman.scene",
+      "order": 1,
+      "dependsOn": [],
+      "title": "Create the ground",
+      "intent": "Create a wide plane beneath the snowman",
+      "explanation": "The ground is an owned resource and does not replace any user object.",
+      "state": "ready",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.mesh.create_plane",
+        "arguments": {
+          "resourceId": "snowman.ground",
+          "objectName": "OperatingLine.Ground",
+          "size": 14,
+          "location": [0, 0, 0]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 0] }],
+      "expectedObservations": [
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.ground" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.model",
+      "parentId": "snowman",
+      "order": 2,
+      "dependsOn": [],
+      "title": "Build the base model",
+      "intent": "Create the three snow volumes",
+      "explanation": "Three overlapping spheres establish the complete snowman silhouette.",
+      "state": "draft",
       "action": null,
       "anchors": [],
       "expectedObservations": [],
@@ -37,23 +76,24 @@
       "id": "snowman.model.body_lower",
       "parentId": "snowman.model",
       "order": 1,
-      "dependsOn": [],
-      "title": "Create lower body",
+      "dependsOn": ["snowman.scene.ground"],
+      "title": "Create the lower body",
       "intent": "Create the largest snow sphere",
       "explanation": "The lower sphere carries the snowman's weight and defines its overall scale.",
-      "state": "ready",
+      "state": "draft",
       "action": {
         "adapterId": "blender",
-        "name": "snowman.body_lower",
+        "name": "blender.mesh.create_uv_sphere",
         "arguments": {
+          "resourceId": "snowman.body.lower",
           "objectName": "OperatingLine.BodyLower",
-          "radius": 1.5,
-          "location": [0, 0, 1.5]
+          "radius": 1.55,
+          "location": [0, 0, 1.55]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 1.5] }],
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 1.55] }],
       "expectedObservations": [
-        { "kind": "object_exists", "parameters": { "name": "OperatingLine.BodyLower" } }
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.body.lower" } }
       ],
       "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
@@ -62,22 +102,23 @@
       "parentId": "snowman.model",
       "order": 2,
       "dependsOn": ["snowman.model.body_lower"],
-      "title": "Create upper body",
+      "title": "Create the upper body",
       "intent": "Create the middle snow sphere",
-      "explanation": "The upper body overlaps the base and provides support for the head.",
+      "explanation": "The upper body overlaps the base and supports the head.",
       "state": "draft",
       "action": {
         "adapterId": "blender",
-        "name": "snowman.body_upper",
+        "name": "blender.mesh.create_uv_sphere",
         "arguments": {
+          "resourceId": "snowman.body.upper",
           "objectName": "OperatingLine.BodyUpper",
-          "radius": 1.1,
+          "radius": 1.15,
           "location": [0, 0, 3.65]
         }
       },
       "anchors": [{ "kind": "world_position", "position": [0, 0, 3.65] }],
       "expectedObservations": [
-        { "kind": "object_exists", "parameters": { "name": "OperatingLine.BodyUpper" } }
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.body.upper" } }
       ],
       "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
@@ -86,61 +127,380 @@
       "parentId": "snowman.model",
       "order": 3,
       "dependsOn": ["snowman.model.body_upper"],
-      "title": "Create head",
+      "title": "Create the head",
       "intent": "Create the top snow sphere",
-      "explanation": "The head completes the base silhouette and becomes the anchor for facial details.",
+      "explanation": "The head completes the silhouette and anchors the facial details.",
       "state": "draft",
       "action": {
         "adapterId": "blender",
-        "name": "snowman.head",
+        "name": "blender.mesh.create_uv_sphere",
         "arguments": {
+          "resourceId": "snowman.head",
           "objectName": "OperatingLine.Head",
-          "radius": 0.82,
+          "radius": 0.85,
           "location": [0, 0, 5.35]
         }
       },
       "anchors": [{ "kind": "world_position", "position": [0, 0, 5.35] }],
       "expectedObservations": [
-        { "kind": "object_exists", "parameters": { "name": "OperatingLine.Head" } }
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.head" } }
       ],
       "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
     {
       "id": "snowman.details",
       "parentId": "snowman",
-      "order": 2,
-      "dependsOn": ["snowman.model.head"],
-      "title": "Add face and accessories",
-      "intent": "Add eyes, nose, mouth, arms and accessories",
-      "explanation": "Details are planned only after the base silhouette is stable.",
+      "order": 3,
+      "dependsOn": [],
+      "title": "Add character details",
+      "intent": "Create the face, buttons, and arms",
+      "explanation": "Batched primitive actions keep related details atomic and reversible.",
       "state": "draft",
       "action": null,
       "anchors": [],
       "expectedObservations": [],
       "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.details.face",
+      "parentId": "snowman.details",
+      "order": 1,
+      "dependsOn": ["snowman.model.head"],
+      "title": "Create the face",
+      "intent": "Create two eyes, a carrot nose, and five mouth points",
+      "explanation": "The facial primitives are created as one compensated batch around the front of the head.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.mesh.create_primitive_batch",
+        "arguments": {
+          "items": [
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.eye.left",
+              "objectName": "OperatingLine.EyeLeft",
+              "radius": 0.1,
+              "location": [-0.28, -0.78, 5.55]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.eye.right",
+              "objectName": "OperatingLine.EyeRight",
+              "radius": 0.1,
+              "location": [0.28, -0.78, 5.55]
+            },
+            {
+              "primitive": "cone",
+              "resourceId": "snowman.face.nose",
+              "objectName": "OperatingLine.Nose",
+              "radiusStart": 0.2,
+              "radiusEnd": 0.025,
+              "start": [0, -0.78, 5.34],
+              "end": [0, -1.65, 5.34]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.mouth.1",
+              "objectName": "OperatingLine.Mouth01",
+              "radius": 0.055,
+              "location": [-0.28, -0.79, 5.1]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.mouth.2",
+              "objectName": "OperatingLine.Mouth02",
+              "radius": 0.055,
+              "location": [-0.14, -0.83, 5.03]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.mouth.3",
+              "objectName": "OperatingLine.Mouth03",
+              "radius": 0.055,
+              "location": [0, -0.85, 5]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.mouth.4",
+              "objectName": "OperatingLine.Mouth04",
+              "radius": 0.055,
+              "location": [0.14, -0.83, 5.03]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.face.mouth.5",
+              "objectName": "OperatingLine.Mouth05",
+              "radius": 0.055,
+              "location": [0.28, -0.79, 5.1]
+            }
+          ]
+        }
+      },
+      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Head" }],
+      "expectedObservations": [
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.eye.left" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.eye.right" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.nose" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.mouth.1" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.mouth.2" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.mouth.3" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.mouth.4" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.mouth.5" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.details.buttons",
+      "parentId": "snowman.details",
+      "order": 2,
+      "dependsOn": ["snowman.details.face"],
+      "title": "Create the buttons",
+      "intent": "Create three coal buttons on the body",
+      "explanation": "Three small spheres provide readable detail on the upper and lower body.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.mesh.create_primitive_batch",
+        "arguments": {
+          "items": [
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.button.1",
+              "objectName": "OperatingLine.Button01",
+              "radius": 0.1,
+              "location": [0, -1.11, 4.05]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.button.2",
+              "objectName": "OperatingLine.Button02",
+              "radius": 0.11,
+              "location": [0, -1.3, 3.5]
+            },
+            {
+              "primitive": "sphere",
+              "resourceId": "snowman.button.3",
+              "objectName": "OperatingLine.Button03",
+              "radius": 0.12,
+              "location": [0, -1.48, 2.65]
+            }
+          ]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, -1.2, 3.5] }],
+      "expectedObservations": [
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.button.1" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.button.2" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.button.3" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.details.arms",
+      "parentId": "snowman.details",
+      "order": 3,
+      "dependsOn": ["snowman.details.buttons"],
+      "title": "Create the arms",
+      "intent": "Create two wooden branch arms",
+      "explanation": "Two tapered-looking cylinders extend from the upper body in a welcoming pose.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.mesh.create_primitive_batch",
+        "arguments": {
+          "items": [
+            {
+              "primitive": "cylinder",
+              "resourceId": "snowman.arm.left",
+              "objectName": "OperatingLine.ArmLeft",
+              "radius": 0.09,
+              "start": [-0.95, 0, 3.9],
+              "end": [-2.25, 0, 4.55]
+            },
+            {
+              "primitive": "cylinder",
+              "resourceId": "snowman.arm.right",
+              "objectName": "OperatingLine.ArmRight",
+              "radius": 0.09,
+              "start": [0.95, 0, 3.9],
+              "end": [2.25, 0, 4.55]
+            }
+          ]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 4.1] }],
+      "expectedObservations": [
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.arm.left" } },
+        { "kind": "resource_exists", "parameters": { "resourceId": "snowman.arm.right" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
     {
       "id": "snowman.materials",
       "parentId": "snowman",
-      "order": 3,
-      "dependsOn": ["snowman.details"],
-      "title": "Set materials",
-      "intent": "Apply snow and accessory materials",
-      "explanation": "Material roughness and color are tuned after geometry is complete.",
+      "order": 4,
+      "dependsOn": [],
+      "title": "Apply materials",
+      "intent": "Give each logical resource an appropriate surface",
+      "explanation": "Snow, accessory, and ground materials are defined independently from geometry.",
       "state": "draft",
       "action": null,
       "anchors": [],
       "expectedObservations": [],
       "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.materials.snow",
+      "parentId": "snowman.materials",
+      "order": 1,
+      "dependsOn": ["snowman.details.arms"],
+      "title": "Apply the snow material",
+      "intent": "Create a rough white material for all snow volumes",
+      "explanation": "A single logical material keeps the body and head visually consistent.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.material.create_and_assign",
+        "arguments": {
+          "materialId": "snowman.material.snow",
+          "materialName": "OperatingLine.Material.Snow",
+          "targets": ["snowman.body.lower", "snowman.body.upper", "snowman.head"],
+          "baseColor": [0.92, 0.97, 1, 1],
+          "roughness": 0.82,
+          "metallic": 0
+        }
+      },
+      "anchors": [{ "kind": "object", "objectName": "OperatingLine.BodyLower" }],
+      "expectedObservations": [
+        {
+          "kind": "material_assigned",
+          "parameters": {
+            "materialId": "snowman.material.snow",
+            "targets": ["snowman.body.lower", "snowman.body.upper", "snowman.head"]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.materials.accessories",
+      "parentId": "snowman.materials",
+      "order": 2,
+      "dependsOn": ["snowman.materials.snow"],
+      "title": "Apply the accessory palette",
+      "intent": "Create and assign coal, carrot, and wood materials",
+      "explanation": "A palette action applies three reusable materials to the logical detail resources.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.material.create_palette_and_assign",
+        "arguments": {
+          "materials": [
+            {
+              "materialId": "snowman.material.coal",
+              "materialName": "OperatingLine.Material.Coal",
+              "targets": [
+                "snowman.face.eye.left",
+                "snowman.face.eye.right",
+                "snowman.face.mouth.1",
+                "snowman.face.mouth.2",
+                "snowman.face.mouth.3",
+                "snowman.face.mouth.4",
+                "snowman.face.mouth.5",
+                "snowman.button.1",
+                "snowman.button.2",
+                "snowman.button.3"
+              ],
+              "baseColor": [0.025, 0.03, 0.035, 1],
+              "roughness": 0.72,
+              "metallic": 0
+            },
+            {
+              "materialId": "snowman.material.carrot",
+              "materialName": "OperatingLine.Material.Carrot",
+              "targets": ["snowman.face.nose"],
+              "baseColor": [1, 0.22, 0.025, 1],
+              "roughness": 0.58,
+              "metallic": 0
+            },
+            {
+              "materialId": "snowman.material.wood",
+              "materialName": "OperatingLine.Material.Wood",
+              "targets": ["snowman.arm.left", "snowman.arm.right"],
+              "baseColor": [0.24, 0.075, 0.025, 1],
+              "roughness": 0.9,
+              "metallic": 0
+            }
+          ]
+        }
+      },
+      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Head" }],
+      "expectedObservations": [
+        {
+          "kind": "material_assigned",
+          "parameters": {
+            "materialId": "snowman.material.coal",
+            "targets": ["snowman.face.eye.left", "snowman.face.eye.right"]
+          }
+        },
+        {
+          "kind": "material_assigned",
+          "parameters": {
+            "materialId": "snowman.material.carrot",
+            "targets": ["snowman.face.nose"]
+          }
+        },
+        {
+          "kind": "material_assigned",
+          "parameters": {
+            "materialId": "snowman.material.wood",
+            "targets": ["snowman.arm.left", "snowman.arm.right"]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.materials.ground",
+      "parentId": "snowman.materials",
+      "order": 3,
+      "dependsOn": ["snowman.materials.accessories"],
+      "title": "Apply the ground material",
+      "intent": "Create a cool matte surface for the ground",
+      "explanation": "The ground remains visually distinct while preserving the winter palette.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.material.create_and_assign",
+        "arguments": {
+          "materialId": "snowman.material.ground",
+          "materialName": "OperatingLine.Material.Ground",
+          "targets": ["snowman.ground"],
+          "baseColor": [0.18, 0.24, 0.32, 1],
+          "roughness": 0.88,
+          "metallic": 0
+        }
+      },
+      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Ground" }],
+      "expectedObservations": [
+        {
+          "kind": "material_assigned",
+          "parameters": {
+            "materialId": "snowman.material.ground",
+            "targets": ["snowman.ground"]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     },
     {
       "id": "snowman.lighting",
       "parentId": "snowman",
-      "order": 4,
-      "dependsOn": ["snowman.materials"],
-      "title": "Set lights and camera",
-      "intent": "Compose and light the snowman",
-      "explanation": "Lighting and framing depend on the final silhouette and materials.",
+      "order": 5,
+      "dependsOn": [],
+      "title": "Set lighting and camera",
+      "intent": "Create an isolated render scene and compose the preview",
+      "explanation": "The render scene, world, lights, and camera are owned resources separate from the user's active setup.",
       "state": "draft",
       "action": null,
       "anchors": [],
@@ -148,18 +508,146 @@
       "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
     },
     {
+      "id": "snowman.lighting.scene",
+      "parentId": "snowman.lighting",
+      "order": 1,
+      "dependsOn": ["snowman.materials.ground"],
+      "title": "Create the render scene",
+      "intent": "Create an isolated scene, world, and snowman collection",
+      "explanation": "Isolation protects the user's existing render scene and gives the preview deterministic ownership.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.render_scene.create",
+        "arguments": {
+          "sceneId": "snowman.render.scene",
+          "sceneName": "OperatingLine.Scene.Snowman",
+          "worldId": "snowman.render.world",
+          "worldName": "OperatingLine.World.Snowman",
+          "collectionId": "snowman.collection",
+          "backgroundColor": [0.025, 0.04, 0.075, 1],
+          "strength": 0.28
+        }
+      },
+      "anchors": [{ "kind": "operator", "operatorId": "operating_line.render_scene.create" }],
+      "expectedObservations": [
+        {
+          "kind": "render_scene_ready",
+          "parameters": {
+            "sceneId": "snowman.render.scene",
+            "worldId": "snowman.render.world",
+            "collectionId": "snowman.collection"
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.lighting.rig",
+      "parentId": "snowman.lighting",
+      "order": 2,
+      "dependsOn": ["snowman.lighting.scene"],
+      "title": "Create lights and camera",
+      "intent": "Create two area lights and a portrait camera rig",
+      "explanation": "A soft key and fill light reveal the snow material while the camera frames the complete figure.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.render_rig.create",
+        "arguments": {
+          "sceneId": "snowman.render.scene",
+          "collectionId": "snowman.collection",
+          "lights": [
+            {
+              "resourceId": "snowman.light.key",
+              "objectName": "OperatingLine.Light.Key",
+              "dataName": "OperatingLine.LightData.Key",
+              "location": [4.5, -5.5, 8],
+              "target": [0, 0, 3.2],
+              "color": [1, 0.84, 0.68],
+              "energy": 1100,
+              "size": 5
+            },
+            {
+              "resourceId": "snowman.light.fill",
+              "objectName": "OperatingLine.Light.Fill",
+              "dataName": "OperatingLine.LightData.Fill",
+              "location": [-4, -2.5, 5.5],
+              "target": [0, 0, 3.2],
+              "color": [0.55, 0.7, 1],
+              "energy": 650,
+              "size": 4
+            }
+          ],
+          "camera": {
+            "resourceId": "snowman.camera.preview",
+            "objectName": "OperatingLine.Camera.Preview",
+            "dataName": "OperatingLine.CameraData.Preview",
+            "location": [9, -14, 7],
+            "target": [0, 0, 3],
+            "lens": 58
+          }
+        }
+      },
+      "anchors": [{ "kind": "operator", "operatorId": "operating_line.render_rig.create" }],
+      "expectedObservations": [
+        {
+          "kind": "render_rig_ready",
+          "parameters": {
+            "sceneId": "snowman.render.scene",
+            "cameraId": "snowman.camera.preview",
+            "lightIds": ["snowman.light.key", "snowman.light.fill"]
+          }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
       "id": "snowman.render",
       "parentId": "snowman",
-      "order": 5,
-      "dependsOn": ["snowman.lighting"],
-      "title": "Render and verify",
-      "intent": "Render the final scene and verify the requested result",
-      "explanation": "The final step records render evidence and semantic scene checks.",
+      "order": 6,
+      "dependsOn": [],
+      "title": "Render the preview",
+      "intent": "Render and verify the completed snowman",
+      "explanation": "The final stage produces a managed preview artifact without accepting an arbitrary filesystem path.",
       "state": "draft",
       "action": null,
       "anchors": [],
       "expectedObservations": [],
       "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.render.preview",
+      "parentId": "snowman.render",
+      "order": 1,
+      "dependsOn": ["snowman.lighting.rig"],
+      "title": "Render a PNG preview",
+      "intent": "Produce a deterministic 320 by 320 Eevee preview",
+      "explanation": "The adapter selects an extension-owned temporary destination rather than consuming a path from the plan.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.render.execute_preview",
+        "arguments": {
+          "renderId": "snowman.render.preview",
+          "sceneId": "snowman.render.scene",
+          "engine": "auto_eevee",
+          "resolutionX": 320,
+          "resolutionY": 320,
+          "resolutionPercentage": 100,
+          "format": "PNG",
+          "destination": "extension_temp",
+          "samples": 32
+        }
+      },
+      "anchors": [{ "kind": "operator", "operatorId": "render.render" }],
+      "expectedObservations": [
+        {
+          "kind": "render_artifact_exists",
+          "parameters": { "renderId": "snowman.render.preview", "format": "PNG" }
+        }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
     }
   ]
 }

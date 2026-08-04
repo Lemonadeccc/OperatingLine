@@ -59,6 +59,22 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `step_succeeded` transition，也不触发自动补偿。它不能被规划器或 eval 当作已验证成功；
 动作结果与观察判定、补偿策略的分离仍属于下一阶段。
 
+## 宿主执行记录与补偿
+
+Companion 应按步骤 ID 保存 action receipt，不能把 action 名当作唯一键；一个计划可以在多个
+步骤复用同一种通用 action。receipt 可以包含多个新建宿主资源、对既有自有资源的 mutation、
+文件产物和用于视觉定位的锚点。Blender revision 2 实现使用 pointer、不可预测 receipt token
+和 logical ID 的组合身份，并额外核对步骤 ID 与 action 名；名称只用于显示和冲突预检，不构成
+删除授权。
+
+多资源动作应先验证整批参数、名称、逻辑 ID 和依赖资源，再开始写入。宿主 API 在预检后仍可能
+失败，因此执行器还必须记录已产生的副作用并进行失败补偿。mutation 回退采用
+compare-and-restore：只有当前值仍等于该动作写入的值时才恢复旧值；检测到外部修改时显式拒绝，
+避免静默覆盖用户或其他工具的后续操作。
+
+这是 Blender Companion 当前的补偿实现，不是所有宿主已经具备的通用能力。其他适配器必须在
+能力画像中分别声明批量预检、精确身份、失败补偿和冲突检测的支持等级。
+
 当前 HTTP 决策与升级边界见 [ADR 0003](../adr/0003-loopback-companion-polling.md)。
 
 ## 新宿主适配流程

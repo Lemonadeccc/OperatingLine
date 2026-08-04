@@ -16,7 +16,7 @@ describe('guide plan protocol fixture', () => {
     const fixture = readFixture();
 
     const plan = guidePlanSchema.parse(fixture);
-    expect(plan.steps.filter((step) => step.action !== null)).toHaveLength(3);
+    expect(plan.steps.filter((step) => step.action !== null)).toHaveLength(13);
     expect(plan.steps.some((step) => step.anchors[0]?.kind === 'world_position')).toBe(true);
   });
 

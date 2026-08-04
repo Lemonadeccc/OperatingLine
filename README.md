@@ -4,7 +4,8 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 > 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
-> 计划投递/状态回传闭环已可运行；通用 AI 自动规划和完整雪人制作流程仍在路线图中。
+> 计划投递/状态回传闭环已可运行；内置计划可完成并回退一张确定性的雪人渲染预览。
+> 通用 AI 自动规划、节点聊天、训练/Eval 和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -30,18 +31,19 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back、
   Overlay 开关、当前步骤卡片和视口引导线；可显式连接回环地址上的 Orchestrator，非阻塞
   拉取新计划并回传步骤结果。
-- **雪人垂直切片**：根据版本化计划依次创建下半身、上半身和头部；回退只删除当前动作
-  拥有的对象。
+- **完整雪人预览垂直切片**：内置 revision 2 计划包含 6 个阶段、13 个可执行步骤，依次完成
+  地面、三段身体、脸部、纽扣、手臂、材质、隔离渲染场景、双 Area Light、相机和
+  320 × 320 Eevee PNG；`Back` 可以逐步反向补偿整条执行链。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
   触发 OperatingLine 控件。
 
 Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测试。
 
-![OperatingLine 在 Blender 视口中的当前步骤卡片与引导线](docs/assets/blender-guidance.png)
+![OperatingLine 在 Blender 内的任务树、控制按钮、步骤卡片与雪人预览](docs/assets/blender-guidance.png)
 
 > [!IMPORTANT]
-> 当前实时链路已经接通，但执行目录仍只包含雪人下半身、上半身和头部三个确定性 Blender
-> 动作。材质、灯光、相机、渲染、骨骼动画、通用 AI 自动拆解、节点聊天引用和第二宿主尚未完成。
+> 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，不是“AI 已能自动完成任意 Blender
+> 任务”。通用 AI 自动拆解、节点聊天引用、Eval/训练导出、骨骼动画和第二宿主尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -67,6 +69,17 @@ native extension      native companion
 `protocol/` 是跨语言交换格式，`packages/protocol` 是 TypeScript 绑定与 Schema 生成器。
 任务树的 `parentId + order` 负责展示和编号，`dependsOn` 形成实际执行 DAG。每个叶子节点
 可包含动作名、经校验的参数、语义锚点、预期观察和回退方式。
+
+Blender 当前允许 8 类通用 action：创建平面、创建 UV 球、批量创建基础体、创建并分配单个
+材质、创建并分配材质组、创建隔离渲染场景、创建灯光相机组，以及生成受限临时目录中的渲染
+预览。动作注册表按步骤 ID 绑定执行器；同一种 action 可以安全地出现在多个步骤中。
+
+每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
+产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
+仅凭名称或可复制属性删除对象。复合动作先检查整批名称与逻辑 ID 冲突；执行中途失败会补偿
+已经产生的部分结果。回退 mutation 前还会比较当前值与动作完成后的记录值，发现用户或其他
+工具已经修改时拒绝覆盖。若自有 Mesh、Material 或 Collection 已被外部对象引用，`Back` 会在
+零写入预检阶段停止并保留步骤收据；解除外部引用后可以重试，不会静默留下失管资源。
 
 自动动作只允许绑定在结构叶子上，并且只能依赖其他自动动作；Companion 必须按
 `dependsOn` 的拓扑顺序执行，`order` 只作为同时可执行节点的稳定排序条件。没有 action 的
@@ -141,8 +154,9 @@ pnpm dev
 在 3D View 中按 `N`，打开 `OperatingLine` 页签：
 
 1. `Start` 重置演示会话、展示 Overlay，并将计划置于第一个可执行步骤之前。
-2. `Next` 按计划顺序创建雪人的下半身、上半身和头部。
-3. `Back` 回退当前步骤，只删除该动作拥有的对象，不删除用户对象。
+2. `Next` 按 13 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，建立
+   隔离 Scene、World、双 Area Light 和 Camera，最后生成 320 × 320 Eevee PNG。
+3. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 13 步，不删除用户对象。
 4. `Toggle Overlay` 显示或隐藏当前步骤卡片和视口引导。
 5. 任务树分支可以独立展开或折叠，当前叶子节点会显示活动状态。
 6. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划。
@@ -152,9 +166,15 @@ pnpm dev
 也只有场景恰好包含通过保守工厂指纹检查的三件套时才会原子性删除。Blender 不提供这些对象的
 可信来源标记，因此显式开关才是删除授权，指纹检查只是额外保护，不能代替授权。
 
-当前回退 receipt 只在本次 Extension 会话内有效。保存重开或扩展重载后，OperatingLine 不会仅凭
-可复制的自定义属性接管或删除旧对象；遇到同名残留时会停止并要求用户明确处理，避免误删用户
-复制或修改过的内容。
+当前回退 receipt 只在本次 Extension 会话内有效，并以步骤 ID 保存该步产生的多个资源、mutation
+和文件产物。保存重开或扩展重载后，OperatingLine 不会仅凭可复制的自定义属性接管或删除旧对象；
+遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
+外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
+
+revision 2 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
+`render_rig_ready` 和 `render_artifact_exists` 五类新增 observation 检查资源、材质、场景、
+灯光相机和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
+但不会把 action 的 `step_succeeded` 自动改判为失败，也不会触发自动补偿。
 
 运行中收到更高 revision 时，Extension 不会因为“收到计划”而自动回退场景。更新会显示为
 pending，用户 Back 到起点后才会安装；Disconnect 会取消该 pending 更新。非法协议版本、
@@ -220,11 +240,14 @@ pnpm test:blender:visual
 pnpm package:blender
 ```
 
-`pnpm test:blender:companion` 会启动真实 Orchestrator 进程和 Blender，经过 MCP 发布计划、
-回环 HTTP 拉取、主线程 Start/Next/Back 与状态回传，验证默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会启动第一个检测到的 Blender，通过真实 GUI 捕获
-`artifacts/blender/overlay-smoke.png`。它先生成专用空场景，避免保存过的 `.blend` 元数据被误认
-为工厂场景；默认场景清理本身由双版本 headless integration test 验证。
+`pnpm test:blender` 会在检测到的 Blender 4.5+ 可执行文件中运行基础 Extension 回归和完整雪人
+测试；后者验证复合动作冲突不会留下部分结果、外部 Mesh/Material/Collection 引用会安全阻止
+回退、320 × 320 PNG、隔离 Scene，以及 13 步完整前进/回退。`pnpm test:blender:companion`
+会启动真实 Orchestrator 进程和 Blender，经过 MCP 发布计划、回环 HTTP 拉取、主线程
+Start/Next/Back 与状态回传，验证默认 Cube 不被删除以及跨进程闭环。
+`pnpm test:blender:visual` 会从 Blender 工厂场景开始，保留默认 Cube、Camera 和 Light，执行
+完整计划后切换到隔离渲染 Scene，并调用真实 OperatingLine Panel 绘制任务树与控制按钮，再
+通过真实 GUI 捕获 `artifacts/blender/overlay-smoke.png`。
 
 macOS 会自动检测 `/Applications/Blender.app` 和 `/Applications/Blender 2.app`；Linux 会检测
 `/usr/bin/blender` 和 `/usr/local/bin/blender`。其他安装位置使用 `BLENDER_BIN`。
@@ -257,10 +280,10 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 Orchestrator ↔ Companion 跨进程闭环，以及受限的现有 MCP Bridge。当前仍未完成：
 
 1. 根据“创建雪人”等任意目标自动生成结构正确、能力可执行的 GuidePlan。
-2. 扩展雪人动作目录，覆盖细节、材质、灯光、相机、渲染和骨骼动画。
+2. 在确定性雪人预览之外增加骨骼动画，并扩展经过验证的通用 Blender 动作目录。
 3. 加入节点聊天引用、局部重规划、计划差异确认和用户可编辑参数。
-4. 区分动作成功与观察验证结果，完善失败补偿，并在接入 Blender `undo_post`/`redo_post`
-   后再声明原生 Undo 能力。
+4. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
+   `undo_post`/`redo_post` 后再声明原生 Undo 能力。
 5. 导出可复现的执行轨迹、计划、观察与评分数据，形成 eval/replay 流程。
 6. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
 7. 在首个稳定发布前引入 Changesets 与自动发布流程。

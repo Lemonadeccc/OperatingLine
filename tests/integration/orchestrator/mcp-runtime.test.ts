@@ -154,7 +154,7 @@ describe('OperatingLine runtime', () => {
 
       const plan = JSON.parse(
         readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
-      ) as unknown;
+      ) as { id: string; revision: number };
       const publishResponse = await fetch(runtime.mcpEndpoint, {
         method: 'POST',
         headers: {
@@ -177,7 +177,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(guideResponse.status).toBe(200);
       await expect(guideResponse.json()).resolves.toMatchObject({
-        plan: { id: 'snowman-demo', revision: 1 },
+        plan: { id: plan.id, revision: plan.revision },
       });
     } finally {
       await runtime.stop();
@@ -204,35 +204,37 @@ describe('OperatingLine runtime', () => {
       expect(delivered.status).toBe(200);
       await expect(delivered.json()).resolves.toMatchObject({
         protocolVersion: '1.0.0',
-        plan: { id: plan.id, revision: 1 },
+        plan: { id: plan.id, revision: plan.revision },
       });
 
       guideUrl.searchParams.set('knownPlanId', plan.id);
-      guideUrl.searchParams.set('knownRevision', '1');
+      guideUrl.searchParams.set('knownRevision', String(plan.revision));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
       ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
 
-      guideUrl.searchParams.set('knownRevision', '3');
+      guideUrl.searchParams.set('knownRevision', String(plan.revision + 2));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
       ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
-      guideUrl.searchParams.set('knownRevision', '1');
+      guideUrl.searchParams.set('knownRevision', String(plan.revision));
 
-      const revisionTwo = { ...plan, revision: 2 };
+      const nextRevision = { ...plan, revision: plan.revision + 1 };
       expect(
-        (await callMcpTool(runtime, 21, 'operatingline.guide.publish', revisionTwo)).result
+        (await callMcpTool(runtime, 21, 'operatingline.guide.publish', nextRevision)).result
           ?.isError,
       ).not.toBe(true);
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toMatchObject({ plan: { id: plan.id, revision: 2 } });
+      ).resolves.toMatchObject({
+        plan: { id: plan.id, revision: nextRevision.revision },
+      });
 
       guideUrl.searchParams.set('adapterId', 'different-adapter');
       await expect(
@@ -397,7 +399,7 @@ describe('OperatingLine runtime', () => {
       expect(accepted.result?.isError).not.toBe(true);
 
       const invalidGraph = structuredClone(plan);
-      invalidGraph.revision = 2;
+      invalidGraph.revision = plan.revision + 1;
       const action = invalidGraph.steps.find((step) => step.action !== null)?.action;
       const modelBranch = invalidGraph.steps.find((step) => step.id === 'snowman.model');
       if (modelBranch === undefined || action === undefined) {
@@ -417,7 +419,7 @@ describe('OperatingLine runtime', () => {
       const rejectedRevision = await callMcpTool(runtime, 12, 'operatingline.guide.publish', plan);
       expect(rejectedRevision.result).toMatchObject({ isError: true });
       expect(rejectedRevision.result?.content?.[0]?.text).toContain(
-        'is not newer than latest accepted revision 1',
+        `is not newer than latest accepted revision ${plan.revision}`,
       );
 
       const mixedHostPlan = structuredClone(plan);
@@ -442,7 +444,7 @@ describe('OperatingLine runtime', () => {
         headers: { authorization: `Bearer ${accessToken}` },
       });
       await expect(guideResponse.json()).resolves.toMatchObject({
-        plan: { id: plan.id, revision: 1 },
+        plan: { id: plan.id, revision: plan.revision },
       });
 
       const replacementPlan = structuredClone(plan);
@@ -463,7 +465,7 @@ describe('OperatingLine runtime', () => {
       );
       expect(rejectedAfterSwitch.result).toMatchObject({ isError: true });
       expect(rejectedAfterSwitch.result?.content?.[0]?.text).toContain(
-        'is not newer than latest accepted revision 1',
+        `is not newer than latest accepted revision ${plan.revision}`,
       );
     } finally {
       await runtime.stop();

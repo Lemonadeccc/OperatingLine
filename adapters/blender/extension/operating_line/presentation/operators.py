@@ -29,7 +29,17 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
-        _session().start()
+        session = _session()
+        try:
+            session.start()
+        except (OSError, RuntimeError, ValueError) as error:
+            _companion().report(
+                "error",
+                step=session.active_step,
+                error=str(error),
+            )
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if context.scene.operating_line_replace_factory_scene:
             removed = remove_factory_startup_objects(context.scene)
             if not removed:
@@ -57,7 +67,7 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
         )
         try:
             step = session.next()
-        except RuntimeError as error:
+        except (OSError, RuntimeError, ValueError) as error:
             _companion().report("error", step=candidate, error=str(error))
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -75,7 +85,14 @@ class OPERATINGLINE_OT_back(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, _context):
-        step = _session().back()
+        session = _session()
+        candidate = session.active_step
+        try:
+            step = session.back()
+        except (OSError, RuntimeError, ValueError) as error:
+            _companion().report("error", step=candidate, error=str(error))
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if step is None:
             self.report({"INFO"}, "No active step to roll back")
             return {"CANCELLED"}

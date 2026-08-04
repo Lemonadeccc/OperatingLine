@@ -1,23 +1,89 @@
-"""Use-case state and traversal for the bundled snowman demo."""
+"""Use-case state and traversal for a validated guide plan."""
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from ..domain import TaskNode, executable_steps
 
 
 @dataclass(frozen=True, slots=True)
-class ActionReceipt:
-    """Stable identity for one adapter mutation, independent of display names."""
+class ParentIdentity:
+    """Exact Blender container identity for an owned Collection link."""
 
-    action_name: str
+    resource_type: str
+    session_uid: int
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceIdentity:
+    """Exact identity of one Blender ID created by an action."""
+
+    resource_type: str
+    logical_id: str
     display_name: str
-    rollback_token: str
-    object_pointer: int
-    collection_pointer: int
+    pointer: int
+    receipt_token: str
+    step_id: str = ""
+    action_name: str = ""
+    parent_links: tuple[ParentIdentity, ...] = ()
 
 
-ExecuteAction = Callable[[], ActionReceipt]
+@dataclass(frozen=True, slots=True)
+class MutationRecord:
+    """A compare-and-restore mutation made to a resource owned by this guide."""
+
+    resource: ResourceIdentity
+    attribute: str
+    before: Any
+    after: Any
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactIdentity:
+    """A file artifact created by an action."""
+
+    logical_id: str
+    path: str
+    sha256: str
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActionReceipt:
+    """All reversible effects produced by one executable plan step."""
+
+    receipt_id: str
+    step_id: str
+    action_name: str
+    created: tuple[ResourceIdentity, ...] = ()
+    mutations: tuple[MutationRecord, ...] = ()
+    artifacts: tuple[ArtifactIdentity, ...] = ()
+    anchor: ResourceIdentity | None = None
+
+    # Compatibility properties for the original one-object snowman slice.
+    @property
+    def rollback_token(self) -> str:
+        return self.anchor.receipt_token if self.anchor is not None else self.receipt_id
+
+    @property
+    def display_name(self) -> str:
+        return self.anchor.display_name if self.anchor is not None else self.action_name
+
+    @property
+    def object_pointer(self) -> int:
+        return self.anchor.pointer if self.anchor is not None else 0
+
+    @property
+    def collection_pointer(self) -> int:
+        for resource in self.created:
+            if resource.resource_type == "COLLECTION":
+                return resource.pointer
+        return 0
+
+
+ExecuteAction = Callable[[Mapping[str, ActionReceipt]], ActionReceipt]
 RollbackAction = Callable[[ActionReceipt], None]
 
 
@@ -64,6 +130,9 @@ class DemoSession:
         self.reset()
         self.started = True
 
+    def _step_actions(self, step: TaskNode) -> tuple[ExecuteAction, RollbackAction]:
+        return self._actions[step.id]
+
     def next(self) -> TaskNode | None:
         if not self.started:
             self.start()
@@ -71,9 +140,12 @@ class DemoSession:
         if next_index >= len(self.steps):
             return None
         step = self.steps[next_index]
+        execute, _rollback = self._step_actions(step)
+        receipt = execute(self.receipts)
         action_name = step.action.name if step.action else ""
-        execute, _rollback = self._actions[action_name]
-        self.receipts[action_name] = execute()
+        if receipt.step_id != step.id or receipt.action_name != action_name:
+            raise RuntimeError(f"Action returned a receipt for the wrong step: {step.id}")
+        self.receipts[step.id] = receipt
         self.active_index = next_index
         return step
 
@@ -81,11 +153,11 @@ class DemoSession:
         step = self.active_step
         if step is None:
             return None
-        action_name = step.action.name if step.action else ""
-        _execute, rollback = self._actions[action_name]
-        receipt = self.receipts.pop(action_name, None)
+        _execute, rollback = self._step_actions(step)
+        receipt = self.receipts.get(step.id)
         if receipt is not None:
             rollback(receipt)
+            del self.receipts[step.id]
         self.active_index -= 1
         return step
 

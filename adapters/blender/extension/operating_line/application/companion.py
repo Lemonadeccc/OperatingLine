@@ -13,6 +13,7 @@ import bpy
 from ..domain import load_task_tree_data
 from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
+from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession
 
 PROTOCOL_VERSION = "1.0.0"
@@ -261,20 +262,14 @@ class CompanionController:
         else:
             phase = "idle"
         observation_step = step or active
-        observations: list[dict[str, Any]] = []
-        if observation_step is not None:
-            for expected in observation_step.expected_observations:
-                kind = expected.get("kind")
-                parameters = expected.get("parameters")
-                satisfied = False
-                details: dict[str, Any] = {"parameters": parameters}
-                if kind == "object_exists" and isinstance(parameters, dict):
-                    name = parameters.get("name")
-                    satisfied = isinstance(name, str) and bpy.data.objects.get(name) is not None
-                    details["objectName"] = name
-                observations.append(
-                    {"kind": str(kind), "satisfied": satisfied, "details": details}
-                )
+        observations = (
+            evaluate_observations(
+                observation_step.expected_observations,
+                session.receipts,
+            )
+            if observation_step is not None
+            else []
+        )
         self._sequence += 1
         report = {
             "protocolVersion": PROTOCOL_VERSION,
