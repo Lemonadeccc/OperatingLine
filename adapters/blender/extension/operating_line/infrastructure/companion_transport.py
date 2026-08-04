@@ -69,6 +69,7 @@ class CompanionTransport:
         known_plan_id: str | None = None,
         known_revision: int | None = None,
         known_proposal_id: str | None = None,
+        known_revision_thread_id: str | None = None,
         poll_interval: float = 1.0,
         timeout: float = 0.75,
     ) -> None:
@@ -101,6 +102,12 @@ class CompanionTransport:
         self._known_plan_id = known_plan_id
         self._known_revision = known_revision
         self._known_proposal_id = known_proposal_id
+        self._revision_thread_id = self._validated_optional_uuid(
+            known_revision_thread_id,
+            "Known revision thread id",
+        )
+        self._revision_history_signature: str | None = None
+        self._revision_history_before_turn: int | None = None
         parsed_base_url = urlsplit(self.base_url)
         self._host = parsed_base_url.hostname or "127.0.0.1"
         self._port = parsed_base_url.port or 80
@@ -151,6 +158,33 @@ class CompanionTransport:
     def accept_plan(self, plan_id: str, revision: int) -> None:
         self.control.put(
             {"kind": "plan_accepted", "planId": plan_id, "revision": revision}
+        )
+
+    @staticmethod
+    def _validated_optional_uuid(value: str | None, label: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"{label} must be a UUID")
+        try:
+            uuid.UUID(value)
+        except ValueError as error:
+            raise ValueError(f"{label} must be a UUID") from error
+        return value
+
+    def follow_revision_thread(self, thread_id: str | None) -> None:
+        validated = self._validated_optional_uuid(thread_id, "Revision thread id")
+        self.control.put({"kind": "follow_revision_thread", "threadId": validated})
+
+    def load_revision_history_before(self, before_turn: int) -> None:
+        if (
+            isinstance(before_turn, bool)
+            or not isinstance(before_turn, int)
+            or before_turn <= 0
+        ):
+            raise ValueError("Revision history cursor must be a positive integer")
+        self.control.put(
+            {"kind": "load_revision_history_before", "beforeTurn": before_turn}
         )
 
     def submit_revision_request(self, request: dict[str, Any]) -> None:
@@ -308,7 +342,66 @@ class CompanionTransport:
             if not isinstance(proposal_id, str) or not proposal_id:
                 raise ValueError("Runtime proposal must contain a proposalId")
             self._known_proposal_id = proposal_id
+            revision_thread = proposal.get("revisionThread")
+            if isinstance(revision_thread, dict):
+                thread_id = revision_thread.get("threadId")
+                if isinstance(thread_id, str):
+                    self._revision_thread_id = self._validated_optional_uuid(
+                        thread_id,
+                        "Proposal revision thread id",
+                    )
+                    self._revision_history_signature = None
             self.incoming.put({"kind": "proposal", "proposal": proposal})
+        self._poll_revision_history()
+
+    def _poll_revision_history(self) -> None:
+        thread_id = self._revision_thread_id
+        if thread_id is None:
+            return
+        query_values = {
+            "threadId": thread_id,
+            "targetAdapterId": "blender",
+            "instanceId": self._instance_id,
+            "limit": "20",
+        }
+        requested_before_turn = self._revision_history_before_turn
+        if requested_before_turn is not None:
+            query_values["beforeTurn"] = str(requested_before_turn)
+        query = urlencode(query_values)
+        try:
+            response = self._request_json(
+                "GET",
+                f"/api/v1/replan/thread?{query}",
+                abort_on_stop=True,
+            )
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            unavailable_signature = f"unavailable:{thread_id}"
+            if self._revision_history_signature != unavailable_signature:
+                self._revision_history_signature = unavailable_signature
+                self.incoming.put(
+                    {
+                        "kind": "revision_thread_history_unavailable",
+                        "message": "Runtime has no revision history for this thread",
+                    }
+                )
+            if requested_before_turn is not None:
+                self._revision_history_before_turn = None
+            return
+        if response.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
+            raise ValueError("Unsupported revision history protocol version")
+        if response.get("threadId") != thread_id:
+            raise ValueError("Runtime returned the wrong revision thread history")
+        signature = json.dumps(response, sort_keys=True, separators=(",", ":"))
+        if signature != self._revision_history_signature:
+            self._revision_history_signature = signature
+            self.incoming.put(
+                {"kind": "revision_thread_history", "history": response}
+            )
+        if requested_before_turn is not None:
+            self._revision_history_before_turn = None
+            self._revision_history_signature = None
 
     def _run(self) -> None:
         next_poll = 0.0
@@ -339,6 +432,13 @@ class CompanionTransport:
                         self._known_revision = int(control["revision"])
                     elif control.get("kind") == "proposal_seen":
                         self._known_proposal_id = str(control["proposalId"])
+                    elif control.get("kind") == "follow_revision_thread":
+                        self._revision_thread_id = control.get("threadId")
+                        self._revision_history_before_turn = None
+                        self._revision_history_signature = None
+                    elif control.get("kind") == "load_revision_history_before":
+                        self._revision_history_before_turn = int(control["beforeTurn"])
+                        self._revision_history_signature = None
                 if pending_decision is None:
                     try:
                         pending_decision = self.decisions.get_nowait()
@@ -374,6 +474,15 @@ class CompanionTransport:
                     request_id = pending_revision_request.get("requestId")
                     if response.get("requestId") != request_id:
                         raise ValueError("Runtime acknowledged the wrong revision request")
+                    revision_thread = pending_revision_request.get("revisionThread")
+                    if isinstance(revision_thread, dict):
+                        thread_id = revision_thread.get("threadId")
+                        if isinstance(thread_id, str):
+                            self._revision_thread_id = self._validated_optional_uuid(
+                                thread_id,
+                                "Revision request thread id",
+                            )
+                            self._revision_history_signature = None
                     self.incoming.put(
                         {
                             "kind": "revision_request_acknowledged",

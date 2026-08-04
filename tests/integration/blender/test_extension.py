@@ -48,6 +48,10 @@ from operating_line_extension.operating_line.presentation.operators import (  # 
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_start,
 )
+from operating_line_extension.operating_line.presentation.panel import (  # noqa: E402
+    _display_columns,
+    _wrap_history_message,
+)
 from operating_line_extension.operating_line.domain import (  # noqa: E402
     RESOURCE_PATH,
     executable_steps,
@@ -202,10 +206,46 @@ def assert_companion_and_plan_semantics() -> None:
 
         def do_GET(self):
             assert self.headers.get("Authorization") == f"Bearer {token}"
-            if urlsplit(self.path).path == "/redirect":
+            parsed_path = urlsplit(self.path)
+            if parsed_path.path == "/redirect":
                 self.send_response(302)
                 self.send_header("Location", "http://192.0.2.1/credential-leak")
                 self.end_headers()
+                return
+            if parsed_path.path == "/api/v1/replan/thread":
+                query = parse_qs(parsed_path.query)
+                assert revision_requests
+                revision_request = revision_requests[-1]
+                assert query["threadId"] == [
+                    revision_request["revisionThread"]["threadId"]
+                ]
+                assert query["targetAdapterId"] == ["blender"]
+                assert query["instanceId"] == [companion.instance_id]
+                self._reply(
+                    {
+                        "protocolVersion": "1.1.0",
+                        "threadId": revision_request["revisionThread"]["threadId"],
+                        "targetAdapterId": "blender",
+                        "instanceId": companion.instance_id,
+                        "planId": revision_request["basePlan"]["id"],
+                        "latestTurn": 1,
+                        "status": "awaiting_proposal",
+                        "turns": [
+                            {
+                                "turn": 1,
+                                "state": "awaiting_proposal",
+                                "request": revision_request,
+                                "proposal": None,
+                                "decision": None,
+                            }
+                        ],
+                        "page": {
+                            "beforeTurn": None,
+                            "nextBeforeTurn": None,
+                            "hasMore": False,
+                        },
+                    }
+                )
                 return
             if slow_guide[0]:
                 slow_guide_started.set()
@@ -221,7 +261,7 @@ def assert_companion_and_plan_semantics() -> None:
                         return
                     time.sleep(0.05)
                 return
-            query = parse_qs(urlsplit(self.path).query)
+            query = parse_qs(parsed_path.query)
             requests.append(query)
             known = query.get("knownPlanId") == ["live-snowman"] and query.get(
                 "knownRevision"
@@ -353,6 +393,17 @@ def assert_companion_and_plan_semantics() -> None:
             "parentRequestId": None,
         }
         assert companion.last_revision_request_id == revision_request["requestId"]
+        history_deadline = time.monotonic() + 2.0
+        while time.monotonic() < history_deadline:
+            companion.pump()
+            if companion.revision_thread_history is not None:
+                break
+            time.sleep(0.02)
+        assert companion.revision_thread_history is not None
+        assert companion.revision_thread_history["turns"][0]["request"][
+            "message"
+        ] == revision_request["message"]
+        assert companion.revision_thread_history["status"] == "awaiting_proposal"
         assert {item.as_pointer() for item in bpy.data.objects} == (
             scene_objects_before_request
         )
@@ -957,6 +1008,17 @@ def assert_companion_and_plan_semantics() -> None:
 
 
 def main() -> None:
+    wrapped_english = _wrap_history_message(
+        "@1.2.3 Make this head larger and rougher"
+    )
+    wrapped_chinese = _wrap_history_message("@1.2.3 把雪人的头部放大并增加粗糙感")
+    assert " ".join(wrapped_english) == "@1.2.3 Make this head larger and rougher"
+    assert "".join(wrapped_chinese).replace(" ", "") == (
+        "@1.2.3 把雪人的头部放大并增加粗糙感".replace(" ", "")
+    )
+    assert all(_display_columns(line) <= 24 for line in wrapped_english)
+    assert all(_display_columns(line) <= 24 for line in wrapped_chinese)
+
     catalog_actions = {item["name"] for item in ACTION_CATALOG["actions"]}
     implemented_catalog_actions = {
         name for name in ALLOWED_ACTIONS if name.startswith("blender.")

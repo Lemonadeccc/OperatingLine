@@ -18,6 +18,8 @@ import {
   guideProposalSubmissionSchema,
   guideReplanSubmissionSchema,
   guideRevisionRequestSchema,
+  guideRevisionThreadHistoryRequestSchema,
+  guideRevisionThreadHistorySchema,
   planningContextSchema,
 } from '../src/index.js';
 
@@ -26,6 +28,16 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'guide-revision-thread-history-request.schema.json',
+    'https://operatingline.dev/schema/v1/guide-revision-thread-history-request.json',
+    guideRevisionThreadHistoryRequestSchema,
+  ],
+  [
+    'guide-revision-thread-history.schema.json',
+    'https://operatingline.dev/schema/v1/guide-revision-thread-history.json',
+    guideRevisionThreadHistorySchema,
+  ],
   [
     'guide-plan-diff.schema.json',
     'https://operatingline.dev/schema/v1/guide-plan-diff.json',

@@ -22,6 +22,7 @@ import {
   guideReplanSubmissionSchema,
   guideRevisionRequestListSchema,
   guideRevisionRequestSchema,
+  guideRevisionThreadHistoryRequestSchema,
   planningContextRequestSchema,
   planningContextSchema,
   type ActionCatalog,
@@ -35,6 +36,7 @@ import { z } from 'zod';
 import { createActionCatalogRegistry } from './action-catalogs.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
+import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
@@ -343,6 +345,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.replan.thread.get',
+        {
+          description:
+            'Return a newest-page-first, vendor-neutral history of one linear revision thread, preserving exact user requests, proposals, Plan diffs, and in-host decisions.',
+          inputSchema: guideRevisionThreadHistoryRequestSchema,
+        },
+        async (requestInput) => {
+          const request = guideRevisionThreadHistoryRequestSchema.parse(requestInput);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createGuideRevisionThreadHistory(database, request)),
+              },
+            ],
+          };
+        },
+      );
+
+      server.registerTool(
         'operatingline.eval.export',
         {
           description:
@@ -535,6 +557,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/replan/thread', async (request, reply) => {
+      const parsedRequest = guideRevisionThreadHistoryRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return createGuideRevisionThreadHistory(database, parsedRequest.data);
+      } catch (error) {
+        return reply.code(404).send({
+          error: 'revision_thread_not_found',
+          message: error instanceof Error ? error.message : 'Unknown revision history error',
+        });
+      }
+    });
     runtimeApp.get('/api/v1/companion/guide', async (request, reply) => {
       const parsedRequest = companionGuideRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -589,7 +627,19 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               : database.getGuideReplanProposalForRequest(parentProposalId);
           const parentProposal =
             rawParentProposal === null ? null : guideProposalSchema.parse(rawParentProposal);
-          validateGuideRevisionThread(parsedRequest.data, head, parentProposal);
+          const rawParentDecision =
+            parentProposal === null
+              ? null
+              : database.getGuideProposalDecision(
+                  parentProposal.proposalId,
+                  parsedRequest.data.adapterId,
+                  parsedRequest.data.instanceId,
+                );
+          const parentDecision =
+            rawParentDecision === null
+              ? null
+              : guideProposalDecisionSchema.parse(rawParentDecision);
+          validateGuideRevisionThread(parsedRequest.data, head, parentProposal, parentDecision);
         }
       } catch (error) {
         return reply.code(422).send({
@@ -687,3 +737,4 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 export { createActionCatalogRegistry };
 export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
+export { createGuideRevisionThreadHistory } from './guide-revision-history.js';

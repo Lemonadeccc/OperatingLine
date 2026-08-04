@@ -271,6 +271,7 @@ try {
   assert.equal(result.proposalReviewedBeforeExecution, true);
   assert.equal(result.requestLinkedProposalReviewedBeforeExecution, true);
   assert.equal(result.planDiffReviewedBeforeExecution, true);
+  assert.equal(result.revisionHistoryReviewed, true);
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);

@@ -20,7 +20,8 @@ Guide protocol `1.1.0` 在 `GuideRevisionRequest` 与请求关联 `GuideProposal
 
 当前 thread 是线性的。新 turn 必须保持 adapter、Companion instance 与 ActionCatalog 版本不变，
 并把父请求关联 Proposal 的完整 Plan 作为逐字段相等的 base。数据库对 `threadId + turn` 和非空
-`parentRequestId` 建立唯一索引；Orchestrator 在写入前验证 head、父 Proposal 和精确基线。
+`parentRequestId` 建立唯一索引；Orchestrator 在写入前验证 head、父 Proposal 和精确基线。ADR 0010
+进一步要求父 Proposal 已在同一宿主实例被接受。
 
 Plan diff 按目标树 DFS 顺序列出新增与更新节点，再按旧树 DFS 顺序列出删除节点。它包含：
 
@@ -45,11 +46,12 @@ Blender 对收到的 thread/diff 再做语言独立的结构与计数校验，�
 - **JSON Patch 直接执行**：会绕过完整计划校验、ActionCatalog 与宿主内审批。
 - **只保存父 request ID**：无法验证 turn、thread 身份或防止同一父节点静默分支。
 - **允许任意分支**：需要显式的分支选择、合并和冲突 UI；当前产品尚未定义这些语义。
-- **把异步输入命名为聊天**：没有内置模型、流式回复和完整消息历史，会误导用户。
+- **把异步输入命名为实时聊天**：没有内置模型或流式回复，会误导用户；ADR 0010 后来增加的是
+  可回放的结构化修订历史，而不是模型会话。
 
 ## 后果与后续
 
 - 两轮及以上修订现在拥有可验证的线性来源，Plan diff 可进入现有 Eval/replay 事件包。
 - 用户在 Blender 接受前可看到计划级、节点级和简单参数级变化；接收 Proposal 仍不修改场景。
 - 后续参数表单必须生成新的完整 Plan revision 和 diff，不能原地修改已签收 Proposal。
-- 完整消息历史、分支/合并策略、自动评分与训练数据治理仍是独立里程碑。
+- ADR 0010 已补充完整的结构化消息历史；分支/合并策略、自动评分与训练数据治理仍是独立里程碑。

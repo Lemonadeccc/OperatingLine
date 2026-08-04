@@ -238,6 +238,20 @@ class OPERATINGLINE_OT_submit_revision_request(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class OPERATINGLINE_OT_load_older_revision_history(bpy.types.Operator):
+    bl_idname = "operating_line.load_older_revision_history"
+    bl_label = "Load Older Turns"
+    bl_description = "Load the preceding page of this immutable revision thread"
+
+    def execute(self, _context):
+        companion = _companion()
+        if companion.load_older_revision_history():
+            self.report({"INFO"}, "Older revision turns requested")
+            return {"FINISHED"}
+        self.report({"INFO"}, companion.revision_history_error)
+        return {"CANCELLED"}
+
+
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
     bl_idname = "operating_line.toggle_overlay"
     bl_label = "Show or Hide Guidance"
@@ -272,6 +286,7 @@ CLASSES = (
     OPERATINGLINE_OT_reference_node,
     OPERATINGLINE_OT_clear_revision_request,
     OPERATINGLINE_OT_submit_revision_request,
+    OPERATINGLINE_OT_load_older_revision_history,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_back,

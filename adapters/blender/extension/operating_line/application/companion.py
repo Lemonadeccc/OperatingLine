@@ -27,6 +27,7 @@ from .revision_review import (
     new_revision_thread,
     validate_plan_diff,
     validate_revision_thread,
+    validate_revision_thread_history,
 )
 
 COMPANION_VERSION = "0.1.0"
@@ -48,6 +49,11 @@ class CompanionController:
         self.proposed_plan: dict[str, Any] | None = None
         self.proposal_session: DemoSession | None = None
         self._active_revision_lineage: RevisionLineage | None = None
+        self.revision_thread_history: dict[str, Any] | None = None
+        self.revision_history_error = ""
+        self._revision_history_turns: dict[int, dict[str, Any]] = {}
+        self._revision_history_has_more = False
+        self._revision_history_next_before_turn: int | None = None
         self._revision_base_session: DemoSession | None = None
         self._revision_reference_scope: str | None = None
         self._revision_reference_ids: list[str] = []
@@ -93,6 +99,11 @@ class CompanionController:
             self.instance_id,
             known_plan_id=session.plan_id,
             known_revision=session.revision,
+            known_revision_thread_id=(
+                self._active_revision_lineage.thread_id
+                if self._active_revision_lineage is not None
+                else None
+            ),
         )
         self.disconnect(preserve_active_revision_draft=True)
         self._transport = transport
@@ -121,6 +132,9 @@ class CompanionController:
         self.pending_plan = None
         self.proposed_plan = None
         self.proposal_session = None
+        if self._active_revision_lineage is None:
+            self._clear_revision_history()
+        self.revision_history_error = ""
         preserve_revision_draft = (
             preserve_active_revision_draft
             and self._revision_reference_scope == "active"
@@ -251,6 +265,52 @@ class CompanionController:
         ):
             window_manager.operating_line_revision_message = ""
 
+    def _clear_revision_history(self) -> None:
+        self.revision_thread_history = None
+        self._revision_history_turns.clear()
+        self._revision_history_has_more = False
+        self._revision_history_next_before_turn = None
+
+    def _store_revision_history_page(self, history: dict[str, Any]) -> None:
+        same_thread = (
+            self.revision_thread_history is not None
+            and self.revision_thread_history.get("threadId") == history["threadId"]
+        )
+        if not same_thread:
+            self._clear_revision_history()
+        had_turns = bool(self._revision_history_turns)
+        for record in history["turns"]:
+            self._revision_history_turns[record["turn"]] = record
+        page = history["page"]
+        if page["beforeTurn"] is not None or not had_turns:
+            self._revision_history_has_more = page["hasMore"]
+            self._revision_history_next_before_turn = page["nextBeforeTurn"]
+        self.revision_thread_history = {
+            **history,
+            "turns": [
+                self._revision_history_turns[turn]
+                for turn in sorted(self._revision_history_turns)
+            ],
+            "page": {
+                "beforeTurn": None,
+                "nextBeforeTurn": self._revision_history_next_before_turn,
+                "hasMore": self._revision_history_has_more,
+            },
+        }
+
+    def load_older_revision_history(self) -> bool:
+        transport = self._transport
+        cursor = self._revision_history_next_before_turn
+        if transport is None or not transport.running:
+            self.revision_history_error = "Connect the runtime to load older turns"
+            return False
+        if cursor is None or not self._revision_history_has_more:
+            self.revision_history_error = "No older revision turns are available"
+            return False
+        transport.load_revision_history_before(cursor)
+        self.revision_history_error = f"Loading turns before {cursor}"
+        return True
+
     def submit_revision_request(self, message: str) -> dict[str, Any]:
         transport = self._transport
         if transport is None or not transport.running:
@@ -340,6 +400,10 @@ class CompanionController:
         if self._revision_base_session is current:
             self.clear_revision_draft()
         self._active_revision_lineage = None
+        self._clear_revision_history()
+        self.revision_history_error = ""
+        if self._transport is not None:
+            self._transport.follow_revision_thread(None)
         replace_session(replacement)
         if (
             self.pending_plan is not None
@@ -470,6 +534,9 @@ class CompanionController:
             self.clear_revision_draft()
         self.proposed_plan = proposal
         self.proposal_session = replacement
+        proposal_lineage = lineage_from_proposal(proposal)
+        if proposal_lineage is not None and self._transport is not None:
+            self._transport.follow_revision_thread(proposal_lineage.thread_id)
         self._last_rejected_proposal = None
         self.error = ""
         self.status = (
@@ -506,6 +573,10 @@ class CompanionController:
         self.proposed_plan = None
         self.proposal_session = None
         self._active_revision_lineage = accepted_lineage
+        if transport is not None:
+            transport.follow_revision_thread(
+                accepted_lineage.thread_id if accepted_lineage is not None else None
+            )
         self._last_rejected_proposal = None
         self.status = f"Plan {get_session().plan_id} r{get_session().revision} accepted"
         self.error = ""
@@ -626,6 +697,26 @@ class CompanionController:
                         self.revision_request_status = (
                             f"Request {request_id[:8]} stored for MCP planner"
                         )
+                elif message.get("kind") == "revision_thread_history":
+                    try:
+                        history = validate_revision_thread_history(
+                            message.get("history"),
+                            instance_id=self.instance_id,
+                        )
+                        self._store_revision_history_page(history)
+                        self.revision_history_error = ""
+                    except (KeyError, TypeError, ValueError) as error:
+                        self.revision_history_error = str(error)
+                        self.error = str(error)
+                        self.status = "Revision history rejected"
+                        self.report("error", error=self.error)
+                elif message.get("kind") == "revision_thread_history_unavailable":
+                    self.revision_history_error = str(
+                        message.get(
+                            "message",
+                            "Runtime revision history is unavailable",
+                        )
+                    )
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"

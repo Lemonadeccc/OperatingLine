@@ -238,6 +238,15 @@ describe('OperatingLine persistence', () => {
     expect(database.getGuideReplanProposalForRequest(firstRequest.requestId)).toEqual(
       firstProposal,
     );
+    const firstDecision = proposalDecision(firstProposal.proposalId, firstThreadRequest.instanceId);
+    expect(database.recordGuideProposalDecision(firstDecision)).toBe('accepted');
+    expect(
+      database.getGuideProposalDecision(
+        firstProposal.proposalId,
+        'blender',
+        firstThreadRequest.instanceId,
+      ),
+    ).toEqual(firstDecision);
 
     const secondRequest = revisionRequest();
     const secondThreadRequest = {
@@ -254,6 +263,45 @@ describe('OperatingLine persistence', () => {
     expect(database.getGuideRevisionThreadHead(firstRequest.requestId)).toEqual(
       secondThreadRequest,
     );
+    expect(
+      database.listGuideRevisionThreadTurns(
+        firstRequest.requestId,
+        'blender',
+        firstThreadRequest.instanceId,
+        null,
+        20,
+      ),
+    ).toEqual([
+      { request: secondThreadRequest, proposal: null, decision: null },
+      { request: firstThreadRequest, proposal: firstProposal, decision: firstDecision },
+    ]);
+    expect(
+      database.listGuideRevisionThreadTurns(
+        firstRequest.requestId,
+        'blender',
+        firstThreadRequest.instanceId,
+        2,
+        20,
+      ),
+    ).toEqual([{ request: firstThreadRequest, proposal: firstProposal, decision: firstDecision }]);
+    expect(
+      database.listGuideRevisionThreadTurns(
+        firstRequest.requestId,
+        'gimp',
+        firstThreadRequest.instanceId,
+        null,
+        20,
+      ),
+    ).toEqual([]);
+    expect(() =>
+      database.listGuideRevisionThreadTurns(
+        firstRequest.requestId,
+        'blender',
+        firstThreadRequest.instanceId,
+        0,
+        20,
+      ),
+    ).toThrow('positive safe integer');
     expect(() =>
       database.recordGuideRevisionRequest({
         ...revisionRequest(),

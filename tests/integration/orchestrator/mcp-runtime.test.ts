@@ -155,6 +155,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.replan.requests.list' },
+            { name: 'operatingline.replan.thread.get' },
             { name: 'operatingline.eval.export' },
             { name: 'operatingline.replan.propose' },
             { name: 'operatingline.guide.publish' },
@@ -650,6 +651,27 @@ describe('OperatingLine runtime', () => {
         },
       });
 
+      const awaitingDecision = await callMcpTool(runtime, 191, 'operatingline.replan.thread.get', {
+        threadId: requestId,
+        targetAdapterId: 'blender',
+        instanceId,
+      });
+      expect(JSON.parse(awaitingDecision.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        threadId: requestId,
+        latestTurn: 1,
+        status: 'awaiting_decision',
+        turns: [
+          {
+            turn: 1,
+            state: 'awaiting_decision',
+            request: { requestId, message: revisionRequest.message },
+            proposal: { revisionRequestId: requestId, planDiff: { summary: { planFields: 1 } } },
+            decision: null,
+          },
+        ],
+        page: { beforeTurn: null, nextBeforeTurn: null, hasMore: false },
+      });
+
       const noPending = await callMcpTool(runtime, 20, 'operatingline.replan.requests.list', {
         targetAdapterId: 'blender',
       });
@@ -676,6 +698,60 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(`${runtime.baseUrl}/api/v1/guide`, { headers }).then((response) => response.json()),
       ).resolves.toEqual({ plan: null });
+
+      const prematureContinuationId = randomUUID();
+      const prematureContinuation = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/revision-request`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            ...revisionRequest,
+            requestId: prematureContinuationId,
+            basePlan: replanned,
+            revisionThread: {
+              threadId: requestId,
+              turn: 2,
+              parentRequestId: requestId,
+            },
+          }),
+        },
+      );
+      expect(prematureContinuation.status).toBe(422);
+      await expect(prematureContinuation.json()).resolves.toMatchObject({
+        message: expect.stringContaining('must be accepted in the same host instance'),
+      });
+
+      const acceptedDecision = {
+        protocolVersion: '1.1.0',
+        decisionId: randomUUID(),
+        proposalId: JSON.parse(proposed.result?.content?.[0]?.text ?? '{}').proposalId,
+        adapterId: 'blender',
+        instanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      };
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(acceptedDecision),
+        },
+      );
+      expect(decisionResponse.status).toBe(200);
+      await expect(decisionResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const historyUrl = new URL('/api/v1/replan/thread', runtime.baseUrl);
+      historyUrl.searchParams.set('threadId', requestId);
+      historyUrl.searchParams.set('targetAdapterId', 'blender');
+      historyUrl.searchParams.set('instanceId', instanceId);
+      await expect(
+        fetch(historyUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({
+        status: 'accepted',
+        turns: [{ turn: 1, state: 'accepted', decision: { decision: 'accepted' } }],
+      });
 
       const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
         requestId,
@@ -752,6 +828,32 @@ describe('OperatingLine runtime', () => {
           targetPlan: { id: 'snowman-demo', revision: 6 },
           summary: { planFields: 1 },
         },
+      });
+
+      const latestHistory = await callMcpTool(runtime, 221, 'operatingline.replan.thread.get', {
+        threadId: requestId,
+        targetAdapterId: 'blender',
+        instanceId,
+        limit: 1,
+      });
+      expect(JSON.parse(latestHistory.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        latestTurn: 2,
+        status: 'awaiting_decision',
+        turns: [{ turn: 2, request: { requestId: continuedRequestId } }],
+        page: { nextBeforeTurn: 2, hasMore: true },
+      });
+      const previousHistory = await callMcpTool(runtime, 222, 'operatingline.replan.thread.get', {
+        threadId: requestId,
+        targetAdapterId: 'blender',
+        instanceId,
+        beforeTurn: 2,
+        limit: 1,
+      });
+      expect(JSON.parse(previousHistory.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        latestTurn: 2,
+        status: 'awaiting_decision',
+        turns: [{ turn: 1, state: 'accepted', request: { requestId } }],
+        page: { beforeTurn: 2, nextBeforeTurn: null, hasMore: false },
       });
 
       guideUrl.searchParams.set('instanceId', instanceId);

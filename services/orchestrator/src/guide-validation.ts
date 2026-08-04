@@ -5,6 +5,7 @@ import type {
   ActionCatalog,
   GuidePlan,
   GuideProposal,
+  GuideProposalDecision,
   GuideRevisionRequest,
 } from '@operatingline/protocol';
 
@@ -158,6 +159,7 @@ export function validateGuideRevisionThread(
   request: GuideRevisionRequest,
   threadHead: GuideRevisionRequest | null,
   parentProposal: GuideProposal | null,
+  parentDecision: GuideProposalDecision | null,
 ): void {
   const thread = request.revisionThread;
   if (thread === undefined) {
@@ -190,6 +192,17 @@ export function validateGuideRevisionThread(
   }
   if (parentProposal === null || parentProposal.revisionRequestId !== threadHead.requestId) {
     throw new Error(`Guide revision thread parent has no linked proposal: ${threadHead.requestId}`);
+  }
+  if (
+    parentDecision === null ||
+    parentDecision.proposalId !== parentProposal.proposalId ||
+    parentDecision.adapterId !== request.adapterId ||
+    parentDecision.instanceId !== request.instanceId ||
+    parentDecision.decision !== 'accepted'
+  ) {
+    throw new Error(
+      `Guide revision thread parent proposal must be accepted in the same host instance: ${parentProposal.proposalId}`,
+    );
   }
   if (!isDeepStrictEqual(parentProposal.plan, request.basePlan)) {
     throw new Error(

@@ -188,24 +188,61 @@ def configure_state():
         }
         accepted_session = extension.get_session()
         companion = extension.get_companion()
-        assert extension.get_companion().stage_proposal(
-            {
-                "protocolVersion": "1.1.0",
-                "proposalId": str(uuid.uuid4()),
-                "targetAdapterId": "blender",
-                "targetInstanceId": companion.instance_id,
-                "revisionRequestId": request_id,
-                "revisionThread": {
-                    "threadId": request_id,
+        revision_thread = {
+            "threadId": request_id,
+            "turn": 1,
+            "parentRequestId": None,
+        }
+        proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": str(uuid.uuid4()),
+            "targetAdapterId": "blender",
+            "targetInstanceId": companion.instance_id,
+            "revisionRequestId": request_id,
+            "revisionThread": revision_thread,
+            "catalogVersion": "1.1.0",
+            "plan": plan,
+            "planDiff": plan_diff,
+            "proposedAt": "2026-08-04T12:00:00Z",
+        }
+        assert extension.get_companion().stage_proposal(proposal)
+        revision_request = {
+            "protocolVersion": "1.1.0",
+            "requestId": request_id,
+            "adapterId": "blender",
+            "catalogVersion": "1.1.0",
+            "instanceId": companion.instance_id,
+            "basePlan": base_plan,
+            "references": [
+                {"nodeId": "snowman.model.head", "nodeNumber": "1.2.3"}
+            ],
+            "message": "@1.2.3 Make this head slightly larger and rougher",
+            "revisionThread": revision_thread,
+            "occurredAt": "2026-08-04T11:59:00Z",
+        }
+        companion.revision_thread_history = {
+            "protocolVersion": "1.1.0",
+            "threadId": request_id,
+            "targetAdapterId": "blender",
+            "instanceId": companion.instance_id,
+            "planId": base_plan["id"],
+            "latestTurn": 1,
+            "status": "awaiting_decision",
+            "turns": [
+                {
                     "turn": 1,
-                    "parentRequestId": None,
-                },
-                "catalogVersion": "1.1.0",
-                "plan": plan,
-                "planDiff": plan_diff,
-                "proposedAt": "2026-08-04T12:00:00Z",
-            }
-        )
+                    "state": "awaiting_decision",
+                    "request": revision_request,
+                    "proposal": proposal,
+                    "decision": None,
+                }
+            ],
+            "page": {
+                "beforeTurn": None,
+                "nextBeforeTurn": None,
+                "hasMore": False,
+            },
+        }
         assert extension.get_session() is accepted_session
         assert extension.get_companion().proposal_session is not None
         assert not session.receipts

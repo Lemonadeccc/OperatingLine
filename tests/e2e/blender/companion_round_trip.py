@@ -189,6 +189,21 @@ def main() -> None:
             "revision": expected_revision + 1,
         }
         assert first_diff["summary"]["updatedSteps"] == 2
+        wait_until(
+            lambda: (
+                controller.revision_thread_history is not None
+                and controller.revision_thread_history["latestTurn"] == 1
+                and controller.revision_thread_history["status"]
+                == "awaiting_decision"
+            ),
+            "first revision history proposal state",
+        )
+        assert controller.revision_thread_history["turns"][0]["request"][
+            "message"
+        ].endswith("Make the head slightly larger and keep the silhouette readable")
+        assert controller.revision_thread_history["turns"][0]["proposal"][
+            "planDiff"
+        ] == first_diff
         assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
         session = operating_line.get_session()
         assert session.revision == expected_revision + 1
@@ -198,6 +213,13 @@ def main() -> None:
             threading.main_thread().ident,
         ]
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
+        wait_until(
+            lambda: (
+                controller.revision_thread_history is not None
+                and controller.revision_thread_history["status"] == "accepted"
+            ),
+            "first revision history acceptance",
+        )
 
         # Continue the accepted revision in the same immutable feedback thread.
         assert bpy.ops.operating_line.reference_node(
@@ -241,6 +263,19 @@ def main() -> None:
             "id": expected_plan_id,
             "revision": expected_revision + 2,
         }
+        wait_until(
+            lambda: (
+                controller.revision_thread_history is not None
+                and controller.revision_thread_history["latestTurn"] == 2
+                and controller.revision_thread_history["status"]
+                == "awaiting_decision"
+                and len(controller.revision_thread_history["turns"]) == 2
+            ),
+            "complete two-turn revision history",
+        )
+        assert [
+            item["state"] for item in controller.revision_thread_history["turns"]
+        ] == ["accepted", "awaiting_decision"]
         assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
         session = operating_line.get_session()
         assert session.revision == expected_revision + 2
@@ -251,6 +286,14 @@ def main() -> None:
             threading.main_thread().ident,
         ]
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
+        wait_until(
+            lambda: (
+                controller.revision_thread_history is not None
+                and controller.revision_thread_history["latestTurn"] == 2
+                and controller.revision_thread_history["status"] == "accepted"
+            ),
+            "second revision history acceptance",
+        )
 
         assert bpy.ops.operating_line.start() == {"FINISHED"}
         start_sequence = controller.last_report["sequence"]
@@ -360,6 +403,7 @@ def main() -> None:
                     "revisionRequestId": revision_request_id,
                     "secondRevisionRequestId": second_revision_request_id,
                     "revisionThreadId": first_thread["threadId"],
+                    "revisionHistoryReviewed": True,
                     "planDiffReviewedBeforeExecution": True,
                     "requestLinkedProposalReviewedBeforeExecution": True,
                 },

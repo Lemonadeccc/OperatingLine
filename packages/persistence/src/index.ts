@@ -66,6 +66,12 @@ export interface GuideRevisionRequestInput {
 
 export type RecordGuideRevisionRequestResult = 'accepted' | 'duplicate' | 'conflict';
 
+export interface StoredGuideRevisionThreadTurn {
+  request: unknown;
+  proposal: unknown | null;
+  decision: unknown | null;
+}
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -103,6 +109,18 @@ export interface OperatingLineDatabase {
   getGuideRevisionRequest(requestId: string): unknown | null;
   getGuideRevisionThreadHead(threadId: string): unknown | null;
   getGuideReplanProposalForRequest(requestId: string): unknown | null;
+  getGuideProposalDecision(
+    proposalId: string,
+    adapterId: string,
+    instanceId: string,
+  ): unknown | null;
+  listGuideRevisionThreadTurns(
+    threadId: string,
+    adapterId: string,
+    instanceId: string,
+    beforeTurn: number | null,
+    limit: number,
+  ): StoredGuideRevisionThreadTurn[];
   listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
@@ -352,6 +370,30 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     ORDER BY CAST(json_extract(payload, '$.revisionThread.turn') AS INTEGER) DESC
     LIMIT 1
   `);
+  const listRevisionThreadTurns = sqlite.prepare(`
+    SELECT
+      request.payload AS request_payload,
+      proposal.payload AS proposal_payload,
+      decision.payload AS decision_payload
+    FROM guide_revision_requests AS request
+    LEFT JOIN guide_revision_request_proposals AS linked
+      ON linked.request_id = request.request_id
+    LEFT JOIN guide_proposals AS proposal
+      ON proposal.proposal_id = linked.proposal_id
+    LEFT JOIN guide_proposal_decisions AS decision
+      ON decision.proposal_id = proposal.proposal_id
+      AND decision.adapter_id = request.adapter_id
+      AND decision.instance_id = request.instance_id
+    WHERE json_extract(request.payload, '$.revisionThread.threadId') = ?
+      AND request.adapter_id = ?
+      AND request.instance_id = ?
+      AND (
+        ? IS NULL
+        OR CAST(json_extract(request.payload, '$.revisionThread.turn') AS INTEGER) < ?
+      )
+    ORDER BY CAST(json_extract(request.payload, '$.revisionThread.turn') AS INTEGER) DESC
+    LIMIT ?
+  `);
   const insertRevisionRequestProposal = sqlite.prepare(`
     INSERT INTO guide_revision_request_proposals (request_id, proposal_id, linked_at)
     VALUES (?, ?, ?)
@@ -373,7 +415,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     WHERE decision_id = ?
   `);
   const findGuideProposalDecision = sqlite.prepare(`
-    SELECT decision
+    SELECT decision, payload
     FROM guide_proposal_decisions
     WHERE proposal_id = ? AND adapter_id = ? AND instance_id = ?
   `);
@@ -689,6 +731,60 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw new Error('SQLite returned an invalid guide replan proposal payload');
       }
       return JSON.parse(row.payload) as unknown;
+    },
+    getGuideProposalDecision(proposalId, adapterId, instanceId) {
+      const row = findGuideProposalDecision.get(proposalId, adapterId, instanceId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide proposal decision payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    listGuideRevisionThreadTurns(threadId, adapterId, instanceId, beforeTurn, limit) {
+      if (beforeTurn !== null && (!Number.isSafeInteger(beforeTurn) || beforeTurn < 1)) {
+        throw new Error('Revision history cursor must be a positive safe integer or null');
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 101) {
+        throw new Error('Revision history limit must be an integer between 1 and 101');
+      }
+      return listRevisionThreadTurns
+        .all(threadId, adapterId, instanceId, beforeTurn, beforeTurn, limit)
+        .map((row) => {
+          const candidate = row as {
+            request_payload?: unknown;
+            proposal_payload?: unknown;
+            decision_payload?: unknown;
+          };
+          if (typeof candidate.request_payload !== 'string') {
+            throw new Error('SQLite returned an invalid guide revision history request');
+          }
+          if (
+            candidate.proposal_payload !== null &&
+            typeof candidate.proposal_payload !== 'string'
+          ) {
+            throw new Error('SQLite returned an invalid guide revision history proposal');
+          }
+          if (
+            candidate.decision_payload !== null &&
+            typeof candidate.decision_payload !== 'string'
+          ) {
+            throw new Error('SQLite returned an invalid guide revision history decision');
+          }
+          return {
+            request: JSON.parse(candidate.request_payload) as unknown,
+            proposal:
+              candidate.proposal_payload === null
+                ? null
+                : (JSON.parse(candidate.proposal_payload) as unknown),
+            decision:
+              candidate.decision_payload === null
+                ? null
+                : (JSON.parse(candidate.decision_payload) as unknown),
+          };
+        });
     },
     listPendingGuideRevisionRequests(adapterId, limit) {
       return listPendingRevisionRequests

@@ -1,5 +1,7 @@
 """Recursive VIEW_3D sidebar UI for OperatingLine plans."""
 
+from unicodedata import east_asian_width
+
 import bpy
 
 from ..application import GuidanceState, node_state
@@ -226,6 +228,125 @@ def _draw_revision_request(layout, context, companion) -> None:
         composer.label(text="Connect the runtime to send", icon="UNLINKED")
 
 
+def _compact_history_message(value, limit: int = 76) -> str:
+    rendered = " ".join(str(value).split())
+    return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
+
+
+def _display_columns(value: str) -> int:
+    return sum(
+        2 if east_asian_width(character) in {"F", "W"} else 1
+        for character in value
+    )
+
+
+def _wrap_history_message(value, max_columns: int = 24) -> list[str]:
+    """Wrap a complete revision message for Blender's narrow sidebar."""
+    rendered = " ".join(str(value).split())
+    if not rendered:
+        return [""]
+
+    lines: list[str] = []
+    current = ""
+    for word in rendered.split(" "):
+        candidate = word if not current else f"{current} {word}"
+        if _display_columns(candidate) <= max_columns:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+            current = ""
+        while _display_columns(word) > max_columns:
+            split_at = 0
+            width = 0
+            for character in word:
+                character_width = (
+                    2 if east_asian_width(character) in {"F", "W"} else 1
+                )
+                if width + character_width > max_columns:
+                    break
+                width += character_width
+                split_at += 1
+            lines.append(word[:split_at])
+            word = word[split_at:]
+        current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _draw_revision_history(layout, context, companion) -> None:
+    history = companion.revision_thread_history
+    if history is None:
+        if companion.revision_history_error:
+            warning = layout.box()
+            warning.label(text="Revision history unavailable", icon="ERROR")
+            warning.label(text=_compact_history_message(companion.revision_history_error))
+        return
+
+    history_box = layout.box()
+    history_box.label(text="Revision history", icon="TIME")
+    history_box.prop(
+        context.window_manager,
+        "operating_line_revision_history_expanded",
+        text="Show all loaded turns",
+    )
+    turns = history["turns"]
+    if turns:
+        history_box.label(text=f"Thread {history['threadId'][:8]}", icon="LINKED")
+        history_box.label(
+            text=f"Turns {turns[0]['turn']}-{turns[-1]['turn']} / latest {history['latestTurn']}"
+        )
+    expanded = context.window_manager.operating_line_revision_history_expanded
+    visible_turns = turns if expanded else turns[-3:]
+    hidden_turns = len(turns) - len(visible_turns)
+    if hidden_turns > 0:
+        history_box.label(text=f"{hidden_turns} earlier loaded turns collapsed")
+
+    state_presentation = {
+        "awaiting_proposal": ("Waiting for planner", "TIME"),
+        "awaiting_decision": ("Awaiting decision", "QUESTION"),
+        "accepted": ("Accepted", "CHECKMARK"),
+        "rejected": ("Rejected", "CANCEL"),
+    }
+    for record in visible_turns:
+        label, icon = state_presentation[record["state"]]
+        turn_box = history_box.box()
+        turn_box.label(text=f"Turn {record['turn']}  {label}", icon=icon)
+        references = " ".join(
+            f"@{item['nodeNumber']}" for item in record["request"]["references"]
+        )
+        turn_box.label(text=f"You {references}", icon="GREASEPENCIL")
+        for line in _wrap_history_message(record["request"]["message"]):
+            turn_box.label(text=line)
+        proposal = record["proposal"]
+        if proposal is not None:
+            summary = proposal["planDiff"]["summary"]
+            turn_box.label(
+                text=f"Planner revision {proposal['plan']['revision']}",
+                icon="FILE_REFRESH",
+            )
+            turn_box.label(
+                text=(
+                    f"Diff +{summary['addedSteps']} -{summary['removedSteps']} "
+                    f"~{summary['updatedSteps']} moved {summary['movedSteps']}"
+                )
+            )
+
+    page = history["page"]
+    if page["hasMore"]:
+        load = history_box.row()
+        load.enabled = companion.connected
+        load.operator("operating_line.load_older_revision_history", icon="IMPORT")
+    elif turns and turns[0]["turn"] == 1:
+        history_box.label(text="Complete thread loaded", icon="CHECKMARK")
+    if companion.revision_history_error:
+        history_box.label(
+            text=_compact_history_message(companion.revision_history_error),
+            icon="INFO",
+        )
+
+
 def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> None:
     start = layout.row()
     start.scale_y = 1.15
@@ -318,6 +439,7 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
             connection.label(text=companion.error, icon="ERROR")
 
         _draw_proposal_summary(layout, companion, session)
+        _draw_revision_history(layout, context, companion)
         layout.prop(context.scene, "operating_line_replace_factory_scene")
         _draw_walkthrough_controls(
             layout,

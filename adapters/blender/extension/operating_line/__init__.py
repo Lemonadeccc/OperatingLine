@@ -97,6 +97,18 @@ def register() -> None:
             maxlen=4000,
             options={"SKIP_SAVE"},
         )
+    if not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_revision_history_expanded",
+    ):
+        bpy.types.WindowManager.operating_line_revision_history_expanded = (
+            bpy.props.BoolProperty(
+                name="Show all loaded revision turns",
+                description="Expand every revision turn already loaded from the runtime",
+                default=False,
+                options={"SKIP_SAVE"},
+            )
+        )
     if _session is None:
         _session = DemoSession(
             SNOWMAN_TASK_TREE,
@@ -132,6 +144,7 @@ def unregister() -> None:
         "operating_line_runtime_url",
         "operating_line_bearer_token",
         "operating_line_revision_message",
+        "operating_line_revision_history_expanded",
     ):
         if hasattr(bpy.types.WindowManager, property_name):
             delattr(bpy.types.WindowManager, property_name)

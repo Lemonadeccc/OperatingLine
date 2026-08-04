@@ -1,5 +1,6 @@
 """Pure Python tests for deterministic Blender guidance state."""
 
+from copy import deepcopy
 from importlib import import_module
 import sys
 import unittest
@@ -27,6 +28,7 @@ node_state = application.node_state
 relevant_steps = application.relevant_steps
 step_state = application.step_state
 validate_plan_diff = application.validate_plan_diff
+validate_revision_thread_history = application.validate_revision_thread_history
 ActionSpec = domain.ActionSpec
 TaskNode = domain.TaskNode
 STATE_COLORS = visual_theme.STATE_COLORS
@@ -259,6 +261,160 @@ class GuidanceStateTests(unittest.TestCase):
         invalid = {**diff, "summary": {**diff["summary"], "updatedSteps": 0}}
         with self.assertRaisesRegex(ValueError, "summary is inconsistent"):
             validate_plan_diff(invalid, plan)
+
+    def test_revision_history_validation_keeps_exact_messages_and_decisions(self) -> None:
+        thread_id = str(uuid.uuid4())
+        instance_id = str(uuid.uuid4())
+        proposal_id = str(uuid.uuid4())
+        plan = {"id": "snowman", "revision": 2}
+        request = {
+            "protocolVersion": "1.1.0",
+            "requestId": thread_id,
+            "adapterId": "blender",
+            "catalogVersion": "1.1.0",
+            "instanceId": instance_id,
+            "basePlan": {"id": "snowman", "revision": 1},
+            "references": [{"nodeId": "head", "nodeNumber": "1.2"}],
+            "message": "@1.2 Make the head larger",
+            "revisionThread": {
+                "threadId": thread_id,
+                "turn": 1,
+                "parentRequestId": None,
+            },
+            "occurredAt": "2026-08-05T10:00:00Z",
+        }
+        proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": proposal_id,
+            "targetAdapterId": "blender",
+            "targetInstanceId": instance_id,
+            "plan": plan,
+            "revisionRequestId": thread_id,
+            "revisionThread": request["revisionThread"],
+            "planDiff": {
+                "basePlan": {"id": "snowman", "revision": 1},
+                "targetPlan": plan,
+                "summary": {
+                    "planFields": 0,
+                    "addedSteps": 0,
+                    "removedSteps": 0,
+                    "updatedSteps": 0,
+                    "movedSteps": 0,
+                },
+                "planChanges": [],
+                "stepChanges": [],
+            },
+            "catalogVersion": "1.1.0",
+            "proposedAt": "2026-08-05T10:01:00Z",
+        }
+        decision = {
+            "protocolVersion": "1.1.0",
+            "decisionId": str(uuid.uuid4()),
+            "proposalId": proposal_id,
+            "adapterId": "blender",
+            "instanceId": instance_id,
+            "decision": "accepted",
+            "occurredAt": "2026-08-05T10:02:00Z",
+        }
+        history = {
+            "protocolVersion": "1.1.0",
+            "threadId": thread_id,
+            "targetAdapterId": "blender",
+            "instanceId": instance_id,
+            "planId": "snowman",
+            "latestTurn": 1,
+            "status": "accepted",
+            "turns": [
+                {
+                    "turn": 1,
+                    "state": "accepted",
+                    "request": request,
+                    "proposal": proposal,
+                    "decision": decision,
+                }
+            ],
+            "page": {
+                "beforeTurn": None,
+                "nextBeforeTurn": None,
+                "hasMore": False,
+            },
+        }
+        validated = validate_revision_thread_history(
+            history,
+            instance_id=instance_id,
+        )
+        self.assertEqual(validated["turns"][0]["request"]["message"], request["message"])
+        history["turns"][0]["decision"]["instanceId"] = str(uuid.uuid4())
+        with self.assertRaisesRegex(ValueError, "outside its proposal scope"):
+            validate_revision_thread_history(history, instance_id=instance_id)
+
+        history["turns"][0]["decision"]["instanceId"] = instance_id
+        second_request_id = str(uuid.uuid4())
+        second_request = {
+            **deepcopy(request),
+            "requestId": second_request_id,
+            "basePlan": plan,
+            "message": "@1.2 Make the head rougher",
+            "revisionThread": {
+                "threadId": thread_id,
+                "turn": 2,
+                "parentRequestId": request["requestId"],
+            },
+            "occurredAt": "2026-08-05T10:03:00Z",
+        }
+        second_plan = {"id": "snowman", "revision": 3}
+        second_proposal = {
+            **deepcopy(proposal),
+            "proposalId": str(uuid.uuid4()),
+            "plan": second_plan,
+            "revisionRequestId": second_request_id,
+            "revisionThread": second_request["revisionThread"],
+            "planDiff": {
+                **deepcopy(proposal["planDiff"]),
+                "basePlan": plan,
+                "targetPlan": second_plan,
+            },
+            "proposedAt": "2026-08-05T10:04:00Z",
+        }
+        history["latestTurn"] = 2
+        history["status"] = "awaiting_decision"
+        history["turns"].append(
+            {
+                "turn": 2,
+                "state": "awaiting_decision",
+                "request": second_request,
+                "proposal": second_proposal,
+                "decision": None,
+            }
+        )
+        validate_revision_thread_history(history, instance_id=instance_id)
+
+        broken_request_chain = deepcopy(history)
+        broken_request_chain["turns"][1]["request"]["revisionThread"][
+            "parentRequestId"
+        ] = str(uuid.uuid4())
+        broken_request_chain["turns"][1]["proposal"]["revisionThread"] = (
+            broken_request_chain["turns"][1]["request"]["revisionThread"]
+        )
+        with self.assertRaisesRegex(ValueError, "parent request chain"):
+            validate_revision_thread_history(
+                broken_request_chain,
+                instance_id=instance_id,
+            )
+
+        broken_proposal_chain = deepcopy(history)
+        proposal_thread = broken_proposal_chain["turns"][1]["proposal"][
+            "revisionThread"
+        ]
+        broken_proposal_chain["turns"][1]["proposal"]["revisionThread"] = {
+            **proposal_thread,
+            "parentRequestId": str(uuid.uuid4()),
+        }
+        with self.assertRaisesRegex(ValueError, "wrong thread turn"):
+            validate_revision_thread_history(
+                broken_proposal_chain,
+                instance_id=instance_id,
+            )
 
 
 if __name__ == "__main__":

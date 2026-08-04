@@ -21,6 +21,9 @@
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
 协议 `1.1.0` 还增加线性 `revisionThread`；`guide-plan-diff.schema.json` 定义服务端计算并随请求关联
 Proposal 投递的精确 Plan/节点/字段前后值。`1.0.0` payload 仍可读取，但新 Companion 产生 `1.1.0`。
+`guide-revision-thread-history-request.schema.json` 与
+`guide-revision-thread-history.schema.json` 定义按宿主实例隔离、以 `beforeTurn` 向前分页的完整修订
+记录；每轮原样关联请求、Proposal、diff 和人工决策。
 
 `eval-export-request.schema.json` 与 `eval-export-bundle.schema.json` 定义按 adapter、Plan 和可选
 Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录版本、相关完整计划与提案、人工
@@ -41,7 +44,10 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - 修订请求以 `requestId` 幂等；相同 ID 的不同 payload 是 conflict。引用的 `nodeId + nodeNumber`
   必须与请求携带的完整 base Plan 一致。
 - `revisionThread` 的首轮使用 `threadId = requestId`；后续 turn 必须指向当前 thread head，并以该父
-  请求关联 Proposal 的完整计划作为精确 base。当前协议只允许线性历史，不静默创建分支。
+  请求关联且已在同一宿主实例接受的 Proposal 完整计划作为精确 base。当前协议只允许线性历史，
+  不静默创建分支。
+- 修订历史默认返回最新一页、页内按 turn 正序排列；`nextBeforeTurn` 只在仍有更早记录时出现，
+  调用方将它作为下一次 `beforeTurn`，单页最多 100 轮。
 - 请求关联重规划必须使用同一 Plan ID、请求绑定的精确 `catalogVersion` 和严格更高 revision；返回的
   Proposal 带 `targetInstanceId`、`revisionThread` 与确定性 `planDiff`，只投递给发起请求的 Companion。
 - AI 在生成可执行步骤前应读取目标宿主的精确 ActionCatalog/PlanningContext。Proposal 的动作名、

@@ -29,6 +29,9 @@ STEP_FIELDS = frozenset(
 SUMMARY_FIELDS = frozenset(
     {"planFields", "addedSteps", "removedSteps", "updatedSteps", "movedSteps"}
 )
+REVISION_TURN_STATES = frozenset(
+    {"awaiting_proposal", "awaiting_decision", "accepted", "rejected"}
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,12 @@ def _require_uuid(value: Any, label: str) -> str:
 def _require_nonnegative_integer(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _require_positive_integer(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
     return value
 
 
@@ -128,6 +137,18 @@ def new_revision_thread(
 def _validate_plan_reference(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {"id", "revision"}:
         raise ValueError(f"{label} does not match the protocol")
+    plan_id = value.get("id")
+    revision = value.get("revision")
+    if not isinstance(plan_id, str) or not plan_id:
+        raise ValueError(f"{label} id must be a non-empty string")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision <= 0:
+        raise ValueError(f"{label} revision must be a positive integer")
+    return {"id": plan_id, "revision": revision}
+
+
+def _validate_embedded_plan_identity(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
     plan_id = value.get("id")
     revision = value.get("revision")
     if not isinstance(plan_id, str) or not plan_id:
@@ -256,10 +277,273 @@ def validate_plan_diff(value: Any, target_plan: dict[str, Any]) -> dict[str, Any
     return deepcopy(value)
 
 
+def _validate_history_request(
+    value: Any,
+    *,
+    thread_id: str,
+    turn: int,
+    instance_id: str,
+    plan_id: str,
+) -> None:
+    expected_fields = {
+        "protocolVersion",
+        "requestId",
+        "adapterId",
+        "catalogVersion",
+        "instanceId",
+        "basePlan",
+        "references",
+        "message",
+        "revisionThread",
+        "occurredAt",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("Revision history request does not match the protocol")
+    if value.get("protocolVersion") != "1.1.0":
+        raise ValueError("Revision history requires protocol 1.1 requests")
+    request_id = _require_uuid(value.get("requestId"), "Revision history request id")
+    if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
+        raise ValueError("Revision history request is outside this Blender instance")
+    thread = validate_revision_thread(value.get("revisionThread"), request_id=request_id)
+    if thread["threadId"] != thread_id or thread["turn"] != turn:
+        raise ValueError("Revision history request uses the wrong thread turn")
+    base_plan = _validate_embedded_plan_identity(
+        value.get("basePlan"), "Revision history base plan"
+    )
+    if base_plan["id"] != plan_id:
+        raise ValueError("Revision history cannot change plan id")
+    message = value.get("message")
+    if not isinstance(message, str) or not message.strip() or len(message) > 4000:
+        raise ValueError("Revision history request message is invalid")
+    references = value.get("references")
+    if not isinstance(references, list) or not 1 <= len(references) <= 8:
+        raise ValueError("Revision history request references are invalid")
+    for reference in references:
+        if not isinstance(reference, dict) or set(reference) != {
+            "nodeId",
+            "nodeNumber",
+        }:
+            raise ValueError("Revision history node reference does not match the protocol")
+        if not isinstance(reference.get("nodeId"), str) or not reference["nodeId"]:
+            raise ValueError("Revision history node reference id is invalid")
+        node_number = reference.get("nodeNumber")
+        if (
+            not isinstance(node_number, str)
+            or NODE_NUMBER_PATTERN.fullmatch(node_number) is None
+        ):
+            raise ValueError("Revision history node reference number is invalid")
+
+
+def _validate_history_proposal(
+    value: Any,
+    *,
+    request: dict[str, Any],
+    thread_id: str,
+    turn: int,
+    instance_id: str,
+    plan_id: str,
+) -> None:
+    required_fields = {
+        "protocolVersion",
+        "proposalId",
+        "targetAdapterId",
+        "targetInstanceId",
+        "plan",
+        "revisionRequestId",
+        "revisionThread",
+        "planDiff",
+        "catalogVersion",
+        "proposedAt",
+    }
+    if not isinstance(value, dict) or set(value) != required_fields:
+        raise ValueError("Revision history proposal does not match the protocol")
+    _require_uuid(value.get("proposalId"), "Revision history proposal id")
+    if (
+        value.get("protocolVersion") != "1.1.0"
+        or value.get("targetAdapterId") != "blender"
+        or value.get("targetInstanceId") != instance_id
+        or value.get("revisionRequestId") != request.get("requestId")
+    ):
+        raise ValueError("Revision history proposal is outside its request scope")
+    thread = validate_revision_thread(
+        value.get("revisionThread"),
+        request_id=request["requestId"],
+    )
+    if (
+        thread["threadId"] != thread_id
+        or thread["turn"] != turn
+        or thread != request.get("revisionThread")
+    ):
+        raise ValueError("Revision history proposal uses the wrong thread turn")
+    plan = value.get("plan")
+    if not isinstance(plan, dict):
+        raise ValueError("Revision history proposal plan must be an object")
+    plan_reference = _validate_embedded_plan_identity(
+        plan, "Revision history proposal plan"
+    )
+    if plan_reference["id"] != plan_id:
+        raise ValueError("Revision history proposal cannot change plan id")
+    validate_plan_diff(value.get("planDiff"), plan)
+
+
+def _validate_history_decision(
+    value: Any,
+    *,
+    proposal: dict[str, Any],
+    instance_id: str,
+) -> str:
+    expected_fields = {
+        "protocolVersion",
+        "decisionId",
+        "proposalId",
+        "adapterId",
+        "instanceId",
+        "decision",
+        "occurredAt",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("Revision history decision does not match the protocol")
+    _require_uuid(value.get("decisionId"), "Revision history decision id")
+    decision = value.get("decision")
+    if (
+        value.get("proposalId") != proposal.get("proposalId")
+        or value.get("adapterId") != "blender"
+        or value.get("instanceId") != instance_id
+        or decision not in {"accepted", "rejected"}
+    ):
+        raise ValueError("Revision history decision is outside its proposal scope")
+    return decision
+
+
+def validate_revision_thread_history(
+    value: Any,
+    *,
+    instance_id: str,
+) -> dict[str, Any]:
+    expected_fields = {
+        "protocolVersion",
+        "threadId",
+        "targetAdapterId",
+        "instanceId",
+        "planId",
+        "latestTurn",
+        "status",
+        "turns",
+        "page",
+    }
+    if not isinstance(value, dict) or set(value) != expected_fields:
+        raise ValueError("Revision thread history does not match the protocol")
+    if value.get("protocolVersion") != "1.1.0":
+        raise ValueError("Unsupported revision history protocol version")
+    thread_id = _require_uuid(value.get("threadId"), "Revision history thread id")
+    _require_uuid(instance_id, "Blender instance id")
+    if value.get("targetAdapterId") != "blender" or value.get("instanceId") != instance_id:
+        raise ValueError("Revision history targets a different Blender instance")
+    plan_id = value.get("planId")
+    if not isinstance(plan_id, str) or not plan_id:
+        raise ValueError("Revision history plan id must be non-empty")
+    latest_turn = _require_positive_integer(
+        value.get("latestTurn"), "Revision history latest turn"
+    )
+    status = value.get("status")
+    if status not in REVISION_TURN_STATES:
+        raise ValueError("Revision history status is invalid")
+
+    page = value.get("page")
+    if not isinstance(page, dict) or set(page) != {
+        "beforeTurn",
+        "nextBeforeTurn",
+        "hasMore",
+    }:
+        raise ValueError("Revision history page does not match the protocol")
+    for field in ("beforeTurn", "nextBeforeTurn"):
+        if page[field] is not None:
+            _require_positive_integer(page[field], f"Revision history page {field}")
+    if not isinstance(page.get("hasMore"), bool):
+        raise ValueError("Revision history page hasMore must be boolean")
+
+    turns = value.get("turns")
+    if not isinstance(turns, list) or len(turns) > 100:
+        raise ValueError("Revision history turns must be a bounded array")
+    previous_turn = None
+    previous_request_id = None
+    for record in turns:
+        if not isinstance(record, dict) or set(record) != {
+            "turn",
+            "state",
+            "request",
+            "proposal",
+            "decision",
+        }:
+            raise ValueError("Revision history turn does not match the protocol")
+        turn = _require_positive_integer(record.get("turn"), "Revision history turn")
+        if previous_turn is not None and turn != previous_turn + 1:
+            raise ValueError("Revision history page turns must be contiguous")
+        if turn > latest_turn:
+            raise ValueError("Revision history turn exceeds the latest turn")
+        previous_turn = turn
+        request = record.get("request")
+        _validate_history_request(
+            request,
+            thread_id=thread_id,
+            turn=turn,
+            instance_id=instance_id,
+            plan_id=plan_id,
+        )
+        if (
+            previous_request_id is not None
+            and request["revisionThread"]["parentRequestId"]
+            != previous_request_id
+        ):
+            raise ValueError("Revision history page breaks its parent request chain")
+        previous_request_id = request["requestId"]
+        proposal = record.get("proposal")
+        decision = record.get("decision")
+        if proposal is None:
+            expected_state = "awaiting_proposal"
+            if decision is not None:
+                raise ValueError("A revision history decision requires a proposal")
+        else:
+            _validate_history_proposal(
+                proposal,
+                request=request,
+                thread_id=thread_id,
+                turn=turn,
+                instance_id=instance_id,
+                plan_id=plan_id,
+            )
+            expected_state = "awaiting_decision"
+            if decision is not None:
+                expected_state = _validate_history_decision(
+                    decision,
+                    proposal=proposal,
+                    instance_id=instance_id,
+                )
+        if record.get("state") != expected_state:
+            raise ValueError("Revision history turn state is inconsistent")
+
+    first_turn = turns[0]["turn"] if turns else None
+    if page["beforeTurn"] is not None and any(
+        record["turn"] >= page["beforeTurn"] for record in turns
+    ):
+        raise ValueError("Revision history page does not precede its cursor")
+    if page["beforeTurn"] is None and turns and turns[-1]["turn"] != latest_turn:
+        raise ValueError("Newest revision history page must include the latest turn")
+    if page["hasMore"]:
+        if first_turn is None or page["nextBeforeTurn"] != first_turn:
+            raise ValueError("Revision history continuation cursor is inconsistent")
+    elif page["nextBeforeTurn"] is not None:
+        raise ValueError("Complete revision history page cannot have a cursor")
+    if turns and turns[-1]["turn"] == latest_turn and turns[-1]["state"] != status:
+        raise ValueError("Revision history latest status is inconsistent")
+    return deepcopy(value)
+
+
 __all__ = (
     "RevisionLineage",
     "lineage_from_proposal",
     "new_revision_thread",
     "validate_plan_diff",
     "validate_revision_thread",
+    "validate_revision_thread_history",
 )

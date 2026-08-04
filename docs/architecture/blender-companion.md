@@ -84,7 +84,10 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 只读预览。Protocol `1.1.0` 的 Proposal 还必须带线性 thread 元数据和 Plan diff；Panel 在 Accept 前
 显示 `+ / - / ~ / moved`、变化节点、字段和可紧凑表示的 action 参数前后值。接受请求关联 Proposal
 后，新的 active-plan 引用会继承 `threadId`、递增 turn 并把上一 request 作为 parent。输入区仍明确
-称为 Revision request，因为当前没有内置模型、流式回复或完整聊天记录。
+称为 Revision request，因为当前没有内置模型或流式回复。后台 transport 还会读取当前 thread 的
+最新历史页；主线程验证 request/proposal/diff/decision 关系并在 Sidebar 显示最近三轮。用户可展开
+全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
+不会调用场景 API。
 
 ## revision 4 雪人执行切片
 

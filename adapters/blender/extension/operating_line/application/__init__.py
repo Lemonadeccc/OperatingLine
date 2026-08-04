@@ -14,6 +14,7 @@ from .revision_review import (
     new_revision_thread,
     validate_plan_diff,
     validate_revision_thread,
+    validate_revision_thread_history,
 )
 
 __all__ = (
@@ -29,4 +30,5 @@ __all__ = (
     "step_state",
     "validate_plan_diff",
     "validate_revision_thread",
+    "validate_revision_thread_history",
 )

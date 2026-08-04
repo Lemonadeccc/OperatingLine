@@ -37,6 +37,12 @@ GuideRevisionRequest
   ├─ stable nodeId + user-visible nodeNumber references
   └─ user-authored revision message
 
+GuideRevisionThreadHistory
+  ├─ thread + adapter + instance scope
+  ├─ exact request + proposal + diff + decision per turn
+  ├─ derived review state
+  └─ newest page + beforeTurn cursor
+
 EvalExportBundle
   ├─ adapter + Plan + optional instance scope
   ├─ exact catalogs + related immutable events
@@ -82,8 +88,13 @@ base Plan、精确目录版本与每个节点编号，并通过 MCP 暴露待处
 Plan ID 的完整更高 revision；它不能原地 patch 已审批计划。生成的 Proposal 绑定请求 ID 并按
 `targetInstanceId` 只投递给发起实例，仍然经过同一宿主内 Accept/Reject 门禁。协议 `1.1.0` 为请求
 增加线性 `revisionThread`；后续 turn 必须引用当前 head，并以父请求关联 Proposal 的完整 Plan 为
-精确基线。Orchestrator 对 base/target 计算确定性 Plan diff，保留计划字段、节点增删移动、步骤字段
+精确基线，而且父 Proposal 必须已在同一宿主实例接受。Orchestrator 对 base/target 计算确定性 Plan diff，保留计划字段、节点增删移动、步骤字段
 以及 action 参数的 JSON 前后值；宿主只负责验证并呈现，不自行猜测差异。
+
+`operatingline.replan.thread.get` 与 `/api/v1/replan/thread` 从现有请求、Proposal 和决策表派生只读
+消息历史，不复制一份可变聊天日志。查询以 thread、adapter 和 instance 隔离，默认返回最新页并用
+`beforeTurn` 向前分页；每页仍按 turn 正序阅读。Blender 合并已加载页面，但不会把 Proposal 当作
+模型推理或流式聊天内容。
 
 列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
 Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：
@@ -146,6 +157,9 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
+线性 thread 与 Plan diff 见
+[ADR 0009](../adr/0009-linear-revision-threads-and-plan-diffs.md)；修订历史见
+[ADR 0010](../adr/0010-paginated-revision-history.md)。
 
 ## 新宿主适配流程
 
