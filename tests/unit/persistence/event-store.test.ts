@@ -51,14 +51,39 @@ function revisionRequest(requestId = randomUUID()) {
 describe('OperatingLine persistence', () => {
   it('stores append-only execution events', () => {
     const database = openOperatingLineDatabase(':memory:');
-
+    const firstId = randomUUID();
     database.appendEvent({
-      id: randomUUID(),
+      id: firstId,
       eventType: 'runtime.started',
       payload: { adapter: 'fake-blender' },
+      createdAt: '2026-08-04T00:00:00.000Z',
+    });
+    database.appendEvent({
+      id: randomUUID(),
+      eventType: 'guide.plan.published',
+      payload: { plan: { revision: 1, id: 'snowman' } },
+      createdAt: '2026-08-04T00:00:01.000Z',
     });
 
-    expect(database.countEvents()).toBe(1);
+    expect(database.countEvents()).toBe(2);
+    expect(database.listExecutionEvents(0, 1)).toEqual([
+      {
+        sequence: 1,
+        id: firstId,
+        eventType: 'runtime.started',
+        payload: { adapter: 'fake-blender' },
+        createdAt: '2026-08-04T00:00:00.000Z',
+      },
+    ]);
+    expect(database.listExecutionEvents(1, 10)).toMatchObject([
+      {
+        sequence: 2,
+        eventType: 'guide.plan.published',
+        payload: { plan: { id: 'snowman', revision: 1 } },
+      },
+    ]);
+    expect(() => database.listExecutionEvents(-1, 1)).toThrow('non-negative');
+    expect(() => database.listExecutionEvents(0, 10_001)).toThrow('between 1 and 10000');
     database.close();
   });
 
@@ -213,7 +238,11 @@ describe('OperatingLine persistence', () => {
 
       const reopened = openOperatingLineDatabase(databasePath);
       expect(reopened.listLatestCompanionStates()).toEqual([second]);
+      expect(reopened.listExecutionEvents(0, 10).map((event) => event.sequence)).toEqual([1, 2]);
       expect(reopened.recordCompanionState(second)).toBe('duplicate');
+      const third = { ...second, reportId: randomUUID(), sequence: 3 };
+      expect(reopened.recordCompanionState(third)).toBe('accepted');
+      expect(reopened.listExecutionEvents(2, 10).map((event) => event.sequence)).toEqual([3]);
       reopened.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -254,6 +283,13 @@ describe('OperatingLine persistence', () => {
           created_at TEXT NOT NULL
         );
         INSERT INTO schema_migrations (version, applied_at) VALUES (1, datetime('now'));
+        INSERT INTO execution_events (id, event_type, payload, created_at)
+        VALUES (
+          'legacy-event',
+          'legacy.recorded',
+          '{"planId":"legacy-plan"}',
+          '2026-08-03T00:00:00.000Z'
+        );
       `);
       versionOne.close();
 
@@ -266,12 +302,26 @@ describe('OperatingLine persistence', () => {
         occurredAt: '2000-01-01T00:00:00Z',
       };
       expect(upgraded.recordCompanionState(report)).toBe('accepted');
+      expect(upgraded.listExecutionEvents(0, 10)).toMatchObject([
+        {
+          sequence: 1,
+          id: 'legacy-event',
+          eventType: 'legacy.recorded',
+          payload: { planId: 'legacy-plan' },
+        },
+        { sequence: 2, eventType: 'companion.state.reported' },
+      ]);
       upgraded.close();
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 4,
+        count: 5,
       });
+      expect(
+        inspected
+          .prepare("SELECT name FROM pragma_table_info('execution_events') ORDER BY cid")
+          .all(),
+      ).toContainEqual({ name: 'sequence' });
       const event = inspected
         .prepare(
           `SELECT payload, created_at FROM execution_events

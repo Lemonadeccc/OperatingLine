@@ -13,6 +13,7 @@ import {
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
   companionStateReportSchema,
+  evalExportRequestSchema,
   guidePlanSchema,
   guideProposalDecisionSchema,
   guideProposalSchema,
@@ -32,6 +33,7 @@ import {
 import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
+import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
@@ -143,7 +145,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               latestProposedRevisionByPlanId.get(request.planId) ?? 0,
               activePlan?.id === request.planId ? activePlan.revision : 0,
             );
-      return planningContextSchema.parse({
+      const context = planningContextSchema.parse({
         protocolVersion: guideProtocolVersion,
         targetAdapterId: request.targetAdapterId,
         goal: request.goal ?? null,
@@ -170,7 +172,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             'Submit one complete GuidePlan revision for in-host preview and explicit human acceptance.',
         },
       });
+      database.appendEvent({
+        id: randomUUID(),
+        eventType: 'planning.context.generated',
+        payload: { request, context },
+      });
+      return context;
     };
+
+    const getEvalExport = (request: ReturnType<typeof evalExportRequestSchema.parse>) =>
+      createEvalExport({
+        request,
+        availableCatalogs: actionCatalogRegistry.list(),
+        events: readExecutionEventLedger(database),
+        exportId: randomUUID(),
+        exportedAt: new Date().toISOString(),
+      });
 
     const createProposal = (input: {
       targetAdapterId: string;
@@ -309,6 +326,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.eval.export',
+        {
+          description:
+            'Export a versioned, paginated evidence bundle for one plan and host, including exact action catalogs, proposals, human decisions, step observations, and rollback reports. No quality score is inferred.',
+          inputSchema: evalExportRequestSchema,
+        },
+        async (requestInput) => {
+          const request = evalExportRequestSchema.parse(requestInput);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(getEvalExport(request)) }],
+          };
+        },
+      );
+
+      server.registerTool(
         'operatingline.replan.propose',
         {
           description:
@@ -369,9 +401,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             id: randomUUID(),
             eventType: 'guide.plan.published',
             payload: {
-              planId: plan.id,
-              revision: plan.revision,
-              protocolVersion: plan.protocolVersion,
+              targetAdapterId:
+                plan.steps.find((step) => step.action !== null)?.action?.adapterId ?? null,
+              plan,
             },
           });
           activePlan = plan;
@@ -458,6 +490,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(404).send({
           error: 'planning_context_unavailable',
           message: error instanceof Error ? error.message : 'Unknown planning context error',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/eval/export', async (request, reply) => {
+      const parsedRequest = evalExportRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return getEvalExport(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'eval_export_unavailable',
+          message: error instanceof Error ? error.message : 'Unknown eval export error',
         });
       }
     });
@@ -597,3 +645,4 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 }
 
 export { createActionCatalogRegistry };
+export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';

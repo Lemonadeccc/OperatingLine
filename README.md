@@ -8,8 +8,9 @@
 > Blender 内预览任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.0.0` ActionCatalog 和 PlanningContext；任意目标的质量
-> 质量基线、连续对话/差异审查、训练/Eval、骨骼动画和第二宿主仍在路线图中。
+> Orchestrator 现在可以查询 Blender `1.0.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
+> 与内容哈希的 Eval/replay 原始证据；任意目标质量基线、连续对话/差异审查、自动评分/训练治理、
+> 骨骼动画和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -39,6 +40,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **节点引用与请求关联重规划**：Blender 的活动树和待审树都提供 `Ref`；Revision request 绑定
   完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
   更高 Plan revision；结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
+- **Eval/replay 证据导出**：MCP 或 HTTP 客户端可按 adapter、Plan 和可选 Companion 实例分页导出
+  用户目标、精确 ActionCatalog、完整 Proposal、人工决定、逐步 observation 与 rollback。Bundle
+  自带稳定事件 sequence、内容 SHA-256 和未脱敏警告，但不会把遥测虚构成质量评分。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
   视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
@@ -60,7 +64,7 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先调用
 > `operatingline.planning.context` 再生成任意目标的 GuideProposal，但当前 Blender 目录只覆盖 8 个
 > 已验证动作，尚未建立跨目标质量基线。当前修订输入是异步、一次性的不可变请求，不是内置模型
-> 或流式聊天；连续对话、Plan diff、Eval/训练导出、骨骼动画和第二宿主尚未完成。
+> 或流式聊天；连续对话、Plan diff、自动评分/训练数据治理、骨骼动画和第二宿主尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -74,7 +78,7 @@ Codex / Claude / another MCP client
                  │ MCP
                  ▼
 services/orchestrator
-目录/规划上下文 · 计划验证 · 修订请求 · Proposal 审批 · Companion 投递 · 状态/事件记录
+目录/规划上下文 · 计划验证 · 修订请求 · Proposal 审批 · Companion 投递 · 状态/事件 · Eval 导出
                  │ authenticated loopback HTTP
                  │ plan/proposal pull · decision/state report
         ┌────────┴─────────┐
@@ -100,6 +104,8 @@ Blender 当前允许 8 类通用 action：创建平面、创建 UV 球、批量�
 [ADR 0005](docs/adr/0005-versioned-action-catalog-planning-context.md)。
 节点引用、实例定向投递和不可变重规划见
 [ADR 0006](docs/adr/0006-immutable-node-revision-requests.md)。
+稳定事件序列与版本化 Eval 证据包见
+[ADR 0007](docs/adr/0007-versioned-eval-evidence-export.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -178,6 +184,10 @@ pnpm dev
    MCP 客户端调用 `operatingline.replan.requests.list` 读取请求，再调用
    `operatingline.replan.propose` 提交 `{ requestId, catalogVersion, plan }`。`plan` 必须是同一 Plan ID
    的完整更高 revision；Blender 会把它作为新的待审 Proposal 展示，而不会直接执行。
+7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，传入
+   `{ targetAdapterId, planId, instanceId?, afterSequence?, limit? }`；也可请求
+   `GET /api/v1/eval/export`。继续分页时把上一页 `nextAfterSequence` 作为新游标。导出未自动脱敏，
+   分享或用于训练前必须检查目标文本、修订消息、动作参数、观察和错误详情。
 
 例如，MCP 客户端在规划前使用：
 
@@ -340,7 +350,7 @@ OPERATINGLINE_ACCESS_TOKEN=development-token OPERATINGLINE_PORT=43123 pnpm dev
 服务只监听 `127.0.0.1`，启动日志会输出 MCP endpoint。当前注册的 MCP tools 为
 `operatingline.health`、`operatingline.adapters.list`、`operatingline.companions.list`、
 `operatingline.action_catalog.get`、`operatingline.planning.context`、
-`operatingline.replan.requests.list`、`operatingline.replan.propose`、
+`operatingline.replan.requests.list`、`operatingline.eval.export`、`operatingline.replan.propose`、
 `operatingline.guide.publish` 和 `operatingline.guide.propose`。
 
 ## 提交规范
@@ -367,7 +377,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 3. 在已完成的节点引用与不可变重规划上增加连续对话、计划差异确认和用户可编辑参数。
 4. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
    `undo_post`/`redo_post` 后再声明原生 Undo 能力。
-5. 导出可复现的执行轨迹、计划、观察与评分数据，形成 eval/replay 流程。
+5. 在已完成的原始 eval/replay 证据导出之上增加显式评分器、数据脱敏与同意/保留策略、数据集切分
+   和训练流水线；当前导出不自动评分，也不应未经审核直接分享。
 6. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
 7. 在首个稳定发布前引入 Changesets 与自动发布流程。
 

@@ -12,7 +12,11 @@ import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { FakeBlenderAdapter } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 
-import { startRuntime, type RunningRuntime } from '@operatingline/orchestrator';
+import {
+  computeEvalContentSha256,
+  startRuntime,
+  type RunningRuntime,
+} from '@operatingline/orchestrator';
 
 const accessToken = 'test-token-with-at-least-16-characters';
 
@@ -151,6 +155,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.replan.requests.list' },
+            { name: 'operatingline.eval.export' },
             { name: 'operatingline.replan.propose' },
             { name: 'operatingline.guide.publish' },
             { name: 'operatingline.guide.propose' },
@@ -294,6 +299,234 @@ describe('OperatingLine runtime', () => {
       });
       expect(unknownArgument.result).toMatchObject({ isError: true });
       expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('exports a paginated replay bundle with planning, approval, observations, and rollback', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
+    const instanceId = randomUUID();
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    const plan = JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    ) as {
+      id: string;
+      revision: number;
+      steps: Array<{ id: string; action: unknown }>;
+    };
+    const executableStepId = plan.steps.find((step) => step.action !== null)?.id;
+    if (executableStepId === undefined) {
+      throw new Error('Snowman fixture has no executable step');
+    }
+
+    try {
+      const goal = 'Create a beginner-friendly snowman and retain every rollback observation.';
+      await callMcpTool(runtime, 50, 'operatingline.planning.context', {
+        targetAdapterId: 'blender',
+        goal,
+        planId: plan.id,
+      });
+      await callMcpTool(runtime, 501, 'operatingline.planning.context', {
+        targetAdapterId: 'blender',
+        goal: 'Unrelated plan that must not leak into this export.',
+        planId: 'unrelated-plan',
+      });
+      const proposed = await callMcpTool(runtime, 51, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        catalogVersion: '1.0.0',
+        plan,
+      });
+      const proposal = JSON.parse(proposed.result?.content?.[0]?.text ?? '{}') as {
+        proposalId?: string;
+      };
+      if (proposal.proposalId === undefined) {
+        throw new Error('Guide proposal did not return an id');
+      }
+
+      const decision = {
+        protocolVersion: '1.0.0',
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      };
+      expect(
+        await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(decision),
+        }).then((response) => response.json()),
+      ).toEqual({ result: 'accepted' });
+
+      const report = (
+        sequence: number,
+        transition: 'step_succeeded' | 'step_rolled_back',
+        satisfied: boolean,
+      ) => ({
+        protocolVersion: '1.0.0',
+        reportId: randomUUID(),
+        sequence,
+        adapterId: 'blender',
+        instanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3',
+        plan: { id: plan.id, revision: plan.revision },
+        phase: 'running',
+        activeStepId: executableStepId,
+        completedStepIds: transition === 'step_succeeded' ? [executableStepId] : [],
+        transition,
+        stepId: executableStepId,
+        observations: [
+          {
+            kind: 'object_exists',
+            satisfied,
+            details: { logicalId: 'snowman.body.lower', source: 'integration-test' },
+          },
+        ],
+        error: null,
+        occurredAt: new Date().toISOString(),
+      });
+      for (const state of [
+        report(1, 'step_succeeded', true),
+        report(2, 'step_rolled_back', false),
+      ]) {
+        const response = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(state),
+        });
+        expect(response.status).toBe(200);
+      }
+      const otherInstanceState = {
+        ...report(1, 'step_succeeded', true),
+        reportId: randomUUID(),
+        instanceId: randomUUID(),
+      };
+      expect(
+        (
+          await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(otherInstanceState),
+          })
+        ).status,
+      ).toBe(200);
+
+      const firstResponse = await callMcpTool(runtime, 52, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        limit: 2,
+      });
+      expect(firstResponse.result?.isError).not.toBe(true);
+      const first = JSON.parse(firstResponse.result?.content?.[0]?.text ?? '{}') as {
+        exportId: string;
+        exportedAt: string;
+        events: Array<{ eventType: string; payload: Record<string, unknown> }>;
+        page: { nextAfterSequence: number };
+        integrity: { contentSha256: string };
+        [key: string]: unknown;
+      };
+      expect(first).toMatchObject({
+        formatVersion: '1.0.0',
+        scope: { targetAdapterId: 'blender', planId: plan.id, instanceId },
+        catalogs: [{ adapterId: 'blender', catalogVersion: '1.0.0' }],
+        page: { afterSequence: 0, hasMore: true },
+        summary: {
+          matchedEventCount: 5,
+          eventTypeCounts: {
+            'planning.context.generated': 1,
+            'guide.proposal.created': 1,
+            'guide.proposal.decided': 1,
+            'companion.state.reported': 2,
+          },
+          transitionCounts: { step_rolled_back: 1, step_succeeded: 1 },
+          decisionCounts: { accepted: 1 },
+        },
+        dataHandling: { redaction: 'none', containsPotentiallySensitiveContent: true },
+      });
+      expect(first.events).toHaveLength(2);
+      expect(first.events[0]).toMatchObject({
+        eventType: 'planning.context.generated',
+        payload: { context: { goal, requestedPlanId: plan.id } },
+      });
+      expect(first.events[1]).toMatchObject({
+        eventType: 'guide.proposal.created',
+        payload: { plan: { id: plan.id, steps: plan.steps } },
+      });
+      const firstContent = structuredClone(first) as Record<string, unknown>;
+      delete firstContent['exportId'];
+      delete firstContent['exportedAt'];
+      delete firstContent['integrity'];
+      expect(first.integrity.contentSha256).toBe(computeEvalContentSha256(firstContent));
+
+      const repeatedResponse = await callMcpTool(runtime, 521, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        limit: 2,
+      });
+      const repeated = JSON.parse(repeatedResponse.result?.content?.[0]?.text ?? '{}') as {
+        exportId: string;
+        integrity: { contentSha256: string };
+      };
+      expect(repeated.exportId).not.toBe(first.exportId);
+      expect(repeated.integrity.contentSha256).toBe(first.integrity.contentSha256);
+
+      const secondResponse = await callMcpTool(runtime, 53, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        afterSequence: first.page.nextAfterSequence,
+        limit: 100,
+      });
+      const second = JSON.parse(secondResponse.result?.content?.[0]?.text ?? '{}') as {
+        events: Array<{ eventType: string; payload: Record<string, unknown> }>;
+        page: { hasMore: boolean };
+      };
+      expect(second.page.hasMore).toBe(false);
+      expect(second.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            eventType: 'guide.proposal.decided',
+            payload: expect.objectContaining({ decision: 'accepted', instanceId }),
+          }),
+          expect.objectContaining({
+            eventType: 'companion.state.reported',
+            payload: expect.objectContaining({
+              transition: 'step_rolled_back',
+              observations: [expect.objectContaining({ satisfied: false })],
+            }),
+          }),
+        ]),
+      );
+
+      const httpUrl = new URL('/api/v1/eval/export', runtime.baseUrl);
+      httpUrl.searchParams.set('targetAdapterId', 'blender');
+      httpUrl.searchParams.set('planId', plan.id);
+      httpUrl.searchParams.set('instanceId', instanceId);
+      const httpResponse = await fetch(httpUrl, { headers });
+      expect(httpResponse.status).toBe(200);
+      await expect(httpResponse.json()).resolves.toMatchObject({
+        scope: { instanceId },
+        summary: { matchedEventCount: 5 },
+      });
+
+      const malformed = await fetch(
+        `${runtime.baseUrl}/api/v1/eval/export?targetAdapterId=blender`,
+        { headers },
+      );
+      expect(malformed.status).toBe(400);
     } finally {
       await runtime.stop();
     }
@@ -444,7 +677,11 @@ describe('OperatingLine runtime', () => {
   });
 
   it('delivers only new guide plans containing actions for the requesting adapter', async () => {
-    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
     const instanceId = randomUUID();
     try {
       const plan = JSON.parse(
@@ -453,6 +690,22 @@ describe('OperatingLine runtime', () => {
       expect(
         (await callMcpTool(runtime, 20, 'operatingline.guide.publish', plan)).result?.isError,
       ).not.toBe(true);
+      const publishedEval = await callMcpTool(runtime, 201, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+      });
+      expect(JSON.parse(publishedEval.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        summary: {
+          matchedEventCount: 1,
+          eventTypeCounts: { 'guide.plan.published': 1 },
+        },
+        events: [
+          {
+            eventType: 'guide.plan.published',
+            payload: { targetAdapterId: 'blender', plan },
+          },
+        ],
+      });
 
       const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
       guideUrl.searchParams.set('adapterId', 'blender');
@@ -771,6 +1024,13 @@ describe('OperatingLine runtime', () => {
       );
       expect(companionGuideResponse.status).toBe(401);
       expect((await fetch(`${runtime.baseUrl}/api/v1/companions`)).status).toBe(401);
+      expect(
+        (
+          await fetch(
+            `${runtime.baseUrl}/api/v1/eval/export?targetAdapterId=blender&planId=snowman`,
+          )
+        ).status,
+      ).toBe(401);
       expect(
         (
           await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {

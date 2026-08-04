@@ -7,6 +7,14 @@ export interface ExecutionEventInput {
   createdAt?: string;
 }
 
+export interface StoredExecutionEvent {
+  sequence: number;
+  id: string;
+  eventType: string;
+  payload: unknown;
+  createdAt: string;
+}
+
 export interface CompanionStateInput {
   reportId: string;
   adapterId: string;
@@ -71,6 +79,7 @@ function canonicalJson(value: unknown): string {
 export interface OperatingLineDatabase {
   appendEvent(event: ExecutionEventInput): void;
   countEvents(): number;
+  listExecutionEvents(afterSequence: number, limit: number): StoredExecutionEvent[];
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
   recordGuideReplanProposal<T extends GuideProposalInput>(
     proposal: T,
@@ -105,7 +114,8 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     );
 
     CREATE TABLE IF NOT EXISTS execution_events (
-      id TEXT PRIMARY KEY,
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
       event_type TEXT NOT NULL,
       payload TEXT NOT NULL,
       created_at TEXT NOT NULL
@@ -188,11 +198,60 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     VALUES (4, datetime('now'));
   `);
 
+  const executionEventColumns = sqlite.prepare("PRAGMA table_info('execution_events')").all();
+  const hasExecutionEventSequence = executionEventColumns.some(
+    (row) => (row as { name?: unknown }).name === 'sequence',
+  );
+  if (!hasExecutionEventSequence) {
+    try {
+      sqlite.exec(`
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE execution_events_v5 (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          id TEXT NOT NULL UNIQUE,
+          event_type TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        INSERT INTO execution_events_v5 (sequence, id, event_type, payload, created_at)
+        SELECT rowid, id, event_type, payload, created_at
+        FROM execution_events
+        ORDER BY rowid;
+
+        DROP TABLE execution_events;
+        ALTER TABLE execution_events_v5 RENAME TO execution_events;
+
+        COMMIT;
+      `);
+    } catch (error) {
+      try {
+        sqlite.exec('ROLLBACK;');
+      } catch {
+        // The migration may have failed before opening a transaction.
+      }
+      throw error;
+    }
+  }
+  sqlite
+    .prepare(
+      "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (5, datetime('now'))",
+    )
+    .run();
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
   `);
   const countEvents = sqlite.prepare('SELECT COUNT(*) AS value FROM execution_events');
+  const listEvents = sqlite.prepare(`
+    SELECT sequence, id, event_type, payload, created_at
+    FROM execution_events
+    WHERE sequence > ?
+    ORDER BY sequence
+    LIMIT ?
+  `);
   const insertGuideProposal = sqlite.prepare(`
     INSERT INTO guide_proposals (
       proposal_id,
@@ -322,7 +381,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       insertEvent.run(
         event.id,
         event.eventType,
-        JSON.stringify(event.payload),
+        canonicalJson(event.payload),
         event.createdAt ?? new Date().toISOString(),
       );
     },
@@ -332,6 +391,39 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw new Error('SQLite returned an invalid event count');
       }
       return value;
+    },
+    listExecutionEvents(afterSequence, limit) {
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+        throw new Error('Execution event cursor must be a non-negative safe integer');
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
+        throw new Error('Execution event limit must be an integer between 1 and 10000');
+      }
+      return listEvents.all(afterSequence, limit).map((row) => {
+        const candidate = row as {
+          sequence?: unknown;
+          id?: unknown;
+          event_type?: unknown;
+          payload?: unknown;
+          created_at?: unknown;
+        };
+        if (
+          typeof candidate.sequence !== 'number' ||
+          typeof candidate.id !== 'string' ||
+          typeof candidate.event_type !== 'string' ||
+          typeof candidate.payload !== 'string' ||
+          typeof candidate.created_at !== 'string'
+        ) {
+          throw new Error('SQLite returned an invalid execution event');
+        }
+        return {
+          sequence: candidate.sequence,
+          id: candidate.id,
+          eventType: candidate.event_type,
+          payload: JSON.parse(candidate.payload) as unknown,
+          createdAt: candidate.created_at,
+        };
+      });
     },
     recordGuideProposal(proposal) {
       const payload = canonicalJson(proposal);

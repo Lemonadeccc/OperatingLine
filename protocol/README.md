@@ -20,6 +20,10 @@
 `guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
 
+`eval-export-request.schema.json` 与 `eval-export-bundle.schema.json` 定义按 adapter、Plan 和可选
+Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录版本、相关完整计划与提案、人工
+决定、步骤 observation/rollback、稳定事件序列、汇总和内容 SHA-256；它不定义或暗示质量分数。
+
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
@@ -44,6 +48,12 @@ ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编�
 - 没有 action 的计划缺少宿主路由信息，当前可发布和查询，但不会投递给 Companion。
 - Companion 身份使用 `adapterId + instanceId`；同一身份的 `sequence` 必须严格递增。
 - 同 `reportId` 只有完整 payload 一致时才是幂等重试；内容变化是 conflict，不是 stale。
+- Eval 分页使用追加式事件 `sequence`，而不是可能重复的时间戳。`nextAfterSequence` 是当前页最后一条
+  匹配事件；`matchedEventCount` 是整个 scope 的数量，不是当前页数量。
+- Eval 内容哈希排除随机 `exportId`、`exportedAt` 和 `integrity`，其余顶层内容按
+  `operatingline-json-sort-v1` 递归排序对象键后计算 SHA-256。
+- `redaction: none` 表示原始证据可能含用户目标、修订消息、动作参数、观察和错误；分享或训练前必须
+  由调用方审核和授权。
 
 重新生成协议：
 

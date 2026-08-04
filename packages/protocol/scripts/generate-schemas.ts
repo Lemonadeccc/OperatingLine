@@ -9,6 +9,8 @@ import {
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
   companionStateReportSchema,
+  evalExportBundleSchema,
+  evalExportRequestSchema,
   guidePlanSchema,
   guideProposalDecisionSchema,
   guideProposalSchema,
@@ -23,6 +25,16 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'eval-export-request.schema.json',
+    'https://operatingline.dev/schema/v1/eval-export-request.json',
+    evalExportRequestSchema,
+  ],
+  [
+    'eval-export-bundle.schema.json',
+    'https://operatingline.dev/schema/v1/eval-export-bundle.json',
+    evalExportBundleSchema,
+  ],
   [
     'action-catalog.schema.json',
     'https://operatingline.dev/schema/v1/action-catalog.json',

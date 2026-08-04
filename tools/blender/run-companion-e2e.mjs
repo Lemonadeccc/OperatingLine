@@ -212,6 +212,17 @@ try {
   fixture.revision = planRevision;
   fixture.title = rootTitle;
   fixture.steps.find((step) => step.id === fixture.rootStepId).title = rootTitle;
+  const goal = 'Create, review, revise, execute, and fully roll back a guided snowman.';
+  const planning = await callMcpTool(runtime, 0, 'operatingline.planning.context', {
+    targetAdapterId: 'blender',
+    goal,
+    planId,
+  });
+  assert.notEqual(
+    planning.result?.isError,
+    true,
+    planning.result?.content?.[0]?.text ?? 'Planning context failed',
+  );
   const proposed = await callMcpTool(runtime, 1, 'operatingline.guide.propose', {
     targetAdapterId: 'blender',
     plan: fixture,
@@ -332,8 +343,62 @@ try {
     },
   );
 
+  const evalResponse = await callMcpTool(runtime, 3_000, 'operatingline.eval.export', {
+    targetAdapterId: 'blender',
+    planId,
+    instanceId: revisionRequests[0].instanceId,
+    limit: 1_000,
+  });
+  assert.notEqual(
+    evalResponse.result?.isError,
+    true,
+    evalResponse.result?.content?.[0]?.text ?? 'Eval export failed',
+  );
+  const evalBundle = JSON.parse(evalResponse.result?.content?.[0]?.text ?? '{}');
+  assert.equal(evalBundle.formatVersion, '1.0.0');
+  assert.deepEqual(evalBundle.scope, {
+    targetAdapterId: 'blender',
+    planId,
+    instanceId: revisionRequests[0].instanceId,
+  });
+  assert.equal(evalBundle.catalogs.length, 1);
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.0.0');
+  assert.equal(evalBundle.page.hasMore, false);
+  assert.equal(evalBundle.summary.matchedEventCount, 36);
+  assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 2 });
+  assert.equal(evalBundle.summary.transitionCounts.connected, undefined);
+  assert.equal(evalBundle.summary.transitionCounts.step_succeeded, result.stepCount);
+  assert.equal(evalBundle.summary.transitionCounts.step_rolled_back, result.stepCount);
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'planning.context.generated' && event.payload.context.goal === goal,
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'guide.revision.requested' &&
+        event.payload.requestId === result.revisionRequestId,
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'guide.proposal.created' &&
+        event.payload.plan.revision === planRevision + 1,
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'companion.state.reported' &&
+        event.payload.transition === 'step_rolled_back',
+    ),
+  );
+
   console.log(
-    `OperatingLine request-linked replan E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine request-linked replan and Eval export E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports and ${evalBundle.events.length} scoped events; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

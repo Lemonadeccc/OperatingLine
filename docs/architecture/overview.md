@@ -6,8 +6,9 @@ OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主
 锚点翻译成 Blender Operator、VS Code Command、GIMP Procedure 等实际能力。
 无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
 AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
-事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表和 PlanningContext。MCP 客户端、
-CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内视觉呈现。
+事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表、PlanningContext 和 Eval/replay
+证据导出。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内
+视觉呈现。
 
 ```text
 GuidePlan
@@ -35,6 +36,12 @@ GuideRevisionRequest
   ├─ complete immutable base Plan
   ├─ stable nodeId + user-visible nodeNumber references
   └─ user-authored revision message
+
+EvalExportBundle
+  ├─ adapter + Plan + optional instance scope
+  ├─ exact catalogs + related immutable events
+  ├─ stable sequence cursor + aggregate counts
+  └─ canonical content SHA-256 + raw-data warning
 ```
 
 ## 接入等级
@@ -97,6 +104,21 @@ Companion 状态、revision 提示和计划约束；Proposal 还会依据目录�
 未声明的 anchor/observation/rollback。Orchestrator 不内置模型，因此目录提供的是可靠能力边界，
 不是任意自然语言目标已经达到质量基线的声明。
 
+## Eval/replay 证据边界
+
+`operatingline.eval.export` 与 `GET /api/v1/eval/export` 从同一追加式事件账本建立版本化证据包。
+`targetAdapterId + planId` 是必需 scope，`instanceId` 可把人工决定和状态限制到一个 Companion。
+Orchestrator 通过 Proposal/RevisionRequest ID 解析跨事件关联，因此决定与请求不必紧邻其完整计划。
+每个包携带引用到的精确 ActionCatalog、整个 scope 的计数和当前分页事件；`afterSequence` 使用数据库
+显式自增序列，跨重启稳定，单页最多 1,000 条。尚未带 Plan reference 的初始 `connected` 状态不会
+被猜测归入某个计划。
+
+内容摘要覆盖协议/格式版本、scope、目录、事件页、分页信息、汇总和数据处理声明，不包含随机
+`exportId`、`exportedAt` 或摘要自身。相同事实页因而得到相同 SHA-256。当前实现不自动脱敏，也不
+计算质量分数；`satisfied: false` 仍是原始 observation，而不是被导出层改写的失败结论。调用方在
+分享或训练前必须审核敏感内容。详细决策见
+[ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
+
 ## 宿主执行记录与补偿
 
 Companion 应按步骤 ID 保存 action receipt，不能把 action 名当作唯一键；一个计划可以在多个
@@ -119,6 +141,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0005](../adr/0005-versioned-action-catalog-planning-context.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
+Eval/replay 导出决策见
+[ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
 
 ## 新宿主适配流程
 
