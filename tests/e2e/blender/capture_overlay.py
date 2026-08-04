@@ -100,18 +100,109 @@ def configure_state():
         plan_path = (
             ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
         )
-        plan = json.loads(plan_path.read_text(encoding="utf-8"))
-        plan["id"] = "snowman-visual-proposal"
+        base_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        plan = json.loads(json.dumps(base_plan))
         plan["revision"] += 100
         plan["title"] = "AI proposal: create a reviewed snowman"
         plan["steps"][0]["title"] = plan["title"]
+        base_head = next(
+            step for step in base_plan["steps"] if step["id"] == "snowman.model.head"
+        )
+        target_head = next(
+            step for step in plan["steps"] if step["id"] == "snowman.model.head"
+        )
+        target_head["action"]["arguments"]["radius"] += 0.08
+        request_id = str(uuid.uuid4())
+        plan_diff = {
+            "basePlan": {
+                "id": base_plan["id"],
+                "revision": base_plan["revision"],
+            },
+            "targetPlan": {"id": plan["id"], "revision": plan["revision"]},
+            "summary": {
+                "planFields": 1,
+                "addedSteps": 0,
+                "removedSteps": 0,
+                "updatedSteps": 2,
+                "movedSteps": 0,
+            },
+            "planChanges": [
+                {
+                    "field": "title",
+                    "before": base_plan["title"],
+                    "after": plan["title"],
+                }
+            ],
+            "stepChanges": [
+                {
+                    "kind": "updated",
+                    "stepId": "snowman",
+                    "before": {
+                        "stepId": "snowman",
+                        "nodeNumber": "1",
+                        "parentId": None,
+                        "order": 0,
+                        "title": base_plan["steps"][0]["title"],
+                    },
+                    "after": {
+                        "stepId": "snowman",
+                        "nodeNumber": "1",
+                        "parentId": None,
+                        "order": 0,
+                        "title": plan["steps"][0]["title"],
+                    },
+                    "changes": [
+                        {
+                            "field": "title",
+                            "before": base_plan["steps"][0]["title"],
+                            "after": plan["steps"][0]["title"],
+                        }
+                    ],
+                },
+                {
+                    "kind": "updated",
+                    "stepId": "snowman.model.head",
+                    "before": {
+                        "stepId": "snowman.model.head",
+                        "nodeNumber": "1.2.3",
+                        "parentId": "snowman.model",
+                        "order": 3,
+                        "title": base_head["title"],
+                    },
+                    "after": {
+                        "stepId": "snowman.model.head",
+                        "nodeNumber": "1.2.3",
+                        "parentId": "snowman.model",
+                        "order": 3,
+                        "title": target_head["title"],
+                    },
+                    "changes": [
+                        {
+                            "field": "action",
+                            "before": base_head["action"],
+                            "after": target_head["action"],
+                        }
+                    ],
+                },
+            ],
+        }
         accepted_session = extension.get_session()
+        companion = extension.get_companion()
         assert extension.get_companion().stage_proposal(
             {
-                "protocolVersion": "1.0.0",
+                "protocolVersion": "1.1.0",
                 "proposalId": str(uuid.uuid4()),
                 "targetAdapterId": "blender",
+                "targetInstanceId": companion.instance_id,
+                "revisionRequestId": request_id,
+                "revisionThread": {
+                    "threadId": request_id,
+                    "turn": 1,
+                    "parentRequestId": None,
+                },
+                "catalogVersion": "1.1.0",
                 "plan": plan,
+                "planDiff": plan_diff,
                 "proposedAt": "2026-08-04T12:00:00Z",
             }
         )

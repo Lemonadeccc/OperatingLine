@@ -19,6 +19,8 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 import uuid
 
+from ..domain import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
@@ -163,7 +165,7 @@ class CompanionTransport:
         self.control.put({"kind": "proposal_seen", "proposalId": proposal_id})
         self.decisions.put(
             {
-                "protocolVersion": "1.0.0",
+                "protocolVersion": PROTOCOL_VERSION,
                 "decisionId": str(uuid.uuid4()),
                 "proposalId": proposal_id,
                 "adapterId": "blender",
@@ -291,7 +293,7 @@ class CompanionTransport:
             f"/api/v1/companion/guide?{urlencode(query)}",
             abort_on_stop=True,
         )
-        if response.get("protocolVersion") != "1.0.0":
+        if response.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
             raise ValueError("Unsupported companion protocol version")
         plan = response.get("plan")
         if plan is not None:

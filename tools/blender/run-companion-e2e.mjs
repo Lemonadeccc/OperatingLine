@@ -16,6 +16,7 @@ const planId = 'snowman-companion-e2e';
 const planRevision = 41;
 const rootTitle = 'Create a snowman through the live Companion';
 const revisedRootTitle = 'Create a snowman with a larger reviewed head';
+const twiceRevisedRootTitle = 'Create a fully reviewed snowman with a larger head';
 const childTimeoutMs = 60_000;
 
 function listen(server) {
@@ -179,9 +180,10 @@ const proxy = createServer(async (request, response) => {
         );
         const revisedPlan = JSON.parse(JSON.stringify(revisionRequest.basePlan));
         revisedPlan.revision += 1;
-        revisedPlan.title = revisedRootTitle;
-        revisedPlan.steps.find((step) => step.id === revisedPlan.rootStepId).title =
-          revisedRootTitle;
+        const revisedTitle =
+          revisionRequest.revisionThread.turn === 1 ? revisedRootTitle : twiceRevisedRootTitle;
+        revisedPlan.title = revisedTitle;
+        revisedPlan.steps.find((step) => step.id === revisedPlan.rootStepId).title = revisedTitle;
         const head = revisedPlan.steps.find((step) => step.id === 'snowman.model.head');
         head.action.arguments.radius += 0.08;
         const replanned = await callMcpTool(
@@ -244,6 +246,7 @@ try {
     OPERATINGLINE_E2E_PLAN_REVISION: String(planRevision),
     OPERATINGLINE_E2E_ROOT_TITLE: rootTitle,
     OPERATINGLINE_E2E_REVISED_ROOT_TITLE: revisedRootTitle,
+    OPERATINGLINE_E2E_TWICE_REVISED_ROOT_TITLE: twiceRevisedRootTitle,
     OPERATINGLINE_RENDER_OUTPUT_DIR: join(temporaryDirectory, 'renders'),
   });
   await replanWork;
@@ -258,8 +261,8 @@ try {
     },
     {
       planId,
-      revision: planRevision + 1,
-      rootTitle: revisedRootTitle,
+      revision: planRevision + 2,
+      rootTitle: twiceRevisedRootTitle,
       lastTransition: 'step_rolled_back',
     },
   );
@@ -267,26 +270,56 @@ try {
   assert.equal(result.stepCount, 15);
   assert.equal(result.proposalReviewedBeforeExecution, true);
   assert.equal(result.requestLinkedProposalReviewedBeforeExecution, true);
-  assert.equal(revisionRequests.length, 1);
+  assert.equal(result.planDiffReviewedBeforeExecution, true);
+  assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
+  assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
   assert.equal(revisionRequests[0].catalogVersion, '1.1.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
-  assert.equal(replanResults.length, 1);
   assert.deepEqual(
-    {
-      revision: replanResults[0].revision,
-      revisionRequestId: replanResults[0].revisionRequestId,
-      targetInstanceId: replanResults[0].targetInstanceId,
-    },
-    {
-      revision: planRevision + 1,
-      revisionRequestId: result.revisionRequestId,
-      targetInstanceId: revisionRequests[0].instanceId,
-    },
+    revisionRequests.map((request) => request.revisionThread),
+    [
+      {
+        threadId: result.revisionRequestId,
+        turn: 1,
+        parentRequestId: null,
+      },
+      {
+        threadId: result.revisionRequestId,
+        turn: 2,
+        parentRequestId: result.revisionRequestId,
+      },
+    ],
   );
-  assert.equal(proposalDecisions.length, 2);
+  assert.equal(replanResults.length, 2);
+  assert.deepEqual(
+    replanResults.map((replan) => ({
+      revision: replan.revision,
+      revisionRequestId: replan.revisionRequestId,
+      targetInstanceId: replan.targetInstanceId,
+      revisionThread: replan.revisionThread,
+      diffBaseRevision: replan.planDiff.basePlan.revision,
+    })),
+    [
+      {
+        revision: planRevision + 1,
+        revisionRequestId: result.revisionRequestId,
+        targetInstanceId: revisionRequests[0].instanceId,
+        revisionThread: revisionRequests[0].revisionThread,
+        diffBaseRevision: planRevision,
+      },
+      {
+        revision: planRevision + 2,
+        revisionRequestId: result.secondRevisionRequestId,
+        targetInstanceId: revisionRequests[1].instanceId,
+        revisionThread: revisionRequests[1].revisionThread,
+        diffBaseRevision: planRevision + 1,
+      },
+    ],
+  );
+  assert.equal(proposalDecisions.length, 3);
   assert.deepEqual(
     {
       adapterId: proposalDecisions[0].adapterId,
@@ -296,13 +329,14 @@ try {
   );
   assert.deepEqual(
     proposalDecisions.map((decision) => decision.decision),
-    ['accepted', 'accepted'],
+    ['accepted', 'accepted', 'accepted'],
   );
 
   const reports = [...reportsById.values()];
   const transitions = reports.map((report) => report.transition);
   assert.deepEqual(transitions, [
     'connected',
+    'plan_loaded',
     'plan_loaded',
     'plan_loaded',
     'walkthrough_started',
@@ -336,7 +370,7 @@ try {
       completedStepIds: companions[0].completedStepIds,
     },
     {
-      plan: { id: planId, revision: planRevision + 1 },
+      plan: { id: planId, revision: planRevision + 2 },
       transition: 'step_rolled_back',
       activeStepId: null,
       completedStepIds: [],
@@ -364,8 +398,8 @@ try {
   assert.equal(evalBundle.catalogs.length, 1);
   assert.equal(evalBundle.catalogs[0].catalogVersion, '1.1.0');
   assert.equal(evalBundle.page.hasMore, false);
-  assert.equal(evalBundle.summary.matchedEventCount, 10 + 2 * result.stepCount);
-  assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 2 });
+  assert.equal(evalBundle.summary.matchedEventCount, 15 + 2 * result.stepCount);
+  assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });
   assert.equal(evalBundle.summary.transitionCounts.connected, undefined);
   assert.equal(evalBundle.summary.transitionCounts.step_succeeded, result.stepCount);
   assert.equal(evalBundle.summary.transitionCounts.step_rolled_back, result.stepCount);
@@ -385,8 +419,17 @@ try {
   assert.ok(
     evalBundle.events.some(
       (event) =>
+        event.eventType === 'guide.revision.requested' &&
+        event.payload.requestId === result.secondRevisionRequestId &&
+        event.payload.revisionThread.turn === 2,
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
         event.eventType === 'guide.proposal.created' &&
-        event.payload.plan.revision === planRevision + 1,
+        event.payload.plan.revision === planRevision + 2 &&
+        event.payload.planDiff.basePlan.revision === planRevision + 1,
     ),
   );
   assert.ok(
@@ -398,7 +441,7 @@ try {
   );
 
   console.log(
-    `OperatingLine request-linked replan and Eval export E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports and ${evalBundle.events.length} scoped events; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine two-turn replan/diff and Eval export E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports and ${evalBundle.events.length} scoped events; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

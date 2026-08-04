@@ -2,7 +2,7 @@
   "id": "replace-with-host-id",
   "version": "0.1.0",
   "hostVersion": "replace-with-tested-range",
-  "protocolVersions": ["1.0.0"],
+  "protocolVersions": ["1.0.0", "1.1.0"],
   "connected": false,
   "capabilities": {
     "presentation": {

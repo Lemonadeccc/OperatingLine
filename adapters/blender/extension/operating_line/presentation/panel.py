@@ -59,6 +59,77 @@ def _draw_proposal_node(layout, node, depth: int = 0) -> None:
         _draw_proposal_node(layout, child, depth + 1)
 
 
+def _compact_diff_value(value) -> str | None:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    if isinstance(value, (int, str)):
+        rendered = str(value)
+        return rendered if len(rendered) <= 32 else f"{rendered[:29]}..."
+    if isinstance(value, list) and len(value) <= 3 and all(
+        isinstance(item, (int, float, str, bool)) for item in value
+    ):
+        return str(value)
+    return None
+
+
+def _draw_action_argument_diff(layout, field_change) -> None:
+    before = field_change.get("before")
+    after = field_change.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return
+    before_arguments = before.get("arguments")
+    after_arguments = after.get("arguments")
+    if not isinstance(before_arguments, dict) or not isinstance(after_arguments, dict):
+        return
+    changed_names = sorted(
+        name
+        for name in set(before_arguments) | set(after_arguments)
+        if before_arguments.get(name) != after_arguments.get(name)
+    )
+    for name in changed_names[:2]:
+        before_value = _compact_diff_value(before_arguments.get(name))
+        after_value = _compact_diff_value(after_arguments.get(name))
+        if before_value is not None and after_value is not None:
+            layout.label(text=f"    {name}: {before_value} -> {after_value}")
+
+
+def _draw_plan_diff(layout, plan_diff) -> None:
+    if plan_diff is None:
+        layout.label(text="Initial full plan; no earlier revision", icon="INFO")
+        return
+    summary = plan_diff["summary"]
+    layout.label(
+        text=(
+            f"Changes  +{summary['addedSteps']}  -{summary['removedSteps']}  "
+            f"~{summary['updatedSteps']}  moved {summary['movedSteps']}"
+        ),
+        icon="FILE_REFRESH",
+    )
+    if plan_diff["planChanges"]:
+        fields = ", ".join(change["field"] for change in plan_diff["planChanges"])
+        layout.label(text=f"Plan fields: {fields}")
+    for change in plan_diff["stepChanges"][:5]:
+        snapshot = change.get("after") or change.get("before")
+        kind = change["kind"].capitalize()
+        detail = ""
+        if change["kind"] == "updated":
+            detail = ": " + ", ".join(item["field"] for item in change["changes"])
+        layout.label(
+            text=f"{kind} @{snapshot['nodeNumber']} {snapshot['title']}{detail}"
+        )
+        if change["kind"] == "updated":
+            for field_change in change["changes"]:
+                if field_change["field"] == "action":
+                    _draw_action_argument_diff(layout, field_change)
+    remaining = len(plan_diff["stepChanges"]) - 5
+    if remaining > 0:
+        layout.label(text=f"... {remaining} more changed nodes")
+
+
 def _draw_proposal_summary(layout, companion, active_session) -> None:
     proposal = companion.proposed_plan
     proposal_session = companion.proposal_session
@@ -81,6 +152,16 @@ def _draw_proposal_summary(layout, companion, active_session) -> None:
             text=f"Revision request: {revision_request_id[:8]}",
             icon="LINKED",
         )
+    revision_thread = proposal.get("revisionThread")
+    if revision_thread:
+        review.label(
+            text=(
+                f"Thread {revision_thread['threadId'][:8]}  "
+                f"turn {revision_thread['turn']}"
+            ),
+            icon="LINKED",
+        )
+    _draw_plan_diff(review, proposal.get("planDiff"))
 
     decisions = review.row(align=True)
     accept = decisions.row(align=True)
@@ -104,6 +185,21 @@ def _draw_revision_request(layout, context, companion) -> None:
             text=f"Base: {scope} {base.plan_id} r{base.revision}",
             icon="FILE_TICK",
         )
+        try:
+            lineage = companion.revision_draft_lineage
+        except ValueError as error:
+            composer.label(text=str(error), icon="ERROR")
+        else:
+            if lineage is None:
+                composer.label(text="New revision thread  turn 1", icon="ADD")
+            else:
+                composer.label(
+                    text=(
+                        f"Continue {lineage.thread_id[:8]}  "
+                        f"turn {lineage.turn + 1}"
+                    ),
+                    icon="LINKED",
+                )
         for node in references:
             composer.label(text=f"@{node.number}  {node.title}", icon="LINKED")
 

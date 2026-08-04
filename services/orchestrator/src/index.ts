@@ -34,9 +34,11 @@ import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
+import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
+  validateGuideRevisionThread,
   validateGuidePlanStructure,
   validateProposalTarget,
 } from './guide-validation.js';
@@ -194,7 +196,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       targetInstanceId?: string;
       catalogVersion?: string;
       plan: GuidePlan;
-      revisionRequestId?: string;
+      replan?: {
+        requestId: string;
+        basePlan: GuidePlan;
+        revisionThread: NonNullable<
+          ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
+        >;
+      };
     }): GuideProposal => {
       validateProposalTarget(input.plan, input.targetAdapterId);
       const catalog = actionCatalogRegistry.get({
@@ -216,16 +224,23 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           ? {}
           : { targetInstanceId: input.targetInstanceId }),
         plan: input.plan,
-        ...(input.revisionRequestId === undefined
+        ...(input.replan === undefined
           ? {}
-          : { revisionRequestId: input.revisionRequestId }),
+          : {
+              revisionRequestId: input.replan.requestId,
+              revisionThread: input.replan.revisionThread,
+            }),
+        planDiff:
+          input.replan === undefined
+            ? null
+            : computeGuidePlanDiff(input.replan.basePlan, input.plan),
         catalogVersion: catalog.catalogVersion,
         proposedAt: new Date().toISOString(),
       });
-      if (input.revisionRequestId === undefined) {
+      if (input.replan === undefined) {
         database.recordGuideProposal(proposal);
       } else {
-        database.recordGuideReplanProposal(proposal, input.revisionRequestId);
+        database.recordGuideReplanProposal(proposal, input.replan.requestId);
       }
       latestProposedRevisionByPlanId.set(input.plan.id, input.plan.revision);
       return proposal;
@@ -240,6 +255,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       revision: proposal.plan.revision,
       catalogVersion: proposal.catalogVersion,
       revisionRequestId: proposal.revisionRequestId ?? null,
+      revisionThread: proposal.revisionThread ?? null,
+      planDiff: proposal.planDiff ?? null,
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
@@ -369,12 +386,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               `Replan catalog ${submission.catalogVersion} must match revision request catalog ${revisionRequest.catalogVersion}`,
             );
           }
+          if (revisionRequest.revisionThread === undefined) {
+            throw new Error(
+              `Guide revision request ${revisionRequest.requestId} uses legacy protocol without a revision thread`,
+            );
+          }
           const proposal = createProposal({
             targetAdapterId: revisionRequest.adapterId,
             targetInstanceId: revisionRequest.instanceId,
             catalogVersion: submission.catalogVersion,
             plan: submission.plan,
-            revisionRequestId: revisionRequest.requestId,
+            replan: {
+              requestId: revisionRequest.requestId,
+              basePlan: revisionRequest.basePlan,
+              revisionThread: revisionRequest.revisionThread,
+            },
           });
           return {
             content: [{ type: 'text', text: JSON.stringify(proposalResult(proposal)) }],
@@ -551,6 +577,20 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             catalogVersion: parsedRequest.data.catalogVersion,
           }),
         );
+        if (database.getGuideRevisionRequest(parsedRequest.data.requestId) === null) {
+          const thread = parsedRequest.data.revisionThread;
+          const rawHead =
+            thread === undefined ? null : database.getGuideRevisionThreadHead(thread.threadId);
+          const head = rawHead === null ? null : guideRevisionRequestSchema.parse(rawHead);
+          const parentProposalId = thread?.parentRequestId;
+          const rawParentProposal =
+            parentProposalId == null
+              ? null
+              : database.getGuideReplanProposalForRequest(parentProposalId);
+          const parentProposal =
+            rawParentProposal === null ? null : guideProposalSchema.parse(rawParentProposal);
+          validateGuideRevisionThread(parsedRequest.data, head, parentProposal);
+        }
       } catch (error) {
         return reply.code(422).send({
           error: 'invalid_revision_request',
@@ -646,3 +686,4 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
 export { createActionCatalogRegistry };
 export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
+export { computeGuidePlanDiff } from './guide-plan-diff.js';

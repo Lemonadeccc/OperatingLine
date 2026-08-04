@@ -9,8 +9,9 @@
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
 > Orchestrator 现在可以查询 Blender `1.1.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
-> 与内容哈希的 Eval/replay 原始证据；任意目标质量基线、连续对话/差异审查、自动评分/训练治理、
-> 第二宿主仍在路线图中。
+> 与内容哈希的 Eval/replay 原始证据。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
+> 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。任意目标质量基线、完整会话历史、
+> 参数表单编辑、自动评分/训练治理和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -39,7 +40,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   顶层未知参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **节点引用与请求关联重规划**：Blender 的活动树和待审树都提供 `Ref`；Revision request 绑定
   完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
-  更高 Plan revision；结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
+  更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
+  携带精确的 Plan/节点/字段/参数差异，结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
 - **Eval/replay 证据导出**：MCP 或 HTTP 客户端可按 adapter、Plan 和可选 Companion 实例分页导出
   用户目标、精确 ActionCatalog、完整 Proposal、人工决定、逐步 observation 与 rollback。Bundle
   自带稳定事件 sequence、内容 SHA-256 和未脱敏警告，但不会把遥测虚构成质量评分。
@@ -64,8 +66,9 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 预览 → 人工接受/拒绝”的通用审批基础，不是“AI 已能自动完成任意 Blender 任务”。
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先调用
 > `operatingline.planning.context` 再生成任意目标的 GuideProposal，但当前 Blender 目录只覆盖 10 个
-> 已验证动作，尚未建立跨目标质量基线。当前修订输入是异步、一次性的不可变请求，不是内置模型
-> 或流式聊天；连续对话、Plan diff、自动评分/训练数据治理和第二宿主尚未完成。
+> 已验证动作，尚未建立跨目标质量基线。当前修订输入不是内置模型或流式聊天；已经支持可追溯的
+> 多轮线性 thread 和 Plan diff，但尚未提供完整消息历史或用户可编辑参数表单。自动评分/训练数据
+> 治理和第二宿主也尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -110,6 +113,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0007](docs/adr/0007-versioned-eval-evidence-export.md)。
 刚性骨架与姿态关键帧的安全边界见
 [ADR 0008](docs/adr/0008-bounded-rigid-rig-animation.md)。
+多轮 revision thread 与确定性 Plan diff 见
+[ADR 0009](docs/adr/0009-linear-revision-threads-and-plan-diffs.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -187,7 +192,8 @@ pnpm dev
 6. 若要修改某个局部节点，在活动树或待审树点击 `Ref`，在 `Revision request` 中描述变化并发送。
    MCP 客户端调用 `operatingline.replan.requests.list` 读取请求，再调用
    `operatingline.replan.propose` 提交 `{ requestId, catalogVersion, plan }`。`plan` 必须是同一 Plan ID
-   的完整更高 revision；Blender 会把它作为新的待审 Proposal 展示，而不会直接执行。
+   的完整更高 revision；Blender 会把它作为新的待审 Proposal 展示，并列出 Plan/节点/参数差异，
+   而不会直接执行。接受后再次提交引用会自动成为同一 thread 的下一轮。
 7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，传入
    `{ targetAdapterId, planId, instanceId?, afterSequence?, limit? }`；也可请求
    `GET /api/v1/eval/export`。继续分页时把上一页 `nextAfterSequence` 作为新游标。导出未自动脱敏，
@@ -217,9 +223,10 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
 
 在 3D View 中按 `N`，打开 `OperatingLine` 页签：
 
-1. 连接 Orchestrator 后，若收到 AI 提案，先在 `Plan proposal` 区域查看计划 ID/revision、目标宿主
-   和只读任务树。`Accept Plan` 只替换没有 receipt 的空闲会话，不执行任何步骤；`Reject Plan`
-   保留活动计划和场景。活动会话已有结果时，必须先用 Back 回到起点才能接受。
+1. 连接 Orchestrator 后，若收到 AI 提案，先在 `Plan proposal` 区域查看计划 ID/revision、目标宿主、
+   revision thread、`+ / - / ~ / moved` 汇总、字段/简单参数前后值和只读任务树。`Accept Plan` 只替换
+   没有 receipt 的空闲会话，不执行任何步骤；`Reject Plan` 保留活动计划和场景。活动会话已有结果时，
+   必须先用 Back 回到起点才能接受。
 2. `Start` 重置已接受的演示会话、展示 Overlay，并将计划置于第一个可执行步骤之前；待审提案
    存在时 Start/Next 会被门禁，避免在审批期间继续修改场景。
 3. `Next` 按 15 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，创建并
@@ -232,6 +239,7 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`15`。
 7. 树中每个节点的 `Ref` 会把 `@1.2.3` 一类引用加入 Revision request。一次请求可以引用同一
    活动计划或同一待审计划中的最多 8 个节点；发送只入队，不修改模型，返回的新计划仍需审批。
+   若基线来自已接受的请求关联 Proposal，输入区会显示将继续的 thread 与下一 turn。
 8. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划更新
    和本地待审提案。
 
@@ -332,15 +340,15 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 以及 15 步完整
 前进/回退。`pnpm test:blender:companion`
 会启动真实 Orchestrator 进程和 Blender，经过 MCP 提交初版提案、Blender 节点引用与修订请求、
-MCP 请求关联重规划、实例定向 Proposal、两次人工接受、Start/Next/Back、决策与状态回传，验证
-审批前零执行、默认 Cube 不被删除以及跨进程闭环。
+两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、实例定向 Proposal、三次人工接受、
+Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
 `pnpm test:blender:visual` 会为七个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-revision-request.png`、
 `guidance-proposal-review.png`、`guidance-mid-forward.png`、
 `guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
-节点引用与 Revision request、待审提案树与接受/拒绝控件、红色 Back/绿色 Next 并存、回退后的
-颜色与对象变化、完整隐藏，以及 operator 语义降级。
+节点引用与 Revision request、待审提案的 thread/diff/参数变化与接受/拒绝控件、红色 Back/绿色
+Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
 
 产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、
 锚点真实性或隐藏规则。
@@ -380,7 +388,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 1. 建立跨目标规划质量基线与可选 planner 集成，使“创建机器人”等任意目标在现有目录范围内
    稳定生成高质量 GuidePlan；当前由 Codex/Claude 等外部 MCP 客户端负责生成。
-2. 在已完成的节点引用与不可变重规划上增加连续对话、计划差异确认和用户可编辑参数。
+2. 在已完成的线性多轮 revision thread 与 Plan diff 审查上增加完整消息历史、分支/合并策略和
+   用户可编辑参数表单。
 3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
    `undo_post`/`redo_post` 后再声明原生 Undo 能力。
 4. 在已完成的原始 eval/replay 证据导出之上增加显式评分器、数据脱敏与同意/保留策略、数据集切分

@@ -1,5 +1,5 @@
 {
-  "protocolVersion": "1.0.0",
+  "protocolVersion": "1.1.0",
   "catalogVersion": "1.1.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",

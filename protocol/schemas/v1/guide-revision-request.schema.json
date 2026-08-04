@@ -4,7 +4,10 @@
   "properties": {
     "protocolVersion": {
       "type": "string",
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
     },
     "requestId": {
       "type": "string",
@@ -29,7 +32,10 @@
       "properties": {
         "protocolVersion": {
           "type": "string",
-          "const": "1.0.0"
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
         },
         "id": {
           "type": "string",
@@ -356,6 +362,80 @@
       "minLength": 1,
       "maxLength": 4000
     },
+    "revisionThread": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "turn": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "parentRequestId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "threadId",
+        "turn",
+        "parentRequestId"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "turn": {
+                "const": 1
+              }
+            },
+            "required": [
+              "turn"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parentRequestId": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "turn": {
+                "minimum": 2
+              }
+            },
+            "required": [
+              "turn"
+            ]
+          },
+          "then": {
+            "properties": {
+              "parentRequestId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        }
+      ]
+    },
     "occurredAt": {
       "type": "string",
       "format": "date-time",
@@ -374,5 +454,24 @@
     "occurredAt"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "protocolVersion": {
+            "const": "1.1.0"
+          }
+        },
+        "required": [
+          "protocolVersion"
+        ]
+      },
+      "then": {
+        "required": [
+          "revisionThread"
+        ]
+      }
+    }
+  ],
   "$id": "https://operatingline.dev/schema/v1/guide-revision-request.json"
 }

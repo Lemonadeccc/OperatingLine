@@ -218,6 +218,56 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('queries linear revision thread heads and their linked proposal payloads', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const firstRequest = revisionRequest();
+    const firstThreadRequest = {
+      ...firstRequest,
+      revisionThread: {
+        threadId: firstRequest.requestId,
+        turn: 1,
+        parentRequestId: null,
+      },
+    };
+    const firstProposal = guideProposal('snowman', 4);
+
+    expect(database.recordGuideRevisionRequest(firstThreadRequest)).toBe('accepted');
+    expect(database.getGuideRevisionThreadHead(firstRequest.requestId)).toEqual(firstThreadRequest);
+    expect(database.getGuideReplanProposalForRequest(firstRequest.requestId)).toBeNull();
+    database.recordGuideReplanProposal(firstProposal, firstRequest.requestId);
+    expect(database.getGuideReplanProposalForRequest(firstRequest.requestId)).toEqual(
+      firstProposal,
+    );
+
+    const secondRequest = revisionRequest();
+    const secondThreadRequest = {
+      ...secondRequest,
+      instanceId: firstThreadRequest.instanceId,
+      basePlan: { id: 'snowman', revision: 4 },
+      revisionThread: {
+        threadId: firstRequest.requestId,
+        turn: 2,
+        parentRequestId: firstRequest.requestId,
+      },
+    };
+    expect(database.recordGuideRevisionRequest(secondThreadRequest)).toBe('accepted');
+    expect(database.getGuideRevisionThreadHead(firstRequest.requestId)).toEqual(
+      secondThreadRequest,
+    );
+    expect(() =>
+      database.recordGuideRevisionRequest({
+        ...revisionRequest(),
+        instanceId: firstThreadRequest.instanceId,
+        revisionThread: {
+          threadId: firstRequest.requestId,
+          turn: 2,
+          parentRequestId: firstRequest.requestId,
+        },
+      }),
+    ).toThrow('UNIQUE constraint failed');
+    database.close();
+  });
+
   it('persists append-only companion reports and latest state across restart', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-persistence-test-'));
     const databasePath = join(directory, 'state.db');
@@ -315,7 +365,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 5,
+        count: 6,
       });
       expect(
         inspected

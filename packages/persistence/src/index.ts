@@ -55,6 +55,13 @@ export interface GuideRevisionRequestInput {
     id: string;
     revision: number;
   };
+  revisionThread?:
+    | {
+        threadId: string;
+        turn: number;
+        parentRequestId: string | null;
+      }
+    | undefined;
 }
 
 export type RecordGuideRevisionRequestResult = 'accepted' | 'duplicate' | 'conflict';
@@ -94,6 +101,8 @@ export interface OperatingLineDatabase {
     request: T,
   ): RecordGuideRevisionRequestResult;
   getGuideRevisionRequest(requestId: string): unknown | null;
+  getGuideRevisionThreadHead(threadId: string): unknown | null;
+  getGuideReplanProposalForRequest(requestId: string): unknown | null;
   listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
@@ -239,6 +248,21 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (5, datetime('now'))",
     )
     .run();
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS guide_revision_requests_thread_turn
+    ON guide_revision_requests (
+      json_extract(payload, '$.revisionThread.threadId'),
+      CAST(json_extract(payload, '$.revisionThread.turn') AS INTEGER)
+    )
+    WHERE json_extract(payload, '$.revisionThread.threadId') IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS guide_revision_requests_parent
+    ON guide_revision_requests (json_extract(payload, '$.revisionThread.parentRequestId'))
+    WHERE json_extract(payload, '$.revisionThread.parentRequestId') IS NOT NULL;
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (6, datetime('now'));
+  `);
 
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
@@ -314,6 +338,19 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT proposal_id
     FROM guide_revision_request_proposals
     WHERE request_id = ?
+  `);
+  const findRevisionRequestProposalPayload = sqlite.prepare(`
+    SELECT proposal.payload
+    FROM guide_revision_request_proposals AS linked
+    JOIN guide_proposals AS proposal ON proposal.proposal_id = linked.proposal_id
+    WHERE linked.request_id = ?
+  `);
+  const findRevisionThreadHead = sqlite.prepare(`
+    SELECT payload
+    FROM guide_revision_requests
+    WHERE json_extract(payload, '$.revisionThread.threadId') = ?
+    ORDER BY CAST(json_extract(payload, '$.revisionThread.turn') AS INTEGER) DESC
+    LIMIT 1
   `);
   const insertRevisionRequestProposal = sqlite.prepare(`
     INSERT INTO guide_revision_request_proposals (request_id, proposal_id, linked_at)
@@ -629,6 +666,27 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       }
       if (typeof row.payload !== 'string') {
         throw new Error('SQLite returned an invalid guide revision request payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    getGuideRevisionThreadHead(threadId) {
+      const row = findRevisionThreadHead.get(threadId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide revision thread payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    getGuideReplanProposalForRequest(requestId) {
+      const row = findRevisionRequestProposalPayload.get(requestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide replan proposal payload');
       }
       return JSON.parse(row.payload) as unknown;
     },

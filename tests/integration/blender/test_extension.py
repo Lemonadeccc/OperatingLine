@@ -228,7 +228,7 @@ def assert_companion_and_plan_semantics() -> None:
             ) == [str(DYNAMIC_REVISION)]
             self._reply(
                 {
-                    "protocolVersion": "1.0.0",
+                    "protocolVersion": "1.1.0",
                     "plan": None if known else dynamic_plan,
                 }
             )
@@ -336,7 +336,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(revision_requests) == 1
         revision_request = revision_requests[0]
         uuid.UUID(revision_request["requestId"])
-        assert revision_request["protocolVersion"] == "1.0.0"
+        assert revision_request["protocolVersion"] == "1.1.0"
         assert revision_request["adapterId"] == "blender"
         assert revision_request["catalogVersion"] == "1.1.0"
         assert revision_request["instanceId"] == companion.instance_id
@@ -347,6 +347,11 @@ def assert_companion_and_plan_semantics() -> None:
         assert revision_request["message"] == (
             "@1.1.3 Make the head slightly rougher"
         )
+        assert revision_request["revisionThread"] == {
+            "threadId": revision_request["requestId"],
+            "turn": 1,
+            "parentRequestId": None,
+        }
         assert companion.last_revision_request_id == revision_request["requestId"]
         assert {item.as_pointer() for item in bpy.data.objects} == (
             scene_objects_before_request
@@ -640,13 +645,13 @@ def assert_companion_and_plan_semantics() -> None:
     reviewed_plan["revision"] = PLAN_REVISION + 10
     reviewed_plan["title"] = "Reviewed snowman proposal"
     reviewed_proposal = {
-        "protocolVersion": "1.0.0",
+        "protocolVersion": "1.1.0",
         "proposalId": str(uuid.uuid4()),
         "targetAdapterId": "blender",
         "targetInstanceId": companion.instance_id,
-        "revisionRequestId": str(uuid.uuid4()),
         "catalogVersion": "1.1.0",
         "plan": reviewed_plan,
+        "planDiff": None,
         "proposedAt": "2026-08-04T12:00:00Z",
     }
     for invalid_proposal, expected_error in (

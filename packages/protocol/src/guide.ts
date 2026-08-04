@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
-export const guideProtocolVersion = '1.0.0' as const;
-export const guideProtocolVersionSchema = z.literal(guideProtocolVersion);
+export const supportedGuideProtocolVersions = ['1.0.0', '1.1.0'] as const;
+export const guideProtocolVersion = '1.1.0' as const;
+export const guideProtocolVersionSchema = z.enum(supportedGuideProtocolVersions);
 
 export const guideStepIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 export const guideStepIdSchema = z
@@ -10,6 +11,11 @@ export const guideStepIdSchema = z
     guideStepIdPattern,
     'Step ids must use the portable ASCII form [A-Za-z0-9][A-Za-z0-9._:-]*',
   );
+
+export const guideNodeNumberPattern = /^[1-9]\d*(?:\.[1-9]\d*)*$/;
+export const guideNodeNumberSchema = z
+  .string()
+  .regex(guideNodeNumberPattern, 'Node numbers must use dotted positive integers');
 
 export const guideStepStateSchema = z.enum([
   'draft',

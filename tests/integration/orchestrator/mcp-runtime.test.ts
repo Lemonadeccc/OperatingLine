@@ -549,7 +549,7 @@ describe('OperatingLine runtime', () => {
       const requestId = randomUUID();
       const instanceId = randomUUID();
       const revisionRequest = {
-        protocolVersion: '1.0.0',
+        protocolVersion: '1.1.0',
         requestId,
         adapterId: 'blender',
         catalogVersion: '1.1.0',
@@ -557,6 +557,7 @@ describe('OperatingLine runtime', () => {
         basePlan,
         references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
         message: 'Make the head larger while preserving the three-part silhouette.',
+        revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
         occurredAt: new Date().toISOString(),
       };
 
@@ -582,12 +583,18 @@ describe('OperatingLine runtime', () => {
       });
       expect(conflict.status).toBe(409);
 
+      const invalidRequestId = randomUUID();
       const invalidReference = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           ...revisionRequest,
-          requestId: randomUUID(),
+          requestId: invalidRequestId,
+          revisionThread: {
+            threadId: invalidRequestId,
+            turn: 1,
+            parentRequestId: null,
+          },
           references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.9.9' }],
         }),
       });
@@ -635,6 +642,12 @@ describe('OperatingLine runtime', () => {
         revision: 5,
         catalogVersion: '1.1.0',
         revisionRequestId: requestId,
+        revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+        planDiff: {
+          basePlan: { id: 'snowman-demo', revision: 4 },
+          targetPlan: { id: 'snowman-demo', revision: 5 },
+          summary: { planFields: 1 },
+        },
       });
 
       const noPending = await callMcpTool(runtime, 20, 'operatingline.replan.requests.list', {
@@ -671,6 +684,85 @@ describe('OperatingLine runtime', () => {
       });
       expect(secondProposal.result).toMatchObject({ isError: true });
       expect(secondProposal.result?.content?.[0]?.text).toContain('already has a proposal');
+
+      const continuedRequestId = randomUUID();
+      const continuedRequest = {
+        ...revisionRequest,
+        requestId: continuedRequestId,
+        basePlan: replanned,
+        message: 'Keep the larger head and make the plan title more explicit.',
+        revisionThread: {
+          threadId: requestId,
+          turn: 2,
+          parentRequestId: requestId,
+        },
+        occurredAt: new Date(Date.now() + 1_000).toISOString(),
+      };
+      const continued = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(continuedRequest),
+      });
+      expect(continued.status).toBe(200);
+      await expect(continued.json()).resolves.toEqual({
+        result: 'accepted',
+        requestId: continuedRequestId,
+      });
+
+      const branchedRequestId = randomUUID();
+      const branched = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...continuedRequest,
+          requestId: branchedRequestId,
+          revisionThread: {
+            threadId: requestId,
+            turn: 2,
+            parentRequestId: requestId,
+          },
+        }),
+      });
+      expect(branched.status).toBe(422);
+      await expect(branched.json()).resolves.toMatchObject({
+        message: expect.stringContaining('must continue thread head'),
+      });
+
+      const continuedPlan = {
+        ...replanned,
+        revision: 6,
+        title: 'Create a reviewed snowman with a larger head',
+      };
+      const continuedProposal = await callMcpTool(runtime, 22, 'operatingline.replan.propose', {
+        requestId: continuedRequestId,
+        catalogVersion: '1.1.0',
+        plan: continuedPlan,
+      });
+      expect(JSON.parse(continuedProposal.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        proposed: true,
+        revision: 6,
+        revisionRequestId: continuedRequestId,
+        revisionThread: {
+          threadId: requestId,
+          turn: 2,
+          parentRequestId: requestId,
+        },
+        planDiff: {
+          basePlan: { id: 'snowman-demo', revision: 5 },
+          targetPlan: { id: 'snowman-demo', revision: 6 },
+          summary: { planFields: 1 },
+        },
+      });
+
+      guideUrl.searchParams.set('instanceId', instanceId);
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({
+        proposal: {
+          revisionRequestId: continuedRequestId,
+          plan: { id: 'snowman-demo', revision: 6 },
+        },
+      });
     } finally {
       await runtime.stop();
     }
@@ -715,7 +807,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(delivered.status).toBe(200);
       await expect(delivered.json()).resolves.toMatchObject({
-        protocolVersion: '1.0.0',
+        protocolVersion: '1.1.0',
         plan: { id: plan.id, revision: plan.revision },
       });
 
@@ -725,14 +817,14 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
 
       guideUrl.searchParams.set('knownRevision', String(plan.revision + 2));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
       guideUrl.searchParams.set('knownRevision', String(plan.revision));
 
       const nextRevision = { ...plan, revision: plan.revision + 1 };
@@ -753,7 +845,7 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
     } finally {
       await runtime.stop();
     }
@@ -795,7 +887,7 @@ describe('OperatingLine runtime', () => {
       const delivery = await fetch(guideUrl, { headers });
       expect(delivery.status).toBe(200);
       await expect(delivery.json()).resolves.toMatchObject({
-        protocolVersion: '1.0.0',
+        protocolVersion: '1.1.0',
         plan: null,
         proposal: {
           proposalId: proposalResult.proposalId,
@@ -807,10 +899,10 @@ describe('OperatingLine runtime', () => {
       guideUrl.searchParams.set('knownProposalId', proposalResult.proposalId!);
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
 
       const decision = {
-        protocolVersion: '1.0.0',
+        protocolVersion: '1.1.0',
         decisionId: randomUUID(),
         proposalId: proposalResult.proposalId,
         adapterId: 'blender',
@@ -836,7 +928,7 @@ describe('OperatingLine runtime', () => {
       guideUrl.searchParams.delete('knownProposalId');
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
 
       guideUrl.searchParams.set('instanceId', otherInstanceId);
       await expect(

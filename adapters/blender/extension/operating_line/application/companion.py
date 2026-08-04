@@ -13,14 +13,22 @@ import bpy
 from ..domain import (
     BLENDER_ACTION_CATALOG_VERSION,
     CATALOG_VERSION_PATTERN,
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
     load_task_tree_data,
 )
 from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession
+from .revision_review import (
+    RevisionLineage,
+    lineage_from_proposal,
+    new_revision_thread,
+    validate_plan_diff,
+    validate_revision_thread,
+)
 
-PROTOCOL_VERSION = "1.0.0"
 COMPANION_VERSION = "0.1.0"
 
 
@@ -39,6 +47,7 @@ class CompanionController:
         self.pending_plan: dict[str, Any] | None = None
         self.proposed_plan: dict[str, Any] | None = None
         self.proposal_session: DemoSession | None = None
+        self._active_revision_lineage: RevisionLineage | None = None
         self._revision_base_session: DemoSession | None = None
         self._revision_reference_scope: str | None = None
         self._revision_reference_ids: list[str] = []
@@ -145,7 +154,7 @@ class CompanionController:
     def _validated_session(plan: dict[str, Any]) -> DemoSession:
         if not isinstance(plan, dict):
             raise ValueError("Plan must be a JSON object")
-        if plan.get("protocolVersion") != PROTOCOL_VERSION:
+        if plan.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
             raise ValueError("Unsupported guide protocol version")
         plan_id = plan.get("id")
         revision = plan.get("revision")
@@ -181,6 +190,24 @@ class CompanionController:
     @property
     def revision_reference_scope(self) -> str | None:
         return self._revision_reference_scope
+
+    @property
+    def revision_draft_lineage(self) -> RevisionLineage | None:
+        base = self._revision_base_session
+        scope = self._revision_reference_scope
+        if base is None or scope is None:
+            return None
+        if scope == "proposal":
+            if self.proposal_session is not base or self.proposed_plan is None:
+                raise ValueError("The referenced proposal is no longer available")
+            return lineage_from_proposal(self.proposed_plan)
+        if scope == "active":
+            from .. import get_session
+
+            if get_session() is not base:
+                raise ValueError("The referenced active plan is no longer installed")
+            return self._active_revision_lineage
+        raise ValueError("Revision reference scope must be active or proposal")
 
     def revision_reference_nodes(self) -> tuple[Any, ...]:
         base = self._revision_base_session
@@ -241,6 +268,10 @@ class CompanionController:
         if source_plan is None:
             raise ValueError("The selected plan has no immutable source payload")
         request_id = str(uuid.uuid4())
+        revision_thread = new_revision_thread(
+            request_id,
+            self.revision_draft_lineage,
+        )
         request = {
             "protocolVersion": PROTOCOL_VERSION,
             "requestId": request_id,
@@ -252,6 +283,7 @@ class CompanionController:
                 {"nodeId": node.id, "nodeNumber": node.number} for node in references
             ],
             "message": normalized_message,
+            "revisionThread": revision_thread,
             "occurredAt": datetime.now(timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
@@ -307,6 +339,7 @@ class CompanionController:
             return False
         if self._revision_base_session is current:
             self.clear_revision_draft()
+        self._active_revision_lineage = None
         replace_session(replacement)
         if (
             self.pending_plan is not None
@@ -335,6 +368,8 @@ class CompanionController:
         }
         optional_fields = {
             "revisionRequestId",
+            "revisionThread",
+            "planDiff",
             "catalogVersion",
             "targetInstanceId",
         }
@@ -342,7 +377,8 @@ class CompanionController:
             required_fields | optional_fields
         ):
             raise ValueError("Proposal fields do not match the versioned protocol")
-        if proposal.get("protocolVersion") != PROTOCOL_VERSION:
+        proposal_protocol_version = proposal.get("protocolVersion")
+        if proposal_protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
             raise ValueError("Unsupported proposal protocol version")
         proposal_id = proposal.get("proposalId")
         if not isinstance(proposal_id, str):
@@ -371,6 +407,16 @@ class CompanionController:
                 uuid.UUID(revision_request_id)
             except ValueError as error:
                 raise ValueError("Proposal revision request id must be a UUID") from error
+        revision_thread = proposal.get("revisionThread")
+        if revision_thread is not None:
+            if revision_request_id is None:
+                raise ValueError(
+                    "A standalone proposal cannot declare a revision thread"
+                )
+            validate_revision_thread(
+                revision_thread,
+                request_id=revision_request_id,
+            )
         catalog_version = proposal.get("catalogVersion")
         if catalog_version is not None and (
             not isinstance(catalog_version, str)
@@ -390,6 +436,17 @@ class CompanionController:
             raise ValueError(
                 "A request-linked proposal must declare catalog and target instance"
             )
+        if proposal_protocol_version == PROTOCOL_VERSION:
+            if "planDiff" not in proposal:
+                raise ValueError("Protocol 1.1 proposals require a plan diff field")
+            if revision_request_id is not None and (
+                revision_thread is None or proposal.get("planDiff") is None
+            ):
+                raise ValueError(
+                    "A request-linked proposal requires revision thread and plan diff"
+                )
+            if revision_request_id is None and proposal.get("planDiff") is not None:
+                raise ValueError("A standalone proposal cannot declare a plan diff")
         proposed_at = proposal.get("proposedAt")
         if not isinstance(proposed_at, str):
             raise ValueError("Proposal timestamp must include a timezone")
@@ -400,7 +457,9 @@ class CompanionController:
         if parsed_time.tzinfo is None:
             raise ValueError("Proposal timestamp must include a timezone")
 
-        replacement = self._validated_session(proposal.get("plan"))
+        proposed_plan = proposal.get("plan")
+        replacement = self._validated_session(proposed_plan)
+        validate_plan_diff(proposal.get("planDiff"), proposed_plan)
         if (
             self.proposed_plan is not None
             and self.proposed_plan.get("proposalId") == proposal_id
@@ -437,6 +496,7 @@ class CompanionController:
             return False
 
         proposal_id = proposal["proposalId"]
+        accepted_lineage = lineage_from_proposal(proposal)
         accepted_session = self.proposal_session
         if not self.install_plan(proposal["plan"]):
             return False
@@ -445,6 +505,7 @@ class CompanionController:
             transport.decide_proposal(proposal_id, "accepted")
         self.proposed_plan = None
         self.proposal_session = None
+        self._active_revision_lineage = accepted_lineage
         self._last_rejected_proposal = None
         self.status = f"Plan {get_session().plan_id} r{get_session().revision} accepted"
         self.error = ""

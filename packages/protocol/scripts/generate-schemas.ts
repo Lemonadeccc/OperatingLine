@@ -12,6 +12,7 @@ import {
   evalExportBundleSchema,
   evalExportRequestSchema,
   guidePlanSchema,
+  guidePlanDiffSchema,
   guideProposalDecisionSchema,
   guideProposalSchema,
   guideProposalSubmissionSchema,
@@ -25,6 +26,11 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'guide-plan-diff.schema.json',
+    'https://operatingline.dev/schema/v1/guide-plan-diff.json',
+    guidePlanDiffSchema,
+  ],
   [
     'eval-export-request.schema.json',
     'https://operatingline.dev/schema/v1/eval-export-request.json',

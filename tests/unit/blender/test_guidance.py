@@ -3,6 +3,7 @@
 from importlib import import_module
 import sys
 import unittest
+import uuid
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -19,9 +20,13 @@ domain = import_module(f"{PACKAGE_NAME}.domain")
 visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
 DemoSession = application.DemoSession
+RevisionLineage = application.RevisionLineage
+lineage_from_proposal = application.lineage_from_proposal
+new_revision_thread = application.new_revision_thread
 node_state = application.node_state
 relevant_steps = application.relevant_steps
 step_state = application.step_state
+validate_plan_diff = application.validate_plan_diff
 ActionSpec = domain.ActionSpec
 TaskNode = domain.TaskNode
 STATE_COLORS = visual_theme.STATE_COLORS
@@ -171,6 +176,89 @@ class GuidanceStateTests(unittest.TestCase):
                 revision=8,
                 source_plan=source_plan,
             )
+
+    def test_revision_lineage_advances_without_reusing_request_identity(self) -> None:
+        first_request_id = str(uuid.uuid4())
+        first_thread = new_revision_thread(first_request_id, None)
+        self.assertEqual(
+            first_thread,
+            {
+                "threadId": first_request_id,
+                "turn": 1,
+                "parentRequestId": None,
+            },
+        )
+        lineage = lineage_from_proposal(
+            {
+                "revisionRequestId": first_request_id,
+                "revisionThread": first_thread,
+            }
+        )
+        self.assertEqual(
+            lineage,
+            RevisionLineage(first_request_id, 1, first_request_id),
+        )
+        second_request_id = str(uuid.uuid4())
+        self.assertEqual(
+            new_revision_thread(second_request_id, lineage),
+            {
+                "threadId": first_request_id,
+                "turn": 2,
+                "parentRequestId": first_request_id,
+            },
+        )
+
+    def test_plan_diff_validation_preserves_exact_parameter_values(self) -> None:
+        plan = {"id": "snowman", "revision": 2}
+        diff = {
+            "basePlan": {"id": "snowman", "revision": 1},
+            "targetPlan": plan,
+            "summary": {
+                "planFields": 0,
+                "addedSteps": 0,
+                "removedSteps": 0,
+                "updatedSteps": 1,
+                "movedSteps": 0,
+            },
+            "planChanges": [],
+            "stepChanges": [
+                {
+                    "kind": "updated",
+                    "stepId": "snowman.model.head",
+                    "before": {
+                        "stepId": "snowman.model.head",
+                        "nodeNumber": "1.2.3",
+                        "parentId": "snowman.model",
+                        "order": 3,
+                        "title": "Create the head",
+                    },
+                    "after": {
+                        "stepId": "snowman.model.head",
+                        "nodeNumber": "1.2.3",
+                        "parentId": "snowman.model",
+                        "order": 3,
+                        "title": "Create the larger head",
+                    },
+                    "changes": [
+                        {
+                            "field": "action",
+                            "before": {"arguments": {"radius": 0.85}},
+                            "after": {"arguments": {"radius": 0.93}},
+                        }
+                    ],
+                }
+            ],
+        }
+        validated = validate_plan_diff(diff, plan)
+        self.assertEqual(
+            validated["stepChanges"][0]["changes"][0]["after"]["arguments"][
+                "radius"
+            ],
+            0.93,
+        )
+        invalid = {**diff, "summary": {**diff["summary"], "updatedSteps": 0}}
+        with self.assertRaisesRegex(ValueError, "summary is inconsistent"):
+            validate_plan_diff(invalid, plan)
 
 
 if __name__ == "__main__":

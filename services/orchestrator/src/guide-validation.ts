@@ -1,5 +1,12 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { validateExecutableTaskPlan } from '@operatingline/domain';
-import type { ActionCatalog, GuidePlan, GuideRevisionRequest } from '@operatingline/protocol';
+import type {
+  ActionCatalog,
+  GuidePlan,
+  GuideProposal,
+  GuideRevisionRequest,
+} from '@operatingline/protocol';
 
 export function validateGuidePlanStructure(plan: GuidePlan): string | null {
   const root = plan.steps.find((step) => step.id === plan.rootStepId);
@@ -144,5 +151,49 @@ export function validateGuideRevisionRequest(
         `Guide revision request node ${reference.nodeId} uses number ${reference.nodeNumber}; expected ${expectedNumber}`,
       );
     }
+  }
+}
+
+export function validateGuideRevisionThread(
+  request: GuideRevisionRequest,
+  threadHead: GuideRevisionRequest | null,
+  parentProposal: GuideProposal | null,
+): void {
+  const thread = request.revisionThread;
+  if (thread === undefined) {
+    return;
+  }
+  if (thread.turn === 1) {
+    if (threadHead !== null) {
+      throw new Error(`Guide revision thread already exists: ${thread.threadId}`);
+    }
+    return;
+  }
+  if (threadHead === null || threadHead.revisionThread === undefined) {
+    throw new Error(`Unknown guide revision thread: ${thread.threadId}`);
+  }
+  if (
+    threadHead.requestId !== thread.parentRequestId ||
+    threadHead.revisionThread.threadId !== thread.threadId ||
+    threadHead.revisionThread.turn + 1 !== thread.turn
+  ) {
+    throw new Error(
+      `Guide revision turn ${thread.turn} must continue thread head ${threadHead.requestId} at turn ${threadHead.revisionThread.turn}`,
+    );
+  }
+  if (
+    threadHead.adapterId !== request.adapterId ||
+    threadHead.instanceId !== request.instanceId ||
+    threadHead.catalogVersion !== request.catalogVersion
+  ) {
+    throw new Error('A guide revision thread cannot change adapter, instance, or catalog version');
+  }
+  if (parentProposal === null || parentProposal.revisionRequestId !== threadHead.requestId) {
+    throw new Error(`Guide revision thread parent has no linked proposal: ${threadHead.requestId}`);
+  }
+  if (!isDeepStrictEqual(parentProposal.plan, request.basePlan)) {
+    throw new Error(
+      'A continued revision request must use its parent proposal as the exact base plan',
+    );
   }
 }

@@ -80,7 +80,10 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 宿主还可以把活动树或待审树的节点引用提交为不可变 GuideRevisionRequest。Orchestrator 核对完整
 base Plan、精确目录版本与每个节点编号，并通过 MCP 暴露待处理请求。外部模型客户端只能返回相同
 Plan ID 的完整更高 revision；它不能原地 patch 已审批计划。生成的 Proposal 绑定请求 ID 并按
-`targetInstanceId` 只投递给发起实例，仍然经过同一宿主内 Accept/Reject 门禁。
+`targetInstanceId` 只投递给发起实例，仍然经过同一宿主内 Accept/Reject 门禁。协议 `1.1.0` 为请求
+增加线性 `revisionThread`；后续 turn 必须引用当前 head，并以父请求关联 Proposal 的完整 Plan 为
+精确基线。Orchestrator 对 base/target 计算确定性 Plan diff，保留计划字段、节点增删移动、步骤字段
+以及 action 参数的 JSON 前后值；宿主只负责验证并呈现，不自行猜测差异。
 
 列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
 Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：

@@ -40,6 +40,9 @@ def main() -> None:
     expected_revision = int(required_environment("OPERATINGLINE_E2E_PLAN_REVISION"))
     expected_root_title = required_environment("OPERATINGLINE_E2E_ROOT_TITLE")
     expected_revised_title = required_environment("OPERATINGLINE_E2E_REVISED_ROOT_TITLE")
+    expected_twice_revised_title = required_environment(
+        "OPERATINGLINE_E2E_TWICE_REVISED_ROOT_TITLE"
+    )
 
     assert bpy.app.online_access is True, "E2E must run Blender with --online-mode"
     operating_line.register()
@@ -170,11 +173,80 @@ def main() -> None:
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
         assert controller.proposed_plan["catalogVersion"] == "1.1.0"
+        first_thread = controller.proposed_plan["revisionThread"]
+        assert first_thread == {
+            "threadId": revision_request_id,
+            "turn": 1,
+            "parentRequestId": None,
+        }
+        first_diff = controller.proposed_plan["planDiff"]
+        assert first_diff["basePlan"] == {
+            "id": expected_plan_id,
+            "revision": expected_revision,
+        }
+        assert first_diff["targetPlan"] == {
+            "id": expected_plan_id,
+            "revision": expected_revision + 1,
+        }
+        assert first_diff["summary"]["updatedSteps"] == 2
         assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
         session = operating_line.get_session()
         assert session.revision == expected_revision + 1
         assert session.root.title == expected_revised_title
         assert plan_install_threads == [
+            threading.main_thread().ident,
+            threading.main_thread().ident,
+        ]
+        assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
+
+        # Continue the accepted revision in the same immutable feedback thread.
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        window_manager.operating_line_revision_message += (
+            "Keep that change and make the review title more explicit"
+        )
+        assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
+        second_revision_request_id = controller.last_revision_request_id
+        assert second_revision_request_id is not None
+        assert second_revision_request_id != revision_request_id
+        wait_until(
+            lambda: "stored for MCP planner" in controller.revision_request_status,
+            "second revision request acknowledgement",
+        )
+        wait_until(
+            lambda: (
+                controller.proposed_plan is not None
+                and controller.proposed_plan.get("revisionRequestId")
+                == second_revision_request_id
+                and controller.proposal_session is not None
+                and controller.proposal_session.revision == expected_revision + 2
+            ),
+            "second request-linked replan proposal",
+        )
+        assert operating_line.get_session() is session
+        assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
+        assert controller.proposed_plan["revisionThread"] == {
+            "threadId": revision_request_id,
+            "turn": 2,
+            "parentRequestId": revision_request_id,
+        }
+        second_diff = controller.proposed_plan["planDiff"]
+        assert second_diff["basePlan"] == {
+            "id": expected_plan_id,
+            "revision": expected_revision + 1,
+        }
+        assert second_diff["targetPlan"] == {
+            "id": expected_plan_id,
+            "revision": expected_revision + 2,
+        }
+        assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
+        session = operating_line.get_session()
+        assert session.revision == expected_revision + 2
+        assert session.root.title == expected_twice_revised_title
+        assert plan_install_threads == [
+            threading.main_thread().ident,
             threading.main_thread().ident,
             threading.main_thread().ident,
         ]
@@ -286,6 +358,9 @@ def main() -> None:
                     "lastSequence": controller.last_report["sequence"],
                     "proposalReviewedBeforeExecution": True,
                     "revisionRequestId": revision_request_id,
+                    "secondRevisionRequestId": second_revision_request_id,
+                    "revisionThreadId": first_thread["threadId"],
+                    "planDiffReviewedBeforeExecution": True,
                     "requestLinkedProposalReviewedBeforeExecution": True,
                 },
                 indent=2,

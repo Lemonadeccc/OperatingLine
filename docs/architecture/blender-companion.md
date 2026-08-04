@@ -81,7 +81,10 @@ action；Reject 只清除预览。两种决策由网络线程异步回传且按�
 基线；切换基线会清空旧引用。发送时 Companion 把完整 base Plan、稳定节点 ID、当时的树编号、
 打包目录版本和消息放入后台队列。请求确认或暂时失败只更新 UI 状态，不调用 `bpy` 场景 API。
 Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blender 在主线程再次核对后才建立
-只读预览。输入区明确称为 Revision request，因为当前没有内置模型、流式回复或聊天记录。
+只读预览。Protocol `1.1.0` 的 Proposal 还必须带线性 thread 元数据和 Plan diff；Panel 在 Accept 前
+显示 `+ / - / ~ / moved`、变化节点、字段和可紧凑表示的 action 参数前后值。接受请求关联 Proposal
+后，新的 active-plan 引用会继承 `threadId`、递增 turn 并把上一 request 作为 parent。输入区仍明确
+称为 Revision request，因为当前没有内置模型、流式回复或完整聊天记录。
 
 ## revision 4 雪人执行切片
 
