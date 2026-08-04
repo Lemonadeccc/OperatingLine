@@ -2,8 +2,18 @@ import { z } from 'zod';
 
 import { rollbackModeSchema } from './adapter.js';
 import { companionStateReportSchema } from './companion.js';
-import { guideProtocolVersionSchema } from './guide.js';
-import { catalogVersionSchema } from './version.js';
+import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
+import { catalogVersionSchema, planningQualityBaselineVersionSchema } from './version.js';
+
+export const planningPhaseSchema = z.strictObject({
+  id: guideStepIdSchema,
+  order: z.number().int().positive(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  selectionGuidance: z.string().min(1),
+  actionNames: z.array(z.string().min(1)).min(1),
+});
+export type PlanningPhase = z.infer<typeof planningPhaseSchema>;
 
 export const actionArgumentsJsonSchemaSchema = z.strictObject({
   type: z.literal('object'),
@@ -55,6 +65,7 @@ export const actionCatalogSchema = z.strictObject({
   title: z.string().min(1),
   description: z.string().min(1),
   planningNotes: z.array(z.string().min(1)),
+  planningPhases: z.array(planningPhaseSchema).min(1).optional(),
   actions: z.array(actionCatalogEntrySchema).min(1),
 });
 export type ActionCatalog = z.infer<typeof actionCatalogSchema>;
@@ -81,6 +92,44 @@ export function validateActionCatalog(catalog: ActionCatalog): void {
     ) {
       throw new Error(`Action ${action.name} repeats a required argument property`);
     }
+  }
+
+  if (catalog.planningPhases === undefined) {
+    return;
+  }
+  const phaseIds = new Set<string>();
+  const phaseOrders = new Set<number>();
+  const assignedActions = new Set<string>();
+  for (const phase of catalog.planningPhases) {
+    if (phaseIds.has(phase.id)) {
+      throw new Error(
+        `Action catalog ${catalog.adapterId}@${catalog.catalogVersion} repeats planning phase ${phase.id}`,
+      );
+    }
+    if (phaseOrders.has(phase.order)) {
+      throw new Error(
+        `Action catalog ${catalog.adapterId}@${catalog.catalogVersion} repeats planning phase order ${phase.order}`,
+      );
+    }
+    phaseIds.add(phase.id);
+    phaseOrders.add(phase.order);
+    for (const actionName of phase.actionNames) {
+      if (!actionNames.has(actionName)) {
+        throw new Error(`Planning phase ${phase.id} references unknown action ${actionName}`);
+      }
+      if (assignedActions.has(actionName)) {
+        throw new Error(`Action ${actionName} is assigned to more than one planning phase`);
+      }
+      assignedActions.add(actionName);
+    }
+  }
+  const unassignedActions = [...actionNames].filter(
+    (actionName) => !assignedActions.has(actionName),
+  );
+  if (unassignedActions.length > 0) {
+    throw new Error(
+      `Action catalog ${catalog.adapterId}@${catalog.catalogVersion} leaves actions outside planning phases: ${unassignedActions.sort().join(', ')}`,
+    );
   }
 }
 
@@ -121,5 +170,13 @@ export const planningContextSchema = z.strictObject({
     targetAdapterId: z.string().min(1),
     description: z.string().min(1),
   }),
+  qualityGate: z
+    .strictObject({
+      toolName: z.literal('operatingline.planning.evaluate'),
+      baselineVersion: planningQualityBaselineVersionSchema,
+      requiredPhaseSelection: z.literal('planner_declared_from_goal'),
+      description: z.string().min(1),
+    })
+    .optional(),
 });
 export type PlanningContext = z.infer<typeof planningContextSchema>;

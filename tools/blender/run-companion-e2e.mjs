@@ -275,7 +275,7 @@ try {
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.1.0');
+  assert.equal(revisionRequests[0].catalogVersion, '1.2.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -397,9 +397,9 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.1.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.2.0');
   assert.equal(evalBundle.page.hasMore, false);
-  assert.equal(evalBundle.summary.matchedEventCount, 15 + 2 * result.stepCount);
+  assert.equal(evalBundle.summary.matchedEventCount, 18 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });
   assert.equal(evalBundle.summary.transitionCounts.connected, undefined);
   assert.equal(evalBundle.summary.transitionCounts.step_succeeded, result.stepCount);
@@ -408,6 +408,15 @@ try {
     evalBundle.events.some(
       (event) =>
         event.eventType === 'planning.context.generated' && event.payload.context.goal === goal,
+    ),
+  );
+  assert.equal(evalBundle.summary.eventTypeCounts['planning.quality.evaluated'], 3);
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'planning.quality.evaluated' &&
+        event.payload.report.valid === true &&
+        event.payload.report.baselineVersion === '1.0.0',
     ),
   );
   assert.ok(

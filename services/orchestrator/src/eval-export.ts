@@ -167,6 +167,11 @@ function eventMatches(
   switch (event.eventType) {
     case 'planning.context.generated':
       return planningContextMatches(event.payload, request);
+    case 'planning.quality.evaluated':
+      return (
+        stringAt(event.payload, 'targetAdapterId') === request.targetAdapterId &&
+        stringAt(event.payload, 'plan', 'id') === request.planId
+      );
     case 'guide.plan.published':
       return publishedPlanMatches(event.payload, request);
     case 'guide.proposal.created': {

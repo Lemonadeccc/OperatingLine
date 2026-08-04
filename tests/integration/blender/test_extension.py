@@ -59,6 +59,7 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
     ALLOWED_ACTIONS,
+    COLLECTION_NAME,
     OWNER_VALUE,
 )
 
@@ -378,7 +379,7 @@ def assert_companion_and_plan_semantics() -> None:
         uuid.UUID(revision_request["requestId"])
         assert revision_request["protocolVersion"] == "1.1.0"
         assert revision_request["adapterId"] == "blender"
-        assert revision_request["catalogVersion"] == "1.1.0"
+        assert revision_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
         assert revision_request["instanceId"] == companion.instance_id
         assert revision_request["basePlan"] == dynamic_plan
         assert revision_request["references"] == [
@@ -700,7 +701,7 @@ def assert_companion_and_plan_semantics() -> None:
         "proposalId": str(uuid.uuid4()),
         "targetAdapterId": "blender",
         "targetInstanceId": companion.instance_id,
-        "catalogVersion": "1.1.0",
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
         "plan": reviewed_plan,
         "planDiff": None,
         "proposedAt": "2026-08-04T12:00:00Z",
@@ -1283,7 +1284,7 @@ def main() -> None:
         assert bpy.ops.operating_line.start() == {"FINISHED"}
         assert session.active_index == -1
         assert not session.receipts
-        assert bpy.data.collections.get("OperatingLine Snowman") is None
+        assert bpy.data.collections.get(COLLECTION_NAME) is None
         assert bpy.ops.operating_line.next() == {"FINISHED"}
         assert session.active_index == 0
     finally:
@@ -1297,7 +1298,7 @@ def main() -> None:
     duplicate_collection = bpy.data.collections.get("UserDuplicateCollection")
     assert duplicate_collection is not None
     assert bpy.data.objects.get("UserObject") is user_object
-    assert bpy.data.collections.get("OperatingLine Snowman") is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
     assert duplicate_head.name in duplicate_collection.objects
 
     duplicate_mesh = duplicate_head.data

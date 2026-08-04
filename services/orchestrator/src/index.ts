@@ -25,10 +25,14 @@ import {
   guideRevisionThreadHistoryRequestSchema,
   planningContextRequestSchema,
   planningContextSchema,
+  planningQualityBaselineVersion,
+  planningQualityEvaluationRequestSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
   type GuideProposal,
+  type PlanningIntent,
+  type PlanningQualityReport,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -37,6 +41,7 @@ import { createActionCatalogRegistry } from './action-catalogs.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+import { evaluatePlanningQuality } from './planning-quality.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
@@ -175,6 +180,17 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Submit one complete GuidePlan revision for in-host preview and explicit human acceptance.',
         },
+        ...(catalog.planningPhases === undefined
+          ? {}
+          : {
+              qualityGate: {
+                toolName: 'operatingline.planning.evaluate',
+                baselineVersion: planningQualityBaselineVersion,
+                requiredPhaseSelection: 'planner_declared_from_goal',
+                description:
+                  'Declare the goal-relevant planning phases, evaluate the complete candidate, and resolve every error before proposal submission.',
+              },
+            }),
       });
       database.appendEvent({
         id: randomUUID(),
@@ -193,6 +209,34 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         exportedAt: new Date().toISOString(),
       });
 
+    const getPlanningQuality = (
+      request: ReturnType<typeof planningQualityEvaluationRequestSchema.parse>,
+      selectedCatalog?: ActionCatalog,
+    ): PlanningQualityReport => {
+      const catalog =
+        selectedCatalog ??
+        actionCatalogRegistry.get({
+          targetAdapterId: request.targetAdapterId,
+          ...(request.catalogVersion === undefined
+            ? {}
+            : { catalogVersion: request.catalogVersion }),
+        });
+      const report = evaluatePlanningQuality(request, catalog);
+      database.appendEvent({
+        id: randomUUID(),
+        eventType: 'planning.quality.evaluated',
+        payload: {
+          targetAdapterId: request.targetAdapterId,
+          catalogVersion: catalog.catalogVersion,
+          goal: request.goal ?? null,
+          requiredPhaseIds: request.requiredPhaseIds,
+          plan: request.plan,
+          report,
+        },
+      });
+      return report;
+    };
+
     const createProposal = (input: {
       targetAdapterId: string;
       targetInstanceId?: string;
@@ -205,13 +249,36 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
         >;
       };
-    }): GuideProposal => {
+      planning?: PlanningIntent;
+    }): { proposal: GuideProposal; planningQuality: PlanningQualityReport } => {
       validateProposalTarget(input.plan, input.targetAdapterId);
       const catalog = actionCatalogRegistry.get({
         targetAdapterId: input.targetAdapterId,
         ...(input.catalogVersion === undefined ? {} : { catalogVersion: input.catalogVersion }),
       });
       validateGuidePlanAgainstActionCatalog(input.plan, catalog);
+      const planningQuality = getPlanningQuality(
+        planningQualityEvaluationRequestSchema.parse({
+          targetAdapterId: input.targetAdapterId,
+          catalogVersion: catalog.catalogVersion,
+          ...(input.planning === undefined
+            ? {}
+            : {
+                goal: input.planning.goal,
+                requiredPhaseIds: input.planning.requiredPhaseIds,
+              }),
+          plan: input.plan,
+        }),
+        catalog,
+      );
+      if (!planningQuality.valid) {
+        const errors = planningQuality.findings
+          .filter((finding) => finding.severity === 'error')
+          .slice(0, 3)
+          .map((finding) => `${finding.code}: ${finding.message}`)
+          .join('; ');
+        throw new Error(`Planning quality baseline failed: ${errors}`);
+      }
       const latestRevision = latestProposedRevisionByPlanId.get(input.plan.id);
       if (latestRevision !== undefined && input.plan.revision <= latestRevision) {
         throw new Error(
@@ -245,10 +312,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         database.recordGuideReplanProposal(proposal, input.replan.requestId);
       }
       latestProposedRevisionByPlanId.set(input.plan.id, input.plan.revision);
-      return proposal;
+      return { proposal, planningQuality };
     };
 
-    const proposalResult = (proposal: GuideProposal) => ({
+    const proposalResult = (proposal: GuideProposal, planningQuality: PlanningQualityReport) => ({
       proposed: true,
       proposalId: proposal.proposalId,
       targetAdapterId: proposal.targetAdapterId,
@@ -259,6 +326,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       revisionRequestId: proposal.revisionRequestId ?? null,
       revisionThread: proposal.revisionThread ?? null,
       planDiff: proposal.planDiff ?? null,
+      planningQuality,
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
@@ -324,6 +392,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           const request = planningContextRequestSchema.parse(requestInput);
           return {
             content: [{ type: 'text', text: JSON.stringify(getPlanningContext(request)) }],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.planning.evaluate',
+        {
+          description:
+            'Evaluate one complete candidate GuidePlan against the selected host planning phases, teachable hierarchy, semantic guidance, and logical resource dependencies. Returns deterministic findings, not a subjective model score.',
+          inputSchema: planningQualityEvaluationRequestSchema,
+        },
+        async (requestInput) => {
+          const request = planningQualityEvaluationRequestSchema.parse(requestInput);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(getPlanningQuality(request)) }],
           };
         },
       );
@@ -413,7 +496,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               `Guide revision request ${revisionRequest.requestId} uses legacy protocol without a revision thread`,
             );
           }
-          const proposal = createProposal({
+          const { proposal, planningQuality } = createProposal({
             targetAdapterId: revisionRequest.adapterId,
             targetInstanceId: revisionRequest.instanceId,
             catalogVersion: submission.catalogVersion,
@@ -423,9 +506,15 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               basePlan: revisionRequest.basePlan,
               revisionThread: revisionRequest.revisionThread,
             },
+            ...(submission.planning === undefined ? {} : { planning: submission.planning }),
           });
           return {
-            content: [{ type: 'text', text: JSON.stringify(proposalResult(proposal)) }],
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(proposalResult(proposal, planningQuality)),
+              },
+            ],
           };
         },
       );
@@ -476,15 +565,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
         async (submissionInput) => {
           const submission = guideProposalSubmissionSchema.parse(submissionInput);
-          const proposal = createProposal({
+          const { proposal, planningQuality } = createProposal({
             targetAdapterId: submission.targetAdapterId,
             plan: submission.plan,
             ...(submission.catalogVersion === undefined
               ? {}
               : { catalogVersion: submission.catalogVersion }),
+            ...(submission.planning === undefined ? {} : { planning: submission.planning }),
           });
           return {
-            content: [{ type: 'text', text: JSON.stringify(proposalResult(proposal)) }],
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(proposalResult(proposal, planningQuality)),
+              },
+            ],
           };
         },
       );
@@ -538,6 +633,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(404).send({
           error: 'planning_context_unavailable',
           message: error instanceof Error ? error.message : 'Unknown planning context error',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/planning/evaluate', async (request, reply) => {
+      const parsedRequest = planningQualityEvaluationRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return getPlanningQuality(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'planning_quality_unavailable',
+          message: error instanceof Error ? error.message : 'Unknown planning quality error',
         });
       }
     });
@@ -738,3 +849,4 @@ export { createActionCatalogRegistry };
 export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+export { evaluatePlanningQuality } from './planning-quality.js';

@@ -2,6 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
     "targetAdapterId": {
       "type": "string",
       "minLength": 1
@@ -10,31 +22,21 @@
       "type": "string",
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
     },
-    "planning": {
-      "type": "object",
-      "properties": {
-        "goal": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 10000
-        },
-        "requiredPhaseIds": {
-          "minItems": 1,
-          "maxItems": 64,
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          }
-        }
-      },
-      "required": [
-        "goal",
-        "requiredPhaseIds"
-      ],
-      "additionalProperties": false
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
     },
-    "plan": {
+    "requiredPhaseIds": {
+      "minItems": 1,
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "referencePlan": {
       "type": "object",
       "properties": {
         "protocolVersion": {
@@ -343,9 +345,15 @@
     }
   },
   "required": [
+    "formatVersion",
+    "id",
+    "title",
     "targetAdapterId",
-    "plan"
+    "catalogVersion",
+    "goal",
+    "requiredPhaseIds",
+    "referencePlan"
   ],
   "additionalProperties": false,
-  "$id": "https://operatingline.dev/schema/v1/guide-proposal-submission.json"
+  "$id": "https://operatingline.dev/schema/v1/planning-benchmark-case.json"
 }

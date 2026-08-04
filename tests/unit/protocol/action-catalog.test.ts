@@ -14,7 +14,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.1.0');
+    expect(catalog.catalogVersion).toBe('1.2.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -31,6 +31,13 @@ describe('action catalog protocol', () => {
     expect(
       catalog.actions.find((action) => action.name === 'blender.render.execute_preview')?.safety,
     ).toMatchObject({ sideEffect: 'managed_file_write', fileAccess: 'managed_temp' });
+    expect(catalog.planningPhases?.map((phase) => phase.id)).toEqual([
+      'geometry',
+      'materials',
+      'animation',
+      'render_setup',
+      'output',
+    ]);
   });
 
   it('rejects duplicate actions and required argument names absent from properties', () => {
@@ -42,6 +49,14 @@ describe('action catalog protocol', () => {
     unknownRequired.actions[0]!.argumentsSchema.required?.push('missingProperty');
     expect(() => validateActionCatalog(unknownRequired)).toThrow(
       'requires unknown argument property',
+    );
+
+    const repeatedPhaseAction = structuredClone(blenderActionCatalog);
+    repeatedPhaseAction.planningPhases![1]!.actionNames.push(
+      repeatedPhaseAction.planningPhases![0]!.actionNames[0]!,
+    );
+    expect(() => validateActionCatalog(repeatedPhaseAction)).toThrow(
+      'assigned to more than one planning phase',
     );
   });
 

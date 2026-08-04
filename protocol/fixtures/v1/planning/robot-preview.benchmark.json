@@ -1,0 +1,440 @@
+{
+  "formatVersion": "1.0.0",
+  "id": "blender.robot_preview",
+  "title": "Stylized robot preview baseline",
+  "targetAdapterId": "blender",
+  "catalogVersion": "1.2.0",
+  "goal": "Create a stylized friendly robot from supported primitives, apply metallic and accent materials, then render a PNG preview.",
+  "requiredPhaseIds": ["geometry", "materials", "render_setup", "output"],
+  "referencePlan": {
+    "protocolVersion": "1.1.0",
+    "id": "robot-preview-baseline",
+    "revision": 1,
+    "title": "Create and render a stylized robot",
+    "rootStepId": "robot",
+    "steps": [
+      {
+        "id": "robot",
+        "parentId": null,
+        "order": 0,
+        "dependsOn": [],
+        "title": "Create a stylized robot",
+        "intent": "Build, shade, light, and render a primitive-based robot",
+        "explanation": "The root groups the complete teachable workflow without executing an action itself.",
+        "state": "ready",
+        "action": null,
+        "anchors": [],
+        "expectedObservations": [],
+        "rollback": { "mode": "unsupported", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.geometry",
+        "parentId": "robot",
+        "order": 1,
+        "dependsOn": [],
+        "title": "Build the robot geometry",
+        "intent": "Create the ground and all visible robot parts",
+        "explanation": "Geometry is separated from appearance so a beginner can revise proportions first.",
+        "state": "ready",
+        "action": null,
+        "anchors": [],
+        "expectedObservations": [],
+        "rollback": { "mode": "unsupported", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.geometry.ground",
+        "parentId": "robot.geometry",
+        "order": 1,
+        "dependsOn": [],
+        "title": "Create the ground plane",
+        "intent": "Add a neutral surface beneath the robot",
+        "explanation": "The owned ground provides a visible contact surface without touching user objects.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.mesh.create_plane",
+          "arguments": {
+            "resourceId": "robot.ground",
+            "objectName": "OperatingLine.Robot.Ground",
+            "size": 12,
+            "location": [0, 0, 0]
+          }
+        },
+        "anchors": [
+          { "kind": "world_position", "position": [0, 0, 0] },
+          {
+            "kind": "operator",
+            "operatorId": "mesh.primitive_plane_add",
+            "menuPath": ["Add", "Mesh", "Plane"]
+          }
+        ],
+        "expectedObservations": [
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.ground" } }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.geometry.parts",
+        "parentId": "robot.geometry",
+        "order": 2,
+        "dependsOn": ["robot.geometry.ground"],
+        "title": "Create the robot parts",
+        "intent": "Assemble a body, head, arms, eyes, and antenna from supported primitives",
+        "explanation": "One bounded batch keeps the related primitive creation atomic while preserving each logical part.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.mesh.create_primitive_batch",
+          "arguments": {
+            "items": [
+              {
+                "primitive": "cylinder",
+                "resourceId": "robot.body",
+                "objectName": "OperatingLine.Robot.Body",
+                "radius": 0.9,
+                "start": [0, 0, 0.55],
+                "end": [0, 0, 3.1]
+              },
+              {
+                "primitive": "sphere",
+                "resourceId": "robot.head",
+                "objectName": "OperatingLine.Robot.Head",
+                "radius": 0.78,
+                "location": [0, 0, 4]
+              },
+              {
+                "primitive": "cylinder",
+                "resourceId": "robot.arm.left",
+                "objectName": "OperatingLine.Robot.ArmLeft",
+                "radius": 0.16,
+                "start": [-0.75, 0, 2.65],
+                "end": [-2.05, 0, 2.05]
+              },
+              {
+                "primitive": "cylinder",
+                "resourceId": "robot.arm.right",
+                "objectName": "OperatingLine.Robot.ArmRight",
+                "radius": 0.16,
+                "start": [0.75, 0, 2.65],
+                "end": [2.05, 0, 2.05]
+              },
+              {
+                "primitive": "sphere",
+                "resourceId": "robot.eye.left",
+                "objectName": "OperatingLine.Robot.EyeLeft",
+                "radius": 0.13,
+                "location": [-0.27, -0.7, 4.15]
+              },
+              {
+                "primitive": "sphere",
+                "resourceId": "robot.eye.right",
+                "objectName": "OperatingLine.Robot.EyeRight",
+                "radius": 0.13,
+                "location": [0.27, -0.7, 4.15]
+              },
+              {
+                "primitive": "cylinder",
+                "resourceId": "robot.antenna",
+                "objectName": "OperatingLine.Robot.Antenna",
+                "radius": 0.07,
+                "start": [0, 0, 4.68],
+                "end": [0, 0, 5.35]
+              },
+              {
+                "primitive": "sphere",
+                "resourceId": "robot.antenna.tip",
+                "objectName": "OperatingLine.Robot.AntennaTip",
+                "radius": 0.18,
+                "location": [0, 0, 5.5]
+              }
+            ]
+          }
+        },
+        "anchors": [
+          { "kind": "world_position", "position": [0, 0, 2.8] },
+          {
+            "kind": "operator",
+            "operatorId": "operating_line.mesh.create_robot_batch",
+            "menuPath": ["Add", "Mesh", "Cylinder and UV Sphere (repeat)"]
+          }
+        ],
+        "expectedObservations": [
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.body" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.head" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.arm.left" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.arm.right" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.eye.left" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.eye.right" } },
+          { "kind": "resource_exists", "parameters": { "resourceId": "robot.antenna" } },
+          {
+            "kind": "resource_exists",
+            "parameters": { "resourceId": "robot.antenna.tip" }
+          }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.materials",
+        "parentId": "robot",
+        "order": 2,
+        "dependsOn": [],
+        "title": "Apply the material palette",
+        "intent": "Separate the ground, metal shell, and bright accents",
+        "explanation": "A dedicated look-development phase makes roughness and metallic values easy to review.",
+        "state": "ready",
+        "action": null,
+        "anchors": [],
+        "expectedObservations": [],
+        "rollback": { "mode": "unsupported", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.materials.palette",
+        "parentId": "robot.materials",
+        "order": 1,
+        "dependsOn": ["robot.geometry.parts"],
+        "title": "Create and assign robot materials",
+        "intent": "Give each logical part an intentional surface response",
+        "explanation": "The palette action assigns each owned object once and can be compensated as one step.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.material.create_palette_and_assign",
+          "arguments": {
+            "materials": [
+              {
+                "materialId": "robot.material.ground",
+                "materialName": "OperatingLine.Material.RobotGround",
+                "targets": ["robot.ground"],
+                "baseColor": [0.08, 0.1, 0.14, 1],
+                "roughness": 0.82,
+                "metallic": 0
+              },
+              {
+                "materialId": "robot.material.shell",
+                "materialName": "OperatingLine.Material.RobotShell",
+                "targets": [
+                  "robot.body",
+                  "robot.head",
+                  "robot.arm.left",
+                  "robot.arm.right",
+                  "robot.antenna"
+                ],
+                "baseColor": [0.08, 0.32, 0.82, 1],
+                "roughness": 0.3,
+                "metallic": 0.68
+              },
+              {
+                "materialId": "robot.material.accent",
+                "materialName": "OperatingLine.Material.RobotAccent",
+                "targets": ["robot.eye.left", "robot.eye.right", "robot.antenna.tip"],
+                "baseColor": [1, 0.45, 0.04, 1],
+                "roughness": 0.25,
+                "metallic": 0.12
+              }
+            ]
+          }
+        },
+        "anchors": [
+          { "kind": "object", "objectName": "OperatingLine.Robot.Body" },
+          {
+            "kind": "operator",
+            "operatorId": "operating_line.material.create_palette_and_assign",
+            "menuPath": ["Material Properties", "New", "Surface (repeat)"]
+          }
+        ],
+        "expectedObservations": [
+          {
+            "kind": "material_assigned",
+            "parameters": {
+              "materialId": "robot.material.shell",
+              "targets": ["robot.body", "robot.head"]
+            }
+          },
+          {
+            "kind": "material_assigned",
+            "parameters": {
+              "materialId": "robot.material.accent",
+              "targets": ["robot.eye.left", "robot.eye.right"]
+            }
+          }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.render_setup",
+        "parentId": "robot",
+        "order": 3,
+        "dependsOn": [],
+        "title": "Prepare lighting and camera",
+        "intent": "Create an isolated scene with controlled presentation",
+        "explanation": "Scene setup remains separate from the final render so it can be inspected and rolled back.",
+        "state": "ready",
+        "action": null,
+        "anchors": [],
+        "expectedObservations": [],
+        "rollback": { "mode": "unsupported", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.render_setup.scene",
+        "parentId": "robot.render_setup",
+        "order": 1,
+        "dependsOn": ["robot.materials.palette"],
+        "title": "Create the isolated render scene",
+        "intent": "Link only the managed robot collection into a new scene",
+        "explanation": "The isolated scene avoids changing the user's active scene or world.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.render_scene.create",
+          "arguments": {
+            "sceneId": "robot.render.scene",
+            "sceneName": "OperatingLine.Scene.Robot",
+            "worldId": "robot.render.world",
+            "worldName": "OperatingLine.World.Robot",
+            "collectionId": "snowman.collection",
+            "backgroundColor": [0.018, 0.025, 0.055, 1],
+            "strength": 0.24
+          }
+        },
+        "anchors": [
+          {
+            "kind": "operator",
+            "operatorId": "operating_line.render_scene.create",
+            "menuPath": ["Scene selector", "New Scene"]
+          }
+        ],
+        "expectedObservations": [
+          {
+            "kind": "render_scene_ready",
+            "parameters": {
+              "sceneId": "robot.render.scene",
+              "worldId": "robot.render.world",
+              "collectionId": "snowman.collection"
+            }
+          }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.render_setup.rig",
+        "parentId": "robot.render_setup",
+        "order": 2,
+        "dependsOn": ["robot.render_setup.scene"],
+        "title": "Create robot lights and camera",
+        "intent": "Frame the complete robot with a key and fill light",
+        "explanation": "Explicit targets keep the camera and lights understandable and reproducible.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.render_rig.create",
+          "arguments": {
+            "sceneId": "robot.render.scene",
+            "collectionId": "snowman.collection",
+            "lights": [
+              {
+                "resourceId": "robot.light.key",
+                "objectName": "OperatingLine.Robot.Light.Key",
+                "dataName": "OperatingLine.Robot.LightData.Key",
+                "location": [4.5, -5.5, 7.5],
+                "target": [0, 0, 2.6],
+                "color": [1, 0.78, 0.58],
+                "energy": 1050,
+                "size": 4.5
+              },
+              {
+                "resourceId": "robot.light.fill",
+                "objectName": "OperatingLine.Robot.Light.Fill",
+                "dataName": "OperatingLine.Robot.LightData.Fill",
+                "location": [-4, -2.5, 5.5],
+                "target": [0, 0, 2.6],
+                "color": [0.45, 0.65, 1],
+                "energy": 620,
+                "size": 4
+              }
+            ],
+            "camera": {
+              "resourceId": "robot.camera.preview",
+              "objectName": "OperatingLine.Robot.Camera.Preview",
+              "dataName": "OperatingLine.Robot.CameraData.Preview",
+              "location": [8.5, -14, 6.8],
+              "target": [0, 0, 2.7],
+              "lens": 58
+            }
+          }
+        },
+        "anchors": [
+          {
+            "kind": "operator",
+            "operatorId": "operating_line.render_rig.create",
+            "menuPath": ["Add", "Light or Camera (repeat)"]
+          }
+        ],
+        "expectedObservations": [
+          {
+            "kind": "render_rig_ready",
+            "parameters": {
+              "sceneId": "robot.render.scene",
+              "cameraId": "robot.camera.preview",
+              "lightIds": ["robot.light.key", "robot.light.fill"]
+            }
+          }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.output",
+        "parentId": "robot",
+        "order": 4,
+        "dependsOn": [],
+        "title": "Render the preview",
+        "intent": "Create a reviewable PNG artifact",
+        "explanation": "Output remains the final explicit step and never writes outside the managed temporary directory.",
+        "state": "ready",
+        "action": null,
+        "anchors": [],
+        "expectedObservations": [],
+        "rollback": { "mode": "unsupported", "checkpointRequired": false }
+      },
+      {
+        "id": "robot.output.preview",
+        "parentId": "robot.output",
+        "order": 1,
+        "dependsOn": ["robot.render_setup.rig"],
+        "title": "Render a robot PNG preview",
+        "intent": "Render the isolated robot scene at a compact review resolution",
+        "explanation": "The managed artifact can be inspected and removed by the matching Back step.",
+        "state": "ready",
+        "action": {
+          "adapterId": "blender",
+          "name": "blender.render.execute_preview",
+          "arguments": {
+            "renderId": "robot.render.preview",
+            "sceneId": "robot.render.scene",
+            "engine": "auto_eevee",
+            "resolutionX": 320,
+            "resolutionY": 320,
+            "resolutionPercentage": 100,
+            "frame": 1,
+            "format": "PNG",
+            "destination": "extension_temp",
+            "samples": 32
+          }
+        },
+        "anchors": [
+          {
+            "kind": "operator",
+            "operatorId": "render.render",
+            "menuPath": ["Render", "Render Image"]
+          }
+        ],
+        "expectedObservations": [
+          {
+            "kind": "render_artifact_exists",
+            "parameters": { "renderId": "robot.render.preview", "format": "PNG" }
+          }
+        ],
+        "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+      }
+    ]
+  }
+}

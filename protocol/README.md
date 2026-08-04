@@ -16,6 +16,13 @@
 目录规范数据由适配器拥有，例如 Blender 位于
 `adapters/blender/catalog/v1/action-catalog.json`，不放进通用协议包硬编码。
 
+`planning-quality-evaluation-request.schema.json` 与 `planning-quality-report.schema.json` 定义
+模型无关的候选计划质量门。报告验证 catalog 阶段分组/顺序、调用方声明的目标所需阶段、资源
+创建与依赖、语义锚点和观察，只返回确定性 finding 与通过状态，不定义主观模型分数。
+`planning-benchmark-case.schema.json` 把自然语言目标、精确目录版本、所需阶段与一个完整参考 Plan
+绑定为可重放案例；当前非雪人案例位于
+`fixtures/v1/planning/robot-preview.benchmark.json`。
+
 `guide-revision-request.schema.json` 定义宿主创建的不可变节点修订请求；
 `guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
@@ -35,6 +42,8 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - Major 不兼容时必须拒绝连接，不能静默降级。
 - 屏幕像素坐标不是持久协议字段；适配器在运行时解析语义锚点。
 - 树形父子关系用于呈现和引用，`dependsOn` 用于执行调度。
+- 带 `planningPhases` 的目录必须把每个 action 恰好分配到一个阶段；旧目录没有阶段画像时，质量
+  评估显式降级并产生 warning，不能伪装成完整检查。
 - 步骤 ID 使用 `[A-Za-z0-9][A-Za-z0-9._:-]*`；ASCII 序关系保证不同语言的稳定排序一致。
 - 同一 Plan ID 的 `revision` 必须严格递增；切换到其他计划后也不能重新发布旧 revision。
 - AI 计划使用 `GuideProposal` 信封投递；接收和校验不等于接受，只有宿主内显式

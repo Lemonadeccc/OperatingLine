@@ -21,6 +21,9 @@ import {
   guideRevisionThreadHistoryRequestSchema,
   guideRevisionThreadHistorySchema,
   planningContextSchema,
+  planningBenchmarkCaseSchema,
+  planningQualityEvaluationRequestSchema,
+  planningQualityReportSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
@@ -28,6 +31,21 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'planning-benchmark-case.schema.json',
+    'https://operatingline.dev/schema/v1/planning-benchmark-case.json',
+    planningBenchmarkCaseSchema,
+  ],
+  [
+    'planning-quality-evaluation-request.schema.json',
+    'https://operatingline.dev/schema/v1/planning-quality-evaluation-request.json',
+    planningQualityEvaluationRequestSchema,
+  ],
+  [
+    'planning-quality-report.schema.json',
+    'https://operatingline.dev/schema/v1/planning-quality-report.json',
+    planningQualityReportSchema,
+  ],
   [
     'guide-revision-thread-history-request.schema.json',
     'https://operatingline.dev/schema/v1/guide-revision-thread-history-request.json',

@@ -2,12 +2,14 @@ import { z } from 'zod';
 
 import { guidePlanDiffSchema } from './diff.js';
 import { guidePlanSchema, guideProtocolVersionSchema } from './guide.js';
+import { planningIntentSchema } from './planning.js';
 import { guideRevisionThreadSchema } from './revision.js';
 import { catalogVersionSchema } from './version.js';
 
 export const guideProposalSubmissionSchema = z.strictObject({
   targetAdapterId: z.string().min(1),
   catalogVersion: catalogVersionSchema.optional(),
+  planning: planningIntentSchema.optional(),
   plan: guidePlanSchema,
 });
 export type GuideProposalSubmission = z.infer<typeof guideProposalSubmissionSchema>;

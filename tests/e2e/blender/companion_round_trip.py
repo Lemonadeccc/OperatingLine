@@ -172,7 +172,7 @@ def main() -> None:
         assert not session.started and not session.receipts
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
-        assert controller.proposed_plan["catalogVersion"] == "1.1.0"
+        assert controller.proposed_plan["catalogVersion"] == "1.2.0"
         first_thread = controller.proposed_plan["revisionThread"]
         assert first_thread == {
             "threadId": revision_request_id,
@@ -338,7 +338,7 @@ def main() -> None:
         assert (render_artifact.width, render_artifact.height) == (320, 320)
 
         render_scene = bpy.data.scenes.get("OperatingLine.Scene.Snowman")
-        owned_collection = bpy.data.collections.get("OperatingLine Snowman")
+        owned_collection = bpy.data.collections.get("OperatingLine Generated")
         owned_camera = bpy.data.objects.get("OperatingLine.Camera.Preview")
         assert render_scene is not None and owned_collection is not None
         assert owned_camera is not None and render_scene.camera is owned_camera

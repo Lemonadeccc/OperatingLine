@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.1.0",
+  "catalogVersion": "1.2.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -10,9 +10,59 @@
     "Use only actions present in this catalog; arbitrary Python, bpy expressions, screen coordinates, and unlisted Blender operators are unsupported.",
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
-    "This adapter revision uses the managed logical collection snowman.collection for geometry and isolated preview rendering, even when the user goal is not a snowman.",
+    "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
     "The catalog can construct scenes from planes, UV spheres, cones, and cylinders, assign Principled materials, create and bind a rigid armature, author pose keyframes, create an isolated scene, add Area lights and a camera, and render a managed PNG preview at a selected frame. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
-    "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item."
+    "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
+    "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
+  ],
+  "planningPhases": [
+    {
+      "id": "geometry",
+      "order": 1,
+      "title": "Geometry",
+      "description": "Create the model, supporting ground, and visible primitive parts.",
+      "selectionGuidance": "Select for every new object-building goal; split meaningful parts into teachable child steps or bounded batches.",
+      "actionNames": [
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_plane",
+        "blender.mesh.create_primitive_batch"
+      ]
+    },
+    {
+      "id": "materials",
+      "order": 2,
+      "title": "Materials",
+      "description": "Create and assign visible Principled material properties to owned model parts.",
+      "selectionGuidance": "Select when the goal specifies appearance, color, roughness, or metallic response.",
+      "actionNames": [
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign"
+      ]
+    },
+    {
+      "id": "animation",
+      "order": 3,
+      "title": "Rig and animation",
+      "description": "Create a bounded rigid armature and pose keyframes for owned parts.",
+      "selectionGuidance": "Select only when the goal requests motion or a reusable rigid pose; deform animation is unsupported.",
+      "actionNames": ["blender.rig.create_armature", "blender.animation.create_pose_keyframes"]
+    },
+    {
+      "id": "render_setup",
+      "order": 4,
+      "title": "Render setup",
+      "description": "Create an isolated scene, world, lighting, and camera for the owned collection.",
+      "selectionGuidance": "Select before output whenever the goal asks for a rendered preview or controlled presentation.",
+      "actionNames": ["blender.render_scene.create", "blender.render_rig.create"]
+    },
+    {
+      "id": "output",
+      "order": 5,
+      "title": "Output",
+      "description": "Render a managed PNG preview from the prepared scene.",
+      "selectionGuidance": "Select when the goal asks for an image result; render_setup must also be selected.",
+      "actionNames": ["blender.render.execute_preview"]
+    }
   ],
   "actions": [
     {

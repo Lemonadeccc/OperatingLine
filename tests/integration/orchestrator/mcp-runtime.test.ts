@@ -19,6 +19,7 @@ import {
 } from '@operatingline/orchestrator';
 
 const accessToken = 'test-token-with-at-least-16-characters';
+const catalogVersion = blenderActionCatalog.catalogVersion;
 
 async function availablePort(): Promise<number> {
   const probe = createServer();
@@ -154,6 +155,7 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
+            { name: 'operatingline.planning.evaluate' },
             { name: 'operatingline.replan.requests.list' },
             { name: 'operatingline.replan.thread.get' },
             { name: 'operatingline.eval.export' },
@@ -210,9 +212,17 @@ describe('OperatingLine runtime', () => {
       const catalog = JSON.parse(catalogResponse.result?.content?.[0]?.text ?? '{}') as {
         catalogVersion?: string;
         actions?: Array<{ name?: string }>;
+        planningPhases?: Array<{ id?: string }>;
       };
-      expect(catalog).toMatchObject({ catalogVersion: '1.1.0' });
+      expect(catalog).toMatchObject({ catalogVersion });
       expect(catalog.actions).toHaveLength(10);
+      expect(catalog.planningPhases?.map((phase) => phase.id)).toEqual([
+        'geometry',
+        'materials',
+        'animation',
+        'render_setup',
+        'output',
+      ]);
 
       const goal = 'Create a simple three-part mascot and render a preview';
       const contextResponse = await callMcpTool(runtime, 11, 'operatingline.planning.context', {
@@ -225,22 +235,43 @@ describe('OperatingLine runtime', () => {
         recommendedRevision?: number;
         constraints?: { humanApprovalRequired?: boolean };
         submission?: { toolName?: string };
+        qualityGate?: { toolName?: string; baselineVersion?: string };
       };
       expect(context).toMatchObject({
         goal,
         recommendedRevision: 1,
         constraints: { humanApprovalRequired: true },
         submission: { toolName: 'operatingline.guide.propose' },
+        qualityGate: {
+          toolName: 'operatingline.planning.evaluate',
+          baselineVersion: '1.0.0',
+        },
       });
 
       const fixture = JSON.parse(
         readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
       ) as Record<string, unknown>;
       const plan = { ...fixture, id: 'mascot-demo', revision: 1 };
+      const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+      const qualityResponse = await callMcpTool(runtime, 111, 'operatingline.planning.evaluate', {
+        targetAdapterId: 'blender',
+        catalogVersion,
+        goal,
+        requiredPhaseIds,
+        plan,
+      });
+      expect(JSON.parse(qualityResponse.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        valid: true,
+        goal,
+        requiredPhaseIds,
+        summary: { errorCount: 0, usedPhaseCount: 5 },
+      });
       expect(
         (
           await callMcpTool(runtime, 12, 'operatingline.guide.propose', {
             targetAdapterId: 'blender',
+            catalogVersion,
+            planning: { goal, requiredPhaseIds },
             plan,
           })
         ).result?.isError,
@@ -261,8 +292,26 @@ describe('OperatingLine runtime', () => {
       expect(httpContext.status).toBe(200);
       await expect(httpContext.json()).resolves.toMatchObject({
         targetAdapterId: 'blender',
-        catalog: { catalogVersion: '1.1.0' },
+        catalog: { catalogVersion },
+        qualityGate: { toolName: 'operatingline.planning.evaluate' },
       });
+
+      const httpQuality = await fetch(`${runtime.baseUrl}/api/v1/planning/evaluate`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          catalogVersion,
+          goal,
+          requiredPhaseIds,
+          plan,
+        }),
+      });
+      expect(httpQuality.status).toBe(200);
+      await expect(httpQuality.json()).resolves.toMatchObject({ valid: true });
 
       const unavailable = await callMcpTool(runtime, 14, 'operatingline.action_catalog.get', {
         targetAdapterId: 'gimp',
@@ -283,7 +332,9 @@ describe('OperatingLine runtime', () => {
         plan: planWithUnknownAction,
       });
       expect(unknownAction.result).toMatchObject({ isError: true });
-      expect(unknownAction.result?.content?.[0]?.text).toContain('absent from blender@1.1.0');
+      expect(unknownAction.result?.content?.[0]?.text).toContain(
+        `absent from blender@${catalogVersion}`,
+      );
 
       const planWithUnknownArgument = structuredClone(plan) as {
         id: string;
@@ -342,7 +393,7 @@ describe('OperatingLine runtime', () => {
       });
       const proposed = await callMcpTool(runtime, 51, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
-        catalogVersion: '1.1.0',
+        catalogVersion,
         plan,
       });
       const proposal = JSON.parse(proposed.result?.content?.[0]?.text ?? '{}') as {
@@ -441,12 +492,13 @@ describe('OperatingLine runtime', () => {
       expect(first).toMatchObject({
         formatVersion: '1.0.0',
         scope: { targetAdapterId: 'blender', planId: plan.id, instanceId },
-        catalogs: [{ adapterId: 'blender', catalogVersion: '1.1.0' }],
+        catalogs: [{ adapterId: 'blender', catalogVersion }],
         page: { afterSequence: 0, hasMore: true },
         summary: {
-          matchedEventCount: 5,
+          matchedEventCount: 6,
           eventTypeCounts: {
             'planning.context.generated': 1,
+            'planning.quality.evaluated': 1,
             'guide.proposal.created': 1,
             'guide.proposal.decided': 1,
             'companion.state.reported': 2,
@@ -462,8 +514,11 @@ describe('OperatingLine runtime', () => {
         payload: { context: { goal, requestedPlanId: plan.id } },
       });
       expect(first.events[1]).toMatchObject({
-        eventType: 'guide.proposal.created',
-        payload: { plan: { id: plan.id, steps: plan.steps } },
+        eventType: 'planning.quality.evaluated',
+        payload: {
+          plan: { id: plan.id, steps: plan.steps },
+          report: { valid: true, baselineVersion: '1.0.0' },
+        },
       });
       const firstContent = structuredClone(first) as Record<string, unknown>;
       delete firstContent['exportId'];
@@ -520,7 +575,7 @@ describe('OperatingLine runtime', () => {
       expect(httpResponse.status).toBe(200);
       await expect(httpResponse.json()).resolves.toMatchObject({
         scope: { instanceId },
-        summary: { matchedEventCount: 5 },
+        summary: { matchedEventCount: 6 },
       });
 
       const malformed = await fetch(
@@ -553,7 +608,7 @@ describe('OperatingLine runtime', () => {
         protocolVersion: '1.1.0',
         requestId,
         adapterId: 'blender',
-        catalogVersion: '1.1.0',
+        catalogVersion,
         instanceId,
         basePlan,
         references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
@@ -611,7 +666,7 @@ describe('OperatingLine runtime', () => {
         requests: [
           {
             requestId,
-            catalogVersion: '1.1.0',
+            catalogVersion,
             basePlan: { id: 'snowman-demo', revision: 4 },
             references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
           },
@@ -630,18 +685,18 @@ describe('OperatingLine runtime', () => {
       });
       expect(wrongCatalog.result).toMatchObject({ isError: true });
       expect(wrongCatalog.result?.content?.[0]?.text).toContain(
-        'must match revision request catalog 1.1.0',
+        `must match revision request catalog ${catalogVersion}`,
       );
       const proposed = await callMcpTool(runtime, 19, 'operatingline.replan.propose', {
         requestId,
-        catalogVersion: '1.1.0',
+        catalogVersion,
         plan: replanned,
       });
       expect(JSON.parse(proposed.result?.content?.[0]?.text ?? '{}')).toMatchObject({
         proposed: true,
         planId: 'snowman-demo',
         revision: 5,
-        catalogVersion: '1.1.0',
+        catalogVersion,
         revisionRequestId: requestId,
         revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
         planDiff: {
@@ -687,7 +742,7 @@ describe('OperatingLine runtime', () => {
         proposal: {
           revisionRequestId: requestId,
           targetInstanceId: instanceId,
-          catalogVersion: '1.1.0',
+          catalogVersion,
           plan: { id: 'snowman-demo', revision: 5 },
         },
       });
@@ -755,7 +810,7 @@ describe('OperatingLine runtime', () => {
 
       const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
         requestId,
-        catalogVersion: '1.1.0',
+        catalogVersion,
         plan: { ...replanned, revision: 6 },
       });
       expect(secondProposal.result).toMatchObject({ isError: true });
@@ -811,7 +866,7 @@ describe('OperatingLine runtime', () => {
       };
       const continuedProposal = await callMcpTool(runtime, 22, 'operatingline.replan.propose', {
         requestId: continuedRequestId,
-        catalogVersion: '1.1.0',
+        catalogVersion,
         plan: continuedPlan,
       });
       expect(JSON.parse(continuedProposal.result?.content?.[0]?.text ?? '{}')).toMatchObject({

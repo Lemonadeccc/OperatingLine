@@ -97,7 +97,8 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 帧姿态，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light 和一台 Camera，
 最后在扩展管理的临时目录生成帧 20 的 320 × 320 Eevee PNG。
 
-动作目录 `1.1.0` 允许以下 10 类 action，并保留不可变 `1.0.0` 供精确回放：
+当前动作目录 `1.2.0` 允许以下 10 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_uv_sphere`
@@ -131,6 +132,8 @@ receipt。模块重载后仍不会仅凭可复制标签接管旧资源。
 
 隔离渲染 Scene 只链接 OperatingLine 自有 Collection。默认启动文件中的 Cube、Camera 和 Light
 既不会被删除，也不会进入该渲染 Scene；创建的相机和两盏 Area Light 只属于这次执行记录。
+为了历史 Plan/receipt 精确回放，目录中的集合逻辑 ID 仍为 `snowman.collection`，但用户可见的
+Blender Collection 名称已经是目标无关的 `OperatingLine Generated`。
 预览 action 只接受扩展临时目录、1–100000 的显式帧，单边分辨率上限为 1024，采样上限为 128，
 防止远端计划以合法参数长时间同步阻塞 Blender 主线程。
 
@@ -139,6 +142,19 @@ revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `render_artifact_exists` 七类 observation。它们读取 receipt 身份与当前 Blender 状态，并随
 Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
 `step_succeeded` 的提交门，也不会因 `satisfied: false` 自动回退 action。
+
+## 非雪人规划基准
+
+`protocol/fixtures/v1/planning/robot-preview.benchmark.json` 是首个版本化跨目标案例。它把“创建并
+渲染一个友好风格机器人”绑定到 catalog `1.2.0`、目标所需阶段和完整参考 Plan。该目标明确不需要
+Animation，只使用 Geometry、Materials、Render setup 与 Output；六个叶子动作创建地面、批量
+机器人部件、调色板、隔离渲染场景、灯光/相机和 320 × 320 PNG。
+
+`tests/integration/blender/test_planning_benchmark.py` 在 Blender 4.5/5.1 中真实执行六步并逐步检查
+逻辑资源和文件，然后从最后一步回退到起点，证明产物和所有 OperatingLine 自有 Blender 数据均被
+清除。测试只删除精确匹配的工厂 Cube/Camera/Light 以建立隔离 fixture；这不改变 Extension 默认
+Start 不删除用户场景内容的产品行为。此基准证明阶段画像和执行目录可以用于第二个题材，不证明
+外部模型已能理解任意目标或评价造型审美。
 
 ## 与现有 Blender MCP 的边界
 

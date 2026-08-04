@@ -59,8 +59,9 @@ package 提供给 Orchestrator composition root。打包脚本还会把同一文
 
 Blender catalog `1.0.0` 冻结最初验证的 8 个通用动作。catalog `1.1.0` 在不修改历史文件的前提下
 加入 `blender.rig.create_armature`、`blender.animation.create_pose_keyframes`，并要求渲染 action
-显式选择帧。Orchestrator 同时安装两个版本，默认返回最高语义版本；Eval/replay 仍能按历史记录
-解析精确 `1.0.0`。
+显式选择帧。catalog `1.2.0` 再加入有序 `planningPhases` 和确定性候选计划质量门；详细决策见
+[ADR 0011](0011-cross-target-planning-quality-gate.md)。Orchestrator 同时安装三个版本，默认返回
+最高语义版本；Eval/replay 仍能按历史记录解析精确 `1.0.0` 或 `1.1.0`。
 
 几何目前仍共享历史逻辑资源 `snowman.collection`；目录明确披露这一约束。拓扑编辑、雕刻、
 modifier、权重绘制、deform rig 和任意 Python 执行仍不在目录中，规划器必须把它们保留为
@@ -72,6 +73,7 @@ Euler 姿态关键帧，详细边界见 ADR 0008。
 - 模型可以先查询事实，再生成可安装的 Plan，而不是从雪人 fixture 反推私有参数。
 - Orchestrator 仍然是无界面、模型供应商无关的协议服务。
 - 新宿主必须交付真实目录，才能参与 AI Proposal 规划；只有 capability profile 不足以证明动作。
-- 任意目标的质量仍取决于外部模型和目录覆盖范围。节点引用与不可变重规划已由 ADR 0006 落地；
+- 跨目标结构质量现在有确定性门禁，但自然语言语义质量仍取决于外部模型、人工标签和目录覆盖范围。
+  节点引用与不可变重规划已由 ADR 0006 落地；
   线性多轮 thread 与 Plan diff 已由 ADR 0009 落地，结构化消息历史已由 ADR 0010 落地；参数编辑、
   Eval 评分与治理和第二宿主仍是独立后续里程碑。

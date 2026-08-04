@@ -4,35 +4,26 @@
   "properties": {
     "targetAdapterId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 180
     },
     "catalogVersion": {
       "type": "string",
       "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
     },
-    "planning": {
-      "type": "object",
-      "properties": {
-        "goal": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 10000
-        },
-        "requiredPhaseIds": {
-          "minItems": 1,
-          "maxItems": 64,
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          }
-        }
-      },
-      "required": [
-        "goal",
-        "requiredPhaseIds"
-      ],
-      "additionalProperties": false
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "requiredPhaseIds": {
+      "default": [],
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
     },
     "plan": {
       "type": "object",
@@ -344,8 +335,9 @@
   },
   "required": [
     "targetAdapterId",
+    "requiredPhaseIds",
     "plan"
   ],
   "additionalProperties": false,
-  "$id": "https://operatingline.dev/schema/v1/guide-proposal-submission.json"
+  "$id": "https://operatingline.dev/schema/v1/planning-quality-evaluation-request.json"
 }

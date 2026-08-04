@@ -10,6 +10,7 @@ const unitTestFile = resolve('tests/unit/blender/test_guidance.py');
 const testFiles = [
   resolve('tests/integration/blender/test_extension.py'),
   resolve('tests/integration/blender/test_renderable_snowman.py'),
+  resolve('tests/integration/blender/test_planning_benchmark.py'),
 ];
 syncBlenderExtensionResources();
 

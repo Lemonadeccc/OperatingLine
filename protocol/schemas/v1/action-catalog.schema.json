@@ -40,6 +40,53 @@
         "minLength": 1
       }
     },
+    "planningPhases": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "order": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selectionGuidance": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actionNames": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "id",
+          "order",
+          "title",
+          "description",
+          "selectionGuidance",
+          "actionNames"
+        ],
+        "additionalProperties": false
+      }
+    },
     "actions": {
       "minItems": 1,
       "type": "array",

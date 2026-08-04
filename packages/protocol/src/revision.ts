@@ -6,6 +6,7 @@ import {
   guideProtocolVersionSchema,
   guideStepIdSchema,
 } from './guide.js';
+import { planningIntentSchema } from './planning.js';
 import { catalogVersionSchema } from './version.js';
 
 export const guideNodeReferenceSchema = z.strictObject({
@@ -96,6 +97,7 @@ export type GuideRevisionRequestList = z.infer<typeof guideRevisionRequestListSc
 export const guideReplanSubmissionSchema = z.strictObject({
   requestId: z.uuid(),
   catalogVersion: catalogVersionSchema,
+  planning: planningIntentSchema.optional(),
   plan: guidePlanSchema,
 });
 export type GuideReplanSubmission = z.infer<typeof guideReplanSubmissionSchema>;

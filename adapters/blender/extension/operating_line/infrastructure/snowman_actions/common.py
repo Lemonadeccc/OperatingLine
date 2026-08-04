@@ -22,7 +22,7 @@ from ...application.session import (
 )
 
 COLLECTION_LOGICAL_ID = "snowman.collection"
-COLLECTION_NAME = "OperatingLine Snowman"
+COLLECTION_NAME = "OperatingLine Generated"
 OWNER_KEY = "operating_line_owner"
 OWNER_VALUE = "operating_line_blender_v1"
 ACTION_KEY = "operating_line_action"

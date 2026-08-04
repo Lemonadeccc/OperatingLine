@@ -20,6 +20,7 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 
 - 与计划关联的 PlanningContext（含用户目标和当时的完整目录）、完整 Plan/Proposal、节点修订请求、
   请求—Proposal 关联和人工接受/拒绝决定；
+- 与候选计划关联的确定性 planning-quality 请求、阶段覆盖和 error/warning findings；
 - 对应实例的逐步状态、observation、错误和 `step_rolled_back` 记录；
 - 所有被事件引用的精确 ActionCatalog 版本；没有历史引用时包含当前目标宿主的最新目录；
 - 整个匹配集合的事件类型、transition 和 decision 计数，以及当前事件页；
@@ -34,8 +35,8 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 `planning.context.generated`；受信任直接发布路径从本版本起在 `guide.plan.published` 中保存完整
 Plan，而不是只保存 ID/revision。
 
-导出不推断质量分数，也不把 `satisfied: false` 解释为执行失败。它忠实输出已有事实，评分器、成功门
-和恢复策略是独立的后续层。
+导出不推断质量分数，也不把 planning-quality 的结构 finding 当作语义/审美评分，或把
+`satisfied: false` 解释为执行失败。它忠实输出已有事实，评分器、成功门和恢复策略是独立的后续层。
 
 ## 数据边界
 

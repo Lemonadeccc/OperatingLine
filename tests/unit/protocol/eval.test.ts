@@ -70,7 +70,7 @@ describe('eval export protocol', () => {
       },
     });
 
-    expect(parsed.catalogs[0]?.catalogVersion).toBe('1.1.0');
+    expect(parsed.catalogs[0]?.catalogVersion).toBe('1.2.0');
     for (const filename of ['eval-export-request.schema.json', 'eval-export-bundle.schema.json']) {
       const schema = JSON.parse(readFileSync(resolve('protocol/schemas/v1', filename), 'utf8')) as {
         additionalProperties?: boolean;
