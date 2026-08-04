@@ -1,7 +1,7 @@
 {
   "protocolVersion": "1.0.0",
   "id": "snowman-demo",
-  "revision": 2,
+  "revision": 3,
   "title": "Create a complete snowman preview",
   "rootStepId": "snowman",
   "steps": [
@@ -52,7 +52,14 @@
           "location": [0, 0, 0]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 0] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, 0, 0] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_plane_add",
+          "menuPath": ["Add", "Mesh", "Plane"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.ground" } }
       ],
@@ -91,7 +98,14 @@
           "location": [0, 0, 1.55]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 1.55] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, 0, 1.55] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "menuPath": ["Add", "Mesh", "UV Sphere"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.body.lower" } }
       ],
@@ -116,7 +130,14 @@
           "location": [0, 0, 3.65]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 3.65] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, 0, 3.65] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "menuPath": ["Add", "Mesh", "UV Sphere"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.body.upper" } }
       ],
@@ -141,7 +162,14 @@
           "location": [0, 0, 5.35]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 5.35] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, 0, 5.35] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "menuPath": ["Add", "Mesh", "UV Sphere"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.head" } }
       ],
@@ -236,7 +264,14 @@
           ]
         }
       },
-      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Head" }],
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.Head" },
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.mesh.create_face_batch",
+          "menuPath": ["Add", "Mesh", "UV Sphere and Cone (repeat)"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.eye.left" } },
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.face.eye.right" } },
@@ -287,7 +322,14 @@
           ]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, -1.2, 3.5] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, -1.2, 3.5] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "menuPath": ["Add", "Mesh", "UV Sphere (repeat)"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.button.1" } },
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.button.2" } },
@@ -328,7 +370,14 @@
           ]
         }
       },
-      "anchors": [{ "kind": "world_position", "position": [0, 0, 4.1] }],
+      "anchors": [
+        { "kind": "world_position", "position": [0, 0, 4.1] },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_cylinder_add",
+          "menuPath": ["Add", "Mesh", "Cylinder (repeat)"]
+        }
+      ],
       "expectedObservations": [
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.arm.left" } },
         { "kind": "resource_exists", "parameters": { "resourceId": "snowman.arm.right" } }
@@ -370,7 +419,14 @@
           "metallic": 0
         }
       },
-      "anchors": [{ "kind": "object", "objectName": "OperatingLine.BodyLower" }],
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.BodyLower" },
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.material.create_and_assign",
+          "menuPath": ["Material Properties", "New", "Surface"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "material_assigned",
@@ -434,7 +490,14 @@
           ]
         }
       },
-      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Head" }],
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.Head" },
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.material.create_palette_and_assign",
+          "menuPath": ["Material Properties", "New", "Surface (repeat)"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "material_assigned",
@@ -481,7 +544,14 @@
           "metallic": 0
         }
       },
-      "anchors": [{ "kind": "object", "objectName": "OperatingLine.Ground" }],
+      "anchors": [
+        { "kind": "object", "objectName": "OperatingLine.Ground" },
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.material.create_and_assign",
+          "menuPath": ["Material Properties", "New", "Surface"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "material_assigned",
@@ -529,7 +599,13 @@
           "strength": 0.28
         }
       },
-      "anchors": [{ "kind": "operator", "operatorId": "operating_line.render_scene.create" }],
+      "anchors": [
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.render_scene.create",
+          "menuPath": ["Scene selector", "New Scene"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "render_scene_ready",
@@ -589,7 +665,13 @@
           }
         }
       },
-      "anchors": [{ "kind": "operator", "operatorId": "operating_line.render_rig.create" }],
+      "anchors": [
+        {
+          "kind": "operator",
+          "operatorId": "operating_line.render_rig.create",
+          "menuPath": ["Add", "Light or Camera (repeat)"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "render_rig_ready",
@@ -640,7 +722,13 @@
           "samples": 32
         }
       },
-      "anchors": [{ "kind": "operator", "operatorId": "render.render" }],
+      "anchors": [
+        {
+          "kind": "operator",
+          "operatorId": "render.render",
+          "menuPath": ["Render", "Render Image"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "render_artifact_exists",

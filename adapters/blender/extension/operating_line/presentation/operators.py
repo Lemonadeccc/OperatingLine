@@ -47,7 +47,7 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
                     {"WARNING"},
                     "Factory scene fingerprint did not match; no existing object was deleted",
                 )
-        context.scene.operating_line_overlay_enabled = True
+        context.window_manager.operating_line_overlay_enabled = True
         enable_overlay(_session)
         _companion().report("walkthrough_started")
         return {"FINISHED"}
@@ -131,16 +131,16 @@ class OPERATINGLINE_OT_disconnect(bpy.types.Operator):
 
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
     bl_idname = "operating_line.toggle_overlay"
-    bl_label = "Toggle Overlay"
-    bl_description = "Show or hide viewport step guidance"
+    bl_label = "Show or Hide Guidance"
+    bl_description = "Show or hide the viewport guidance, status, and task tree"
 
     def execute(self, context):
         if overlay_enabled():
             disable_overlay()
-            context.scene.operating_line_overlay_enabled = False
+            context.window_manager.operating_line_overlay_enabled = False
         else:
             enable_overlay(_session)
-            context.scene.operating_line_overlay_enabled = True
+            context.window_manager.operating_line_overlay_enabled = True
         return {"FINISHED"}
 
 

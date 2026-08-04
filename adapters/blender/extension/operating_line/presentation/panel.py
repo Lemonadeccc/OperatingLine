@@ -2,8 +2,16 @@
 
 import bpy
 
+from ..application import GuidanceState, node_state
+from ..visual_theme import STATE_ICONS, STATE_SYMBOLS
+
+
+def _step_ordinal(index: int | None) -> str:
+    return "--" if index is None else f"{index + 1:02d}"
+
 
 def _draw_node(layout, node, session, depth: int = 0) -> None:
+    state = node_state(session, node)
     row = layout.row(align=True)
     if depth:
         row.separator(factor=float(depth))
@@ -17,12 +25,72 @@ def _draw_node(layout, node, session, depth: int = 0) -> None:
         )
         operator.node_id = node.id
     else:
-        active = session.active_step is node
-        row.label(text="", icon="RADIOBUT_ON" if active else "RADIOBUT_OFF")
-    row.label(text=f"{node.number}  {node.title}")
+        row.separator(factor=1.0)
+    row.label(
+        text=f"{STATE_SYMBOLS[state]}  {node.number}  {node.title}",
+        icon=STATE_ICONS[state],
+    )
     if node.children and session.is_expanded(node.id):
         for child in node.children:
             _draw_node(layout, child, session, depth + 1)
+
+
+def _draw_walkthrough_controls(layout, session) -> None:
+    start = layout.row()
+    start.scale_y = 1.15
+    start.operator(
+        "operating_line.start",
+        text="Restart Walkthrough" if session.started else "Start Walkthrough",
+        icon="PLAY",
+    )
+
+    active = session.active_step
+    next_index = session.active_index + 1
+    next_step = session.steps[next_index] if next_index < len(session.steps) else None
+
+    controls = layout.row(align=True)
+    controls.scale_y = 1.35
+    back = controls.row(align=True)
+    back.enabled = active is not None
+    back.alert = active is not None
+    back.operator(
+        "operating_line.back",
+        text=f"Back {_step_ordinal(session.active_index if active else None)}",
+        icon=STATE_ICONS[GuidanceState.BACK] if active else "LOCKED",
+    )
+    forward = controls.row(align=True)
+    forward.enabled = next_step is not None
+    forward.operator(
+        "operating_line.next",
+        text=f"{_step_ordinal(next_index if next_step else None)} Next",
+        icon=STATE_ICONS[GuidanceState.NEXT] if next_step else "CHECKMARK",
+    )
+
+
+def _draw_guidance_status(layout, session) -> None:
+    active = session.active_step
+    next_index = session.active_index + 1
+    next_step = session.steps[next_index] if next_index < len(session.steps) else None
+
+    status = layout.box()
+    status.label(
+        text=f"Progress {session.active_index + 1:02d} / {len(session.steps):02d}",
+        icon="INFO",
+    )
+    if active is None:
+        status.label(text="Back --  Nothing to roll back", icon="LOCKED")
+    else:
+        status.label(
+            text=f"Back {session.active_index + 1:02d}  {active.title}",
+            icon=STATE_ICONS[GuidanceState.BACK],
+        )
+    if next_step is None:
+        status.label(text="Next --  Walkthrough complete", icon="CHECKMARK")
+    else:
+        status.label(
+            text=f"Next {next_index + 1:02d}  {next_step.title}",
+            icon=STATE_ICONS[GuidanceState.NEXT],
+        )
 
 
 class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
@@ -58,21 +126,27 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
             connection.label(text=companion.error, icon="ERROR")
 
         layout.prop(context.scene, "operating_line_replace_factory_scene")
-        controls = layout.row(align=True)
-        controls.operator("operating_line.start", icon="PLAY")
-        controls.operator("operating_line.back", icon="TRIA_LEFT")
-        controls.operator("operating_line.next", icon="TRIA_RIGHT")
+        _draw_walkthrough_controls(layout, session)
+
         overlay = layout.row()
-        icon = "HIDE_OFF" if context.scene.operating_line_overlay_enabled else "HIDE_ON"
-        overlay.operator("operating_line.toggle_overlay", icon=icon)
+        guidance_visible = context.window_manager.operating_line_overlay_enabled
+        overlay.operator(
+            "operating_line.toggle_overlay",
+            text="Hide Guidance" if guidance_visible else "Show Guidance",
+            icon="HIDE_OFF" if guidance_visible else "HIDE_ON",
+        )
+
+        if not guidance_visible:
+            hidden = layout.box()
+            hidden.label(text="Guidance hidden; walkthrough state preserved", icon="HIDE_ON")
+            return
 
         layout.separator()
-        _draw_node(layout, session.root, session)
+        _draw_guidance_status(layout, session)
 
-        active = session.active_step
-        status = layout.box()
-        status.label(text="Active step", icon="INFO")
-        status.label(text=f"{active.number}  {active.title}" if active else "Not started")
+        tree = layout.box()
+        tree.label(text="Task tree", icon="OUTLINER")
+        _draw_node(tree, session.root, session)
 
 
 CLASSES = (OPERATINGLINE_PT_sidebar,)

@@ -6,11 +6,24 @@ import { spawnSync } from 'node:child_process';
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
 
+const unitTestFile = resolve('tests/unit/blender/test_guidance.py');
 const testFiles = [
   resolve('tests/integration/blender/test_extension.py'),
   resolve('tests/integration/blender/test_renderable_snowman.py'),
 ];
 syncBlenderExtensionResources();
+
+const python = process.env.PYTHON_BIN ?? (process.platform === 'win32' ? 'python' : 'python3');
+const unitResult = spawnSync(python, [unitTestFile], {
+  env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' },
+  stdio: 'inherit',
+});
+if (unitResult.error) {
+  throw unitResult.error;
+}
+if (unitResult.status !== 0) {
+  throw new Error(`Guidance unit tests failed with exit code ${unitResult.status ?? 1}`);
+}
 
 for (const blender of requireBlenderBinaries()) {
   const version = spawnSync(blender, ['--version'], { encoding: 'utf8' });

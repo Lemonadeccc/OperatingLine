@@ -62,14 +62,14 @@ const collectKeys = (value: unknown): string[] => {
 };
 
 describe('complete snowman guide fixture', () => {
-  it('validates as GuidePlan revision 2 and covers the six ordered stages', () => {
+  it('validates as GuidePlan revision 3 and covers the six ordered stages', () => {
     const plan = readPlan();
     const rootChildren = plan.steps
       .filter((step) => step.parentId === plan.rootStepId)
       .sort((left, right) => left.order - right.order)
       .map((step) => step.id);
 
-    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 2, rootStepId: 'snowman' });
+    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 3, rootStepId: 'snowman' });
     expect(rootChildren).toEqual(stageIds);
   });
 
@@ -106,12 +106,22 @@ describe('complete snowman guide fixture', () => {
       expect(parentIds.has(step.id), step.id).toBe(false);
       expect(step.action?.adapterId, step.id).toBe('blender');
       expect(step.anchors.length, step.id).toBeGreaterThan(0);
+      const operatorAnchor = step.anchors.find((anchor) => anchor.kind === 'operator');
+      expect(operatorAnchor, step.id).toBeDefined();
+      expect(operatorAnchor?.menuPath?.length, step.id).toBeGreaterThan(1);
       expect(step.expectedObservations.length, step.id).toBeGreaterThan(0);
       expect(step.rollback, step.id).toEqual({
         mode: 'compensating_action',
         checkpointRequired: false,
       });
     }
+
+    expect(
+      executableSteps.at(-1)?.anchors.find((anchor) => anchor.kind === 'operator'),
+    ).toMatchObject({
+      operatorId: 'render.render',
+      menuPath: ['Render', 'Render Image'],
+    });
   });
 
   it('uses the generic action catalog and only supported observation kinds', () => {

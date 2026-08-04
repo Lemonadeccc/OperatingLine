@@ -22,13 +22,42 @@
 事件阶段、需要 Blender 官方维护的持久异步运行时，或需要 Python 扩展无法实现的安全边界。
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
-和世界坐标；对内置操作保存 `operator_id` 与菜单路径，由 Companion 在当前版本解析。
+和世界坐标；对内置操作保存 `operatorId` 与可选 `menuPath`。当前版本在没有公开 UI 矩形时
+显示语义路径与 `UI target unavailable`，不会绘制猜测坐标。未来只有版本专用 locator 通过
+真实宿主测试后，才能把该类锚点升级为精确目标。
+
+## 视觉引导状态
+
+Blender 应用层从 `active_index` 派生唯一稳定状态，不在 Panel 与 Overlay 各自维护第二份进度：
+
+```text
+index < active_index      -> completed（蓝色）
+index == active_index     -> back（红色）
+index == active_index + 1 -> next（绿色）
+index > active_index + 1  -> locked（灰色）
+```
+
+Sidebar 用相同状态绘制根节点、阶段与叶子，并以文字 `OK`、`BACK`、`NEXT` 和锁图标补充颜色。
+Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主图标，因为 `UILayout` 不支持
+任意按钮背景色。视口 `POST_PIXEL` Overlay 最多显示四个相邻全局执行序号；Back/Next 的
+真实对象或世界坐标锚点分别使用红/绿 4 px 主线、8–10 px 深色描边、箭头和终点编号。
+
+引导可见性属于 Blender 进程级 UI 状态，保存在带 `SKIP_SAVE` 的 `WindowManager` 属性中，
+因此切换到 OperatingLine 隔离 Render Scene 不会错误地把 UI 显示成隐藏。`Hide Guidance`
+移除 draw handler 并隐藏树与状态详情，但保留执行控件和 `Show Guidance` 恢复入口；步骤、receipt
+与场景内容不随隐藏而改变。
 
 ## 主线程规则
 
 当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权从回环 Orchestrator
 短轮询 GuidePlan，并把 JSON 放入队列。`bpy.app.timers` 在 Blender 主线程安装计划、执行动作、
-回退、生成观察和更新 Overlay 缓存；绘制回调只读取缓存，不进行网络或重计算。
+回退并生成观察；绘制回调不访问网络、不修改场景，只从当前会话派生最多四个相邻步骤，并为
+Back/Next 解析已记录资源的屏幕锚点。
+
+Start/Next/Back/Show/Hide 由 Blender Operator 事件触发当前界面自然重绘。Blender 4.5/5.1
+没有可供 Extension 稳定调用的公开 `Area.tag_redraw` API，因此只更新远端计划或连接文案的
+Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘后才显示；生产代码不会为此
+滥用面向测试/性能测量的 `wm.redraw_timer`。
 
 网络请求有总时限、4 MiB 响应上限，并绕过系统代理且不跟随重定向。Disconnect/Extension
 卸载只做短暂等待；残余清理线程为 daemon、保留到确认退出且不访问 `bpy`。Blender manifest
@@ -38,9 +67,9 @@
 运行中收到新计划不会触发场景回退。若当前会话仍持有 action receipt，更新会暂存并只报告
 一次 pending/error；用户 Back 到起点后由主线程自动安装。Disconnect 会取消 pending 更新。
 
-## revision 2 雪人执行切片
+## revision 3 雪人执行切片
 
-打包内的 `snowman-demo` revision 2 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
+打包内的 `snowman-demo` revision 3 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
 执行 6 个阶段、13 个叶子步骤：创建地面和三段身体，批量创建脸部、纽扣和手臂，分配雪、煤、
 胡萝卜、木头和地面材质，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light
 和一台 Camera，最后在扩展管理的临时目录生成 320 × 320 Eevee PNG。
@@ -74,7 +103,7 @@ Blender 进程内被禁用时也不会因为该冲突而卸载失败或丢弃 re
 预览 action 只接受扩展临时目录，单边分辨率上限为 1024，采样上限为 128，防止远端计划以合法
 参数长时间同步阻塞 Blender 主线程。
 
-revision 2 新增 `resource_exists`、`material_assigned`、`render_scene_ready`、
+revision 3 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
 `render_rig_ready` 和 `render_artifact_exists` 五类 observation。它们读取 receipt 身份与当前
 Blender 状态，并随 Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
 `step_succeeded` 的提交门，也不会因 `satisfied: false` 自动回退 action。

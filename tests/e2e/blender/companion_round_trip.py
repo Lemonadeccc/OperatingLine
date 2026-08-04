@@ -193,7 +193,7 @@ def main() -> None:
             bpy.data.cameras,
         ):
             assert all(
-                item.get("operating_line_owner") != "snowman_demo_v2"
+                item.get("operating_line_owner") != "snowman_demo_v3"
                 for item in collection
             )
 

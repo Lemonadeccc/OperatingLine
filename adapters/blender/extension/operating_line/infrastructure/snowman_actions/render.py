@@ -34,6 +34,7 @@ from .common import (
     text,
     vector,
 )
+from .node_access import require_unique_input, require_unique_node
 
 MAX_PREVIEW_RESOLUTION = 1024
 MAX_PREVIEW_SAMPLES = 128
@@ -313,11 +314,21 @@ def validate_render(arguments: Mapping[str, Any]) -> RenderDefinition:
 
 def _configure_world(world: bpy.types.World, definition: SceneDefinition) -> None:
     world.use_nodes = True
-    background = world.node_tree.nodes.get("Background") if world.node_tree else None
-    if background is None:
-        raise RuntimeError("Blender World has no Background node")
-    background.inputs["Color"].default_value = definition.background_color
-    background.inputs["Strength"].default_value = definition.strength
+    background = require_unique_node(
+        world.node_tree,
+        "ShaderNodeBackground",
+        f"World {world.name!r}",
+    )
+    require_unique_input(
+        background,
+        "Color",
+        "ShaderNodeBackground",
+    ).default_value = definition.background_color
+    require_unique_input(
+        background,
+        "Strength",
+        "ShaderNodeBackground",
+    ).default_value = definition.strength
 
 
 def execute_scene(

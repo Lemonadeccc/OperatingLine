@@ -26,6 +26,7 @@ from .common import (
     text,
     vector,
 )
+from .node_access import require_unique_input, require_unique_node
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,38 @@ ValidatedMaterial = tuple[
 ]
 
 
+def _configure_material_nodes(
+    material: bpy.types.Material,
+    definition: MaterialDefinition,
+) -> None:
+    material.use_nodes = True
+    principled = require_unique_node(
+        material.node_tree,
+        "ShaderNodeBsdfPrincipled",
+        f"Material {material.name!r}",
+    )
+    require_unique_node(
+        material.node_tree,
+        "ShaderNodeOutputMaterial",
+        f"Material {material.name!r}",
+    )
+    require_unique_input(
+        principled,
+        "Base Color",
+        "ShaderNodeBsdfPrincipled",
+    ).default_value = definition.base_color
+    require_unique_input(
+        principled,
+        "Roughness",
+        "ShaderNodeBsdfPrincipled",
+    ).default_value = definition.roughness
+    require_unique_input(
+        principled,
+        "Metallic",
+        "ShaderNodeBsdfPrincipled",
+    ).default_value = definition.metallic
+
+
 def _validate(
     definitions: tuple[MaterialDefinition, ...],
     registry: Mapping[str, ResourceIdentity],
@@ -165,16 +198,7 @@ def execute_materials(
             material.diffuse_color = definition.base_color
             material.roughness = definition.roughness
             material.metallic = definition.metallic
-            material.use_nodes = True
-            principled = (
-                material.node_tree.nodes.get("Principled BSDF")
-                if material.node_tree
-                else None
-            )
-            if principled is not None:
-                principled.inputs["Base Color"].default_value = definition.base_color
-                principled.inputs["Roughness"].default_value = definition.roughness
-                principled.inputs["Metallic"].default_value = definition.metallic
+            _configure_material_nodes(material, definition)
             for object_identity, obj in targets:
                 before = tuple(slot.material for slot in obj.material_slots)
                 obj.data.materials.clear()

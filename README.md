@@ -28,10 +28,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   本地 Companion、查询最新执行状态，并把追加式事件与每个实例的最新快照写入本地数据库。
 - **版本化协议**：定义 GuidePlan、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
-- **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back、
-  Overlay 开关、当前步骤卡片和视口引导线；可显式连接回环地址上的 Orchestrator，非阻塞
-  拉取新计划并回传步骤结果。
-- **完整雪人预览垂直切片**：内置 revision 2 计划包含 6 个阶段、13 个可执行步骤，依次完成
+- **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
+  Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
+  视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
+  Orchestrator，非阻塞拉取新计划并回传步骤结果。
+- **完整雪人预览垂直切片**：内置 revision 3 计划包含 6 个阶段、13 个可执行步骤，依次完成
   地面、三段身体、脸部、纽扣、手臂、材质、隔离渲染场景、双 Area Light、相机和
   320 × 320 Eevee PNG；`Back` 可以逐步反向补偿整条执行链。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
@@ -39,7 +40,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 
 Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测试。
 
-![OperatingLine 在 Blender 内的任务树、控制按钮、步骤卡片与雪人预览](docs/assets/blender-guidance.png)
+![OperatingLine 在 Blender 内的彩色任务树、前进回退按钮、步骤序号与雪人引导线](docs/assets/blender-guidance.png)
 
 > [!IMPORTANT]
 > 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，不是“AI 已能自动完成任意 Blender
@@ -157,9 +158,21 @@ pnpm dev
 2. `Next` 按 13 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，建立
    隔离 Scene、World、双 Area Light 和 Camera，最后生成 320 × 320 Eevee PNG。
 3. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 13 步，不删除用户对象。
-4. `Toggle Overlay` 显示或隐藏当前步骤卡片和视口引导。
-5. 任务树分支可以独立展开或折叠，当前叶子节点会显示活动状态。
+4. `Hide Guidance` 会一起隐藏视口卡片、彩色数字、引导线、状态详情和任务树，但保留
+   Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失当前步骤。
+5. 任务树分支可以独立展开或折叠。蓝色 `OK` 表示已完成，红色 `BACK` 表示当前可补偿步骤，
+   绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`13`。
 6. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划。
+
+Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形。当前对象和世界坐标锚点会
+绘制真实目标线；`operator` 锚点只显示操作 ID 或 `menuPath` 语义路径，并明确标记
+`UI target unavailable`，不会伪造一条指向并未被 AI 点击的按钮连线。Back/Next 按钮使用宿主
+原生控件：Back 采用 Blender 警示色，Next 使用绿色状态图标；任意按钮背景色不是 `UILayout`
+公开能力。
+
+本地 Start/Next/Back/Show/Hide 操作会随 Blender UI 事件自然重绘。只由 Companion timer 更新的
+远端计划或连接文案，可能要等到 Blender 下一次正常界面重绘后显示；当前版本不调用 4.5/5.1
+未公开的区域重绘接口，也不把测试用 `wm.redraw_timer` 放进生产路径。
 
 默认情况下 `Start` 不删除任何现有对象。只在用户显式勾选
 `Delete factory Cube/Camera/Light on Start` 后，Extension 才会尝试清理启动场景；即便已经授权，
@@ -171,7 +184,7 @@ pnpm dev
 遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
 外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
 
-revision 2 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
+revision 3 使用 `resource_exists`、`material_assigned`、`render_scene_ready`、
 `render_rig_ready` 和 `render_artifact_exists` 五类新增 observation 检查资源、材质、场景、
 灯光相机和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
 但不会把 action 的 `step_succeeded` 自动改判为失败，也不会触发自动补偿。
@@ -240,14 +253,20 @@ pnpm test:blender:visual
 pnpm package:blender
 ```
 
-`pnpm test:blender` 会在检测到的 Blender 4.5+ 可执行文件中运行基础 Extension 回归和完整雪人
-测试；后者验证复合动作冲突不会留下部分结果、外部 Mesh/Material/Collection 引用会安全阻止
-回退、320 × 320 PNG、隔离 Scene，以及 13 步完整前进/回退。`pnpm test:blender:companion`
+`pnpm test:blender` 会先用独立 Python 进程运行纯引导状态单元测试，再在每个检测到的 Blender
+4.5+ 可执行文件中运行基础 Extension 回归和完整雪人测试；后者验证复合动作冲突不会留下部分结果、外部
+Mesh/Material/Collection 引用会安全阻止回退、320 × 320 PNG、隔离 Scene，以及 13 步完整
+前进/回退。`pnpm test:blender:companion`
 会启动真实 Orchestrator 进程和 Blender，经过 MCP 发布计划、回环 HTTP 拉取、主线程
 Start/Next/Back 与状态回传，验证默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会从 Blender 工厂场景开始，保留默认 Cube、Camera 和 Light，执行
-完整计划后切换到隔离渲染 Scene，并调用真实 OperatingLine Panel 绘制任务树与控制按钮，再
-通过真实 GUI 捕获 `artifacts/blender/overlay-smoke.png`。
+`pnpm test:blender:visual` 会为五个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-mid-forward.png`、
+`guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
+同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
+红色 Back/绿色 Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
+
+产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、
+锚点真实性或隐藏规则。
 
 macOS 会自动检测 `/Applications/Blender.app` 和 `/Applications/Blender 2.app`；Linux 会检测
 `/usr/bin/blender` 和 `/usr/local/bin/blender`。其他安装位置使用 `BLENDER_BIN`。

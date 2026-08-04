@@ -50,8 +50,6 @@ def register() -> None:
     for cls in CLASSES:
         if not getattr(cls, "is_registered", False):
             bpy.utils.register_class(cls)
-    if not hasattr(bpy.types.Scene, "operating_line_overlay_enabled"):
-        bpy.types.Scene.operating_line_overlay_enabled = bpy.props.BoolProperty(default=False)
     if not hasattr(bpy.types.Scene, "operating_line_replace_factory_scene"):
         bpy.types.Scene.operating_line_replace_factory_scene = bpy.props.BoolProperty(
             name="Delete factory Cube/Camera/Light on Start",
@@ -60,6 +58,13 @@ def register() -> None:
                 "disabled by default to protect user data"
             ),
             default=False,
+        )
+    if not hasattr(bpy.types.WindowManager, "operating_line_overlay_enabled"):
+        bpy.types.WindowManager.operating_line_overlay_enabled = bpy.props.BoolProperty(
+            name="Guidance visible",
+            description="Show the OperatingLine viewport guidance and task details",
+            default=False,
+            options={"SKIP_SAVE"},
         )
     if not hasattr(bpy.types.WindowManager, "operating_line_runtime_url"):
         bpy.types.WindowManager.operating_line_runtime_url = bpy.props.StringProperty(
@@ -101,13 +106,11 @@ def unregister() -> None:
                 f"receipts during unregister: {error}"
             )
     forget_managed_collection()
-    for property_name in (
-        "operating_line_overlay_enabled",
-        "operating_line_replace_factory_scene",
-    ):
+    for property_name in ("operating_line_replace_factory_scene",):
         if hasattr(bpy.types.Scene, property_name):
             delattr(bpy.types.Scene, property_name)
     for property_name in (
+        "operating_line_overlay_enabled",
         "operating_line_runtime_url",
         "operating_line_bearer_token",
     ):

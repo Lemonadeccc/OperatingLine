@@ -29,34 +29,41 @@ if (preparation.status !== 0) {
 
 const renderOutputDirectory = mkdtempSync(join(tmpdir(), 'operatingline-visual-render-'));
 try {
-  const result = spawnSync(
-    blender,
-    [
-      baseFile,
-      '--window-geometry',
-      '80',
-      '80',
-      '1280',
-      '800',
-      '--python-exit-code',
-      '1',
-      '--python',
-      captureScript,
-    ],
-    {
-      env: {
-        ...process.env,
-        OPERATINGLINE_RENDER_OUTPUT_DIR: renderOutputDirectory,
-        PYTHONDONTWRITEBYTECODE: '1',
+  const states = ['initial', 'forward', 'back', 'hidden', 'operator'];
+  for (const state of states) {
+    const result = spawnSync(
+      blender,
+      [
+        baseFile,
+        '--window-geometry',
+        '80',
+        '80',
+        '1600',
+        '1000',
+        '--python-exit-code',
+        '1',
+        '--python',
+        captureScript,
+      ],
+      {
+        env: {
+          ...process.env,
+          OPERATINGLINE_RENDER_OUTPUT_DIR: renderOutputDirectory,
+          OPERATINGLINE_VISUAL_STATE: state,
+          PYTHONDONTWRITEBYTECODE: '1',
+        },
+        stdio: 'inherit',
       },
-      stdio: 'inherit',
-    },
-  );
+    );
 
-  if (result.error) {
-    throw result.error;
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      process.exitCode = result.status ?? 1;
+      break;
+    }
   }
-  process.exitCode = result.status ?? 1;
 } finally {
   rmSync(renderOutputDirectory, { recursive: true, force: true });
 }

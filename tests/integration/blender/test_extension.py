@@ -851,6 +851,14 @@ def main() -> None:
             "walkthrough_started"
         )
         assert session.started and session.active_index == -1
+        assert overlay_enabled() is True
+        assert bpy.context.window_manager.operating_line_overlay_enabled is True
+        assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+        assert overlay_enabled() is False
+        assert bpy.context.window_manager.operating_line_overlay_enabled is False
+        assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+        assert overlay_enabled() is True
+        assert bpy.context.window_manager.operating_line_overlay_enabled is True
         assert all(
             bpy.data.objects.get(name) is not None
             for name in ("Cube", "Camera", "Light")
@@ -1031,7 +1039,7 @@ def main() -> None:
         for collection in bpy.data.collections
     )
     assert overlay_enabled() is False
-    assert not hasattr(bpy.types.Scene, "operating_line_overlay_enabled")
+    assert not hasattr(bpy.types.WindowManager, "operating_line_overlay_enabled")
     assert not hasattr(bpy.types.Scene, "operating_line_replace_factory_scene")
     assert not hasattr(bpy.types.WindowManager, "operating_line_runtime_url")
     assert not hasattr(bpy.types.WindowManager, "operating_line_bearer_token")

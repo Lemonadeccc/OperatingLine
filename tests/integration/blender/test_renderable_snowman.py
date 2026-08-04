@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -30,7 +31,11 @@ from operating_line_renderable_extension.operating_line.infrastructure import ( 
     find_artifact,
     resolve_resource,
 )
+from operating_line_renderable_extension.operating_line.infrastructure import (  # noqa: E402
+    scene_preparation as scene_preparation_actions,
+)
 from operating_line_renderable_extension.operating_line.infrastructure.snowman_actions import (  # noqa: E402
+    material as material_actions,
     model as model_actions,
     render as render_actions,
 )
@@ -111,6 +116,168 @@ def assert_latest_step_satisfied(step_id: str) -> None:
     ]
 
 
+def node_by_type(node_tree, bl_idname: str):
+    matches = tuple(
+        node for node in node_tree.nodes if node.bl_idname == bl_idname
+    )
+    assert len(matches) == 1
+    return matches[0]
+
+
+def input_by_identifier(node, identifier: str):
+    matches = tuple(
+        socket for socket in node.inputs if socket.identifier == identifier
+    )
+    assert len(matches) == 1
+    return matches[0]
+
+
+def assert_vector_close(actual, expected) -> None:
+    assert len(actual) == len(expected)
+    assert all(
+        math.isclose(actual_value, expected_value, abs_tol=1e-6)
+        for actual_value, expected_value in zip(actual, expected)
+    )
+
+
+def assert_localized_node_access() -> None:
+    factory_mesh = bpy.data.objects["Cube"].data
+    factory_material = factory_mesh.materials[0]
+    factory_principled = node_by_type(
+        factory_material.node_tree,
+        "ShaderNodeBsdfPrincipled",
+    )
+    factory_output = node_by_type(
+        factory_material.node_tree,
+        "ShaderNodeOutputMaterial",
+    )
+    localized_factory_sockets = (
+        (input_by_identifier(factory_principled, "Base Color"), "基础颜色"),
+        (input_by_identifier(factory_principled, "Roughness"), "粗糙度"),
+        (input_by_identifier(factory_principled, "Metallic"), "金属度"),
+    )
+    original_node_names = (factory_principled.name, factory_output.name)
+    original_socket_names = tuple(
+        socket.name for socket, _localized_name in localized_factory_sockets
+    )
+    try:
+        factory_principled.name = "非英文原理化节点"
+        factory_output.name = "非英文材质输出"
+        for socket, localized_name in localized_factory_sockets:
+            socket.name = localized_name
+        assert scene_preparation_actions._matches_factory_material(factory_mesh) is True
+    finally:
+        factory_principled.name, factory_output.name = original_node_names
+        for (socket, _localized_name), original_name in zip(
+            localized_factory_sockets,
+            original_socket_names,
+        ):
+            socket.name = original_name
+
+    material_definition = material_actions.MaterialDefinition(
+        "test.material.localized",
+        "OperatingLine.TestLocalizedMaterial",
+        (),
+        (0.17, 0.31, 0.73, 1.0),
+        0.64,
+        0.28,
+    )
+    material = bpy.data.materials.new("OperatingLine.NodeAccessProbe")
+    material.use_nodes = True
+    principled = node_by_type(material.node_tree, "ShaderNodeBsdfPrincipled")
+    output = node_by_type(material.node_tree, "ShaderNodeOutputMaterial")
+    principled.name = "非英文原理化节点"
+    output.name = "非英文材质输出"
+    for identifier, localized_name in (
+        ("Base Color", "基础颜色"),
+        ("Roughness", "粗糙度"),
+        ("Metallic", "金属度"),
+    ):
+        input_by_identifier(principled, identifier).name = localized_name
+
+    material_actions._configure_material_nodes(material, material_definition)
+    assert_vector_close(
+        input_by_identifier(principled, "Base Color").default_value,
+        material_definition.base_color,
+    )
+    assert math.isclose(
+        input_by_identifier(principled, "Roughness").default_value,
+        material_definition.roughness,
+        abs_tol=1e-6,
+    )
+    assert math.isclose(
+        input_by_identifier(principled, "Metallic").default_value,
+        material_definition.metallic,
+        abs_tol=1e-6,
+    )
+
+    material.node_tree.nodes.remove(output)
+    node_count = len(material.node_tree.nodes)
+    try:
+        material_actions._configure_material_nodes(material, material_definition)
+    except RuntimeError as error:
+        assert "must contain exactly one ShaderNodeOutputMaterial node; found 0" in str(
+            error
+        )
+    else:
+        raise AssertionError("Missing Material Output node must fail explicitly")
+    assert len(material.node_tree.nodes) == node_count
+    output = material.node_tree.nodes.new("ShaderNodeOutputMaterial")
+    output.name = "测试恢复的材质输出"
+
+    material.node_tree.nodes.remove(principled)
+    node_count = len(material.node_tree.nodes)
+    try:
+        material_actions._configure_material_nodes(material, material_definition)
+    except RuntimeError as error:
+        assert "must contain exactly one ShaderNodeBsdfPrincipled node; found 0" in str(
+            error
+        )
+    else:
+        raise AssertionError("Missing Principled node must fail explicitly")
+    assert len(material.node_tree.nodes) == node_count
+    bpy.data.materials.remove(material)
+
+    scene_definition = render_actions.SceneDefinition(
+        "test.scene.localized",
+        "OperatingLine.TestLocalizedScene",
+        "test.world.localized",
+        "OperatingLine.TestLocalizedWorld",
+        "snowman.collection",
+        (0.09, 0.14, 0.22, 1.0),
+        0.37,
+    )
+    world = bpy.data.worlds.new("OperatingLine.WorldNodeAccessProbe")
+    world.use_nodes = True
+    background = node_by_type(world.node_tree, "ShaderNodeBackground")
+    background.name = "非英文背景节点"
+    input_by_identifier(background, "Color").name = "颜色"
+    input_by_identifier(background, "Strength").name = "强度"
+    render_actions._configure_world(world, scene_definition)
+    assert_vector_close(
+        input_by_identifier(background, "Color").default_value,
+        scene_definition.background_color,
+    )
+    assert math.isclose(
+        input_by_identifier(background, "Strength").default_value,
+        scene_definition.strength,
+        abs_tol=1e-6,
+    )
+
+    world.node_tree.nodes.remove(background)
+    node_count = len(world.node_tree.nodes)
+    try:
+        render_actions._configure_world(world, scene_definition)
+    except RuntimeError as error:
+        assert "must contain exactly one ShaderNodeBackground node; found 0" in str(
+            error
+        )
+    else:
+        raise AssertionError("Missing Background node must fail explicitly")
+    assert len(world.node_tree.nodes) == node_count
+    bpy.data.worlds.remove(world)
+
+
 def execute_through(session, last_step_id: str) -> None:
     for expected_index in range(
         session.active_index + 1, ACTION_INDEX[last_step_id] + 1
@@ -125,6 +292,7 @@ def main() -> None:
     assert PLAN["id"] == "snowman-demo"
     assert len(ACTION_STEPS) == 13
     assert os.environ.get("OPERATINGLINE_RENDER_OUTPUT_DIR")
+    assert_localized_node_access()
 
     factory_objects = {name: bpy.data.objects[name] for name in ("Cube", "Camera", "Light")}
     factory_object_pointers = {
@@ -204,8 +372,36 @@ def main() -> None:
         # Finish details. Every declared observation must be satisfied after Next.
         execute_through(session, "snowman.details.arms")
 
-        # Material name conflicts are also checked before assignments are mutated.
+        # A missing required shader node must fail the action and roll back the
+        # just-created material instead of silently assigning an unconfigured one.
         snow_arguments = ACTION_BY_ID["snowman.materials.snow"]["action"]["arguments"]
+        original_configure_material = material_actions._configure_material_nodes
+
+        def reject_missing_principled(material, definition):
+            material.use_nodes = True
+            principled = node_by_type(
+                material.node_tree,
+                "ShaderNodeBsdfPrincipled",
+            )
+            material.node_tree.nodes.remove(principled)
+            original_configure_material(material, definition)
+
+        material_actions._configure_material_nodes = reject_missing_principled
+        try:
+            call_next_expect_failure(
+                "must contain exactly one ShaderNodeBsdfPrincipled node; found 0"
+            )
+        finally:
+            material_actions._configure_material_nodes = original_configure_material
+        assert session.active_index == ACTION_INDEX["snowman.details.arms"]
+        assert bpy.data.materials.get(snow_arguments["materialName"]) is None
+        registry = build_resource_registry(session.receipts)
+        assert all(
+            len(resolve_resource(registry[logical_id]).material_slots) == 0
+            for logical_id in snow_arguments["targets"]
+        )
+
+        # Material name conflicts are also checked before assignments are mutated.
         material_targets_before = {}
         registry = build_resource_registry(session.receipts)
         for logical_id in snow_arguments["targets"]:

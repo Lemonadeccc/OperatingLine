@@ -23,7 +23,7 @@ from ...application.session import (
 COLLECTION_LOGICAL_ID = "snowman.collection"
 COLLECTION_NAME = "OperatingLine Snowman"
 OWNER_KEY = "operating_line_owner"
-OWNER_VALUE = "snowman_demo_v2"
+OWNER_VALUE = "snowman_demo_v3"
 ACTION_KEY = "operating_line_action"
 STEP_KEY = "operating_line_step_id"
 ROLLBACK_TOKEN_KEY = "operating_line_rollback_token"

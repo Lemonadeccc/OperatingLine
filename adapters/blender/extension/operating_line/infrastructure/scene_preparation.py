@@ -4,6 +4,8 @@ import math
 
 import bpy
 
+from .snowman_actions.node_access import find_unique_input, find_unique_node
+
 
 _FACTORY_OBJECTS = {
     "Cube": {
@@ -106,13 +108,19 @@ def _matches_factory_material(mesh: bpy.types.Mesh) -> bool:
         return False
     if list(material.keys()) or material.node_tree is None:
         return False
-    principled = material.node_tree.nodes.get("Principled BSDF")
-    output = material.node_tree.nodes.get("Material Output")
+    principled = find_unique_node(
+        material.node_tree,
+        "ShaderNodeBsdfPrincipled",
+    )
+    output = find_unique_node(
+        material.node_tree,
+        "ShaderNodeOutputMaterial",
+    )
     if principled is None or output is None:
         return False
-    base_color = principled.inputs.get("Base Color")
-    metallic = principled.inputs.get("Metallic")
-    roughness = principled.inputs.get("Roughness")
+    base_color = find_unique_input(principled, "Base Color")
+    metallic = find_unique_input(principled, "Metallic")
+    roughness = find_unique_input(principled, "Roughness")
     if base_color is None or metallic is None or roughness is None:
         return False
     node_types = {node.bl_idname for node in material.node_tree.nodes}

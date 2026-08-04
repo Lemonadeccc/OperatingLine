@@ -2,7 +2,7 @@
 
 感谢你改进 OperatingLine。提交代码前，请先了解项目当前边界：协议、Headless Orchestrator、
 Blender Extension、受限 Blender MCP Bridge，以及实时 Orchestrator ↔ Blender 的计划投递与
-状态回传闭环已经可运行。内置 revision 2 计划可以完成并回退 13 步雪人渲染预览；通用 AI
+状态回传闭环已经可运行。内置 revision 3 计划可以完成并回退 13 步雪人渲染预览；通用 AI
 自动规划、节点聊天、训练/Eval、骨骼动画和第二宿主仍未完成。请勿把确定性验收场景描述成
 “AI 已能自动完成任意 Blender 任务”。
 
@@ -76,8 +76,9 @@ pnpm test:blender:companion
 pnpm package:blender
 ```
 
-`pnpm test:blender` 会对检测到的 Blender 可执行文件运行基础 Extension 回归和完整雪人无界面
-集成测试，包括复合动作冲突预检、隔离渲染、PNG 产物与 13 步完整回退。
+`pnpm test:blender` 会先运行纯 Python 引导状态单元测试，再对检测到的 Blender 可执行文件运行
+基础 Extension 回归和完整雪人无界面集成测试，包括复合动作冲突预检、隔离渲染、PNG 产物与
+13 步完整回退。
 `pnpm test:blender:companion` 会启动真实 Orchestrator 与 Blender，验证 MCP 发布、回环计划拉取、
 状态回传和跨进程前进/回退。`pnpm package:blender` 会在 `artifacts/blender/` 生成安装包。
 
@@ -87,11 +88,11 @@ pnpm package:blender
 pnpm test:blender:visual
 ```
 
-该命令启动第一个检测到的 Blender，并生成
-`artifacts/blender/overlay-smoke.png`。脚本从工厂场景启动，确认默认 Cube、Camera 和 Light
-仍存在，执行完整计划后切换到隔离的雪人渲染 Scene，调用真实 OperatingLine Panel，再捕获
-任务树、控制按钮与 Overlay。如果本机没有检测到 Blender，命令会失败并提示设置
-`BLENDER_BIN`。请在拉取请求中说明无法运行的检查及原因，不要把未运行的检查标记为通过。
+该命令分别启动五次第一个检测到的 Blender，从互相隔离的工厂场景捕获初始、前进中、回退后、
+隐藏以及 operator 语义降级状态。输出为 `artifacts/blender/guidance-*.png`，并将前进中状态写入
+兼容产物 `artifacts/blender/overlay-smoke.png`。每次捕获都会确认默认 Cube、Camera 和 Light
+仍存在。如果本机没有检测到 Blender，命令会失败并提示设置 `BLENDER_BIN`。请在拉取请求中
+说明无法运行的检查及原因，不要把未运行的检查标记为通过。
 
 ## 提交信息
 
