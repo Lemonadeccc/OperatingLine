@@ -1,5 +1,5 @@
-name: Bug report
-description: 报告可以稳定复现的 OperatingLine 缺陷
+name: Bug 报告 / Bug report
+description: 报告可以稳定复现的 OperatingLine 缺陷 / Report a reproducible OperatingLine defect
 title: '[Bug] '
 body:
   - type: markdown
@@ -7,56 +7,65 @@ body:
       value: |
         感谢报告问题。安全漏洞请勿在此公开；请改用仓库 Security 页面中的私密报告入口。
         实时 Orchestrator ↔ Blender 链路尚未打通，请勿将缺少该能力作为缺陷提交。
+        Thank you for reporting a problem. Do not disclose security vulnerabilities here; use the private Security reporting form.
+        The live Orchestrator ↔ Blender link is not implemented yet, so its absence is not currently a bug.
   - type: checkboxes
     id: checks
     attributes:
-      label: 提交前检查
+      label: 提交前检查 / Pre-submission checks
       options:
-        - label: 我已搜索现有 issue，未找到相同问题。
+        - label: 我已搜索现有 Issue，未找到相同问题。 / I searched existing issues and found no duplicate.
           required: true
-        - label: 此报告不包含安全漏洞或敏感信息。
+        - label: 此报告不包含安全漏洞或敏感信息。 / This report contains no vulnerability or sensitive data.
           required: true
   - type: textarea
     id: description
     attributes:
-      label: 问题描述
-      description: 说明实际行为、预期行为以及问题造成的影响。
+      label: 问题描述 / Actual behavior
+      description: 说明实际发生了什么以及造成的影响。 / Describe what happened and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为 / Expected behavior
+      description: 说明你预期看到的结果。 / Describe what you expected to happen.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: 复现步骤
-      description: 提供最小、连续、可重复的步骤；必要时附最小 fixture。
+      label: 复现步骤 / Reproduction steps
+      description: 提供最小、连续、可重复的步骤；必要时附最小 fixture。 / Provide minimal, ordered, repeatable steps and a small fixture when needed.
       placeholder: |
-        1. 执行……
-        2. 打开……
-        3. 观察到……
+        1. 执行…… / Run…
+        2. 打开…… / Open…
+        3. 观察到…… / Observe…
     validations:
       required: true
   - type: input
     id: revision
     attributes:
-      label: OperatingLine 版本
-      description: 提供提交 SHA、分支或发布版本。
-      placeholder: 例如 main@abcdef1
+      label: OperatingLine 版本 / Version
+      description: 提供提交 SHA、分支或发布版本。 / Provide a commit SHA, branch, or release version.
+      placeholder: '例如 / Example: main@abcdef1'
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: 运行环境
-      description: 提供操作系统、Node.js、pnpm；涉及 Blender 时提供 Blender 版本和安装方式。
+      label: 运行环境 / Environment
+      description: 提供操作系统、Node.js、pnpm；涉及 Blender 时提供 Blender 版本和安装方式。 / Include OS, Node.js, pnpm, and Blender version/install method when relevant.
       placeholder: |
         - OS:
         - Node.js:
         - pnpm:
-        - Blender（如适用）:
+        - Blender（如适用 / if applicable）:
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: 日志
-      description: 粘贴必要日志。请先删除令牌、私有路径和项目数据。
+      label: 日志 / Logs
+      description: 粘贴必要日志。请先删除令牌、私有路径和项目数据。 / Paste relevant logs after removing tokens, private paths, and project data.
       render: shell

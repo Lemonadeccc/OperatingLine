@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 使用与支持
+  - name: 使用与支持 / Usage and support
     url: https://github.com/Lemonadeccc/OperatingLine/blob/main/SUPPORT.md
-    about: 提交问题前先查看支持范围和已知边界
-  - name: 私密安全报告
+    about: 提交问题前先查看支持范围和已知边界 / Review support scope and known limitations before filing
+  - name: 私密安全报告 / Private security report
     url: https://github.com/Lemonadeccc/OperatingLine/security/advisories/new
-    about: 安全漏洞请勿通过公开 issue 报告
+    about: 安全漏洞请勿通过公开 Issue 报告 / Do not report vulnerabilities in public issues
