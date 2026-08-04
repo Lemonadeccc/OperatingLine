@@ -1,0 +1,165 @@
+{
+  "protocolVersion": "1.0.0",
+  "id": "snowman-demo",
+  "revision": 1,
+  "title": "Create a snowman",
+  "rootStepId": "snowman",
+  "steps": [
+    {
+      "id": "snowman",
+      "parentId": null,
+      "order": 0,
+      "dependsOn": [],
+      "title": "Create a snowman",
+      "intent": "Create and verify a complete snowman scene",
+      "explanation": "The root groups modeling, materials, lighting and rendering work.",
+      "state": "ready",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.model",
+      "parentId": "snowman",
+      "order": 1,
+      "dependsOn": [],
+      "title": "Build base model",
+      "intent": "Create the main snowman volumes",
+      "explanation": "Three overlapping spheres establish the silhouette before details and materials.",
+      "state": "ready",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.model.body_lower",
+      "parentId": "snowman.model",
+      "order": 1,
+      "dependsOn": [],
+      "title": "Create lower body",
+      "intent": "Create the largest snow sphere",
+      "explanation": "The lower sphere carries the snowman's weight and defines its overall scale.",
+      "state": "ready",
+      "action": {
+        "adapterId": "blender",
+        "name": "snowman.body_lower",
+        "arguments": {
+          "objectName": "OperatingLine.BodyLower",
+          "radius": 1.5,
+          "location": [0, 0, 1.5]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 1.5] }],
+      "expectedObservations": [
+        { "kind": "object_exists", "parameters": { "name": "OperatingLine.BodyLower" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.model.body_upper",
+      "parentId": "snowman.model",
+      "order": 2,
+      "dependsOn": ["snowman.model.body_lower"],
+      "title": "Create upper body",
+      "intent": "Create the middle snow sphere",
+      "explanation": "The upper body overlaps the base and provides support for the head.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "snowman.body_upper",
+        "arguments": {
+          "objectName": "OperatingLine.BodyUpper",
+          "radius": 1.1,
+          "location": [0, 0, 3.65]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 3.65] }],
+      "expectedObservations": [
+        { "kind": "object_exists", "parameters": { "name": "OperatingLine.BodyUpper" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.model.head",
+      "parentId": "snowman.model",
+      "order": 3,
+      "dependsOn": ["snowman.model.body_upper"],
+      "title": "Create head",
+      "intent": "Create the top snow sphere",
+      "explanation": "The head completes the base silhouette and becomes the anchor for facial details.",
+      "state": "draft",
+      "action": {
+        "adapterId": "blender",
+        "name": "snowman.head",
+        "arguments": {
+          "objectName": "OperatingLine.Head",
+          "radius": 0.82,
+          "location": [0, 0, 5.35]
+        }
+      },
+      "anchors": [{ "kind": "world_position", "position": [0, 0, 5.35] }],
+      "expectedObservations": [
+        { "kind": "object_exists", "parameters": { "name": "OperatingLine.Head" } }
+      ],
+      "rollback": { "mode": "compensating_action", "checkpointRequired": false }
+    },
+    {
+      "id": "snowman.details",
+      "parentId": "snowman",
+      "order": 2,
+      "dependsOn": ["snowman.model.head"],
+      "title": "Add face and accessories",
+      "intent": "Add eyes, nose, mouth, arms and accessories",
+      "explanation": "Details are planned only after the base silhouette is stable.",
+      "state": "draft",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.materials",
+      "parentId": "snowman",
+      "order": 3,
+      "dependsOn": ["snowman.details"],
+      "title": "Set materials",
+      "intent": "Apply snow and accessory materials",
+      "explanation": "Material roughness and color are tuned after geometry is complete.",
+      "state": "draft",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.lighting",
+      "parentId": "snowman",
+      "order": 4,
+      "dependsOn": ["snowman.materials"],
+      "title": "Set lights and camera",
+      "intent": "Compose and light the snowman",
+      "explanation": "Lighting and framing depend on the final silhouette and materials.",
+      "state": "draft",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    },
+    {
+      "id": "snowman.render",
+      "parentId": "snowman",
+      "order": 5,
+      "dependsOn": ["snowman.lighting"],
+      "title": "Render and verify",
+      "intent": "Render the final scene and verify the requested result",
+      "explanation": "The final step records render evidence and semantic scene checks.",
+      "state": "draft",
+      "action": null,
+      "anchors": [],
+      "expectedObservations": [],
+      "rollback": { "mode": "checkpoint_restore", "checkpointRequired": true }
+    }
+  ]
+}

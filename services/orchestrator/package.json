@@ -1,0 +1,27 @@
+{
+  "name": "@operatingline/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "dev": "tsx src/standalone.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/fastify": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "@operatingline/adapter-sdk": "workspace:*",
+    "@operatingline/domain": "workspace:*",
+    "@operatingline/persistence": "workspace:*",
+    "@operatingline/protocol": "workspace:*",
+    "fastify": "5.11.2",
+    "pino": "10.3.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@operatingline/test-kit": "workspace:*"
+  }
+}

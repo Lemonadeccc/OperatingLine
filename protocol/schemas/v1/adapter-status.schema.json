@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hostVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "protocolVersions": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "connected": {
+      "type": "boolean"
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "presentation": {
+          "type": "object",
+          "properties": {
+            "taskTree": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "viewportOverlay": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "interactiveAnchors": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            }
+          },
+          "required": [
+            "taskTree",
+            "viewportOverlay",
+            "interactiveAnchors"
+          ],
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "inspect": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "invokeActions": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "screenshot": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "rollbackModes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "native_undo",
+                  "checkpoint_restore",
+                  "compensating_action",
+                  "unsupported"
+                ]
+              }
+            }
+          },
+          "required": [
+            "inspect",
+            "invokeActions",
+            "screenshot",
+            "rollbackModes"
+          ],
+          "additionalProperties": false
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "dispatch": {
+              "type": "string",
+              "enum": [
+                "main_thread_serial",
+                "host_managed",
+                "external_process"
+              ]
+            },
+            "network": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "persistentProjectState": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            }
+          },
+          "required": [
+            "dispatch",
+            "network",
+            "persistentProjectState"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "presentation",
+        "execution",
+        "runtime"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "protocolVersions",
+    "connected",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/adapter-status.json"
+}

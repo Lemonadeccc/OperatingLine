@@ -1,0 +1,62 @@
+name: Bug report
+description: 报告可以稳定复现的 OperatingLine 缺陷
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告问题。安全漏洞请勿在此公开；请改用仓库 Security 页面中的私密报告入口。
+        实时 Orchestrator ↔ Blender 链路尚未打通，请勿将缺少该能力作为缺陷提交。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 issue，未找到相同问题。
+          required: true
+        - label: 此报告不包含安全漏洞或敏感信息。
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 说明实际行为、预期行为以及问题造成的影响。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 提供最小、连续、可重复的步骤；必要时附最小 fixture。
+      placeholder: |
+        1. 执行……
+        2. 打开……
+        3. 观察到……
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: OperatingLine 版本
+      description: 提供提交 SHA、分支或发布版本。
+      placeholder: 例如 main@abcdef1
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 提供操作系统、Node.js、pnpm；涉及 Blender 时提供 Blender 版本和安装方式。
+      placeholder: |
+        - OS:
+        - Node.js:
+        - pnpm:
+        - Blender（如适用）:
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 粘贴必要日志。请先删除令牌、私有路径和项目数据。
+      render: shell

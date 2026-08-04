@@ -1,0 +1,16 @@
+{
+  "name": "@operatingline/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "generate:schema": "tsx scripts/generate-schemas.ts",
+    "check:schema": "tsx scripts/generate-schemas.ts --check",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用与支持
+    url: https://github.com/Lemonadeccc/OperatingLine/blob/main/SUPPORT.md
+    about: 提交问题前先查看支持范围和已知边界
+  - name: 私密安全报告
+    url: https://github.com/Lemonadeccc/OperatingLine/security/advisories/new
+    about: 安全漏洞请勿通过公开 issue 报告

@@ -1,0 +1,25 @@
+{
+  "id": "replace-with-host-id",
+  "version": "0.1.0",
+  "hostVersion": "replace-with-tested-range",
+  "protocolVersions": ["1.0.0"],
+  "connected": false,
+  "capabilities": {
+    "presentation": {
+      "taskTree": "unsupported",
+      "viewportOverlay": "unsupported",
+      "interactiveAnchors": "unsupported"
+    },
+    "execution": {
+      "inspect": "unsupported",
+      "invokeActions": "unsupported",
+      "screenshot": "unsupported",
+      "rollbackModes": ["unsupported"]
+    },
+    "runtime": {
+      "dispatch": "host_managed",
+      "network": "unsupported",
+      "persistentProjectState": "unsupported"
+    }
+  }
+}

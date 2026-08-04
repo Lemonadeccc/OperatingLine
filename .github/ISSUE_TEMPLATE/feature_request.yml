@@ -1,0 +1,53 @@
+name: Feature request
+description: 建议新的能力或改进现有行为
+title: '[Feature] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请描述要解决的用户问题，而不只是指定实现方式。实时 Orchestrator ↔ Blender 链路当前仍在路线图中。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前检查
+      options:
+        - label: 我已搜索现有 issue 和路线图，未找到相同建议。
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 用户问题
+      description: 谁在什么场景遇到什么阻碍？当前方案为什么不足？
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期望结果
+      description: 描述可观察、可验收的结果，不要求预先确定内部实现。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 主要范围
+      options:
+        - Protocol / domain
+        - Orchestrator
+        - Blender Extension
+        - Blender MCP Bridge
+        - 新宿主适配器
+        - 文档或开发体验
+        - 跨组件
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 可选方案
+      description: 如有建议，请说明方案、替代选择和取舍。
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 添加示例、草图、相关链接、兼容性或安全约束。

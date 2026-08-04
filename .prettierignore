@@ -1,0 +1,11 @@
+.codex/
+.omx/
+.git/
+node_modules/
+dist/
+.vite/
+out/
+coverage/
+AGENTS.md
+pnpm-lock.yaml
+protocol/schemas/**/*.json

@@ -1,0 +1,61 @@
+{
+  "name": "operating-line",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lemonadeccc/OperatingLine.git"
+  },
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --dir services/orchestrator dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "schema:generate": "pnpm --filter @operatingline/protocol generate:schema",
+    "schema:check": "pnpm --filter @operatingline/protocol check:schema",
+    "audit:prod": "pnpm audit --prod",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "commit": "cz",
+    "commitlint": "commitlint --edit",
+    "package:blender": "node tools/blender/build-extension.mjs",
+    "test:blender": "node tools/blender/run-tests.mjs",
+    "test:blender:visual": "node tools/blender/capture-overlay.mjs",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm format:check",
+    "prepare": "husky"
+  },
+  "config": {
+    "commitizen": {
+      "path": "@commitlint/cz-commitlint"
+    }
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.1",
+    "@commitlint/config-conventional": "21.2.0",
+    "@commitlint/cz-commitlint": "21.2.0",
+    "@eslint/js": "10.0.1",
+    "@operatingline/blender-mcp-bridge": "workspace:*",
+    "@operatingline/domain": "workspace:*",
+    "@operatingline/orchestrator": "workspace:*",
+    "@operatingline/persistence": "workspace:*",
+    "@operatingline/protocol": "workspace:*",
+    "@operatingline/test-kit": "workspace:*",
+    "@types/node": "24.13.3",
+    "commitizen": "4.3.2",
+    "eslint": "10.8.0",
+    "husky": "9.1.7",
+    "inquirer": "9.3.8",
+    "prettier": "3.9.6",
+    "tsx": "4.23.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
+    "vitest": "4.1.10"
+  }
+}

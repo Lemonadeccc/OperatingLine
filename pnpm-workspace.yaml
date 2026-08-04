@@ -1,0 +1,11 @@
+packages:
+  - adapters/*/bridge
+  - services/*
+  - packages/*
+
+auditConfig:
+  ignoreGhsas:
+    - GHSA-frvp-7c67-39w9
+
+onlyBuiltDependencies:
+  - esbuild
