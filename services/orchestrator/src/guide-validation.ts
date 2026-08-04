@@ -1,5 +1,5 @@
 import { validateExecutableTaskPlan } from '@operatingline/domain';
-import type { ActionCatalog, GuidePlan } from '@operatingline/protocol';
+import type { ActionCatalog, GuidePlan, GuideRevisionRequest } from '@operatingline/protocol';
 
 export function validateGuidePlanStructure(plan: GuidePlan): string | null {
   const root = plan.steps.find((step) => step.id === plan.rootStepId);
@@ -92,6 +92,57 @@ export function validateGuidePlanAgainstActionCatalog(
           `Guide step ${step.id} observation ${observation.kind} is unsupported by ${step.action.name}`,
         );
       }
+    }
+  }
+}
+
+export function guidePlanNodeNumbers(plan: GuidePlan): ReadonlyMap<string, string> {
+  validateGuidePlanStructure(plan);
+  const children = new Map<string | null, GuidePlan['steps']>();
+  for (const step of plan.steps) {
+    const siblings = children.get(step.parentId) ?? [];
+    siblings.push(step);
+    children.set(step.parentId, siblings);
+  }
+  for (const siblings of children.values()) {
+    siblings.sort(
+      (left, right) =>
+        left.order - right.order || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+    );
+  }
+
+  const numbers = new Map<string, string>();
+  const visit = (stepId: string, number: string): void => {
+    numbers.set(stepId, number);
+    for (const [index, child] of (children.get(stepId) ?? []).entries()) {
+      visit(child.id, `${number}.${index + 1}`);
+    }
+  };
+  visit(plan.rootStepId, '1');
+  return numbers;
+}
+
+export function validateGuideRevisionRequest(
+  request: GuideRevisionRequest,
+  catalog: ActionCatalog,
+): void {
+  validateProposalTarget(request.basePlan, request.adapterId);
+  validateGuidePlanAgainstActionCatalog(request.basePlan, catalog);
+  const numbers = guidePlanNodeNumbers(request.basePlan);
+  const referencedNodeIds = new Set<string>();
+  for (const reference of request.references) {
+    if (referencedNodeIds.has(reference.nodeId)) {
+      throw new Error(`Guide revision request repeats node ${reference.nodeId}`);
+    }
+    referencedNodeIds.add(reference.nodeId);
+    const expectedNumber = numbers.get(reference.nodeId);
+    if (expectedNumber === undefined) {
+      throw new Error(`Guide revision request references unknown node ${reference.nodeId}`);
+    }
+    if (reference.nodeNumber !== expectedNumber) {
+      throw new Error(
+        `Guide revision request node ${reference.nodeId} uses number ${reference.nodeNumber}; expected ${expectedNumber}`,
+      );
     }
   }
 }

@@ -150,6 +150,8 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
+            { name: 'operatingline.replan.requests.list' },
+            { name: 'operatingline.replan.propose' },
             { name: 'operatingline.guide.publish' },
             { name: 'operatingline.guide.propose' },
           ],
@@ -292,6 +294,150 @@ describe('OperatingLine runtime', () => {
       });
       expect(unknownArgument.result).toMatchObject({ isError: true });
       expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('persists host node references and turns one request into a newer review proposal', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const basePlan = JSON.parse(
+        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      const requestId = randomUUID();
+      const instanceId = randomUUID();
+      const revisionRequest = {
+        protocolVersion: '1.0.0',
+        requestId,
+        adapterId: 'blender',
+        catalogVersion: '1.0.0',
+        instanceId,
+        basePlan,
+        references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+        message: 'Make the head larger while preserving the three-part silhouette.',
+        occurredAt: new Date().toISOString(),
+      };
+
+      const accepted = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(revisionRequest),
+      });
+      expect(accepted.status).toBe(200);
+      await expect(accepted.json()).resolves.toEqual({ result: 'accepted', requestId });
+
+      const duplicate = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(revisionRequest),
+      });
+      await expect(duplicate.json()).resolves.toEqual({ result: 'duplicate', requestId });
+
+      const conflict = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...revisionRequest, message: 'Conflicting reuse' }),
+      });
+      expect(conflict.status).toBe(409);
+
+      const invalidReference = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...revisionRequest,
+          requestId: randomUUID(),
+          references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.9.9' }],
+        }),
+      });
+      expect(invalidReference.status).toBe(422);
+      await expect(invalidReference.json()).resolves.toMatchObject({
+        message: expect.stringContaining('expected 1.2.3'),
+      });
+
+      const pending = await callMcpTool(runtime, 17, 'operatingline.replan.requests.list', {
+        targetAdapterId: 'blender',
+      });
+      expect(JSON.parse(pending.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        requests: [
+          {
+            requestId,
+            catalogVersion: '1.0.0',
+            basePlan: { id: 'snowman-demo', revision: 3 },
+            references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+          },
+        ],
+      });
+
+      const replanned = {
+        ...basePlan,
+        revision: 4,
+        title: 'Create a snowman with a larger head',
+      };
+      const wrongCatalog = await callMcpTool(runtime, 18, 'operatingline.replan.propose', {
+        requestId,
+        catalogVersion: '0.9.0',
+        plan: replanned,
+      });
+      expect(wrongCatalog.result).toMatchObject({ isError: true });
+      expect(wrongCatalog.result?.content?.[0]?.text).toContain(
+        'must match revision request catalog 1.0.0',
+      );
+      const proposed = await callMcpTool(runtime, 19, 'operatingline.replan.propose', {
+        requestId,
+        catalogVersion: '1.0.0',
+        plan: replanned,
+      });
+      expect(JSON.parse(proposed.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        proposed: true,
+        planId: 'snowman-demo',
+        revision: 4,
+        catalogVersion: '1.0.0',
+        revisionRequestId: requestId,
+      });
+
+      const noPending = await callMcpTool(runtime, 20, 'operatingline.replan.requests.list', {
+        targetAdapterId: 'blender',
+      });
+      expect(JSON.parse(noPending.result?.content?.[0]?.text ?? '{}')).toEqual({ requests: [] });
+
+      const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      guideUrl.searchParams.set('adapterId', 'blender');
+      guideUrl.searchParams.set('instanceId', instanceId);
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({
+        plan: null,
+        proposal: {
+          revisionRequestId: requestId,
+          targetInstanceId: instanceId,
+          catalogVersion: '1.0.0',
+          plan: { id: 'snowman-demo', revision: 4 },
+        },
+      });
+      guideUrl.searchParams.set('instanceId', randomUUID());
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({ plan: null, proposal: null });
+      await expect(
+        fetch(`${runtime.baseUrl}/api/v1/guide`, { headers }).then((response) => response.json()),
+      ).resolves.toEqual({ plan: null });
+
+      const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
+        requestId,
+        catalogVersion: '1.0.0',
+        plan: { ...replanned, revision: 5 },
+      });
+      expect(secondProposal.result).toMatchObject({ isError: true });
+      expect(secondProposal.result?.content?.[0]?.text).toContain('already has a proposal');
     } finally {
       await runtime.stop();
     }

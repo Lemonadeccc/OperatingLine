@@ -18,11 +18,15 @@ import {
   guideProposalSchema,
   guideProposalSubmissionSchema,
   guideProtocolVersion,
+  guideReplanSubmissionSchema,
+  guideRevisionRequestListSchema,
+  guideRevisionRequestSchema,
   planningContextRequestSchema,
   planningContextSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
+  type GuideProposal,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -30,6 +34,7 @@ import { z } from 'zod';
 import { createActionCatalogRegistry } from './action-catalogs.js';
 import {
   validateGuidePlanAgainstActionCatalog,
+  validateGuideRevisionRequest,
   validateGuidePlanStructure,
   validateProposalTarget,
 } from './guide-validation.js';
@@ -167,6 +172,59 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    const createProposal = (input: {
+      targetAdapterId: string;
+      targetInstanceId?: string;
+      catalogVersion?: string;
+      plan: GuidePlan;
+      revisionRequestId?: string;
+    }): GuideProposal => {
+      validateProposalTarget(input.plan, input.targetAdapterId);
+      const catalog = actionCatalogRegistry.get({
+        targetAdapterId: input.targetAdapterId,
+        ...(input.catalogVersion === undefined ? {} : { catalogVersion: input.catalogVersion }),
+      });
+      validateGuidePlanAgainstActionCatalog(input.plan, catalog);
+      const latestRevision = latestProposedRevisionByPlanId.get(input.plan.id);
+      if (latestRevision !== undefined && input.plan.revision <= latestRevision) {
+        throw new Error(
+          `Guide plan ${input.plan.id} revision ${input.plan.revision} is not newer than latest proposed revision ${latestRevision}`,
+        );
+      }
+      const proposal = guideProposalSchema.parse({
+        protocolVersion: guideProtocolVersion,
+        proposalId: randomUUID(),
+        targetAdapterId: input.targetAdapterId,
+        ...(input.targetInstanceId === undefined
+          ? {}
+          : { targetInstanceId: input.targetInstanceId }),
+        plan: input.plan,
+        ...(input.revisionRequestId === undefined
+          ? {}
+          : { revisionRequestId: input.revisionRequestId }),
+        catalogVersion: catalog.catalogVersion,
+        proposedAt: new Date().toISOString(),
+      });
+      if (input.revisionRequestId === undefined) {
+        database.recordGuideProposal(proposal);
+      } else {
+        database.recordGuideReplanProposal(proposal, input.revisionRequestId);
+      }
+      latestProposedRevisionByPlanId.set(input.plan.id, input.plan.revision);
+      return proposal;
+    };
+
+    const proposalResult = (proposal: GuideProposal) => ({
+      proposed: true,
+      proposalId: proposal.proposalId,
+      targetAdapterId: proposal.targetAdapterId,
+      targetInstanceId: proposal.targetInstanceId ?? null,
+      planId: proposal.plan.id,
+      revision: proposal.plan.revision,
+      catalogVersion: proposal.catalogVersion,
+      revisionRequestId: proposal.revisionRequestId ?? null,
+    });
+
     const runtimeMcpHandler = createMcpHandler(() => {
       const server = new McpServer({ name: 'operating-line', version: runtimeVersion });
 
@@ -235,6 +293,64 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.replan.requests.list',
+        {
+          description:
+            'List pending immutable host-authored revision requests, including their exact base GuidePlan and stable node references.',
+          inputSchema: guideRevisionRequestListSchema,
+        },
+        async (requestInput) => {
+          const request = guideRevisionRequestListSchema.parse(requestInput);
+          const requests = database
+            .listPendingGuideRevisionRequests(request.targetAdapterId, request.limit)
+            .map((item) => guideRevisionRequestSchema.parse(item));
+          return { content: [{ type: 'text', text: JSON.stringify({ requests }) }] };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.replan.propose',
+        {
+          description:
+            'Attach one complete newer GuidePlan proposal to a pending revision request. This never patches or executes the base plan and still requires in-host acceptance.',
+          inputSchema: guideReplanSubmissionSchema,
+        },
+        async (submissionInput) => {
+          const submission = guideReplanSubmissionSchema.parse(submissionInput);
+          const storedRequest = database.getGuideRevisionRequest(submission.requestId);
+          if (storedRequest === null) {
+            throw new Error(`Unknown guide revision request: ${submission.requestId}`);
+          }
+          const revisionRequest = guideRevisionRequestSchema.parse(storedRequest);
+          if (submission.plan.id !== revisionRequest.basePlan.id) {
+            throw new Error(
+              `Replanned guide id ${submission.plan.id} must match base plan ${revisionRequest.basePlan.id}`,
+            );
+          }
+          if (submission.plan.revision <= revisionRequest.basePlan.revision) {
+            throw new Error(
+              `Replanned guide revision ${submission.plan.revision} must be newer than base revision ${revisionRequest.basePlan.revision}`,
+            );
+          }
+          if (submission.catalogVersion !== revisionRequest.catalogVersion) {
+            throw new Error(
+              `Replan catalog ${submission.catalogVersion} must match revision request catalog ${revisionRequest.catalogVersion}`,
+            );
+          }
+          const proposal = createProposal({
+            targetAdapterId: revisionRequest.adapterId,
+            targetInstanceId: revisionRequest.instanceId,
+            catalogVersion: submission.catalogVersion,
+            plan: submission.plan,
+            revisionRequestId: revisionRequest.requestId,
+          });
+          return {
+            content: [{ type: 'text', text: JSON.stringify(proposalResult(proposal)) }],
+          };
+        },
+      );
+
+      server.registerTool(
         'operatingline.guide.publish',
         {
           description: 'Validate and publish a versioned guide plan for host companions.',
@@ -280,39 +396,15 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
         async (submissionInput) => {
           const submission = guideProposalSubmissionSchema.parse(submissionInput);
-          validateProposalTarget(submission.plan, submission.targetAdapterId);
-          validateGuidePlanAgainstActionCatalog(
-            submission.plan,
-            actionCatalogRegistry.get({ targetAdapterId: submission.targetAdapterId }),
-          );
-          const latestRevision = latestProposedRevisionByPlanId.get(submission.plan.id);
-          if (latestRevision !== undefined && submission.plan.revision <= latestRevision) {
-            throw new Error(
-              `Guide plan ${submission.plan.id} revision ${submission.plan.revision} is not newer than latest proposed revision ${latestRevision}`,
-            );
-          }
-          const proposal = guideProposalSchema.parse({
-            protocolVersion: guideProtocolVersion,
-            proposalId: randomUUID(),
+          const proposal = createProposal({
             targetAdapterId: submission.targetAdapterId,
             plan: submission.plan,
-            proposedAt: new Date().toISOString(),
+            ...(submission.catalogVersion === undefined
+              ? {}
+              : { catalogVersion: submission.catalogVersion }),
           });
-          database.recordGuideProposal(proposal);
-          latestProposedRevisionByPlanId.set(submission.plan.id, submission.plan.revision);
           return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  proposed: true,
-                  proposalId: proposal.proposalId,
-                  targetAdapterId: proposal.targetAdapterId,
-                  planId: proposal.plan.id,
-                  revision: proposal.plan.revision,
-                }),
-              },
-            ],
+            content: [{ type: 'text', text: JSON.stringify(proposalResult(proposal)) }],
           };
         },
       );
@@ -395,6 +487,33 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         plan: planAdapterId === adapterId && !callerHasActiveRevision ? activePlan : null,
         proposal: callerHasPendingProposal ? null : pendingProposal,
       });
+    });
+    runtimeApp.post('/api/v1/companion/revision-request', async (request, reply) => {
+      const parsedRequest = guideRevisionRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_revision_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        validateGuideRevisionRequest(
+          parsedRequest.data,
+          actionCatalogRegistry.get({
+            targetAdapterId: parsedRequest.data.adapterId,
+            catalogVersion: parsedRequest.data.catalogVersion,
+          }),
+        );
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'invalid_revision_request',
+          message: error instanceof Error ? error.message : 'Unknown revision request error',
+        });
+      }
+      const result = database.recordGuideRevisionRequest(parsedRequest.data);
+      if (result === 'conflict') {
+        return reply.code(409).send({ result });
+      }
+      return { result, requestId: parsedRequest.data.requestId };
     });
     runtimeApp.post('/api/v1/companion/proposal-decision', async (request, reply) => {
       const parsedDecision = guideProposalDecisionSchema.safeParse(request.body);

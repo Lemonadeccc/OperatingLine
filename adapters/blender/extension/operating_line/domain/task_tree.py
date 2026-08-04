@@ -1,13 +1,16 @@
 """Validated task-tree construction from bundled plan resources."""
 
 from dataclasses import dataclass
+from copy import deepcopy
 import json
 from pathlib import Path
 import re
 from typing import Any
 
 RESOURCE_PATH = Path(__file__).parents[1] / "resources" / "snowman.plan.json"
+ACTION_CATALOG_PATH = Path(__file__).parents[1] / "resources" / "action-catalog.json"
 STEP_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*")
+CATALOG_VERSION_PATTERN = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +192,20 @@ if (
 ):
     raise ValueError("Bundled plan revision must be a positive integer")
 SNOWMAN_TASK_TREE = load_task_tree_data(_BUNDLED_PLAN)
+
+with ACTION_CATALOG_PATH.open(encoding="utf-8") as _catalog_resource:
+    _BUNDLED_ACTION_CATALOG = json.load(_catalog_resource)
+BLENDER_ACTION_CATALOG_VERSION = _BUNDLED_ACTION_CATALOG.get("catalogVersion")
+if (
+    not isinstance(BLENDER_ACTION_CATALOG_VERSION, str)
+    or CATALOG_VERSION_PATTERN.fullmatch(BLENDER_ACTION_CATALOG_VERSION) is None
+):
+    raise ValueError("Bundled action catalog version must use stable x.y.z form")
+
+
+def bundled_plan_data() -> dict[str, Any]:
+    """Return an isolated copy of the offline plan for immutable revision requests."""
+    return deepcopy(_BUNDLED_PLAN)
 
 
 def executable_steps(root: TaskNode = SNOWMAN_TASK_TREE) -> tuple[TaskNode, ...]:

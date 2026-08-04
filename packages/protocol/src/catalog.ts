@@ -3,11 +3,7 @@ import { z } from 'zod';
 import { rollbackModeSchema } from './adapter.js';
 import { companionStateReportSchema } from './companion.js';
 import { guideProtocolVersionSchema } from './guide.js';
-
-export const catalogVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-export const catalogVersionSchema = z
-  .string()
-  .regex(catalogVersionPattern, 'Catalog versions must use stable semantic version form x.y.z');
+import { catalogVersionSchema } from './version.js';
 
 export const actionArgumentsJsonSchemaSchema = z.strictObject({
   type: z.literal('object'),

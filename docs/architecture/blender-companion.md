@@ -6,6 +6,7 @@
 
 - `Panel` / `UILayout`：Sidebar 任务树和 Start、Next、Back。
 - `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
+- `Panel` / `UILayout`：活动树与待审树的节点 `Ref`、Revision request 输入及发送状态。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
@@ -75,6 +76,12 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 以便活动会话回到起点。Accept 只有在 receipt 为空时才原子替换活动 Session，仍不会执行第一个
 action；Reject 只清除预览。两种决策由网络线程异步回传且按宿主实例幂等。Disconnect 会取消
 本地 pending 更新和待审提案。
+
+活动树和待审树的每个节点都提供 `Ref`。同一草稿最多引用 8 个节点，并且不能混合两个 Plan
+基线；切换基线会清空旧引用。发送时 Companion 把完整 base Plan、稳定节点 ID、当时的树编号、
+打包目录版本和消息放入后台队列。请求确认或暂时失败只更新 UI 状态，不调用 `bpy` 场景 API。
+Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blender 在主线程再次核对后才建立
+只读预览。输入区明确称为 Revision request，因为当前没有内置模型、流式回复或聊天记录。
 
 ## revision 3 雪人执行切片
 

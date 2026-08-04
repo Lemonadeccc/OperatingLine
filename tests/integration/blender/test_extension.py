@@ -186,6 +186,7 @@ def assert_companion_and_plan_semantics() -> None:
     token = "integration-token-123456"
     requests: list[dict] = []
     reports: list[dict] = []
+    revision_requests: list[dict] = []
     post_result = ["accepted"]
     slow_guide = [False]
     slow_guide_started = threading.Event()
@@ -235,7 +236,17 @@ def assert_companion_and_plan_semantics() -> None:
         def do_POST(self):
             assert self.headers.get("Authorization") == f"Bearer {token}"
             length = int(self.headers["Content-Length"])
-            reports.append(json.loads(self.rfile.read(length)))
+            payload = json.loads(self.rfile.read(length))
+            if urlsplit(self.path).path == "/api/v1/companion/revision-request":
+                revision_requests.append(payload)
+                self._reply(
+                    {
+                        "result": "accepted",
+                        "requestId": payload["requestId"],
+                    }
+                )
+                return
+            reports.append(payload)
             self._reply({"result": post_result[0]})
 
         def log_message(self, _format, *_args):
@@ -298,6 +309,48 @@ def assert_companion_and_plan_semantics() -> None:
         assert all(query["adapterId"] == ["blender"] for query in requests)
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert server_thread.ident != main_thread_id
+
+        # Ref creates a stable node citation in Blender. Send queues one full,
+        # immutable base plan for an MCP planner and does not mutate the scene.
+        scene_objects_before_request = {
+            item.as_pointer() for item in bpy.data.objects
+        }
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        assert bpy.context.window_manager.operating_line_revision_message == "@1.1.3 "
+        bpy.context.window_manager.operating_line_revision_message += (
+            "Make the head slightly rougher"
+        )
+        assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
+        assert bpy.context.window_manager.operating_line_revision_message == ""
+        request_deadline = time.monotonic() + 4.0
+        while time.monotonic() < request_deadline:
+            companion.pump()
+            if revision_requests and "stored for MCP planner" in (
+                companion.revision_request_status
+            ):
+                break
+            time.sleep(0.02)
+        assert len(revision_requests) == 1
+        revision_request = revision_requests[0]
+        uuid.UUID(revision_request["requestId"])
+        assert revision_request["protocolVersion"] == "1.0.0"
+        assert revision_request["adapterId"] == "blender"
+        assert revision_request["catalogVersion"] == "1.0.0"
+        assert revision_request["instanceId"] == companion.instance_id
+        assert revision_request["basePlan"] == dynamic_plan
+        assert revision_request["references"] == [
+            {"nodeId": "snowman.model.head", "nodeNumber": "1.1.3"}
+        ]
+        assert revision_request["message"] == (
+            "@1.1.3 Make the head slightly rougher"
+        )
+        assert companion.last_revision_request_id == revision_request["requestId"]
+        assert {item.as_pointer() for item in bpy.data.objects} == (
+            scene_objects_before_request
+        )
 
         # Disconnect may flush queued state, but it must retain and expose any
         # worker that is still stopping instead of claiming to be offline.
@@ -560,13 +613,44 @@ def assert_companion_and_plan_semantics() -> None:
         "protocolVersion": "1.0.0",
         "proposalId": str(uuid.uuid4()),
         "targetAdapterId": "blender",
+        "targetInstanceId": companion.instance_id,
+        "revisionRequestId": str(uuid.uuid4()),
+        "catalogVersion": "1.0.0",
         "plan": reviewed_plan,
         "proposedAt": "2026-08-04T12:00:00Z",
     }
+    for invalid_proposal, expected_error in (
+        (
+            {**reviewed_proposal, "targetInstanceId": str(uuid.uuid4())},
+            "different Blender instance",
+        ),
+        (
+            {**reviewed_proposal, "catalogVersion": "2.0.0"},
+            "Unsupported proposal catalog version",
+        ),
+    ):
+        try:
+            companion.stage_proposal(invalid_proposal)
+        except ValueError as error:
+            assert expected_error in str(error)
+        else:
+            raise AssertionError("Invalid request-linked proposal should be rejected")
+        assert companion.proposed_plan is None
+        assert operating_line.get_session() is accepted_before_review
     assert companion.stage_proposal(reviewed_proposal) is True
     assert operating_line.get_session() is accepted_before_review
     assert companion.proposal_session is not None
     assert companion.proposal_session.plan_id == "reviewed-proposal-plan"
+    assert bpy.ops.operating_line.reference_node(
+        scope="proposal",
+        node_id="snowman.model.head",
+    ) == {"FINISHED"}
+    assert companion.revision_reference_scope == "proposal"
+    assert tuple(
+        node.id for node in companion.revision_reference_nodes()
+    ) == ("snowman.model.head",)
+    assert bpy.ops.operating_line.clear_revision_request() == {"FINISHED"}
+    assert companion.revision_reference_nodes() == ()
     assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
     assert bpy.ops.operating_line.start() == {"CANCELLED"}
     assert bpy.ops.operating_line.next() == {"CANCELLED"}
@@ -577,10 +661,22 @@ def assert_companion_and_plan_semantics() -> None:
     assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
 
     assert companion.stage_proposal(reviewed_proposal) is True
+    assert bpy.ops.operating_line.reference_node(
+        scope="proposal",
+        node_id="snowman.model.head",
+    ) == {"FINISHED"}
+    bpy.context.window_manager.operating_line_revision_message += "Refine after accept"
     assert companion.accept_proposal() is True
     reviewed_session = operating_line.get_session()
     assert reviewed_session is not accepted_before_review
     assert reviewed_session.plan_id == "reviewed-proposal-plan"
+    assert companion.revision_reference_scope == "active"
+    assert companion.revision_base_session is reviewed_session
+    assert bpy.context.window_manager.operating_line_revision_message.endswith(
+        "Refine after accept"
+    )
+    assert bpy.ops.operating_line.clear_revision_request() == {"FINISHED"}
+    assert bpy.context.window_manager.operating_line_revision_message == ""
     assert not reviewed_session.started and not reviewed_session.receipts
     assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
 
@@ -1121,6 +1217,7 @@ def main() -> None:
     assert not hasattr(bpy.types.Scene, "operating_line_replace_factory_scene")
     assert not hasattr(bpy.types.WindowManager, "operating_line_runtime_url")
     assert not hasattr(bpy.types.WindowManager, "operating_line_bearer_token")
+    assert not hasattr(bpy.types.WindowManager, "operating_line_revision_message")
     assert not registered_companion.timer_registered
     assert not bpy.app.timers.is_registered(registered_companion.timer_callback)
     print("OperatingLine Blender integration test passed")

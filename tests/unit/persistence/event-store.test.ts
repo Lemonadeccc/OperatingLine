@@ -34,6 +34,20 @@ function proposalDecision(
   };
 }
 
+function revisionRequest(requestId = randomUUID()) {
+  return {
+    protocolVersion: '1.0.0',
+    requestId,
+    adapterId: 'blender',
+    catalogVersion: '1.0.0',
+    instanceId: randomUUID(),
+    basePlan: { id: 'snowman', revision: 3 },
+    references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+    message: 'Make the head slightly larger.',
+    occurredAt: new Date().toISOString(),
+  };
+}
+
 describe('OperatingLine persistence', () => {
   it('stores append-only execution events', () => {
     const database = openOperatingLineDatabase(':memory:');
@@ -108,6 +122,22 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('delivers a request-linked proposal only to its target companion instance', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const targetInstanceId = randomUUID();
+    const otherInstanceId = randomUUID();
+    const scoped = {
+      ...guideProposal('snowman-revision', 4),
+      targetInstanceId,
+    };
+
+    database.recordGuideProposal(scoped);
+
+    expect(database.getPendingGuideProposal('blender', targetInstanceId)).toEqual(scoped);
+    expect(database.getPendingGuideProposal('blender', otherInstanceId)).toBeNull();
+    database.close();
+  });
+
   it('restores pending proposals and revision watermarks after restart', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-proposal-test-'));
     const databasePath = join(directory, 'state.db');
@@ -127,6 +157,40 @@ describe('OperatingLine persistence', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('stores revision requests idempotently and atomically links a replan proposal', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const request = revisionRequest();
+    const otherAdapter = {
+      ...revisionRequest(),
+      adapterId: 'gimp',
+      occurredAt: '2099-01-01T00:00:00.000Z',
+    };
+
+    expect(database.recordGuideRevisionRequest(request)).toBe('accepted');
+    expect(database.recordGuideRevisionRequest(request)).toBe('duplicate');
+    expect(database.recordGuideRevisionRequest({ ...request, message: 'Conflicting reuse' })).toBe(
+      'conflict',
+    );
+    expect(database.recordGuideRevisionRequest(otherAdapter)).toBe('accepted');
+    expect(database.getGuideRevisionRequest(request.requestId)).toEqual(request);
+    expect(database.listPendingGuideRevisionRequests('blender', 20)).toEqual([request]);
+    expect(database.listPendingGuideRevisionRequests(undefined, 1)).toEqual([request]);
+
+    const proposal = guideProposal('snowman', 4);
+    database.recordGuideReplanProposal(proposal, request.requestId);
+    expect(database.listPendingGuideRevisionRequests('blender', 20)).toEqual([]);
+    expect(database.listPendingGuideRevisionRequests('gimp', 20)).toEqual([otherAdapter]);
+    expect(database.getPendingGuideProposal('blender', randomUUID())).toEqual(proposal);
+    expect(() =>
+      database.recordGuideReplanProposal(guideProposal('snowman', 5), request.requestId),
+    ).toThrow('already has a proposal');
+    expect(() =>
+      database.recordGuideReplanProposal(guideProposal('unknown', 1), randomUUID()),
+    ).toThrow('Unknown guide revision request');
+    expect(database.countEvents()).toBe(4);
+    database.close();
   });
 
   it('persists append-only companion reports and latest state across restart', () => {
@@ -206,7 +270,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 3,
+        count: 4,
       });
       const event = inspected
         .prepare(

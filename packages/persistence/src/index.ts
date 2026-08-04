@@ -19,6 +19,7 @@ export type RecordCompanionStateResult = 'accepted' | 'duplicate' | 'stale' | 'c
 export interface GuideProposalInput {
   proposalId: string;
   targetAdapterId: string;
+  targetInstanceId?: string | undefined;
   proposedAt: string;
   plan: {
     id: string;
@@ -35,6 +36,20 @@ export interface GuideProposalDecisionInput {
 }
 
 export type RecordGuideProposalDecisionResult = 'accepted' | 'duplicate' | 'conflict' | 'unknown';
+
+export interface GuideRevisionRequestInput {
+  requestId: string;
+  adapterId: string;
+  catalogVersion: string;
+  instanceId: string;
+  occurredAt: string;
+  basePlan: {
+    id: string;
+    revision: number;
+  };
+}
+
+export type RecordGuideRevisionRequestResult = 'accepted' | 'duplicate' | 'conflict';
 
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
@@ -57,11 +72,20 @@ export interface OperatingLineDatabase {
   appendEvent(event: ExecutionEventInput): void;
   countEvents(): number;
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
+  recordGuideReplanProposal<T extends GuideProposalInput>(
+    proposal: T,
+    revisionRequestId: string,
+  ): void;
   getPendingGuideProposal(adapterId: string, instanceId: string): unknown | null;
   listLatestGuidePlanRevisions(): Array<{ planId: string; revision: number }>;
   recordGuideProposalDecision<T extends GuideProposalDecisionInput>(
     decision: T,
   ): RecordGuideProposalDecisionResult;
+  recordGuideRevisionRequest<T extends GuideRevisionRequestInput>(
+    request: T,
+  ): RecordGuideRevisionRequestResult;
+  getGuideRevisionRequest(requestId: string): unknown | null;
+  listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -138,6 +162,30 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (3, datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS guide_revision_requests (
+      request_id TEXT PRIMARY KEY,
+      adapter_id TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      base_plan_id TEXT NOT NULL,
+      base_revision INTEGER NOT NULL CHECK (base_revision > 0),
+      occurred_at TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS guide_revision_requests_pending_order
+    ON guide_revision_requests (adapter_id, occurred_at, request_id);
+
+    CREATE TABLE IF NOT EXISTS guide_revision_request_proposals (
+      request_id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE,
+      linked_at TEXT NOT NULL,
+      FOREIGN KEY (request_id) REFERENCES guide_revision_requests(request_id),
+      FOREIGN KEY (proposal_id) REFERENCES guide_proposals(proposal_id)
+    );
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (4, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -160,6 +208,10 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       SELECT proposal_id, payload
       FROM guide_proposals
       WHERE target_adapter_id = ?
+        AND (
+          json_extract(payload, '$.targetInstanceId') IS NULL
+          OR json_extract(payload, '$.targetInstanceId') = ?
+        )
       ORDER BY rowid DESC
       LIMIT 1
     )
@@ -172,6 +224,41 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         AND decision.adapter_id = ?
         AND decision.instance_id = ?
     )
+  `);
+  const findRevisionRequest = sqlite.prepare(`
+    SELECT adapter_id, instance_id, base_plan_id, base_revision, payload
+    FROM guide_revision_requests
+    WHERE request_id = ?
+  `);
+  const insertRevisionRequest = sqlite.prepare(`
+    INSERT INTO guide_revision_requests (
+      request_id,
+      adapter_id,
+      instance_id,
+      base_plan_id,
+      base_revision,
+      occurred_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const listPendingRevisionRequests = sqlite.prepare(`
+    SELECT request.payload
+    FROM guide_revision_requests AS request
+    LEFT JOIN guide_revision_request_proposals AS linked
+      ON linked.request_id = request.request_id
+    WHERE linked.request_id IS NULL
+      AND (? IS NULL OR request.adapter_id = ?)
+    ORDER BY request.occurred_at, request.request_id
+    LIMIT ?
+  `);
+  const findRevisionRequestProposal = sqlite.prepare(`
+    SELECT proposal_id
+    FROM guide_revision_request_proposals
+    WHERE request_id = ?
+  `);
+  const insertRevisionRequestProposal = sqlite.prepare(`
+    INSERT INTO guide_revision_request_proposals (request_id, proposal_id, linked_at)
+    VALUES (?, ?, ?)
   `);
   const listLatestGuideRevisions = sqlite.prepare(`
     SELECT plan_id, MAX(plan_revision) AS revision
@@ -270,8 +357,50 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw error;
       }
     },
+    recordGuideReplanProposal(proposal, revisionRequestId) {
+      const payload = canonicalJson(proposal);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const request = findRevisionRequest.get(revisionRequestId);
+        if (request === undefined) {
+          throw new Error(`Unknown guide revision request: ${revisionRequestId}`);
+        }
+        if (findRevisionRequestProposal.get(revisionRequestId) !== undefined) {
+          throw new Error(`Guide revision request already has a proposal: ${revisionRequestId}`);
+        }
+        insertGuideProposal.run(
+          proposal.proposalId,
+          proposal.targetAdapterId,
+          proposal.plan.id,
+          proposal.plan.revision,
+          proposal.proposedAt,
+          payload,
+        );
+        const linkedAt = new Date().toISOString();
+        insertEvent.run(
+          `guide-proposal:${proposal.proposalId}`,
+          'guide.proposal.created',
+          payload,
+          linkedAt,
+        );
+        insertRevisionRequestProposal.run(revisionRequestId, proposal.proposalId, linkedAt);
+        insertEvent.run(
+          `guide-revision-proposal:${revisionRequestId}`,
+          'guide.revision.proposed',
+          canonicalJson({
+            requestId: revisionRequestId,
+            proposalId: proposal.proposalId,
+          }),
+          linkedAt,
+        );
+        sqlite.exec('COMMIT;');
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
     getPendingGuideProposal(adapterId, instanceId) {
-      const row = findPendingGuideProposal.get(adapterId, adapterId, instanceId) as
+      const row = findPendingGuideProposal.get(adapterId, instanceId, adapterId, instanceId) as
         { payload?: unknown } | undefined;
       if (row === undefined) {
         return null;
@@ -355,6 +484,72 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         sqlite.exec('ROLLBACK;');
         throw error;
       }
+    },
+    recordGuideRevisionRequest(request) {
+      const payload = canonicalJson(request);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findRevisionRequest.get(request.requestId) as
+          | {
+              adapter_id: string;
+              instance_id: string;
+              base_plan_id: string;
+              base_revision: number;
+              payload: string;
+            }
+          | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.adapter_id === request.adapterId &&
+            existing.instance_id === request.instanceId &&
+            existing.base_plan_id === request.basePlan.id &&
+            existing.base_revision === request.basePlan.revision &&
+            existing.payload === payload
+            ? 'duplicate'
+            : 'conflict';
+        }
+        insertRevisionRequest.run(
+          request.requestId,
+          request.adapterId,
+          request.instanceId,
+          request.basePlan.id,
+          request.basePlan.revision,
+          request.occurredAt,
+          payload,
+        );
+        insertEvent.run(
+          `guide-revision-request:${request.requestId}`,
+          'guide.revision.requested',
+          payload,
+          new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getGuideRevisionRequest(requestId) {
+      const row = findRevisionRequest.get(requestId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide revision request payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    listPendingGuideRevisionRequests(adapterId, limit) {
+      return listPendingRevisionRequests
+        .all(adapterId ?? null, adapterId ?? null, limit)
+        .map((row) => {
+          const payload = (row as { payload?: unknown }).payload;
+          if (typeof payload !== 'string') {
+            throw new Error('SQLite returned an invalid guide revision request payload');
+          }
+          return JSON.parse(payload) as unknown;
+        });
     },
     recordCompanionState(report) {
       const payload = canonicalJson(report);

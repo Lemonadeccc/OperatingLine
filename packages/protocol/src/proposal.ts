@@ -1,9 +1,11 @@
 import { z } from 'zod';
 
 import { guidePlanSchema, guideProtocolVersionSchema } from './guide.js';
+import { catalogVersionSchema } from './version.js';
 
 export const guideProposalSubmissionSchema = z.strictObject({
   targetAdapterId: z.string().min(1),
+  catalogVersion: catalogVersionSchema.optional(),
   plan: guidePlanSchema,
 });
 export type GuideProposalSubmission = z.infer<typeof guideProposalSubmissionSchema>;
@@ -12,7 +14,10 @@ export const guideProposalSchema = z.strictObject({
   protocolVersion: guideProtocolVersionSchema,
   proposalId: z.uuid(),
   targetAdapterId: z.string().min(1),
+  targetInstanceId: z.uuid().optional(),
   plan: guidePlanSchema,
+  revisionRequestId: z.uuid().optional(),
+  catalogVersion: catalogVersionSchema.optional(),
   proposedAt: z.iso.datetime({ offset: true }),
 });
 export type GuideProposal = z.infer<typeof guideProposalSchema>;

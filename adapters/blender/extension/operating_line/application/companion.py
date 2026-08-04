@@ -10,7 +10,11 @@ from typing import Any
 
 import bpy
 
-from ..domain import load_task_tree_data
+from ..domain import (
+    BLENDER_ACTION_CATALOG_VERSION,
+    CATALOG_VERSION_PATTERN,
+    load_task_tree_data,
+)
 from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
@@ -35,6 +39,12 @@ class CompanionController:
         self.pending_plan: dict[str, Any] | None = None
         self.proposed_plan: dict[str, Any] | None = None
         self.proposal_session: DemoSession | None = None
+        self._revision_base_session: DemoSession | None = None
+        self._revision_reference_scope: str | None = None
+        self._revision_reference_ids: list[str] = []
+        self.revision_request_status = ""
+        self.last_revision_request_id: str | None = None
+        self._pending_revision_request_ids: set[str] = set()
         self._last_rejected_plan: tuple[Any, ...] | None = None
         self._last_rejected_proposal: tuple[Any, ...] | None = None
 
@@ -75,7 +85,7 @@ class CompanionController:
             known_plan_id=session.plan_id,
             known_revision=session.revision,
         )
-        self.disconnect()
+        self.disconnect(preserve_active_revision_draft=True)
         self._transport = transport
         self.error = ""
         self.status = "Connecting"
@@ -88,6 +98,7 @@ class CompanionController:
         *,
         flush_timeout: float = 1.5,
         wait_timeout: float = 0.0,
+        preserve_active_revision_draft: bool = False,
     ) -> None:
         transport = self._transport
         self._transport = None
@@ -101,6 +112,16 @@ class CompanionController:
         self.pending_plan = None
         self.proposed_plan = None
         self.proposal_session = None
+        preserve_revision_draft = (
+            preserve_active_revision_draft
+            and self._revision_reference_scope == "active"
+            and self._revision_base_session is not None
+        )
+        if not preserve_revision_draft:
+            self.clear_revision_draft()
+        self._pending_revision_request_ids.clear()
+        if not preserve_revision_draft:
+            self.revision_request_status = ""
         self._last_rejected_plan = None
         self._last_rejected_proposal = None
 
@@ -134,7 +155,115 @@ class CompanionController:
             raise ValueError("Plan revision must be a positive integer")
         root = load_task_tree_data(plan)
         actions = action_registry(root)  # validates adapter/action allowlist and arguments
-        return DemoSession(root, actions, plan_id=plan_id, revision=revision)
+        return DemoSession(
+            root,
+            actions,
+            plan_id=plan_id,
+            revision=revision,
+            source_plan=plan,
+        )
+
+    def _session_for_reference_scope(self, scope: str) -> DemoSession:
+        if scope == "proposal":
+            if self.proposal_session is None:
+                raise ValueError("No proposed plan is available for reference")
+            return self.proposal_session
+        if scope == "active":
+            from .. import get_session
+
+            return get_session()
+        raise ValueError("Revision reference scope must be active or proposal")
+
+    @property
+    def revision_base_session(self) -> DemoSession | None:
+        return self._revision_base_session
+
+    @property
+    def revision_reference_scope(self) -> str | None:
+        return self._revision_reference_scope
+
+    def revision_reference_nodes(self) -> tuple[Any, ...]:
+        base = self._revision_base_session
+        if base is None:
+            return ()
+        return tuple(
+            node
+            for node_id in self._revision_reference_ids
+            for node in (base.find_node(node_id),)
+            if node is not None
+        )
+
+    def add_revision_reference(self, scope: str, node_id: str) -> tuple[Any, bool]:
+        base = self._session_for_reference_scope(scope)
+        node = base.find_node(node_id)
+        if node is None:
+            raise ValueError(f"Unknown task node: {node_id}")
+        if base.source_plan_copy() is None:
+            raise ValueError("The selected plan has no immutable source payload")
+        base_changed = self._revision_base_session is not None and self._revision_base_session is not base
+        if base_changed:
+            self.clear_revision_draft()
+            self.revision_request_status = "Revision draft moved to a different base plan"
+        if self._revision_base_session is None:
+            self._revision_base_session = base
+            self._revision_reference_scope = scope
+        if node_id not in self._revision_reference_ids:
+            if len(self._revision_reference_ids) >= 8:
+                raise ValueError("A revision request can reference at most 8 nodes")
+            self._revision_reference_ids.append(node_id)
+        return node, base_changed
+
+    def clear_revision_draft(self) -> None:
+        self._revision_base_session = None
+        self._revision_reference_scope = None
+        self._revision_reference_ids.clear()
+        window_manager = getattr(bpy.context, "window_manager", None)
+        if window_manager is not None and hasattr(
+            window_manager,
+            "operating_line_revision_message",
+        ):
+            window_manager.operating_line_revision_message = ""
+
+    def submit_revision_request(self, message: str) -> dict[str, Any]:
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect to the OperatingLine runtime before sending a request")
+        base = self._revision_base_session
+        references = self.revision_reference_nodes()
+        if base is None or not references:
+            raise ValueError("Select at least one task-node reference")
+        normalized_message = message.strip() if isinstance(message, str) else ""
+        if not normalized_message:
+            raise ValueError("Revision request message must not be empty")
+        if len(normalized_message) > 4000:
+            raise ValueError("Revision request message must not exceed 4000 characters")
+        source_plan = base.source_plan_copy()
+        if source_plan is None:
+            raise ValueError("The selected plan has no immutable source payload")
+        request_id = str(uuid.uuid4())
+        request = {
+            "protocolVersion": PROTOCOL_VERSION,
+            "requestId": request_id,
+            "adapterId": "blender",
+            "catalogVersion": BLENDER_ACTION_CATALOG_VERSION,
+            "instanceId": self.instance_id,
+            "basePlan": source_plan,
+            "references": [
+                {"nodeId": node.id, "nodeNumber": node.number} for node in references
+            ],
+            "message": normalized_message,
+            "occurredAt": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        transport.submit_revision_request(request)
+        self._pending_revision_request_ids.add(request_id)
+        self.last_revision_request_id = request_id
+        self.revision_request_status = (
+            f"Request {request_id[:8]} queued; scene unchanged"
+        )
+        self.clear_revision_draft()
+        return request
 
     def install_plan(self, plan: dict[str, Any]) -> bool:
         """Validate fully before replacing the active session."""
@@ -176,6 +305,8 @@ class CompanionController:
                 self.status = "Plan update pending"
                 self.report("error", error=message)
             return False
+        if self._revision_base_session is current:
+            self.clear_revision_draft()
         replace_session(replacement)
         if (
             self.pending_plan is not None
@@ -195,14 +326,21 @@ class CompanionController:
         """Validate an AI-authored proposal without replacing or executing a session."""
         if not isinstance(proposal, dict):
             raise ValueError("Proposal must be a JSON object")
-        expected_fields = {
+        required_fields = {
             "protocolVersion",
             "proposalId",
             "targetAdapterId",
             "plan",
             "proposedAt",
         }
-        if set(proposal) != expected_fields:
+        optional_fields = {
+            "revisionRequestId",
+            "catalogVersion",
+            "targetInstanceId",
+        }
+        if not required_fields.issubset(proposal) or set(proposal) - (
+            required_fields | optional_fields
+        ):
             raise ValueError("Proposal fields do not match the versioned protocol")
         if proposal.get("protocolVersion") != PROTOCOL_VERSION:
             raise ValueError("Unsupported proposal protocol version")
@@ -215,6 +353,43 @@ class CompanionController:
             raise ValueError("Proposal id must be a UUID") from error
         if proposal.get("targetAdapterId") != "blender":
             raise ValueError("Proposal does not target the Blender adapter")
+        target_instance_id = proposal.get("targetInstanceId")
+        if target_instance_id is not None:
+            if not isinstance(target_instance_id, str):
+                raise ValueError("Proposal target instance id must be a UUID")
+            try:
+                uuid.UUID(target_instance_id)
+            except ValueError as error:
+                raise ValueError("Proposal target instance id must be a UUID") from error
+            if target_instance_id != self.instance_id:
+                raise ValueError("Proposal targets a different Blender instance")
+        revision_request_id = proposal.get("revisionRequestId")
+        if revision_request_id is not None:
+            if not isinstance(revision_request_id, str):
+                raise ValueError("Proposal revision request id must be a UUID")
+            try:
+                uuid.UUID(revision_request_id)
+            except ValueError as error:
+                raise ValueError("Proposal revision request id must be a UUID") from error
+        catalog_version = proposal.get("catalogVersion")
+        if catalog_version is not None and (
+            not isinstance(catalog_version, str)
+            or CATALOG_VERSION_PATTERN.fullmatch(catalog_version) is None
+        ):
+            raise ValueError("Proposal catalog version must use x.y.z")
+        if (
+            catalog_version is not None
+            and catalog_version != BLENDER_ACTION_CATALOG_VERSION
+        ):
+            raise ValueError(
+                f"Unsupported proposal catalog version: {catalog_version}"
+            )
+        if revision_request_id is not None and (
+            target_instance_id is None or catalog_version is None
+        ):
+            raise ValueError(
+                "A request-linked proposal must declare catalog and target instance"
+            )
         proposed_at = proposal.get("proposedAt")
         if not isinstance(proposed_at, str):
             raise ValueError("Proposal timestamp must include a timezone")
@@ -231,6 +406,9 @@ class CompanionController:
             and self.proposed_plan.get("proposalId") == proposal_id
         ):
             return True
+        previous_proposal_session = self.proposal_session
+        if self._revision_base_session is previous_proposal_session:
+            self.clear_revision_draft()
         self.proposed_plan = proposal
         self.proposal_session = replacement
         self._last_rejected_proposal = None
@@ -259,6 +437,7 @@ class CompanionController:
             return False
 
         proposal_id = proposal["proposalId"]
+        accepted_session = self.proposal_session
         if not self.install_plan(proposal["plan"]):
             return False
         transport = self._transport
@@ -269,6 +448,11 @@ class CompanionController:
         self._last_rejected_proposal = None
         self.status = f"Plan {get_session().plan_id} r{get_session().revision} accepted"
         self.error = ""
+        if self._revision_base_session is accepted_session:
+            self._revision_base_session = get_session()
+            self._revision_reference_scope = "active"
+        else:
+            self.clear_revision_draft()
         return True
 
     def reject_proposal(self) -> bool:
@@ -279,11 +463,14 @@ class CompanionController:
         if proposal is None:
             self.error = "No plan proposal is awaiting review"
             return False
+        rejected_session = self.proposal_session
         transport = self._transport
         if transport is not None:
             transport.decide_proposal(proposal["proposalId"], "rejected")
         self.proposed_plan = None
         self.proposal_session = None
+        if self._revision_base_session is rejected_session:
+            self.clear_revision_draft()
         self._last_rejected_proposal = None
         session = get_session()
         self.status = (
@@ -370,9 +557,21 @@ class CompanionController:
                             self.error = str(error)
                             self.status = "Plan proposal rejected"
                             self.report("error", error=self.error)
+                elif message.get("kind") == "revision_request_acknowledged":
+                    request_id = message.get("requestId")
+                    if isinstance(request_id, str):
+                        self._pending_revision_request_ids.discard(request_id)
+                        self.last_revision_request_id = request_id
+                        self.revision_request_status = (
+                            f"Request {request_id[:8]} stored for MCP planner"
+                        )
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"
+                    if self._pending_revision_request_ids:
+                        self.revision_request_status = (
+                            "Request delivery will retry after reconnect"
+                        )
                 elif message.get("kind") == "recovered":
                     self.error = ""
                     session = get_session()

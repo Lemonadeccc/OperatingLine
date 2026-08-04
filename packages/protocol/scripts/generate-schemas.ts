@@ -13,6 +13,8 @@ import {
   guideProposalDecisionSchema,
   guideProposalSchema,
   guideProposalSubmissionSchema,
+  guideReplanSubmissionSchema,
+  guideRevisionRequestSchema,
   planningContextSchema,
 } from '../src/index.js';
 
@@ -30,6 +32,16 @@ const schemas = [
     'planning-context.schema.json',
     'https://operatingline.dev/schema/v1/planning-context.json',
     planningContextSchema,
+  ],
+  [
+    'guide-revision-request.schema.json',
+    'https://operatingline.dev/schema/v1/guide-revision-request.json',
+    guideRevisionRequestSchema,
+  ],
+  [
+    'guide-replan-submission.schema.json',
+    'https://operatingline.dev/schema/v1/guide-replan-submission.json',
+    guideReplanSubmissionSchema,
   ],
   [
     'guide-plan.schema.json',

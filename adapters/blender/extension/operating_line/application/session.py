@@ -1,6 +1,7 @@
 """Use-case state and traversal for a validated guide plan."""
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,17 +96,43 @@ class DemoSession:
         *,
         plan_id: str | None = "snowman-demo",
         revision: int | None = 1,
+        source_plan: Mapping[str, Any] | None = None,
     ) -> None:
         self.root = root
         self._actions = actions
         self.plan_id = plan_id
         self.revision = revision
+        self._source_plan = deepcopy(dict(source_plan)) if source_plan is not None else None
+        if self._source_plan is not None and (
+            self._source_plan.get("id") != plan_id
+            or self._source_plan.get("revision") != revision
+        ):
+            raise ValueError("Session source plan identity does not match plan id/revision")
         self.steps = executable_steps(root)
         self.active_index = -1
         self.started = False
         self.receipts: dict[str, ActionReceipt] = {}
         self._branch_node_ids = self._branch_ids(root)
         self.expanded_node_ids = set(self._branch_node_ids)
+        self._nodes_by_id = self._index_nodes(root)
+
+    @staticmethod
+    def _index_nodes(root: TaskNode) -> dict[str, TaskNode]:
+        nodes: dict[str, TaskNode] = {}
+
+        def visit(node: TaskNode) -> None:
+            nodes[node.id] = node
+            for child in node.children:
+                visit(child)
+
+        visit(root)
+        return nodes
+
+    def find_node(self, node_id: str) -> TaskNode | None:
+        return self._nodes_by_id.get(node_id)
+
+    def source_plan_copy(self) -> dict[str, Any] | None:
+        return deepcopy(self._source_plan)
 
     @staticmethod
     def _branch_ids(root: TaskNode) -> set[str]:

@@ -165,6 +165,79 @@ class OPERATINGLINE_OT_reject_proposal(bpy.types.Operator):
         return {"CANCELLED"}
 
 
+class OPERATINGLINE_OT_reference_node(bpy.types.Operator):
+    bl_idname = "operating_line.reference_node"
+    bl_label = "Reference Node"
+    bl_description = "Add this stable task node to an immutable revision request"
+
+    node_id: bpy.props.StringProperty()
+    scope: bpy.props.StringProperty()
+
+    def execute(self, context):
+        companion = _companion()
+        try:
+            node, base_changed = companion.add_revision_reference(
+                self.scope,
+                self.node_id,
+            )
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+
+        window_manager = context.window_manager
+        token = f"@{node.number}"
+        current_message = window_manager.operating_line_revision_message.strip()
+        if base_changed:
+            next_message = token
+        elif token not in current_message.split():
+            next_message = f"{current_message} {token}".strip()
+        else:
+            next_message = current_message
+        window_manager.operating_line_revision_message = (
+            f"{next_message} " if next_message else ""
+        )
+        companion.revision_request_status = (
+            f"{token} referenced; describe the change"
+        )
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_clear_revision_request(bpy.types.Operator):
+    bl_idname = "operating_line.clear_revision_request"
+    bl_label = "Clear Request"
+    bl_description = "Clear the local revision-request draft without changing the scene"
+
+    def execute(self, context):
+        companion = _companion()
+        companion.clear_revision_draft()
+        companion.revision_request_status = "Revision draft cleared"
+        context.window_manager.operating_line_revision_message = ""
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_submit_revision_request(bpy.types.Operator):
+    bl_idname = "operating_line.submit_revision_request"
+    bl_label = "Send Request"
+    bl_description = (
+        "Queue an immutable revision request for an external MCP planner; "
+        "this does not change the scene"
+    )
+
+    def execute(self, context):
+        companion = _companion()
+        try:
+            companion.submit_revision_request(
+                context.window_manager.operating_line_revision_message
+            )
+        except ValueError as error:
+            companion.revision_request_status = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        context.window_manager.operating_line_revision_message = ""
+        self.report({"INFO"}, "Revision request queued; the scene was not changed")
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
     bl_idname = "operating_line.toggle_overlay"
     bl_label = "Show or Hide Guidance"
@@ -196,6 +269,9 @@ CLASSES = (
     OPERATINGLINE_OT_disconnect,
     OPERATINGLINE_OT_accept_proposal,
     OPERATINGLINE_OT_reject_proposal,
+    OPERATINGLINE_OT_reference_node,
+    OPERATINGLINE_OT_clear_revision_request,
+    OPERATINGLINE_OT_submit_revision_request,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_back,

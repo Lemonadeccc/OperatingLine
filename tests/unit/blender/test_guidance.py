@@ -18,6 +18,7 @@ application = import_module(f"{PACKAGE_NAME}.application")
 domain = import_module(f"{PACKAGE_NAME}.domain")
 visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
+DemoSession = application.DemoSession
 node_state = application.node_state
 relevant_steps = application.relevant_steps
 step_state = application.step_state
@@ -136,6 +137,40 @@ class GuidanceStateTests(unittest.TestCase):
         self.assertEqual(len(set(STATE_SYMBOLS.values())), len(GuidanceState))
         self.assertEqual(STATE_SYMBOLS[GuidanceState.BACK], "BACK")
         self.assertEqual(STATE_SYMBOLS[GuidanceState.NEXT], "NEXT")
+
+    def test_session_indexes_stable_nodes_and_isolates_source_plan_copies(self) -> None:
+        root = TaskNode(
+            id="root",
+            number="1",
+            title="Root",
+            order=0,
+            children=(self.steps[0],),
+        )
+        source_plan = {
+            "id": "revision-base",
+            "revision": 7,
+            "steps": [{"id": "root"}, {"id": self.steps[0].id}],
+        }
+        session = DemoSession(
+            root,
+            {},
+            plan_id="revision-base",
+            revision=7,
+            source_plan=source_plan,
+        )
+
+        self.assertIs(session.find_node(self.steps[0].id), self.steps[0])
+        first_copy = session.source_plan_copy()
+        first_copy["revision"] = 99
+        self.assertEqual(session.source_plan_copy()["revision"], 7)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            DemoSession(
+                root,
+                {},
+                plan_id="revision-base",
+                revision=8,
+                source_plan=source_plan,
+            )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,10 @@
 目录规范数据由适配器拥有，例如 Blender 位于
 `adapters/blender/catalog/v1/action-catalog.json`，不放进通用协议包硬编码。
 
+`guide-revision-request.schema.json` 定义宿主创建的不可变节点修订请求；
+`guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
+ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
+
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
@@ -28,6 +32,10 @@
   `accepted` 决策才能把它安装为活动计划。`rejected` 不得修改宿主场景或活动计划。
 - Proposal 决策以 `proposalId + adapterId + instanceId` 唯一；同一实例的同值重试幂等，
   相反决策是 conflict。其他实例仍可独立审查同一提案。
+- 修订请求以 `requestId` 幂等；相同 ID 的不同 payload 是 conflict。引用的 `nodeId + nodeNumber`
+  必须与请求携带的完整 base Plan 一致。
+- 请求关联重规划必须使用同一 Plan ID、请求绑定的精确 `catalogVersion` 和严格更高 revision；返回的
+  Proposal 带 `targetInstanceId`，只投递给发起请求的 Companion。
 - AI 在生成可执行步骤前应读取目标宿主的精确 ActionCatalog/PlanningContext。Proposal 的动作名、
   顶层参数、anchor、observation 和 rollback 必须属于该目录；宿主仍对嵌套参数和实际资源执行
   最终校验。

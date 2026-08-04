@@ -39,6 +39,7 @@ def main() -> None:
     expected_plan_id = required_environment("OPERATINGLINE_E2E_PLAN_ID")
     expected_revision = int(required_environment("OPERATINGLINE_E2E_PLAN_REVISION"))
     expected_root_title = required_environment("OPERATINGLINE_E2E_ROOT_TITLE")
+    expected_revised_title = required_environment("OPERATINGLINE_E2E_REVISED_ROOT_TITLE")
 
     assert bpy.app.online_access is True, "E2E must run Blender with --online-mode"
     operating_line.register()
@@ -132,6 +133,52 @@ def main() -> None:
         assert maximum_pump_seconds < 0.15, (
             f"Main-thread pump blocked for {maximum_pump_seconds:.3f}s"
         )
+
+        # A host-authored node reference becomes an immutable revision request.
+        # The real MCP runtime returns a complete, instance-scoped proposal; no
+        # scene effect occurs until the user reviews it and later executes steps.
+        objects_before_revision = {
+            item.as_pointer() for item in bpy.data.objects
+        }
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        assert window_manager.operating_line_revision_message == "@1.2.3 "
+        window_manager.operating_line_revision_message += (
+            "Make the head slightly larger and keep the silhouette readable"
+        )
+        assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
+        revision_request_id = controller.last_revision_request_id
+        assert revision_request_id is not None
+        wait_until(
+            lambda: "stored for MCP planner" in controller.revision_request_status,
+            "revision request acknowledgement",
+        )
+        wait_until(
+            lambda: (
+                controller.proposed_plan is not None
+                and controller.proposed_plan.get("revisionRequestId")
+                == revision_request_id
+                and controller.proposal_session is not None
+                and controller.proposal_session.revision == expected_revision + 1
+            ),
+            "request-linked replan proposal",
+        )
+        assert operating_line.get_session() is session
+        assert not session.started and not session.receipts
+        assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
+        assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
+        assert controller.proposed_plan["catalogVersion"] == "1.0.0"
+        assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
+        session = operating_line.get_session()
+        assert session.revision == expected_revision + 1
+        assert session.root.title == expected_revised_title
+        assert plan_install_threads == [
+            threading.main_thread().ident,
+            threading.main_thread().ident,
+        ]
+        assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
 
         assert bpy.ops.operating_line.start() == {"FINISHED"}
         start_sequence = controller.last_report["sequence"]
@@ -236,6 +283,8 @@ def main() -> None:
                     "lastTransition": controller.last_report["transition"],
                     "lastSequence": controller.last_report["sequence"],
                     "proposalReviewedBeforeExecution": True,
+                    "revisionRequestId": revision_request_id,
+                    "requestLinkedProposalReviewedBeforeExecution": True,
                 },
                 indent=2,
             ),

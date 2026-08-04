@@ -25,6 +25,7 @@ OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 STATE = os.environ.get("OPERATINGLINE_VISUAL_STATE", "forward")
 OUTPUT_NAMES = {
     "initial": "guidance-initial.png",
+    "revision": "guidance-revision-request.png",
     "proposal": "guidance-proposal-review.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
@@ -86,6 +87,15 @@ def view3d_context():
 def configure_state():
     if STATE == "initial":
         assert session.active_index == -1
+    elif STATE == "revision":
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        bpy.context.window_manager.operating_line_revision_message += (
+            "Make this head slightly larger and rougher"
+        )
+        assert extension.get_companion().revision_reference_scope == "active"
     elif STATE == "proposal":
         plan_path = (
             ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
@@ -167,6 +177,7 @@ def prepare_view():
         )
     print(f"OperatingLine panel invocation result: {sorted(result)}", flush=True)
     assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
+    bpy.context.window.cursor_warp(1100, 500)
     bpy.app.timers.register(capture_and_quit, first_interval=0.75)
     return None
 
@@ -220,7 +231,7 @@ def assert_guidance_pixels():
         flush=True,
     )
 
-    if STATE in {"initial", "proposal"}:
+    if STATE in {"initial", "revision", "proposal"}:
         assert next_step > 0.0003
         assert locked > 0.0001
         assert completed < 0.00003 and back < 0.00003

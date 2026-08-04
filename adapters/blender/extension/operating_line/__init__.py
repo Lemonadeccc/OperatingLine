@@ -4,7 +4,12 @@ import bpy
 
 from .application import DemoSession
 from .application.companion import CompanionController
-from .domain import SNOWMAN_PLAN_ID, SNOWMAN_PLAN_REVISION, SNOWMAN_TASK_TREE
+from .domain import (
+    SNOWMAN_PLAN_ID,
+    SNOWMAN_PLAN_REVISION,
+    SNOWMAN_TASK_TREE,
+    bundled_plan_data,
+)
 from .infrastructure import (
     action_registry,
     disable_overlay,
@@ -24,6 +29,7 @@ def get_session() -> DemoSession:
             action_registry(SNOWMAN_TASK_TREE),
             plan_id=SNOWMAN_PLAN_ID,
             revision=SNOWMAN_PLAN_REVISION,
+            source_plan=bundled_plan_data(),
         )
     return _session
 
@@ -80,12 +86,24 @@ def register() -> None:
             subtype="PASSWORD",
             options={"SKIP_SAVE"},
         )
+    if not hasattr(bpy.types.WindowManager, "operating_line_revision_message"):
+        bpy.types.WindowManager.operating_line_revision_message = bpy.props.StringProperty(
+            name="Requested change",
+            description=(
+                "Describe a change to the referenced task nodes; sending creates "
+                "an immutable request and does not change the scene"
+            ),
+            default="",
+            maxlen=4000,
+            options={"SKIP_SAVE"},
+        )
     if _session is None:
         _session = DemoSession(
             SNOWMAN_TASK_TREE,
             action_registry(SNOWMAN_TASK_TREE),
             plan_id=SNOWMAN_PLAN_ID,
             revision=SNOWMAN_PLAN_REVISION,
+            source_plan=bundled_plan_data(),
         )
     get_companion().register_timer()
 
@@ -113,6 +131,7 @@ def unregister() -> None:
         "operating_line_overlay_enabled",
         "operating_line_runtime_url",
         "operating_line_bearer_token",
+        "operating_line_revision_message",
     ):
         if hasattr(bpy.types.WindowManager, property_name):
             delattr(bpy.types.WindowManager, property_name)

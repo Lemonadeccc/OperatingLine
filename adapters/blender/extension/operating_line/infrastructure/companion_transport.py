@@ -88,6 +88,7 @@ class CompanionTransport:
         self.incoming: Queue[dict[str, Any]] = Queue()
         self.outgoing: Queue[dict[str, Any]] = Queue()
         self.decisions: Queue[dict[str, Any]] = Queue()
+        self.revision_requests: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -149,6 +150,12 @@ class CompanionTransport:
         self.control.put(
             {"kind": "plan_accepted", "planId": plan_id, "revision": revision}
         )
+
+    def submit_revision_request(self, request: dict[str, Any]) -> None:
+        request_id = request.get("requestId")
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("Revision request must contain a requestId")
+        self.revision_requests.put(request)
 
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
         if decision not in {"accepted", "rejected"}:
@@ -305,13 +312,16 @@ class CompanionTransport:
         next_poll = 0.0
         pending_report: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
+        pending_revision_request: dict[str, Any] | None = None
         last_error = ""
         while (
             not self._stop.is_set()
             or pending_report is not None
             or pending_decision is not None
+            or pending_revision_request is not None
             or not self.outgoing.empty()
             or not self.decisions.empty()
+            or not self.revision_requests.empty()
         ):
             if self._stop.is_set() and time.monotonic() >= self._flush_deadline:
                 break
@@ -344,6 +354,32 @@ class CompanionTransport:
                         )
                     request_succeeded = True
                     pending_decision = None
+                if pending_revision_request is None:
+                    try:
+                        pending_revision_request = self.revision_requests.get_nowait()
+                    except Empty:
+                        pass
+                if pending_revision_request is not None:
+                    response = self._request_json(
+                        "POST",
+                        "/api/v1/companion/revision-request",
+                        pending_revision_request,
+                    )
+                    if response.get("result") not in {"accepted", "duplicate"}:
+                        raise ValueError(
+                            "Runtime rejected or did not acknowledge revision request"
+                        )
+                    request_id = pending_revision_request.get("requestId")
+                    if response.get("requestId") != request_id:
+                        raise ValueError("Runtime acknowledged the wrong revision request")
+                    self.incoming.put(
+                        {
+                            "kind": "revision_request_acknowledged",
+                            "requestId": request_id,
+                        }
+                    )
+                    request_succeeded = True
+                    pending_revision_request = None
                 if pending_report is None:
                     try:
                         pending_report = self.outgoing.get_nowait()

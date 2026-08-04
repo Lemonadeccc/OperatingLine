@@ -3,4 +3,6 @@ export * from './catalog.js';
 export * from './companion.js';
 export * from './guide.js';
 export * from './proposal.js';
+export * from './revision.js';
 export * from './runtime.js';
+export * from './version.js';

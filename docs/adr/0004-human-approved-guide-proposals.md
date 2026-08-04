@@ -64,5 +64,6 @@ Companion 拉取请求可以带 `knownProposalId`，防止尚未决定的草案�
 
 Proposal/Decision 事件已经为后续 replay 和 eval 提供审计输入，但当前还没有训练/Eval 导出器。
 MCP 客户端目前必须自己构造 GuidePlan；下一阶段需要版本化 action catalog 与 planner context，
-之后才能可靠地支持任意自然语言目标。节点聊天与局部重规划应生成新的不可变 plan revision 和
-proposal，而不是原地修改已审查内容。
+之后才能可靠地支持任意自然语言目标。ActionCatalog/PlanningContext 已由 ADR 0005 落地；节点
+引用与请求关联重规划已按 ADR 0006 生成新的不可变 Plan revision 和 Proposal，而不是原地修改
+已审查内容。

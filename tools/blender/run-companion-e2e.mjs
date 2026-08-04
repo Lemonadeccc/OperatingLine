@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { startRuntime } from '@operatingline/orchestrator';
+import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
@@ -14,6 +15,7 @@ const accessToken = 'operatingline-companion-e2e-token-0001';
 const planId = 'snowman-companion-e2e';
 const planRevision = 41;
 const rootTitle = 'Create a snowman through the live Companion';
+const revisedRootTitle = 'Create a snowman with a larger reviewed head';
 const childTimeoutMs = 60_000;
 
 function listen(server) {
@@ -104,10 +106,17 @@ const [blender] = requireBlenderBinaries();
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-companion-e2e-'));
 const resultPath = join(temporaryDirectory, 'result.json');
 const databasePath = join(temporaryDirectory, 'events.db');
-const runtime = await startRuntime({ databasePath, accessToken });
+const runtime = await startRuntime({
+  databasePath,
+  accessToken,
+  actionCatalogs: [blenderActionCatalog],
+});
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
 const proposalDecisions = [];
+const revisionRequests = [];
+const replanResults = [];
+let replanWork = Promise.resolve();
 
 const proxy = createServer(async (request, response) => {
   try {
@@ -150,6 +159,45 @@ const proxy = createServer(async (request, response) => {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
     });
     response.end(upstreamBody);
+    if (
+      upstream.ok &&
+      request.method === 'POST' &&
+      request.url === '/api/v1/companion/revision-request'
+    ) {
+      const revisionRequest = JSON.parse(body.toString('utf8'));
+      revisionRequests.push(revisionRequest);
+      replanWork = replanWork.then(async () => {
+        const pending = await callMcpTool(
+          runtime,
+          2000 + revisionRequests.length,
+          'operatingline.replan.requests.list',
+          { targetAdapterId: 'blender' },
+        );
+        const pendingRequests = JSON.parse(pending.result?.content?.[0]?.text ?? '{}').requests;
+        assert.ok(
+          pendingRequests.some((candidate) => candidate.requestId === revisionRequest.requestId),
+        );
+        const revisedPlan = JSON.parse(JSON.stringify(revisionRequest.basePlan));
+        revisedPlan.revision += 1;
+        revisedPlan.title = revisedRootTitle;
+        revisedPlan.steps.find((step) => step.id === revisedPlan.rootStepId).title =
+          revisedRootTitle;
+        const head = revisedPlan.steps.find((step) => step.id === 'snowman.model.head');
+        head.action.arguments.radius += 0.08;
+        const replanned = await callMcpTool(
+          runtime,
+          2100 + revisionRequests.length,
+          'operatingline.replan.propose',
+          {
+            requestId: revisionRequest.requestId,
+            catalogVersion: revisionRequest.catalogVersion,
+            plan: revisedPlan,
+          },
+        );
+        assert.notEqual(replanned.result?.isError, true);
+        replanResults.push(JSON.parse(replanned.result?.content?.[0]?.text ?? '{}'));
+      });
+    }
   } catch (error) {
     response.writeHead(502, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
@@ -168,7 +216,11 @@ try {
     targetAdapterId: 'blender',
     plan: fixture,
   });
-  assert.notEqual(proposed.result?.isError, true);
+  assert.notEqual(
+    proposed.result?.isError,
+    true,
+    proposed.result?.content?.[0]?.text ?? 'Initial proposal failed',
+  );
 
   const proxyAddress = await listen(proxy);
   assert.ok(proxyAddress && typeof proxyAddress !== 'string');
@@ -180,8 +232,10 @@ try {
     OPERATINGLINE_E2E_PLAN_ID: planId,
     OPERATINGLINE_E2E_PLAN_REVISION: String(planRevision),
     OPERATINGLINE_E2E_ROOT_TITLE: rootTitle,
+    OPERATINGLINE_E2E_REVISED_ROOT_TITLE: revisedRootTitle,
     OPERATINGLINE_RENDER_OUTPUT_DIR: join(temporaryDirectory, 'renders'),
   });
+  await replanWork;
 
   const result = JSON.parse(readFileSync(resultPath, 'utf8'));
   assert.deepEqual(
@@ -191,12 +245,37 @@ try {
       rootTitle: result.rootTitle,
       lastTransition: result.lastTransition,
     },
-    { planId, revision: planRevision, rootTitle, lastTransition: 'step_rolled_back' },
+    {
+      planId,
+      revision: planRevision + 1,
+      rootTitle: revisedRootTitle,
+      lastTransition: 'step_rolled_back',
+    },
   );
   assert.ok(result.maximumPumpSeconds < 0.15);
   assert.equal(result.stepCount, 13);
   assert.equal(result.proposalReviewedBeforeExecution, true);
-  assert.equal(proposalDecisions.length, 1);
+  assert.equal(result.requestLinkedProposalReviewedBeforeExecution, true);
+  assert.equal(revisionRequests.length, 1);
+  assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
+  assert.equal(revisionRequests[0].catalogVersion, '1.0.0');
+  assert.deepEqual(revisionRequests[0].references, [
+    { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
+  ]);
+  assert.equal(replanResults.length, 1);
+  assert.deepEqual(
+    {
+      revision: replanResults[0].revision,
+      revisionRequestId: replanResults[0].revisionRequestId,
+      targetInstanceId: replanResults[0].targetInstanceId,
+    },
+    {
+      revision: planRevision + 1,
+      revisionRequestId: result.revisionRequestId,
+      targetInstanceId: revisionRequests[0].instanceId,
+    },
+  );
+  assert.equal(proposalDecisions.length, 2);
   assert.deepEqual(
     {
       adapterId: proposalDecisions[0].adapterId,
@@ -204,11 +283,16 @@ try {
     },
     { adapterId: 'blender', decision: 'accepted' },
   );
+  assert.deepEqual(
+    proposalDecisions.map((decision) => decision.decision),
+    ['accepted', 'accepted'],
+  );
 
   const reports = [...reportsById.values()];
   const transitions = reports.map((report) => report.transition);
   assert.deepEqual(transitions, [
     'connected',
+    'plan_loaded',
     'plan_loaded',
     'walkthrough_started',
     ...Array.from({ length: result.stepCount }, () => 'step_succeeded'),
@@ -241,7 +325,7 @@ try {
       completedStepIds: companions[0].completedStepIds,
     },
     {
-      plan: { id: planId, revision: planRevision },
+      plan: { id: planId, revision: planRevision + 1 },
       transition: 'step_rolled_back',
       activeStepId: null,
       completedStepIds: [],
@@ -249,7 +333,7 @@ try {
   );
 
   console.log(
-    `OperatingLine proposal-review Companion E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine request-linked replan E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

@@ -26,10 +26,17 @@ def _draw_node(layout, node, session, depth: int = 0) -> None:
         operator.node_id = node.id
     else:
         row.separator(factor=1.0)
-    row.label(
+    content = row.split(factor=0.82, align=True)
+    content.label(
         text=f"{STATE_SYMBOLS[state]}  {node.number}  {node.title}",
         icon=STATE_ICONS[state],
     )
+    reference = content.operator(
+        "operating_line.reference_node",
+        text="Ref",
+    )
+    reference.node_id = node.id
+    reference.scope = "active"
     if node.children and session.is_expanded(node.id):
         for child in node.children:
             _draw_node(layout, child, session, depth + 1)
@@ -40,7 +47,14 @@ def _draw_proposal_node(layout, node, depth: int = 0) -> None:
     if depth:
         row.separator(factor=float(depth))
     marker = "STEP" if node.action is not None else "GROUP"
-    row.label(text=f"{marker}  {node.number}  {node.title}")
+    content = row.split(factor=0.82, align=True)
+    content.label(text=f"{marker}  {node.number}  {node.title}")
+    reference = content.operator(
+        "operating_line.reference_node",
+        text="Ref",
+    )
+    reference.node_id = node.id
+    reference.scope = "proposal"
     for child in node.children:
         _draw_proposal_node(layout, child, depth + 1)
 
@@ -61,6 +75,12 @@ def _draw_proposal_summary(layout, companion, active_session) -> None:
         text=f"{proposal_session.plan_id}  revision {proposal_session.revision}"
     )
     review.label(text=f"Target: {proposal['targetAdapterId']}")
+    revision_request_id = proposal.get("revisionRequestId")
+    if revision_request_id:
+        review.label(
+            text=f"Revision request: {revision_request_id[:8]}",
+            icon="LINKED",
+        )
 
     decisions = review.row(align=True)
     accept = decisions.row(align=True)
@@ -69,6 +89,45 @@ def _draw_proposal_summary(layout, companion, active_session) -> None:
     decisions.operator("operating_line.reject_proposal", icon="CANCEL")
     if active_session.receipts:
         review.label(text="Use Back to reach the start before accepting", icon="ERROR")
+
+
+def _draw_revision_request(layout, context, companion) -> None:
+    composer = layout.box()
+    composer.label(text="Revision request", icon="GREASEPENCIL")
+    base = companion.revision_base_session
+    references = companion.revision_reference_nodes()
+    if base is None:
+        composer.label(text="Click a node's link icon to reference it", icon="INFO")
+    else:
+        scope = companion.revision_reference_scope or "active"
+        composer.label(
+            text=f"Base: {scope} {base.plan_id} r{base.revision}",
+            icon="FILE_TICK",
+        )
+        for node in references:
+            composer.label(text=f"@{node.number}  {node.title}", icon="LINKED")
+
+    composer.prop(
+        context.window_manager,
+        "operating_line_revision_message",
+        text="Request",
+    )
+    controls = composer.row(align=True)
+    clear = controls.row(align=True)
+    clear.enabled = bool(base or context.window_manager.operating_line_revision_message)
+    clear.operator("operating_line.clear_revision_request", icon="X")
+    send = controls.row(align=True)
+    send.enabled = (
+        companion.connected
+        and bool(references)
+        and bool(context.window_manager.operating_line_revision_message.strip())
+    )
+    send.operator("operating_line.submit_revision_request", icon="EXPORT")
+
+    if companion.revision_request_status:
+        composer.label(text=companion.revision_request_status, icon="INFO")
+    elif not companion.connected:
+        composer.label(text="Connect the runtime to send", icon="UNLINKED")
 
 
 def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> None:
@@ -184,12 +243,12 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
             return
 
         layout.separator()
+        _draw_guidance_status(layout, session)
+        _draw_revision_request(layout, context, companion)
         if companion.proposal_session is not None:
             proposal_tree = layout.box()
             proposal_tree.label(text="Proposed task tree (read-only)", icon="QUESTION")
             _draw_proposal_node(proposal_tree, companion.proposal_session.root)
-
-        _draw_guidance_status(layout, session)
 
         tree = layout.box()
         tree.label(text="Active task tree", icon="OUTLINER")
