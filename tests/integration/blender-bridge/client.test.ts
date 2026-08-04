@@ -113,7 +113,18 @@ describe('Blender MCP TCP bridge', () => {
   });
 
   it('enforces a wall-clock timeout against slow-drip responses', async () => {
+    let resolveSocketClosed: (() => void) | undefined;
+    const socketClosed = new Promise<void>((resolve) => {
+      resolveSocketClosed = resolve;
+    });
+    let unexpectedSocketError: Error | undefined;
     const server = createServer((socket) => {
+      socket.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ECONNRESET') {
+          unexpectedSocketError = error;
+        }
+      });
+      socket.once('close', () => resolveSocketClosed?.());
       socket.once('data', () => {
         const response = `${JSON.stringify({ status: 'ok', result: true })}\0`;
         let index = 0;
@@ -141,5 +152,7 @@ describe('Blender MCP TCP bridge', () => {
         'start',
       ),
     ).rejects.toThrow('request timed out');
+    await socketClosed;
+    expect(unexpectedSocketError).toBeUndefined();
   });
 });
