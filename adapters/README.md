@@ -18,6 +18,10 @@ adapters/<host>/
 不得把宿主 API 类型泄漏到 `packages/domain`，也不得用固定屏幕坐标替代语义锚点。新适配器
 首先复制 `_template/capabilities.example.json`，逐项确认能力和限制。
 
+支持实时计划的 Companion 应复用 `protocol/schemas/v1/companion-*`：网络/IPC 线程只交换
+协议数据，通过宿主主线程队列安装计划和执行 action。计划拉取不能产生宿主数据副作用；
+运行中的计划更新必须等待安全边界或显式用户操作。
+
 `bridge/` 只负责连接已有宿主 transport，不是安全沙箱。它必须默认限制在回环地址、
 校验消息大小与超时，并只暴露明确允许的 Companion 命令。不得将任意代码执行作为
 OperatingLine 的公开能力。

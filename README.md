@@ -3,7 +3,8 @@
 [![CI](https://github.com/Lemonadeccc/OperatingLine/actions/workflows/ci.yml/badge.svg)](https://github.com/Lemonadeccc/OperatingLine/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-> 当前阶段：`0.1.0` 垂直切片。Blender 内引导已可运行，跨进程实时计划投递仍在路线图中。
+> 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
+> 计划投递/状态回传闭环已可运行；通用 AI 自动规划和完整雪人制作流程仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -17,17 +18,18 @@ OperatingLine 把高层目标拆成可引用的任务树，再把可执行叶子
 `1.2.1` 这样的编号精确引用某个节点。
 
 OperatingLine 不在目标软件外叠加透明窗口。任务树、引导线和操作控件由每个宿主的原生
-Companion/Extension 在软件内呈现；无界面 Orchestrator 当前负责协议验证、计划发布、
-事件记录和能力描述。
+Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验证、计划发布、
+本地 Companion 投递、状态查询、事件记录和能力描述。
 
 ## 真实可运行能力
 
-- **Headless Orchestrator**：提供经鉴权的 MCP/HTTP 接口，可验证和发布 GuidePlan、查询能力与
-  当前计划，并把运行事件写入本地数据库。
+- **Headless Orchestrator**：提供经鉴权的 MCP/HTTP 接口，可验证和发布 GuidePlan、投递给
+  本地 Companion、查询最新执行状态，并把追加式事件与每个实例的最新快照写入本地数据库。
 - **版本化协议**：定义 GuidePlan、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back、
-  Overlay 开关、当前步骤卡片和视口引导线。
+  Overlay 开关、当前步骤卡片和视口引导线；可显式连接回环地址上的 Orchestrator，非阻塞
+  拉取新计划并回传步骤结果。
 - **雪人垂直切片**：根据版本化计划依次创建下半身、上半身和头部；回退只删除当前动作
   拥有的对象。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
@@ -38,9 +40,10 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 ![OperatingLine 在 Blender 视口中的当前步骤卡片与引导线](docs/assets/blender-guidance.png)
 
 > [!IMPORTANT]
-> Orchestrator 和 Blender Extension 当前可以分别运行，但实时 Orchestrator ↔ Companion
-> 配对、计划投递、执行队列和观察回传尚未打通。Blender Extension 目前使用打包内的
-> 雪人 fixture；Bridge 只负责受限控件调用，不是完整的 GuidePlan 同步链路。
+> 当前实时链路已经接通，但执行目录仍只包含雪人下半身、上半身和头部三个确定性 Blender
+> 动作。材质、灯光、相机、渲染、骨骼动画、通用 AI 自动拆解、节点聊天引用和第二宿主尚未完成。
+> 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
+> 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
 ## 工作原理
 
@@ -49,10 +52,9 @@ Codex / Claude / another MCP client
                  │ MCP
                  ▼
 services/orchestrator
-计划验证 · 计划发布 · 事件记录 · 能力描述
-                 │
-                 ┆ live pairing/queue: planned, not connected
-                 ┆
+计划验证 · Companion 投递 · 状态/事件记录 · 能力描述
+                 │ authenticated loopback HTTP
+                 │ plan pull / state report
         ┌────────┴─────────┐
         ▼                  ▼
 adapters/blender      adapters/<host>
@@ -72,9 +74,19 @@ native extension      native companion
 步骤 ID 使用协议限定的可移植 ASCII 格式，保证 TypeScript、Python 和未来其他适配器的
 并列步骤排序一致。
 
+Companion protocol v1 的一个 GuidePlan 内，所有非空 action 必须使用同一个 `adapterId`。
+当前 Orchestrator 会在发布阶段显式拒绝混合宿主计划，而不会把必然无法安装的完整计划投递给
+某一个宿主。跨宿主计划需要另外设计保持树、依赖、编号和 revision 语义的投影/调度协议；
+纯 actionless 计划因缺少宿主路由信息，当前只可发布和查询，不会由 Companion 接口投递。
+
 Companion 负责把这些通用定义翻译成宿主的 Operator、Command 或 Procedure，并在宿主内
 解析对象、世界坐标或自有控件等稳定锚点。持久协议不使用易受窗口、DPI 和布局变化影响的
 固定像素坐标。
+
+Blender Companion 的网络线程只交换 HTTP/JSON，并把新计划放入队列；`bpy.app.timers`
+在 Blender 主线程安装计划、执行动作和更新 UI。状态报告通过 `reportId + sequence` 实现
+精确重试、乱序拒绝和最新快照恢复。计划投递本身不会删除已经创建的场景对象：运行中收到
+新 revision 时会暂存更新，等用户 Back 到起点后再安装。
 
 ## 5 分钟快速开始
 
@@ -97,7 +109,32 @@ BLENDER_BIN=/absolute/path/to/blender pnpm package:blender
 打包产物为 `artifacts/blender/operating_line-0.1.0.zip`。在 Blender 中选择
 `Edit → Preferences → Extensions → Install from Disk`，安装并启用该 ZIP。
 
-这条快速开始运行的是 Blender Extension 内置雪人计划，不需要先启动 Orchestrator。
+这条快速开始可以直接运行 Blender Extension 内置雪人计划，不需要先启动 Orchestrator。
+
+### 连接实时 Orchestrator
+
+使用固定回环端口启动 Orchestrator；Token 至少 16 个字符，并应由当前用户自行生成：
+
+```bash
+export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
+export OPERATINGLINE_PORT=43123
+pnpm dev
+```
+
+然后在 Blender 的 `OperatingLine` Sidebar 中：
+
+1. 确认 `Edit → Preferences → System → Network → Allow Online Access` 已开启。
+2. `Runtime URL` 填写 `http://127.0.0.1:43123`。
+3. `Bearer token` 填写同一个 Token；该字段使用 `SKIP_SAVE`，不会写入 `.blend`。
+4. 点击 `Connect`。连接成功后，Extension 会保留当前离线计划，并只拉取 ID/revision 更新的计划。
+5. 把 Codex、Claude 或其他 MCP Client 连接到 `http://127.0.0.1:43123/mcp`，调用
+   `operatingline.guide.publish` 发布 GuidePlan。
+
+计划安装、Start/Next/Back 和步骤观察可以通过
+`operatingline.companions.list` 或 `GET /api/v1/companions` 查询。所有 `/mcp` 和 `/api/`
+请求都需要 `Authorization: Bearer <token>`；服务与 Blender Companion 都拒绝非回环地址。
+当前查询返回的是每个 `adapterId + instanceId` 的最新已知快照，不是带心跳或超时判定的在线
+状态；关闭 Blender 后，最后一条快照仍会保留，直到未来引入租约/心跳机制。
 
 ## Blender 内交互
 
@@ -108,6 +145,7 @@ BLENDER_BIN=/absolute/path/to/blender pnpm package:blender
 3. `Back` 回退当前步骤，只删除该动作拥有的对象，不删除用户对象。
 4. `Toggle Overlay` 显示或隐藏当前步骤卡片和视口引导。
 5. 任务树分支可以独立展开或折叠，当前叶子节点会显示活动状态。
+6. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划。
 
 默认情况下 `Start` 不删除任何现有对象。只在用户显式勾选
 `Delete factory Cube/Camera/Light on Start` 后，Extension 才会尝试清理启动场景；即便已经授权，
@@ -117,6 +155,10 @@ BLENDER_BIN=/absolute/path/to/blender pnpm package:blender
 当前回退 receipt 只在本次 Extension 会话内有效。保存重开或扩展重载后，OperatingLine 不会仅凭
 可复制的自定义属性接管或删除旧对象；遇到同名残留时会停止并要求用户明确处理，避免误删用户
 复制或修改过的内容。
+
+运行中收到更高 revision 时，Extension 不会因为“收到计划”而自动回退场景。更新会显示为
+pending，用户 Back 到起点后才会安装；Disconnect 会取消该 pending 更新。非法协议版本、
+非允许列表动作、非回环 URL、超大响应和过期/冲突状态报告都会显式失败。
 
 ## 与现有 Blender MCP 并存
 
@@ -173,10 +215,13 @@ pnpm check
 
 ```bash
 pnpm test:blender
+pnpm test:blender:companion
 pnpm test:blender:visual
 pnpm package:blender
 ```
 
+`pnpm test:blender:companion` 会启动真实 Orchestrator 进程和 Blender，经过 MCP 发布计划、
+回环 HTTP 拉取、主线程 Start/Next/Back 与状态回传，验证默认 Cube 不被删除以及跨进程闭环。
 `pnpm test:blender:visual` 会启动第一个检测到的 Blender，通过真实 GUI 捕获
 `artifacts/blender/overlay-smoke.png`。它先生成专用空场景，避免保存过的 `.blend` 元数据被误认
 为工厂场景；默认场景清理本身由双版本 headless integration test 验证。
@@ -191,7 +236,8 @@ OPERATINGLINE_ACCESS_TOKEN=development-token OPERATINGLINE_PORT=43123 pnpm dev
 ```
 
 服务只监听 `127.0.0.1`，启动日志会输出 MCP endpoint。当前注册的 MCP tools 为
-`operatingline.health`、`operatingline.adapters.list` 和 `operatingline.guide.publish`。
+`operatingline.health`、`operatingline.adapters.list`、`operatingline.guide.publish` 和
+`operatingline.companions.list`。
 
 ## 提交规范
 
@@ -207,15 +253,16 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 ## 路线图与当前边界
 
-已完成的是协议、Orchestrator 发布端、Blender 内引导/可回退建模，以及受限的现有 MCP
-Bridge。下一个端到端里程碑是：
+已完成的是协议、Orchestrator 发布/投递/状态端、Blender 内引导与可回退建模、真实
+Orchestrator ↔ Companion 跨进程闭环，以及受限的现有 MCP Bridge。当前仍未完成：
 
-1. 定义 Companion 配对、身份和能力协商流程。
-2. 把 MCP 发布的 GuidePlan 投递到 Blender Companion 队列。
-3. 在 Blender 主线程中执行动作，回传观察、验证和回退结果。
-4. 将会话状态接入 Blender `undo_post`/`redo_post`，再声明原生 Undo 能力。
-5. 加入聊天节点引用、局部重规划、计划差异和 eval/replay 导出。
-6. 使用同一协议接入第二个开源宿主，验证通用性。
+1. 根据“创建雪人”等任意目标自动生成结构正确、能力可执行的 GuidePlan。
+2. 扩展雪人动作目录，覆盖细节、材质、灯光、相机、渲染和骨骼动画。
+3. 加入节点聊天引用、局部重规划、计划差异确认和用户可编辑参数。
+4. 区分动作成功与观察验证结果，完善失败补偿，并在接入 Blender `undo_post`/`redo_post`
+   后再声明原生 Undo 能力。
+5. 导出可复现的执行轨迹、计划、观察与评分数据，形成 eval/replay 流程。
+6. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
 7. 在首个稳定发布前引入 Changesets 与自动发布流程。
 
 首版只保证自有面板控件、三维对象和世界坐标锚点，不承诺精确标注任意 Blender 内置按钮。

@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -48,6 +49,27 @@ interface McpToolResponse {
   result?: {
     isError?: boolean;
     content?: Array<{ type?: string; text?: string }>;
+  };
+}
+
+function companionReport(instanceId: string, sequence: number) {
+  return {
+    protocolVersion: '1.0.0',
+    reportId: randomUUID(),
+    sequence,
+    adapterId: 'fake-blender',
+    instanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.0',
+    plan: null,
+    phase: 'idle',
+    activeStepId: null,
+    completedStepIds: [],
+    transition: 'connected',
+    stepId: null,
+    observations: [],
+    error: null,
+    occurredAt: new Date().toISOString(),
   };
 }
 
@@ -121,6 +143,10 @@ describe('OperatingLine runtime', () => {
           tools: [
             { name: 'operatingline.health' },
             { name: 'operatingline.adapters.list' },
+            {
+              name: 'operatingline.companions.list',
+              description: 'List the latest known state reported by each host companion.',
+            },
             { name: 'operatingline.guide.publish' },
           ],
         },
@@ -158,6 +184,167 @@ describe('OperatingLine runtime', () => {
     }
   });
 
+  it('delivers only new guide plans containing actions for the requesting adapter', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    const instanceId = randomUUID();
+    try {
+      const plan = JSON.parse(
+        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      ) as { id: string; revision: number };
+      expect(
+        (await callMcpTool(runtime, 20, 'operatingline.guide.publish', plan)).result?.isError,
+      ).not.toBe(true);
+
+      const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      guideUrl.searchParams.set('adapterId', 'blender');
+      guideUrl.searchParams.set('instanceId', instanceId);
+      const delivered = await fetch(guideUrl, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(delivered.status).toBe(200);
+      await expect(delivered.json()).resolves.toMatchObject({
+        protocolVersion: '1.0.0',
+        plan: { id: plan.id, revision: 1 },
+      });
+
+      guideUrl.searchParams.set('knownPlanId', plan.id);
+      guideUrl.searchParams.set('knownRevision', '1');
+      await expect(
+        fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+
+      guideUrl.searchParams.set('knownRevision', '3');
+      await expect(
+        fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+      guideUrl.searchParams.set('knownRevision', '1');
+
+      const revisionTwo = { ...plan, revision: 2 };
+      expect(
+        (await callMcpTool(runtime, 21, 'operatingline.guide.publish', revisionTwo)).result
+          ?.isError,
+      ).not.toBe(true);
+      await expect(
+        fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toMatchObject({ plan: { id: plan.id, revision: 2 } });
+
+      guideUrl.searchParams.set('adapterId', 'different-adapter');
+      await expect(
+        fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('rejects malformed companion guide queries', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    try {
+      const badUuid = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=fake-blender&instanceId=bad`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      expect(badUuid.status).toBe(400);
+
+      const missingRevision = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=fake-blender&instanceId=${randomUUID()}&knownPlanId=snowman`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      expect(missingRevision.status).toBe(400);
+
+      const unknownField = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=fake-blender&instanceId=${randomUUID()}&extra=true`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      expect(unknownField.status).toBe(400);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('accepts, deduplicates, rejects stale state, and lists latest companions over HTTP and MCP', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    const instanceId = randomUUID();
+    const first = companionReport(instanceId, 1);
+    const stale = companionReport(instanceId, 1);
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const post = (report: unknown) =>
+        fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(report),
+        });
+      await expect(post(first).then((response) => response.json())).resolves.toEqual({
+        result: 'accepted',
+      });
+      await expect(post(first).then((response) => response.json())).resolves.toEqual({
+        result: 'duplicate',
+      });
+      const conflict = await post({ ...first, hostVersion: '4.6.0' });
+      expect(conflict.status).toBe(409);
+      await expect(conflict.json()).resolves.toEqual({ result: 'conflict' });
+      await expect(post(stale).then((response) => response.json())).resolves.toEqual({
+        result: 'stale',
+      });
+
+      const listResponse = await fetch(`${runtime.baseUrl}/api/v1/companions`, { headers });
+      expect(listResponse.status).toBe(200);
+      await expect(listResponse.json()).resolves.toEqual({ companions: [first] });
+
+      const mcpResponse = await callMcpTool(runtime, 30, 'operatingline.companions.list', {});
+      expect(mcpResponse.result?.isError).not.toBe(true);
+      expect(JSON.parse(mcpResponse.result?.content?.[0]?.text ?? 'null')).toEqual([first]);
+
+      const invalid = await post({ ...first, reportId: randomUUID(), unknown: true });
+      expect(invalid.status).toBe(400);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('restores latest companion state after a runtime restart', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-companion-runtime-test-'));
+    const databasePath = join(directory, 'state.db');
+    const report = companionReport(randomUUID(), 1);
+    try {
+      const firstRuntime = await startRuntime({ databasePath, accessToken });
+      const accepted = await fetch(`${firstRuntime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(report),
+      });
+      expect(accepted.status).toBe(200);
+      await firstRuntime.stop();
+
+      const restarted = await startRuntime({ databasePath, accessToken });
+      try {
+        const response = await fetch(`${restarted.baseUrl}/api/v1/companions`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        await expect(response.json()).resolves.toEqual({ companions: [report] });
+      } finally {
+        await restarted.stop();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects unauthenticated MCP requests', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -176,6 +363,21 @@ describe('OperatingLine runtime', () => {
 
       const guideResponse = await fetch(`${runtime.baseUrl}/api/v1/guide`);
       expect(guideResponse.status).toBe(401);
+
+      const companionGuideResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=fake-blender&instanceId=${randomUUID()}`,
+      );
+      expect(companionGuideResponse.status).toBe(401);
+      expect((await fetch(`${runtime.baseUrl}/api/v1/companions`)).status).toBe(401);
+      expect(
+        (
+          await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(companionReport(randomUUID(), 1)),
+          })
+        ).status,
+      ).toBe(401);
     } finally {
       await runtime.stop();
     }
@@ -218,6 +420,24 @@ describe('OperatingLine runtime', () => {
         'is not newer than latest accepted revision 1',
       );
 
+      const mixedHostPlan = structuredClone(plan);
+      mixedHostPlan.id = 'snowman-mixed-host';
+      const mixedHostAction = mixedHostPlan.steps.find((step) => step.action !== null)?.action;
+      if (mixedHostAction === null || typeof mixedHostAction !== 'object') {
+        throw new Error('Snowman fixture is missing an executable action');
+      }
+      (mixedHostAction as Record<string, unknown>).adapterId = 'different-adapter';
+      const rejectedMixedHost = await callMcpTool(
+        runtime,
+        13,
+        'operatingline.guide.publish',
+        mixedHostPlan,
+      );
+      expect(rejectedMixedHost.result).toMatchObject({ isError: true });
+      expect(rejectedMixedHost.result?.content?.[0]?.text).toContain(
+        'must target a single action adapter',
+      );
+
       const guideResponse = await fetch(`${runtime.baseUrl}/api/v1/guide`, {
         headers: { authorization: `Bearer ${accessToken}` },
       });
@@ -229,7 +449,7 @@ describe('OperatingLine runtime', () => {
       replacementPlan.id = 'snowman-demo-replacement';
       const acceptedReplacement = await callMcpTool(
         runtime,
-        13,
+        14,
         'operatingline.guide.publish',
         replacementPlan,
       );
@@ -237,7 +457,7 @@ describe('OperatingLine runtime', () => {
 
       const rejectedAfterSwitch = await callMcpTool(
         runtime,
-        14,
+        15,
         'operatingline.guide.publish',
         plan,
       );

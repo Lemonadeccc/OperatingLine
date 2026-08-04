@@ -7,6 +7,7 @@ from .task_tree import (
     TaskNode,
     executable_steps,
     load_task_tree,
+    load_task_tree_data,
 )
 
 __all__ = (
@@ -16,4 +17,5 @@ __all__ = (
     "TaskNode",
     "executable_steps",
     "load_task_tree",
+    "load_task_tree_data",
 )

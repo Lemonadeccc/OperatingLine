@@ -26,9 +26,17 @@
 
 ## 主线程规则
 
-网络/IPC 只接收紧凑命令并入队。`bpy`、任务状态更新和 Overlay 数据交换在 Blender 主线程
-串行执行；绘制回调只读取缓存。Blender 官方不支持长期运行的 Python 后台线程，因此
-companion transport 将采用外部进程或轻量 timer pump，不在绘制函数中阻塞。
+当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权从回环 Orchestrator
+短轮询 GuidePlan，并把 JSON 放入队列。`bpy.app.timers` 在 Blender 主线程安装计划、执行动作、
+回退、生成观察和更新 Overlay 缓存；绘制回调只读取缓存，不进行网络或重计算。
+
+网络请求有总时限、4 MiB 响应上限，并绕过系统代理且不跟随重定向。Disconnect/Extension
+卸载只做短暂等待；残余清理线程为 daemon、保留到确认退出且不访问 `bpy`。Blender manifest
+声明 network 权限，UI 同时检查 `bpy.app.online_access`；URL 仅接受 `http` 回环地址，Token
+使用 WindowManager `SKIP_SAVE` 属性，不写入 `.blend`。
+
+运行中收到新计划不会触发场景回退。若当前会话仍持有 action receipt，更新会暂存并只报告
+一次 pending/error；用户 Back 到起点后由主线程自动安装。Disconnect 会取消 pending 更新。
 
 ## 与现有 Blender MCP 的边界
 

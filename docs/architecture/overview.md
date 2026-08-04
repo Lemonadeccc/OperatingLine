@@ -4,9 +4,9 @@
 
 OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主 Companion 负责把语义动作与
 锚点翻译成 Blender Operator、VS Code Command、GIMP Procedure 等实际能力。
-无界面 Orchestrator 是目标架构中唯一的计划与调度服务；当前实现只完成协议验证、计划发布、
-事件记录和能力描述，实时调度链路仍在路线图中。MCP 客户端、CLI、Web 界面或其他第三方工具
-都是可替换的协议消费者，不承担宿主内视觉呈现。
+无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、计划发布、
+经鉴权的回环 Companion 拉取、幂等状态回传、事件/最新快照持久化和能力描述。MCP 客户端、
+CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内视觉呈现。
 
 ```text
 GuidePlan
@@ -33,6 +33,33 @@ GuidePlan
 按 DAG 拓扑顺序执行；`order` 和 `id` 只负责在多个 ready 节点之间提供跨语言稳定次序。
 步骤 ID 限制为协议定义的可移植 ASCII 标识符，避免不同运行时的 Unicode 排序规则造成漂移。
 actionless 叶子是说明或人工步骤，不会被自动执行器当作已经完成的依赖。
+
+Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的所有非空 action 必须使用
+同一个 `adapterId`。Orchestrator 在发布时拒绝混合宿主计划，不临时过滤步骤；否则会破坏
+`parentId`、`dependsOn`、编号和 revision 的整体语义。纯 actionless 计划没有宿主路由信息，
+当前只保存为已发布计划，不进入 Companion 投递链路。跨宿主投影与协调需要后续协议设计。
+
+## Companion 同步契约
+
+首个 transport 使用经 Bearer Token 鉴权的回环 HTTP 短轮询：Companion 以
+`adapterId + instanceId` 标识实例，使用成对的 `knownPlanId + knownRevision` 拉取更新，并以
+唯一 `reportId`、单实例递增 `sequence` 回传状态。Orchestrator 将精确重试识别为 duplicate，
+拒绝旧 sequence，并把同 reportId 的不同内容识别为 conflict。
+
+列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
+Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：
+
+- 计划投递本身不执行 action，也不删除宿主数据。
+- 宿主 API 调用只能发生在宿主允许的线程/事件阶段。
+- 动作目录必须是允许列表，不能把任意代码执行包装成通用 action。
+- 非法计划、过期或冲突状态必须显式失败。
+- 离线能力与网络能力分开声明，断线不能破坏已安装的本地计划。
+
+`0.1.0` 的 observation 是执行后的遥测：`satisfied: false` 会被原样回传，但尚不改变
+`step_succeeded` transition，也不触发自动补偿。它不能被规划器或 eval 当作已验证成功；
+动作结果与观察判定、补偿策略的分离仍属于下一阶段。
+
+当前 HTTP 决策与升级边界见 [ADR 0003](../adr/0003-loopback-companion-polling.md)。
 
 ## 新宿主适配流程
 

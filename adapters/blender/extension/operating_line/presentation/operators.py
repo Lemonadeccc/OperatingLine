@@ -16,6 +16,12 @@ def _session():
     return get_session()
 
 
+def _companion():
+    from .. import get_companion
+
+    return get_companion()
+
+
 class OPERATINGLINE_OT_start(bpy.types.Operator):
     bl_idname = "operating_line.start"
     bl_label = "Start"
@@ -33,6 +39,7 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
                 )
         context.scene.operating_line_overlay_enabled = True
         enable_overlay(_session)
+        _companion().report("walkthrough_started")
         return {"FINISHED"}
 
 
@@ -43,10 +50,21 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, _context):
-        step = _session().next()
+        session = _session()
+        next_index = session.active_index + 1
+        candidate = (
+            session.steps[next_index] if next_index < len(session.steps) else None
+        )
+        try:
+            step = session.next()
+        except RuntimeError as error:
+            _companion().report("error", step=candidate, error=str(error))
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if step is None:
             self.report({"INFO"}, "All demo steps are complete")
             return {"CANCELLED"}
+        _companion().report("step_succeeded", step=step)
         return {"FINISHED"}
 
 
@@ -61,6 +79,36 @@ class OPERATINGLINE_OT_back(bpy.types.Operator):
         if step is None:
             self.report({"INFO"}, "No active step to roll back")
             return {"CANCELLED"}
+        _companion().report("step_rolled_back", step=step)
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_connect(bpy.types.Operator):
+    bl_idname = "operating_line.connect"
+    bl_label = "Connect"
+    bl_description = "Connect to a loopback OperatingLine runtime"
+
+    def execute(self, context):
+        window_manager = context.window_manager
+        try:
+            _companion().connect(
+                window_manager.operating_line_runtime_url,
+                window_manager.operating_line_bearer_token,
+            )
+        except ValueError as error:
+            _companion().error = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_disconnect(bpy.types.Operator):
+    bl_idname = "operating_line.disconnect"
+    bl_label = "Disconnect"
+    bl_description = "Disconnect from the OperatingLine runtime"
+
+    def execute(self, _context):
+        _companion().disconnect()
         return {"FINISHED"}
 
 
@@ -91,6 +139,8 @@ class OPERATINGLINE_OT_toggle_branch(bpy.types.Operator):
 
 
 CLASSES = (
+    OPERATINGLINE_OT_connect,
+    OPERATINGLINE_OT_disconnect,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_back,

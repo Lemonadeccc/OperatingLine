@@ -27,6 +27,7 @@
     "commitlint": "commitlint --edit",
     "package:blender": "node tools/blender/build-extension.mjs",
     "test:blender": "node tools/blender/run-tests.mjs",
+    "test:blender:companion": "tsx tools/blender/run-companion-e2e.mjs",
     "test:blender:visual": "node tools/blender/capture-overlay.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm format:check",
     "prepare": "husky"

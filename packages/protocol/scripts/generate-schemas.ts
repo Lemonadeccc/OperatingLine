@@ -3,7 +3,13 @@ import { resolve } from 'node:path';
 
 import { z } from 'zod';
 
-import { adapterStatusSchema, guidePlanSchema } from '../src/index.js';
+import {
+  adapterStatusSchema,
+  companionGuideDeliverySchema,
+  companionGuideRequestSchema,
+  companionStateReportSchema,
+  guidePlanSchema,
+} from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
 mkdirSync(outputDirectory, { recursive: true });
@@ -19,6 +25,21 @@ const schemas = [
     'adapter-status.schema.json',
     'https://operatingline.dev/schema/v1/adapter-status.json',
     adapterStatusSchema,
+  ],
+  [
+    'companion-guide-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-guide-request.json',
+    companionGuideRequestSchema,
+  ],
+  [
+    'companion-guide-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-guide-delivery.json',
+    companionGuideDeliverySchema,
+  ],
+  [
+    'companion-state-report.schema.json',
+    'https://operatingline.dev/schema/v1/companion-state-report.json',
+    companionStateReportSchema,
   ],
 ] as const;
 

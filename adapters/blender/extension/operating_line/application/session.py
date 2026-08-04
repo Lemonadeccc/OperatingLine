@@ -26,9 +26,14 @@ class DemoSession:
         self,
         root: TaskNode,
         actions: Mapping[str, tuple[ExecuteAction, RollbackAction]],
+        *,
+        plan_id: str | None = "snowman-demo",
+        revision: int | None = 1,
     ) -> None:
         self.root = root
         self._actions = actions
+        self.plan_id = plan_id
+        self.revision = revision
         self.steps = executable_steps(root)
         self.active_index = -1
         self.started = False

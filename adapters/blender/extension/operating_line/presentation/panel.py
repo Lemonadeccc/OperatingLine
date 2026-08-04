@@ -38,6 +38,25 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
         layout = self.layout
         session = get_session()
 
+        from .. import get_companion
+
+        companion = get_companion()
+        connection = layout.box()
+        connection.label(text="Live companion", icon="URL")
+        connection.prop(context.window_manager, "operating_line_runtime_url")
+        connection.prop(context.window_manager, "operating_line_bearer_token")
+        connection_controls = connection.row(align=True)
+        if companion.connected:
+            connection_controls.operator("operating_line.disconnect", icon="UNLINKED")
+        else:
+            connection_controls.enabled = getattr(bpy.app, "online_access", True)
+            connection_controls.operator("operating_line.connect", icon="LINKED")
+        connection.label(text=companion.status)
+        if not getattr(bpy.app, "online_access", True):
+            connection.label(text="Online access is disabled in Blender", icon="ERROR")
+        elif companion.error:
+            connection.label(text=companion.error, icon="ERROR")
+
         layout.prop(context.scene, "operating_line_replace_factory_scene")
         controls = layout.row(align=True)
         controls.operator("operating_line.start", icon="PLAY")

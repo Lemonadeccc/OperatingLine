@@ -25,12 +25,20 @@ class TaskNode:
     order: int
     depends_on: tuple[str, ...] = ()
     action: ActionSpec | None = None
+    expected_observations: tuple[dict[str, Any], ...] = ()
     children: tuple["TaskNode", ...] = ()
 
 
 def load_task_tree(path: Path = RESOURCE_PATH) -> TaskNode:
     with path.open(encoding="utf-8") as resource:
         plan = json.load(resource)
+    return load_task_tree_data(plan)
+
+
+def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
+    """Validate and build a task tree from an in-memory guide plan."""
+    if not isinstance(plan, dict):
+        raise ValueError("Plan must be a JSON object")
     raw_steps = plan.get("steps")
     root_id = plan.get("rootStepId")
     if not isinstance(raw_steps, list) or not isinstance(root_id, str):
@@ -136,6 +144,14 @@ def load_task_tree(path: Path = RESOURCE_PATH) -> TaskNode:
         title = raw.get("title")
         if not isinstance(title, str):
             raise ValueError(f"Invalid title on step: {step_id}")
+        expected_observations = raw.get("expectedObservations", [])
+        if not isinstance(expected_observations, list) or not all(
+            isinstance(observation, dict)
+            and isinstance(observation.get("kind"), str)
+            and isinstance(observation.get("parameters"), dict)
+            for observation in expected_observations
+        ):
+            raise ValueError(f"Invalid expectedObservations on step: {step_id}")
         return TaskNode(
             id=step_id,
             number=number,
@@ -143,6 +159,7 @@ def load_task_tree(path: Path = RESOURCE_PATH) -> TaskNode:
             order=raw["order"],
             depends_on=tuple(raw["dependsOn"]),
             action=action,
+            expected_observations=tuple(dict(item) for item in expected_observations),
             children=children,
         )
 

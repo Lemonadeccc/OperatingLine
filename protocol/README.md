@@ -7,6 +7,9 @@
 `protocol/fixtures` 是示例计划的唯一编辑源。Blender 构建和测试脚本会把离线所需 fixture
 同步到 Extension resources，并通过集成测试校验内容一致，禁止手工维护两份不同计划。
 
+`protocol/schemas/v1/companion-*` 定义通用 Companion 的计划拉取与状态报告格式。它们与
+GuidePlan Schema 一样由 `packages/protocol` 生成；任何宿主不得自行增加未版本化字段。
+
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
@@ -15,6 +18,11 @@
 - 树形父子关系用于呈现和引用，`dependsOn` 用于执行调度。
 - 步骤 ID 使用 `[A-Za-z0-9][A-Za-z0-9._:-]*`；ASCII 序关系保证不同语言的稳定排序一致。
 - 同一 Plan ID 的 `revision` 必须严格递增；切换到其他计划后也不能重新发布旧 revision。
+- Companion protocol v1 的单个 GuidePlan 中，所有非空 action 必须使用同一 `adapterId`；
+  混合宿主计划必须拒绝，不能通过删减步骤破坏树、依赖、编号或 revision 语义。
+- 没有 action 的计划缺少宿主路由信息，当前可发布和查询，但不会投递给 Companion。
+- Companion 身份使用 `adapterId + instanceId`；同一身份的 `sequence` 必须严格递增。
+- 同 `reportId` 只有完整 payload 一致时才是幂等重试；内容变化是 conflict，不是 stale。
 
 重新生成协议：
 

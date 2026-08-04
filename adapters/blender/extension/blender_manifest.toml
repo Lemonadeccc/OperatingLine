@@ -7,3 +7,6 @@ maintainer = "OperatingLine Contributors"
 type = "add-on"
 blender_version_min = "4.5.0"
 license = ["SPDX:Apache-2.0"]
+
+[permissions]
+network = "Connect to local OperatingLine orchestrator"

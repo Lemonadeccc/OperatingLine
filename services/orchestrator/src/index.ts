@@ -10,7 +10,12 @@ import { validateExecutableTaskPlan } from '@operatingline/domain';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 import {
   adapterStatusSchema,
+  companionGuideDeliverySchema,
+  companionGuideRequestSchema,
+  companionStateReportSchema,
   guidePlanSchema,
+  guideProtocolVersion,
+  type CompanionStateReport,
   type GuidePlan,
   type RuntimeStatus,
 } from '@operatingline/protocol';
@@ -90,6 +95,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       })),
     });
 
+    const listCompanionStates = (): CompanionStateReport[] =>
+      database
+        .listLatestCompanionStates()
+        .map((report) => companionStateReportSchema.parse(report));
+
     const runtimeMcpHandler = createMcpHandler(() => {
       const server = new McpServer({ name: 'operating-line', version: runtimeVersion });
 
@@ -113,6 +123,17 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
         async () => ({
           content: [{ type: 'text', text: JSON.stringify(getStatus().adapters) }],
+        }),
+      );
+
+      server.registerTool(
+        'operatingline.companions.list',
+        {
+          description: 'List the latest known state reported by each host companion.',
+          inputSchema: z.strictObject({}),
+        },
+        async () => ({
+          content: [{ type: 'text', text: JSON.stringify(listCompanionStates()) }],
         }),
       );
 
@@ -143,6 +164,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           );
           if (!structure.valid) {
             throw new Error(`Invalid guide plan: ${structure.errors.join('; ')}`);
+          }
+          const actionAdapterIds = new Set(
+            plan.steps.flatMap((step) => (step.action === null ? [] : [step.action.adapterId])),
+          );
+          if (actionAdapterIds.size > 1) {
+            throw new Error(
+              'Companion protocol v1 guide plans must target a single action adapter',
+            );
           }
           const latestRevision = latestRevisionByPlanId.get(plan.id);
           if (latestRevision !== undefined && plan.revision <= latestRevision) {
@@ -192,6 +221,39 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
+    runtimeApp.get('/api/v1/companion/guide', async (request, reply) => {
+      const parsedRequest = companionGuideRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+
+      const { adapterId, knownPlanId, knownRevision } = parsedRequest.data;
+      const planAdapterId = activePlan?.steps.find((step) => step.action !== null)?.action
+        ?.adapterId;
+      const callerHasActiveRevision =
+        activePlan !== null &&
+        knownPlanId === activePlan.id &&
+        knownRevision !== undefined &&
+        knownRevision >= activePlan.revision;
+      return companionGuideDeliverySchema.parse({
+        protocolVersion: guideProtocolVersion,
+        plan: planAdapterId === adapterId && !callerHasActiveRevision ? activePlan : null,
+      });
+    });
+    runtimeApp.post('/api/v1/companion/state', async (request, reply) => {
+      const parsedReport = companionStateReportSchema.safeParse(request.body);
+      if (!parsedReport.success) {
+        return reply.code(400).send({ error: 'invalid_report', issues: parsedReport.error.issues });
+      }
+      const result = database.recordCompanionState(parsedReport.data);
+      if (result === 'conflict') {
+        return reply.code(409).send({ result });
+      }
+      return { result };
+    });
+    runtimeApp.get('/api/v1/companions', async () => ({ companions: listCompanionStates() }));
     runtimeApp.all('/mcp', async (request, reply) => {
       reply.hijack();
       await nodeHandler(request.raw as unknown as NodeIncomingMessageLike, reply.raw, request.body);
