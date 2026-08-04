@@ -7,7 +7,8 @@
 
 OperatingLine 的首个实时 Companion 链路采用经 Bearer Token 鉴权的回环 HTTP 短轮询。
 Blender Extension 主动连接只监听 `127.0.0.1` 的 Orchestrator，拉取新 GuidePlan，并把
-当前会话快照作为版本化状态报告回传。
+当前会话快照作为版本化状态报告回传。后续新增的 GuideProposal 与人工决策复用同一短轮询和
+后台线程边界，其审批语义由 [ADR 0004](0004-human-approved-guide-proposals.md) 单独定义。
 
 ```text
 MCP client

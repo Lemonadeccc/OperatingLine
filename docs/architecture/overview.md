@@ -4,8 +4,9 @@
 
 OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主 Companion 负责把语义动作与
 锚点翻译成 Blender Operator、VS Code Command、GIMP Procedure 等实际能力。
-无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、计划发布、
-经鉴权的回环 Companion 拉取、幂等状态回传、事件/最新快照持久化和能力描述。MCP 客户端、
+无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
+AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
+事件/最新快照持久化和能力描述。MCP 客户端、
 CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内视觉呈现。
 
 ```text
@@ -17,6 +18,11 @@ GuidePlan
        ├─ semantic anchors
        ├─ expected observations
        └─ rollback policy
+
+GuideProposal
+  ├─ proposalId + targetAdapterId
+  ├─ immutable GuidePlan revision
+  └─ per-companion accepted/rejected decision
 ```
 
 ## 接入等级
@@ -46,10 +52,18 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 唯一 `reportId`、单实例递增 `sequence` 回传状态。Orchestrator 将精确重试识别为 duplicate，
 拒绝旧 sequence，并把同 reportId 的不同内容识别为 conflict。
 
+同一次拉取也可以返回该宿主的最新 GuideProposal。Companion 用 `knownProposalId` 阻止待审草案
+重复入队；用户在宿主内接受或拒绝后，以 `proposalId + adapterId + instanceId` 回传决策。
+同一实例对同一 proposal 的同值重试是 duplicate，相反决策是 conflict；另一个宿主实例拥有
+独立的审查决定。提案和决策都以完整版本化 payload 追加写入数据库，Orchestrator 重启后仍可
+恢复尚未决定的最新提案与 Plan revision 水位。
+
 列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
 Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：
 
 - 计划投递本身不执行 action，也不删除宿主数据。
+- 提案接收与校验只建立只读预览；只有宿主内的显式 Accept 才能替换没有未回退 receipt 的
+  活动会话，Reject 必须保持活动计划与宿主数据不变。
 - 宿主 API 调用只能发生在宿主允许的线程/事件阶段。
 - 动作目录必须是允许列表，不能把任意代码执行包装成通用 action。
 - 非法计划、过期或冲突状态必须显式失败。
@@ -58,6 +72,11 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `0.1.0` 的 observation 是执行后的遥测：`satisfied: false` 会被原样回传，但尚不改变
 `step_succeeded` transition，也不触发自动补偿。它不能被规划器或 eval 当作已验证成功；
 动作结果与观察判定、补偿策略的分离仍属于下一阶段。
+
+当前“AI 规划”边界是 model-neutral：Codex、Claude 或其他 MCP 客户端生成完整 GuidePlan 并调用
+`operatingline.guide.propose`，OperatingLine 负责结构/单宿主校验、持久化、宿主内预览和人工
+门禁。Orchestrator 还没有内置模型，也没有可供规划器查询每个 action 参数约束的版本化 catalog，
+因此不能声称已经支持任意自然语言目标的自动规划。
 
 ## 宿主执行记录与补偿
 
@@ -75,7 +94,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 这是 Blender Companion 当前的补偿实现，不是所有宿主已经具备的通用能力。其他适配器必须在
 能力画像中分别声明批量预检、精确身份、失败补偿和冲突检测的支持等级。
 
-当前 HTTP 决策与升级边界见 [ADR 0003](../adr/0003-loopback-companion-polling.md)。
+当前 HTTP transport 与升级边界见 [ADR 0003](../adr/0003-loopback-companion-polling.md)，
+提案审批决策见 [ADR 0004](../adr/0004-human-approved-guide-proposals.md)。
 
 ## 新宿主适配流程
 

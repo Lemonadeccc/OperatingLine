@@ -5,6 +5,7 @@
 当前需求不需要给 Blender 仓库提 PR。Blender Extension 可以通过公开 API 注册：
 
 - `Panel` / `UILayout`：Sidebar 任务树和 Start、Next、Back。
+- `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
@@ -50,8 +51,9 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 ## 主线程规则
 
 当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权从回环 Orchestrator
-短轮询 GuidePlan，并把 JSON 放入队列。`bpy.app.timers` 在 Blender 主线程安装计划、执行动作、
-回退并生成观察；绘制回调不访问网络、不修改场景，只从当前会话派生最多四个相邻步骤，并为
+短轮询 GuidePlan/GuideProposal，并把 JSON 放入队列。`bpy.app.timers` 在 Blender 主线程校验
+提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
+不修改场景，只从当前会话派生最多四个相邻步骤，并为
 Back/Next 解析已记录资源的屏幕锚点。
 
 Start/Next/Back/Show/Hide 由 Blender Operator 事件触发当前界面自然重绘。Blender 4.5/5.1
@@ -64,8 +66,15 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 声明 network 权限，UI 同时检查 `bpy.app.online_access`；URL 仅接受 `http` 回环地址，Token
 使用 WindowManager `SKIP_SAVE` 属性，不写入 `.blend`。
 
-运行中收到新计划不会触发场景回退。若当前会话仍持有 action receipt，更新会暂存并只报告
-一次 pending/error；用户 Back 到起点后由主线程自动安装。Disconnect 会取消 pending 更新。
+`guide.publish` 路径运行中收到新计划不会触发场景回退。若当前会话仍持有 action receipt，更新
+会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
+
+`guide.propose` 路径始终进入独立审查状态：Blender 完整验证计划结构、动作允许列表与参数，
+只创建不执行的预览 Session，并在 Sidebar 显示 proposal ID 对应的计划标题、revision、目标宿主、
+只读任务树以及 Accept/Reject。存在提案时 Start/Next 在 UI 与 Operator 两层都被门禁，Back 保留，
+以便活动会话回到起点。Accept 只有在 receipt 为空时才原子替换活动 Session，仍不会执行第一个
+action；Reject 只清除预览。两种决策由网络线程异步回传且按宿主实例幂等。Disconnect 会取消
+本地 pending 更新和待审提案。
 
 ## revision 3 雪人执行切片
 

@@ -29,7 +29,7 @@ if (preparation.status !== 0) {
 
 const renderOutputDirectory = mkdtempSync(join(tmpdir(), 'operatingline-visual-render-'));
 try {
-  const states = ['initial', 'forward', 'back', 'hidden', 'operator'];
+  const states = ['initial', 'proposal', 'forward', 'back', 'hidden', 'operator'];
   for (const state of states) {
     const result = spawnSync(
       blender,

@@ -16,6 +16,26 @@ export interface CompanionStateInput {
 
 export type RecordCompanionStateResult = 'accepted' | 'duplicate' | 'stale' | 'conflict';
 
+export interface GuideProposalInput {
+  proposalId: string;
+  targetAdapterId: string;
+  proposedAt: string;
+  plan: {
+    id: string;
+    revision: number;
+  };
+}
+
+export interface GuideProposalDecisionInput {
+  decisionId: string;
+  proposalId: string;
+  adapterId: string;
+  instanceId: string;
+  decision: 'accepted' | 'rejected';
+}
+
+export type RecordGuideProposalDecisionResult = 'accepted' | 'duplicate' | 'conflict' | 'unknown';
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -36,6 +56,12 @@ function canonicalJson(value: unknown): string {
 export interface OperatingLineDatabase {
   appendEvent(event: ExecutionEventInput): void;
   countEvents(): number;
+  recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
+  getPendingGuideProposal(adapterId: string, instanceId: string): unknown | null;
+  listLatestGuidePlanRevisions(): Array<{ planId: string; revision: number }>;
+  recordGuideProposalDecision<T extends GuideProposalDecisionInput>(
+    decision: T,
+  ): RecordGuideProposalDecisionResult;
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -85,6 +111,33 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (2, datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS guide_proposals (
+      proposal_id TEXT PRIMARY KEY,
+      target_adapter_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      plan_revision INTEGER NOT NULL CHECK (plan_revision > 0),
+      proposed_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      UNIQUE (plan_id, plan_revision)
+    );
+
+    CREATE INDEX IF NOT EXISTS guide_proposals_target_order
+    ON guide_proposals (target_adapter_id, proposed_at DESC);
+
+    CREATE TABLE IF NOT EXISTS guide_proposal_decisions (
+      decision_id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+      payload TEXT NOT NULL,
+      UNIQUE (proposal_id, adapter_id, instance_id),
+      FOREIGN KEY (proposal_id) REFERENCES guide_proposals(proposal_id)
+    );
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (3, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -92,6 +145,65 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     VALUES (?, ?, ?, ?)
   `);
   const countEvents = sqlite.prepare('SELECT COUNT(*) AS value FROM execution_events');
+  const insertGuideProposal = sqlite.prepare(`
+    INSERT INTO guide_proposals (
+      proposal_id,
+      target_adapter_id,
+      plan_id,
+      plan_revision,
+      proposed_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const findPendingGuideProposal = sqlite.prepare(`
+    WITH latest AS (
+      SELECT proposal_id, payload
+      FROM guide_proposals
+      WHERE target_adapter_id = ?
+      ORDER BY rowid DESC
+      LIMIT 1
+    )
+    SELECT latest.payload
+    FROM latest
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM guide_proposal_decisions AS decision
+      WHERE decision.proposal_id = latest.proposal_id
+        AND decision.adapter_id = ?
+        AND decision.instance_id = ?
+    )
+  `);
+  const listLatestGuideRevisions = sqlite.prepare(`
+    SELECT plan_id, MAX(plan_revision) AS revision
+    FROM guide_proposals
+    GROUP BY plan_id
+    ORDER BY plan_id
+  `);
+  const findGuideProposalTarget = sqlite.prepare(`
+    SELECT target_adapter_id
+    FROM guide_proposals
+    WHERE proposal_id = ?
+  `);
+  const findGuideProposalDecisionById = sqlite.prepare(`
+    SELECT proposal_id, adapter_id, instance_id, decision, payload
+    FROM guide_proposal_decisions
+    WHERE decision_id = ?
+  `);
+  const findGuideProposalDecision = sqlite.prepare(`
+    SELECT decision
+    FROM guide_proposal_decisions
+    WHERE proposal_id = ? AND adapter_id = ? AND instance_id = ?
+  `);
+  const insertGuideProposalDecision = sqlite.prepare(`
+    INSERT INTO guide_proposal_decisions (
+      decision_id,
+      proposal_id,
+      adapter_id,
+      instance_id,
+      decision,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
   const findStateReport = sqlite.prepare(`
     SELECT adapter_id, instance_id, sequence, payload
     FROM companion_state_reports
@@ -133,6 +245,116 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw new Error('SQLite returned an invalid event count');
       }
       return value;
+    },
+    recordGuideProposal(proposal) {
+      const payload = canonicalJson(proposal);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        insertGuideProposal.run(
+          proposal.proposalId,
+          proposal.targetAdapterId,
+          proposal.plan.id,
+          proposal.plan.revision,
+          proposal.proposedAt,
+          payload,
+        );
+        insertEvent.run(
+          `guide-proposal:${proposal.proposalId}`,
+          'guide.proposal.created',
+          payload,
+          new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getPendingGuideProposal(adapterId, instanceId) {
+      const row = findPendingGuideProposal.get(adapterId, adapterId, instanceId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide proposal payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    listLatestGuidePlanRevisions() {
+      return listLatestGuideRevisions.all().map((row) => {
+        const candidate = row as { plan_id?: unknown; revision?: unknown };
+        if (typeof candidate.plan_id !== 'string' || typeof candidate.revision !== 'number') {
+          throw new Error('SQLite returned an invalid guide proposal revision');
+        }
+        return { planId: candidate.plan_id, revision: candidate.revision };
+      });
+    },
+    recordGuideProposalDecision(decision) {
+      const payload = canonicalJson(decision);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingById = findGuideProposalDecisionById.get(decision.decisionId) as
+          | {
+              proposal_id: string;
+              adapter_id: string;
+              instance_id: string;
+              decision: string;
+              payload: string;
+            }
+          | undefined;
+        if (existingById !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existingById.proposal_id === decision.proposalId &&
+            existingById.adapter_id === decision.adapterId &&
+            existingById.instance_id === decision.instanceId &&
+            existingById.decision === decision.decision &&
+            existingById.payload === payload
+            ? 'duplicate'
+            : 'conflict';
+        }
+
+        const proposal = findGuideProposalTarget.get(decision.proposalId) as
+          { target_adapter_id: string } | undefined;
+        if (proposal === undefined) {
+          sqlite.exec('COMMIT;');
+          return 'unknown';
+        }
+        if (proposal.target_adapter_id !== decision.adapterId) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+
+        const existingDecision = findGuideProposalDecision.get(
+          decision.proposalId,
+          decision.adapterId,
+          decision.instanceId,
+        ) as { decision: string } | undefined;
+        if (existingDecision !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existingDecision.decision === decision.decision ? 'duplicate' : 'conflict';
+        }
+
+        insertGuideProposalDecision.run(
+          decision.decisionId,
+          decision.proposalId,
+          decision.adapterId,
+          decision.instanceId,
+          decision.decision,
+          payload,
+        );
+        insertEvent.run(
+          `guide-proposal-decision:${decision.decisionId}`,
+          'guide.proposal.decided',
+          payload,
+          new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
     },
     recordCompanionState(report) {
       const payload = canonicalJson(report);

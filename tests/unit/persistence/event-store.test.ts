@@ -8,6 +8,32 @@ import { describe, expect, it } from 'vitest';
 
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 
+function guideProposal(planId = 'snowman', revision = 1) {
+  return {
+    protocolVersion: '1.0.0',
+    proposalId: randomUUID(),
+    targetAdapterId: 'blender',
+    proposedAt: new Date().toISOString(),
+    plan: { id: planId, revision },
+  };
+}
+
+function proposalDecision(
+  proposalId: string,
+  instanceId: string,
+  decision: 'accepted' | 'rejected' = 'accepted',
+) {
+  return {
+    protocolVersion: '1.0.0',
+    decisionId: randomUUID(),
+    proposalId,
+    adapterId: 'blender',
+    instanceId,
+    decision,
+    occurredAt: new Date().toISOString(),
+  };
+}
+
 describe('OperatingLine persistence', () => {
   it('stores append-only execution events', () => {
     const database = openOperatingLineDatabase(':memory:');
@@ -45,6 +71,62 @@ describe('OperatingLine persistence', () => {
     expect(database.listLatestCompanionStates()).toEqual([second]);
     expect(database.countEvents()).toBe(2);
     database.close();
+  });
+
+  it('persists the latest proposal and isolates human decisions per companion instance', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const firstInstance = randomUUID();
+    const secondInstance = randomUUID();
+    const first = guideProposal('snowman', 1);
+    const latest = guideProposal('snowman', 2);
+
+    database.recordGuideProposal(first);
+    database.recordGuideProposal(latest);
+    expect(database.listLatestGuidePlanRevisions()).toEqual([{ planId: 'snowman', revision: 2 }]);
+    expect(database.getPendingGuideProposal('blender', firstInstance)).toEqual(latest);
+    expect(database.getPendingGuideProposal('maya', firstInstance)).toBeNull();
+
+    const accepted = proposalDecision(latest.proposalId, firstInstance);
+    expect(database.recordGuideProposalDecision(accepted)).toBe('accepted');
+    expect(database.recordGuideProposalDecision(accepted)).toBe('duplicate');
+    expect(database.getPendingGuideProposal('blender', firstInstance)).toBeNull();
+    expect(database.getPendingGuideProposal('blender', secondInstance)).toEqual(latest);
+
+    expect(
+      database.recordGuideProposalDecision({
+        ...accepted,
+        decisionId: randomUUID(),
+        decision: 'rejected',
+      }),
+    ).toBe('conflict');
+    expect(
+      database.recordGuideProposalDecision(
+        proposalDecision(randomUUID(), firstInstance, 'rejected'),
+      ),
+    ).toBe('unknown');
+    expect(database.countEvents()).toBe(3);
+    database.close();
+  });
+
+  it('restores pending proposals and revision watermarks after restart', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-proposal-test-'));
+    const databasePath = join(directory, 'state.db');
+    const proposal = guideProposal('persistent-plan', 4);
+    const instanceId = randomUUID();
+    try {
+      const initial = openOperatingLineDatabase(databasePath);
+      initial.recordGuideProposal(proposal);
+      initial.close();
+
+      const reopened = openOperatingLineDatabase(databasePath);
+      expect(reopened.getPendingGuideProposal('blender', instanceId)).toEqual(proposal);
+      expect(reopened.listLatestGuidePlanRevisions()).toEqual([
+        { planId: 'persistent-plan', revision: 4 },
+      ]);
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('persists append-only companion reports and latest state across restart', () => {
@@ -124,7 +206,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 2,
+        count: 3,
       });
       const event = inspected
         .prepare(
@@ -173,6 +255,41 @@ describe('OperatingLine persistence', () => {
       expect(
         inspected.prepare('SELECT COUNT(*) AS count FROM companion_state_reports').get(),
       ).toEqual({ count: 0 });
+      inspected.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rolls back a proposal when its audit event cannot be appended', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-proposal-rollback-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      openOperatingLineDatabase(databasePath).close();
+      const injected = new DatabaseSync(databasePath);
+      injected.exec(`
+        CREATE TRIGGER fail_proposal_event
+        BEFORE INSERT ON execution_events
+        WHEN NEW.event_type = 'guide.proposal.created'
+        BEGIN
+          SELECT RAISE(FAIL, 'injected proposal event failure');
+        END;
+      `);
+      injected.close();
+
+      const database = openOperatingLineDatabase(databasePath);
+      expect(() => database.recordGuideProposal(guideProposal())).toThrow(
+        'injected proposal event failure',
+      );
+      expect(database.getPendingGuideProposal('blender', randomUUID())).toBeNull();
+      expect(database.listLatestGuidePlanRevisions()).toEqual([]);
+      expect(database.countEvents()).toBe(0);
+      database.close();
+
+      const inspected = new DatabaseSync(databasePath);
+      expect(inspected.prepare('SELECT COUNT(*) AS count FROM guide_proposals').get()).toEqual({
+        count: 0,
+      });
       inspected.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

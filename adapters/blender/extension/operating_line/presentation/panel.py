@@ -35,9 +35,46 @@ def _draw_node(layout, node, session, depth: int = 0) -> None:
             _draw_node(layout, child, session, depth + 1)
 
 
-def _draw_walkthrough_controls(layout, session) -> None:
+def _draw_proposal_node(layout, node, depth: int = 0) -> None:
+    row = layout.row(align=True)
+    if depth:
+        row.separator(factor=float(depth))
+    marker = "STEP" if node.action is not None else "GROUP"
+    row.label(text=f"{marker}  {node.number}  {node.title}")
+    for child in node.children:
+        _draw_proposal_node(layout, child, depth + 1)
+
+
+def _draw_proposal_summary(layout, companion, active_session) -> None:
+    proposal = companion.proposed_plan
+    proposal_session = companion.proposal_session
+    if proposal is None or proposal_session is None:
+        return
+
+    review = layout.box()
+    review_header = review.row()
+    review_header.alert = True
+    review_header.label(text="Plan proposal - review required", icon="QUESTION")
+    review.label(text="No scene change has occurred", icon="INFO")
+    review.label(text=proposal_session.root.title)
+    review.label(
+        text=f"{proposal_session.plan_id}  revision {proposal_session.revision}"
+    )
+    review.label(text=f"Target: {proposal['targetAdapterId']}")
+
+    decisions = review.row(align=True)
+    accept = decisions.row(align=True)
+    accept.enabled = not bool(active_session.receipts)
+    accept.operator("operating_line.accept_proposal", icon="CHECKMARK")
+    decisions.operator("operating_line.reject_proposal", icon="CANCEL")
+    if active_session.receipts:
+        review.label(text="Use Back to reach the start before accepting", icon="ERROR")
+
+
+def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> None:
     start = layout.row()
     start.scale_y = 1.15
+    start.enabled = not proposal_pending
     start.operator(
         "operating_line.start",
         text="Restart Walkthrough" if session.started else "Start Walkthrough",
@@ -59,7 +96,7 @@ def _draw_walkthrough_controls(layout, session) -> None:
         icon=STATE_ICONS[GuidanceState.BACK] if active else "LOCKED",
     )
     forward = controls.row(align=True)
-    forward.enabled = next_step is not None
+    forward.enabled = next_step is not None and not proposal_pending
     forward.operator(
         "operating_line.next",
         text=f"{_step_ordinal(next_index if next_step else None)} Next",
@@ -125,8 +162,13 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
         elif companion.error:
             connection.label(text=companion.error, icon="ERROR")
 
+        _draw_proposal_summary(layout, companion, session)
         layout.prop(context.scene, "operating_line_replace_factory_scene")
-        _draw_walkthrough_controls(layout, session)
+        _draw_walkthrough_controls(
+            layout,
+            session,
+            proposal_pending=companion.proposed_plan is not None,
+        )
 
         overlay = layout.row()
         guidance_visible = context.window_manager.operating_line_overlay_enabled
@@ -142,10 +184,15 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
             return
 
         layout.separator()
+        if companion.proposal_session is not None:
+            proposal_tree = layout.box()
+            proposal_tree.label(text="Proposed task tree (read-only)", icon="QUESTION")
+            _draw_proposal_node(proposal_tree, companion.proposal_session.root)
+
         _draw_guidance_status(layout, session)
 
         tree = layout.box()
-        tree.label(text="Task tree", icon="OUTLINER")
+        tree.label(text="Active task tree", icon="OUTLINER")
         _draw_node(tree, session.root, session)
 
 

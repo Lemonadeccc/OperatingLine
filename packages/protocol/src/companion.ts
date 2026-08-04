@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { guidePlanSchema, guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
+import { guideProposalSchema } from './proposal.js';
 
 export const companionGuideRequestSchema = z
   .strictObject({
@@ -8,6 +9,7 @@ export const companionGuideRequestSchema = z
     instanceId: z.uuid(),
     knownPlanId: z.string().min(1).optional(),
     knownRevision: z.coerce.number().int().positive().optional(),
+    knownProposalId: z.uuid().optional(),
   })
   .meta({
     dependentRequired: {
@@ -28,6 +30,7 @@ export type CompanionGuideRequest = z.infer<typeof companionGuideRequestSchema>;
 export const companionGuideDeliverySchema = z.strictObject({
   protocolVersion: guideProtocolVersionSchema,
   plan: guidePlanSchema.nullable(),
+  proposal: guideProposalSchema.nullable(),
 });
 export type CompanionGuideDelivery = z.infer<typeof companionGuideDeliverySchema>;
 

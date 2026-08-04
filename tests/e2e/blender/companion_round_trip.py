@@ -44,7 +44,9 @@ def main() -> None:
     operating_line.register()
     controller = operating_line.get_companion()
     original_install_plan = controller.install_plan
+    original_stage_proposal = controller.stage_proposal
     plan_install_threads: list[int] = []
+    proposal_stage_threads: list[int] = []
     maximum_pump_seconds = 0.0
 
     def install_plan_on_main_thread(plan):
@@ -53,6 +55,13 @@ def main() -> None:
         return original_install_plan(plan)
 
     controller.install_plan = install_plan_on_main_thread
+
+    def stage_proposal_on_main_thread(proposal):
+        assert threading.current_thread() is threading.main_thread()
+        proposal_stage_threads.append(threading.get_ident())
+        return original_stage_proposal(proposal)
+
+    controller.stage_proposal = stage_proposal_on_main_thread
 
     def pump_once() -> None:
         nonlocal maximum_pump_seconds
@@ -94,11 +103,29 @@ def main() -> None:
 
         wait_until(
             lambda: (
-                operating_line.get_session().plan_id == expected_plan_id
-                and operating_line.get_session().revision == expected_revision
+                controller.proposal_session is not None
+                and controller.proposal_session.plan_id == expected_plan_id
+                and controller.proposal_session.revision == expected_revision
             ),
-            "remote GuidePlan installation",
+            "remote GuidePlan proposal preview",
         )
+        assert operating_line.get_session().plan_id != expected_plan_id
+        assert proposal_stage_threads == [threading.main_thread().ident]
+        assert plan_install_threads == []
+        assert controller.proposed_plan is not None
+        assert controller.proposal_session.root.title == expected_root_title
+        assert bpy.ops.operating_line.start() == {"CANCELLED"}
+        assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        assert not operating_line.get_session().started
+        for item in factory_objects:
+            assert bpy.data.objects.get(item.name) is item
+            assert item.as_pointer() == factory_object_pointers[item.name]
+
+        assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
+        assert controller.proposed_plan is None
+        assert controller.proposal_session is None
+        assert operating_line.get_session().plan_id == expected_plan_id
+        assert operating_line.get_session().revision == expected_revision
         session = operating_line.get_session()
         assert session.root.title == expected_root_title
         assert plan_install_threads == [threading.main_thread().ident]
@@ -208,6 +235,7 @@ def main() -> None:
                     "factoryCubePointer": factory_object_pointers["Cube"],
                     "lastTransition": controller.last_report["transition"],
                     "lastSequence": controller.last_report["sequence"],
+                    "proposalReviewedBeforeExecution": True,
                 },
                 indent=2,
             ),

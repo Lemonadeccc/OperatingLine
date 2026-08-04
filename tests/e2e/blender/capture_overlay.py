@@ -5,10 +5,12 @@ the real Panel popover is drawn from current data without stacked UI snapshots.
 """
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
 from pathlib import Path
+import uuid
 
 import bpy
 from mathutils import Quaternion, Vector
@@ -23,6 +25,7 @@ OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 STATE = os.environ.get("OPERATINGLINE_VISUAL_STATE", "forward")
 OUTPUT_NAMES = {
     "initial": "guidance-initial.png",
+    "proposal": "guidance-proposal-review.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
     "hidden": "guidance-hidden.png",
@@ -83,6 +86,28 @@ def view3d_context():
 def configure_state():
     if STATE == "initial":
         assert session.active_index == -1
+    elif STATE == "proposal":
+        plan_path = (
+            ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
+        )
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        plan["id"] = "snowman-visual-proposal"
+        plan["revision"] += 100
+        plan["title"] = "AI proposal: create a reviewed snowman"
+        plan["steps"][0]["title"] = plan["title"]
+        accepted_session = extension.get_session()
+        assert extension.get_companion().stage_proposal(
+            {
+                "protocolVersion": "1.0.0",
+                "proposalId": str(uuid.uuid4()),
+                "targetAdapterId": "blender",
+                "plan": plan,
+                "proposedAt": "2026-08-04T12:00:00Z",
+            }
+        )
+        assert extension.get_session() is accepted_session
+        assert extension.get_companion().proposal_session is not None
+        assert not session.receipts
     elif STATE == "forward":
         for _ in range(9):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
@@ -195,7 +220,7 @@ def assert_guidance_pixels():
         flush=True,
     )
 
-    if STATE == "initial":
+    if STATE in {"initial", "proposal"}:
         assert next_step > 0.0003
         assert locked > 0.0001
         assert completed < 0.00003 and back < 0.00003

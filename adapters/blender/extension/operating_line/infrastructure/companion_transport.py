@@ -6,6 +6,7 @@ plain JSON-compatible messages with the main-thread companion controller.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import ipaddress
 import json
 from http.client import HTTPConnection, HTTPException, HTTPResponse
@@ -16,6 +17,7 @@ import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
+import uuid
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
@@ -54,7 +56,7 @@ def validate_companion_url(value: str) -> str:
 
 
 class CompanionTransport:
-    """Poll guide plans and post state reports on one background thread."""
+    """Poll plans/proposals and post reports/decisions on one background thread."""
 
     def __init__(
         self,
@@ -64,6 +66,7 @@ class CompanionTransport:
         *,
         known_plan_id: str | None = None,
         known_revision: int | None = None,
+        known_proposal_id: str | None = None,
         poll_interval: float = 1.0,
         timeout: float = 0.75,
     ) -> None:
@@ -84,6 +87,7 @@ class CompanionTransport:
         self._timeout = timeout
         self.incoming: Queue[dict[str, Any]] = Queue()
         self.outgoing: Queue[dict[str, Any]] = Queue()
+        self.decisions: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -93,6 +97,7 @@ class CompanionTransport:
             raise ValueError("Known plan id and revision must be provided together")
         self._known_plan_id = known_plan_id
         self._known_revision = known_revision
+        self._known_proposal_id = known_proposal_id
         parsed_base_url = urlsplit(self.base_url)
         self._host = parsed_base_url.hostname or "127.0.0.1"
         self._port = parsed_base_url.port or 80
@@ -143,6 +148,24 @@ class CompanionTransport:
     def accept_plan(self, plan_id: str, revision: int) -> None:
         self.control.put(
             {"kind": "plan_accepted", "planId": plan_id, "revision": revision}
+        )
+
+    def decide_proposal(self, proposal_id: str, decision: str) -> None:
+        if decision not in {"accepted", "rejected"}:
+            raise ValueError("Proposal decision must be accepted or rejected")
+        self.control.put({"kind": "proposal_seen", "proposalId": proposal_id})
+        self.decisions.put(
+            {
+                "protocolVersion": "1.0.0",
+                "decisionId": str(uuid.uuid4()),
+                "proposalId": proposal_id,
+                "adapterId": "blender",
+                "instanceId": self._instance_id,
+                "decision": decision,
+                "occurredAt": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            }
         )
 
     def _request_json(
@@ -254,6 +277,8 @@ class CompanionTransport:
             query["knownPlanId"] = self._known_plan_id
         if self._known_revision is not None:
             query["knownRevision"] = str(self._known_revision)
+        if self._known_proposal_id is not None:
+            query["knownProposalId"] = self._known_proposal_id
         response = self._request_json(
             "GET",
             f"/api/v1/companion/guide?{urlencode(query)}",
@@ -266,15 +291,27 @@ class CompanionTransport:
             if not isinstance(plan, dict):
                 raise ValueError("Runtime plan must be an object or null")
             self.incoming.put({"kind": "plan", "plan": plan})
+        proposal = response.get("proposal")
+        if proposal is not None:
+            if not isinstance(proposal, dict):
+                raise ValueError("Runtime proposal must be an object or null")
+            proposal_id = proposal.get("proposalId")
+            if not isinstance(proposal_id, str) or not proposal_id:
+                raise ValueError("Runtime proposal must contain a proposalId")
+            self._known_proposal_id = proposal_id
+            self.incoming.put({"kind": "proposal", "proposal": proposal})
 
     def _run(self) -> None:
         next_poll = 0.0
         pending_report: dict[str, Any] | None = None
+        pending_decision: dict[str, Any] | None = None
         last_error = ""
         while (
             not self._stop.is_set()
             or pending_report is not None
+            or pending_decision is not None
             or not self.outgoing.empty()
+            or not self.decisions.empty()
         ):
             if self._stop.is_set() and time.monotonic() >= self._flush_deadline:
                 break
@@ -288,6 +325,25 @@ class CompanionTransport:
                     if control.get("kind") == "plan_accepted":
                         self._known_plan_id = str(control["planId"])
                         self._known_revision = int(control["revision"])
+                    elif control.get("kind") == "proposal_seen":
+                        self._known_proposal_id = str(control["proposalId"])
+                if pending_decision is None:
+                    try:
+                        pending_decision = self.decisions.get_nowait()
+                    except Empty:
+                        pass
+                if pending_decision is not None:
+                    response = self._request_json(
+                        "POST",
+                        "/api/v1/companion/proposal-decision",
+                        pending_decision,
+                    )
+                    if response.get("result") not in {"accepted", "duplicate"}:
+                        raise ValueError(
+                            "Runtime rejected or did not acknowledge proposal decision"
+                        )
+                    request_succeeded = True
+                    pending_decision = None
                 if pending_report is None:
                     try:
                         pending_report = self.outgoing.get_nowait()

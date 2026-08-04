@@ -540,6 +540,74 @@ def assert_companion_and_plan_semantics() -> None:
     companion.install_plan(deepcopy(BUNDLED_PLAN))
     assert operating_line.get_session().plan_id == BUNDLED_PLAN["id"]
 
+    # AI-authored proposals are fully validated and previewed without replacing
+    # the accepted session or mutating the scene. Start/Next remain gated until
+    # the in-host user accepts or rejects the proposal.
+    accepted_before_review = operating_line.get_session()
+    objects_before_review = {
+        item.as_pointer() for item in bpy.data.objects
+    }
+    reviewed_plan = deepcopy(BUNDLED_PLAN)
+    reviewed_plan["id"] = "reviewed-proposal-plan"
+    reviewed_plan["revision"] = PLAN_REVISION + 10
+    reviewed_plan["title"] = "Reviewed snowman proposal"
+    reviewed_proposal = {
+        "protocolVersion": "1.0.0",
+        "proposalId": str(uuid.uuid4()),
+        "targetAdapterId": "blender",
+        "plan": reviewed_plan,
+        "proposedAt": "2026-08-04T12:00:00Z",
+    }
+    assert companion.stage_proposal(reviewed_proposal) is True
+    assert operating_line.get_session() is accepted_before_review
+    assert companion.proposal_session is not None
+    assert companion.proposal_session.plan_id == "reviewed-proposal-plan"
+    assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
+    assert bpy.ops.operating_line.start() == {"CANCELLED"}
+    assert bpy.ops.operating_line.next() == {"CANCELLED"}
+    assert operating_line.get_session() is accepted_before_review
+    assert bpy.ops.operating_line.reject_proposal() == {"FINISHED"}
+    assert companion.proposed_plan is None and companion.proposal_session is None
+    assert operating_line.get_session() is accepted_before_review
+    assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
+
+    assert companion.stage_proposal(reviewed_proposal) is True
+    assert companion.accept_proposal() is True
+    reviewed_session = operating_line.get_session()
+    assert reviewed_session is not accepted_before_review
+    assert reviewed_session.plan_id == "reviewed-proposal-plan"
+    assert not reviewed_session.started and not reviewed_session.receipts
+    assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
+
+    # Receipt ownership blocks acceptance but keeps Back available. Once Back
+    # reaches the start, acceptance replaces the idle session without executing.
+    reviewed_session.start()
+    reviewed_session.next()
+    lower = bpy.data.objects[EXPECTED[0]]
+    lower_pointer = lower.as_pointer()
+    blocked_plan = deepcopy(BUNDLED_PLAN)
+    blocked_plan["id"] = "blocked-proposal-plan"
+    blocked_plan["revision"] = PLAN_REVISION + 11
+    blocked_proposal = {
+        **reviewed_proposal,
+        "proposalId": str(uuid.uuid4()),
+        "plan": blocked_plan,
+        "proposedAt": "2026-08-04T12:01:00Z",
+    }
+    assert companion.stage_proposal(blocked_proposal) is True
+    assert companion.accept_proposal() is False
+    assert companion.status == "Plan proposal blocked"
+    assert operating_line.get_session() is reviewed_session
+    assert bpy.data.objects[EXPECTED[0]].as_pointer() == lower_pointer
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(EXPECTED[0]) is None
+    assert companion.accept_proposal() is True
+    assert operating_line.get_session().plan_id == "blocked-proposal-plan"
+    assert not operating_line.get_session().receipts
+
+    companion.install_plan(deepcopy(BUNDLED_PLAN))
+    assert operating_line.get_session().plan_id == BUNDLED_PLAN["id"]
+
     # A newer revision is cached without scene mutation while receipts exist,
     # reported once, then installed automatically after Back reaches the start.
     pending_session = operating_line.get_session()

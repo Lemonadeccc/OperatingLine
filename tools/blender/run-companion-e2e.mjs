@@ -107,6 +107,7 @@ const databasePath = join(temporaryDirectory, 'events.db');
 const runtime = await startRuntime({ databasePath, accessToken });
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
+const proposalDecisions = [];
 
 const proxy = createServer(async (request, response) => {
   try {
@@ -142,6 +143,9 @@ const proxy = createServer(async (request, response) => {
         mcpVisibleReportIds.add(report.reportId);
       }
     }
+    if (request.method === 'POST' && request.url === '/api/v1/companion/proposal-decision') {
+      proposalDecisions.push(JSON.parse(body.toString('utf8')));
+    }
     response.writeHead(upstream.status, {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
     });
@@ -160,8 +164,11 @@ try {
   fixture.revision = planRevision;
   fixture.title = rootTitle;
   fixture.steps.find((step) => step.id === fixture.rootStepId).title = rootTitle;
-  const published = await callMcpTool(runtime, 1, 'operatingline.guide.publish', fixture);
-  assert.notEqual(published.result?.isError, true);
+  const proposed = await callMcpTool(runtime, 1, 'operatingline.guide.propose', {
+    targetAdapterId: 'blender',
+    plan: fixture,
+  });
+  assert.notEqual(proposed.result?.isError, true);
 
   const proxyAddress = await listen(proxy);
   assert.ok(proxyAddress && typeof proxyAddress !== 'string');
@@ -188,6 +195,15 @@ try {
   );
   assert.ok(result.maximumPumpSeconds < 0.15);
   assert.equal(result.stepCount, 13);
+  assert.equal(result.proposalReviewedBeforeExecution, true);
+  assert.equal(proposalDecisions.length, 1);
+  assert.deepEqual(
+    {
+      adapterId: proposalDecisions[0].adapterId,
+      decision: proposalDecisions[0].decision,
+    },
+    { adapterId: 'blender', decision: 'accepted' },
+  );
 
   const reports = [...reportsById.values()];
   const transitions = reports.map((report) => report.transition);
@@ -233,7 +249,7 @@ try {
   );
 
   console.log(
-    `OperatingLine live Companion E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine proposal-review Companion E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

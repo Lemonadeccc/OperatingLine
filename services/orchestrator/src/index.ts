@@ -6,7 +6,6 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
-import { validateExecutableTaskPlan } from '@operatingline/domain';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 import {
   adapterStatusSchema,
@@ -14,6 +13,9 @@ import {
   companionGuideRequestSchema,
   companionStateReportSchema,
   guidePlanSchema,
+  guideProposalDecisionSchema,
+  guideProposalSchema,
+  guideProposalSubmissionSchema,
   guideProtocolVersion,
   type CompanionStateReport,
   type GuidePlan,
@@ -21,6 +23,7 @@ import {
 } from '@operatingline/protocol';
 import { z } from 'zod';
 
+import { validateGuidePlanStructure, validateProposalTarget } from './guide-validation.js';
 import { closeAll, throwAfterCleanup, type CleanupStep } from './lifecycle.js';
 
 export interface StartRuntimeOptions {
@@ -77,7 +80,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       mcpEndpoint: null,
     };
     let activePlan: GuidePlan | null = null;
-    const latestRevisionByPlanId = new Map<string, number>();
+    const latestPublishedRevisionByPlanId = new Map<string, number>();
+    const latestProposedRevisionByPlanId = new Map(
+      database
+        .listLatestGuidePlanRevisions()
+        .map(({ planId, revision }) => [planId, revision] as const),
+    );
 
     const getStatus = (): RuntimeStatus => ({
       ...status,
@@ -145,35 +153,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
         async (planInput) => {
           const plan = guidePlanSchema.parse(planInput);
-          const root = plan.steps.find((step) => step.id === plan.rootStepId);
-          if (!root || root.parentId !== null) {
-            throw new Error('Guide plan rootStepId must reference a root step');
-          }
-          const taskNodes = plan.steps.map((step) => ({
-            id: step.id,
-            parentId: step.parentId,
-            order: step.order,
-            dependsOn: step.dependsOn,
-            title: step.title,
-            intent: step.intent,
-            status: step.state,
-          }));
-          const structure = validateExecutableTaskPlan(
-            taskNodes,
-            new Set(plan.steps.filter((step) => step.action !== null).map((step) => step.id)),
-          );
-          if (!structure.valid) {
-            throw new Error(`Invalid guide plan: ${structure.errors.join('; ')}`);
-          }
-          const actionAdapterIds = new Set(
-            plan.steps.flatMap((step) => (step.action === null ? [] : [step.action.adapterId])),
-          );
-          if (actionAdapterIds.size > 1) {
-            throw new Error(
-              'Companion protocol v1 guide plans must target a single action adapter',
-            );
-          }
-          const latestRevision = latestRevisionByPlanId.get(plan.id);
+          validateGuidePlanStructure(plan);
+          const latestRevision = latestPublishedRevisionByPlanId.get(plan.id);
           if (latestRevision !== undefined && plan.revision <= latestRevision) {
             throw new Error(
               `Guide plan ${plan.id} revision ${plan.revision} is not newer than latest accepted revision ${latestRevision}`,
@@ -189,12 +170,54 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             },
           });
           activePlan = plan;
-          latestRevisionByPlanId.set(plan.id, plan.revision);
+          latestPublishedRevisionByPlanId.set(plan.id, plan.revision);
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify({ accepted: true, planId: plan.id, revision: plan.revision }),
+              },
+            ],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.guide.propose',
+        {
+          description:
+            'Validate and submit an AI-authored guide plan for in-host human review. The proposal cannot execute until the target companion accepts it.',
+          inputSchema: guideProposalSubmissionSchema,
+        },
+        async (submissionInput) => {
+          const submission = guideProposalSubmissionSchema.parse(submissionInput);
+          validateProposalTarget(submission.plan, submission.targetAdapterId);
+          const latestRevision = latestProposedRevisionByPlanId.get(submission.plan.id);
+          if (latestRevision !== undefined && submission.plan.revision <= latestRevision) {
+            throw new Error(
+              `Guide plan ${submission.plan.id} revision ${submission.plan.revision} is not newer than latest proposed revision ${latestRevision}`,
+            );
+          }
+          const proposal = guideProposalSchema.parse({
+            protocolVersion: guideProtocolVersion,
+            proposalId: randomUUID(),
+            targetAdapterId: submission.targetAdapterId,
+            plan: submission.plan,
+            proposedAt: new Date().toISOString(),
+          });
+          database.recordGuideProposal(proposal);
+          latestProposedRevisionByPlanId.set(submission.plan.id, submission.plan.revision);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  proposed: true,
+                  proposalId: proposal.proposalId,
+                  targetAdapterId: proposal.targetAdapterId,
+                  planId: proposal.plan.id,
+                  revision: proposal.plan.revision,
+                }),
               },
             ],
           };
@@ -229,7 +252,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
       }
 
-      const { adapterId, knownPlanId, knownRevision } = parsedRequest.data;
+      const { adapterId, instanceId, knownPlanId, knownRevision, knownProposalId } =
+        parsedRequest.data;
       const planAdapterId = activePlan?.steps.find((step) => step.action !== null)?.action
         ?.adapterId;
       const callerHasActiveRevision =
@@ -237,10 +261,31 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         knownPlanId === activePlan.id &&
         knownRevision !== undefined &&
         knownRevision >= activePlan.revision;
+      const storedProposal = database.getPendingGuideProposal(adapterId, instanceId);
+      const pendingProposal =
+        storedProposal === null ? null : guideProposalSchema.parse(storedProposal);
+      const callerHasPendingProposal = pendingProposal?.proposalId === knownProposalId;
       return companionGuideDeliverySchema.parse({
         protocolVersion: guideProtocolVersion,
         plan: planAdapterId === adapterId && !callerHasActiveRevision ? activePlan : null,
+        proposal: callerHasPendingProposal ? null : pendingProposal,
       });
+    });
+    runtimeApp.post('/api/v1/companion/proposal-decision', async (request, reply) => {
+      const parsedDecision = guideProposalDecisionSchema.safeParse(request.body);
+      if (!parsedDecision.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_decision', issues: parsedDecision.error.issues });
+      }
+      const result = database.recordGuideProposalDecision(parsedDecision.data);
+      if (result === 'unknown') {
+        return reply.code(404).send({ result });
+      }
+      if (result === 'conflict') {
+        return reply.code(409).send({ result });
+      }
+      return { result };
     });
     runtimeApp.post('/api/v1/companion/state', async (request, reply) => {
       const parsedReport = companionStateReportSchema.safeParse(request.body);

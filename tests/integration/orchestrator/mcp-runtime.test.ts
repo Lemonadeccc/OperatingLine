@@ -148,6 +148,7 @@ describe('OperatingLine runtime', () => {
               description: 'List the latest known state reported by each host companion.',
             },
             { name: 'operatingline.guide.publish' },
+            { name: 'operatingline.guide.propose' },
           ],
         },
       });
@@ -213,14 +214,14 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
 
       guideUrl.searchParams.set('knownRevision', String(plan.revision + 2));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
       guideUrl.searchParams.set('knownRevision', String(plan.revision));
 
       const nextRevision = { ...plan, revision: plan.revision + 1 };
@@ -241,9 +242,138 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null });
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
     } finally {
       await runtime.stop();
+    }
+  });
+
+  it('delivers AI proposals for explicit in-host decisions without publishing them', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    const instanceId = randomUUID();
+    const otherInstanceId = randomUUID();
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const plan = JSON.parse(
+        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      ) as { id: string; revision: number };
+      const proposed = await callMcpTool(runtime, 30, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        plan,
+      });
+      expect(proposed.result?.isError).not.toBe(true);
+      const proposalResult = JSON.parse(proposed.result?.content?.[0]?.text ?? '{}') as {
+        proposalId?: string;
+      };
+      expect(proposalResult.proposalId).toEqual(expect.any(String));
+
+      await expect(
+        fetch(`${runtime.baseUrl}/api/v1/guide`, { headers }).then((response) => response.json()),
+      ).resolves.toEqual({ plan: null });
+
+      const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      guideUrl.searchParams.set('adapterId', 'blender');
+      guideUrl.searchParams.set('instanceId', instanceId);
+      const delivery = await fetch(guideUrl, { headers });
+      expect(delivery.status).toBe(200);
+      await expect(delivery.json()).resolves.toMatchObject({
+        protocolVersion: '1.0.0',
+        plan: null,
+        proposal: {
+          proposalId: proposalResult.proposalId,
+          targetAdapterId: 'blender',
+          plan: { id: plan.id, revision: plan.revision },
+        },
+      });
+
+      guideUrl.searchParams.set('knownProposalId', proposalResult.proposalId!);
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+
+      const decision = {
+        protocolVersion: '1.0.0',
+        decisionId: randomUUID(),
+        proposalId: proposalResult.proposalId,
+        adapterId: 'blender',
+        instanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      };
+      const accepted = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(decision),
+      });
+      expect(accepted.status).toBe(200);
+      await expect(accepted.json()).resolves.toEqual({ result: 'accepted' });
+
+      const duplicate = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(decision),
+      });
+      await expect(duplicate.json()).resolves.toEqual({ result: 'duplicate' });
+
+      guideUrl.searchParams.delete('knownProposalId');
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toEqual({ protocolVersion: '1.0.0', plan: null, proposal: null });
+
+      guideUrl.searchParams.set('instanceId', otherInstanceId);
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({ proposal: { proposalId: proposalResult.proposalId } });
+
+      const wrongTarget = await callMcpTool(runtime, 31, 'operatingline.guide.propose', {
+        targetAdapterId: 'maya',
+        plan: { ...plan, id: 'wrong-target-plan' },
+      });
+      expect(wrongTarget.result).toMatchObject({ isError: true });
+      expect(wrongTarget.result?.content?.[0]?.text).toContain('not proposal target maya');
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('restores proposed revisions and pending delivery after runtime restart', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-runtime-proposal-test-'));
+    const databasePath = join(directory, 'state.db');
+    const plan = JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    ) as { id: string; revision: number };
+    let runtime: RunningRuntime | undefined;
+    try {
+      runtime = await startRuntime({ databasePath, accessToken });
+      const proposed = await callMcpTool(runtime, 40, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        plan,
+      });
+      expect(proposed.result?.isError).not.toBe(true);
+      await runtime.stop();
+
+      runtime = await startRuntime({ databasePath, accessToken });
+      const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      guideUrl.searchParams.set('adapterId', 'blender');
+      guideUrl.searchParams.set('instanceId', randomUUID());
+      await expect(
+        fetch(guideUrl, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        }).then((response) => response.json()),
+      ).resolves.toMatchObject({ proposal: { plan: { id: plan.id, revision: plan.revision } } });
+
+      const stale = await callMcpTool(runtime, 41, 'operatingline.guide.propose', {
+        targetAdapterId: 'blender',
+        plan,
+      });
+      expect(stale.result).toMatchObject({ isError: true });
+      expect(stale.result?.content?.[0]?.text).toContain('latest proposed revision');
+    } finally {
+      await runtime?.stop();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

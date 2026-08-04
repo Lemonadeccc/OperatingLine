@@ -43,12 +43,17 @@ describe('companion protocol', () => {
     ).toBe(true);
     expect(companionStateReportSchema.safeParse(stateReport()).success).toBe(true);
     expect(
-      companionGuideDeliverySchema.safeParse({ protocolVersion: '1.0.0', plan: null }).success,
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.0.0',
+        plan: null,
+        proposal: null,
+      }).success,
     ).toBe(true);
     expect(
       companionGuideDeliverySchema.safeParse({
         protocolVersion: '1.0.0',
         plan: null,
+        proposal: null,
         extra: true,
       }).success,
     ).toBe(false);
@@ -65,6 +70,16 @@ describe('companion protocol', () => {
         knownPlanId: 'snowman',
       }).success,
     ).toBe(false);
+  });
+
+  it('accepts a standalone known proposal watermark', () => {
+    expect(
+      companionGuideRequestSchema.safeParse({
+        adapterId: 'blender',
+        instanceId: randomUUID(),
+        knownProposalId: randomUUID(),
+      }).success,
+    ).toBe(true);
   });
 
   it('enforces report transition and workflow invariants', () => {

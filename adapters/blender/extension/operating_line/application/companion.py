@@ -33,7 +33,10 @@ class CompanionController:
         self.last_report: dict[str, Any] | None = None
         self.last_delivered_sequence = 0
         self.pending_plan: dict[str, Any] | None = None
+        self.proposed_plan: dict[str, Any] | None = None
+        self.proposal_session: DemoSession | None = None
         self._last_rejected_plan: tuple[Any, ...] | None = None
+        self._last_rejected_proposal: tuple[Any, ...] | None = None
 
     @property
     def connected(self) -> bool:
@@ -96,7 +99,10 @@ class CompanionController:
                 stopping.stop(flush_timeout=0.0)
         self._reap_stopping_transports(wait_timeout)
         self.pending_plan = None
+        self.proposed_plan = None
+        self.proposal_session = None
         self._last_rejected_plan = None
+        self._last_rejected_proposal = None
 
     def _reap_stopping_transports(self, wait_timeout: float = 0.0) -> None:
         deadline = time.monotonic() + max(0.0, wait_timeout)
@@ -114,10 +120,10 @@ class CompanionController:
         if self._transport is None:
             self.status = "Disconnecting" if still_stopping else "Offline"
 
-    def install_plan(self, plan: dict[str, Any]) -> bool:
-        """Validate fully before replacing the active session."""
-        from .. import get_session, replace_session
-
+    @staticmethod
+    def _validated_session(plan: dict[str, Any]) -> DemoSession:
+        if not isinstance(plan, dict):
+            raise ValueError("Plan must be a JSON object")
         if plan.get("protocolVersion") != PROTOCOL_VERSION:
             raise ValueError("Unsupported guide protocol version")
         plan_id = plan.get("id")
@@ -128,7 +134,16 @@ class CompanionController:
             raise ValueError("Plan revision must be a positive integer")
         root = load_task_tree_data(plan)
         actions = action_registry(root)  # validates adapter/action allowlist and arguments
-        replacement = DemoSession(root, actions, plan_id=plan_id, revision=revision)
+        return DemoSession(root, actions, plan_id=plan_id, revision=revision)
+
+    def install_plan(self, plan: dict[str, Any]) -> bool:
+        """Validate fully before replacing the active session."""
+        from .. import get_session, replace_session
+
+        replacement = self._validated_session(plan)
+        plan_id = replacement.plan_id
+        revision = replacement.revision
+        assert plan_id is not None and revision is not None
         current = get_session()
         if (
             current.plan_id == plan_id
@@ -174,6 +189,109 @@ class CompanionController:
         self.error = ""
         self._last_rejected_plan = None
         self.report("plan_loaded")
+        return True
+
+    def stage_proposal(self, proposal: dict[str, Any]) -> bool:
+        """Validate an AI-authored proposal without replacing or executing a session."""
+        if not isinstance(proposal, dict):
+            raise ValueError("Proposal must be a JSON object")
+        expected_fields = {
+            "protocolVersion",
+            "proposalId",
+            "targetAdapterId",
+            "plan",
+            "proposedAt",
+        }
+        if set(proposal) != expected_fields:
+            raise ValueError("Proposal fields do not match the versioned protocol")
+        if proposal.get("protocolVersion") != PROTOCOL_VERSION:
+            raise ValueError("Unsupported proposal protocol version")
+        proposal_id = proposal.get("proposalId")
+        if not isinstance(proposal_id, str):
+            raise ValueError("Proposal id must be a UUID")
+        try:
+            uuid.UUID(proposal_id)
+        except ValueError as error:
+            raise ValueError("Proposal id must be a UUID") from error
+        if proposal.get("targetAdapterId") != "blender":
+            raise ValueError("Proposal does not target the Blender adapter")
+        proposed_at = proposal.get("proposedAt")
+        if not isinstance(proposed_at, str):
+            raise ValueError("Proposal timestamp must include a timezone")
+        try:
+            parsed_time = datetime.fromisoformat(proposed_at.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("Proposal timestamp must be an ISO date-time") from error
+        if parsed_time.tzinfo is None:
+            raise ValueError("Proposal timestamp must include a timezone")
+
+        replacement = self._validated_session(proposal.get("plan"))
+        if (
+            self.proposed_plan is not None
+            and self.proposed_plan.get("proposalId") == proposal_id
+        ):
+            return True
+        self.proposed_plan = proposal
+        self.proposal_session = replacement
+        self._last_rejected_proposal = None
+        self.error = ""
+        self.status = (
+            f"Plan proposal {replacement.plan_id} r{replacement.revision} awaiting review"
+        )
+        return True
+
+    def accept_proposal(self) -> bool:
+        """Install the staged proposal only when the active session owns no effects."""
+        from .. import get_session
+
+        proposal = self.proposed_plan
+        if proposal is None or self.proposal_session is None:
+            self.error = "No plan proposal is awaiting review"
+            return False
+        if get_session().receipts:
+            message = (
+                "Plan proposal is blocked; use Back to roll the active walkthrough "
+                "to its start first"
+            )
+            self.error = message
+            self.status = "Plan proposal blocked"
+            self.report("error", error=message)
+            return False
+
+        proposal_id = proposal["proposalId"]
+        if not self.install_plan(proposal["plan"]):
+            return False
+        transport = self._transport
+        if transport is not None:
+            transport.decide_proposal(proposal_id, "accepted")
+        self.proposed_plan = None
+        self.proposal_session = None
+        self._last_rejected_proposal = None
+        self.status = f"Plan {get_session().plan_id} r{get_session().revision} accepted"
+        self.error = ""
+        return True
+
+    def reject_proposal(self) -> bool:
+        """Reject the staged proposal without changing the active session or scene."""
+        from .. import get_session
+
+        proposal = self.proposed_plan
+        if proposal is None:
+            self.error = "No plan proposal is awaiting review"
+            return False
+        transport = self._transport
+        if transport is not None:
+            transport.decide_proposal(proposal["proposalId"], "rejected")
+        self.proposed_plan = None
+        self.proposal_session = None
+        self._last_rejected_proposal = None
+        session = get_session()
+        self.status = (
+            f"Plan {session.plan_id} r{session.revision}"
+            if session.plan_id is not None and session.revision is not None
+            else ("Connected" if self.connected else "Offline")
+        )
+        self.error = ""
         return True
 
     def pump(self) -> float | None:
@@ -224,17 +342,52 @@ class CompanionController:
                             self.error = str(error)
                             self.status = "Plan rejected"
                             self.report("error", error=self.error)
+                elif message.get("kind") == "proposal":
+                    proposal = message.get("proposal")
+                    try:
+                        self.stage_proposal(proposal)
+                    except (KeyError, TypeError, ValueError) as error:
+                        proposal_id = (
+                            proposal.get("proposalId")
+                            if isinstance(proposal, dict)
+                            else None
+                        )
+                        valid_proposal_id = False
+                        if isinstance(proposal_id, str):
+                            try:
+                                uuid.UUID(proposal_id)
+                                valid_proposal_id = True
+                            except ValueError:
+                                pass
+                        if valid_proposal_id:
+                            transport.decide_proposal(proposal_id, "rejected")
+                        rejection_fingerprint = (
+                            proposal_id if valid_proposal_id else str(error),
+                            str(error),
+                        )
+                        if rejection_fingerprint != self._last_rejected_proposal:
+                            self._last_rejected_proposal = rejection_fingerprint
+                            self.error = str(error)
+                            self.status = "Plan proposal rejected"
+                            self.report("error", error=self.error)
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"
                 elif message.get("kind") == "recovered":
                     self.error = ""
                     session = get_session()
-                    self.status = (
-                        f"Plan {session.plan_id} r{session.revision}"
-                        if session.plan_id is not None and session.revision is not None
-                        else "Connected"
-                    )
+                    if self.proposal_session is not None:
+                        self.status = (
+                            f"Plan proposal {self.proposal_session.plan_id} "
+                            f"r{self.proposal_session.revision} awaiting review"
+                        )
+                    else:
+                        self.status = (
+                            f"Plan {session.plan_id} r{session.revision}"
+                            if session.plan_id is not None
+                            and session.revision is not None
+                            else "Connected"
+                        )
         if not self._timer_registered:
             return None
         return 0.2 if self.connected else 1.0

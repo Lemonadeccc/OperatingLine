@@ -1,4 +1,4 @@
-"""Operators exposing the snowman demo use cases."""
+"""Operators exposing accepted-plan guidance and proposal review use cases."""
 
 import bpy
 
@@ -25,10 +25,14 @@ def _companion():
 class OPERATINGLINE_OT_start(bpy.types.Operator):
     bl_idname = "operating_line.start"
     bl_label = "Start"
-    bl_description = "Reset and start the snowman walkthrough"
+    bl_description = "Reset and start the active walkthrough"
     bl_options = {"REGISTER"}
 
     def execute(self, context):
+        if _companion().proposed_plan is not None:
+            message = "Accept or reject the pending plan proposal before starting"
+            self.report({"WARNING"}, message)
+            return {"CANCELLED"}
         session = _session()
         try:
             session.start()
@@ -56,10 +60,14 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
 class OPERATINGLINE_OT_next(bpy.types.Operator):
     bl_idname = "operating_line.next"
     bl_label = "Next"
-    bl_description = "Execute the next deterministic snowman step"
+    bl_description = "Execute the next accepted plan step"
     bl_options = {"REGISTER"}
 
     def execute(self, _context):
+        if _companion().proposed_plan is not None:
+            message = "Accept or reject the pending plan proposal before continuing"
+            self.report({"WARNING"}, message)
+            return {"CANCELLED"}
         session = _session()
         next_index = session.active_index + 1
         candidate = (
@@ -81,7 +89,7 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
 class OPERATINGLINE_OT_back(bpy.types.Operator):
     bl_idname = "operating_line.back"
     bl_label = "Back"
-    bl_description = "Roll back the active action-owned snowman step"
+    bl_description = "Compensate the active action-owned plan step"
     bl_options = {"REGISTER"}
 
     def execute(self, _context):
@@ -129,6 +137,34 @@ class OPERATINGLINE_OT_disconnect(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class OPERATINGLINE_OT_accept_proposal(bpy.types.Operator):
+    bl_idname = "operating_line.accept_proposal"
+    bl_label = "Accept Plan"
+    bl_description = "Accept the reviewed proposal as the active plan without executing it"
+
+    def execute(self, _context):
+        companion = _companion()
+        if companion.accept_proposal():
+            self.report({"INFO"}, "Plan accepted; no step has executed yet")
+            return {"FINISHED"}
+        self.report({"ERROR"}, companion.error or "Plan proposal could not be accepted")
+        return {"CANCELLED"}
+
+
+class OPERATINGLINE_OT_reject_proposal(bpy.types.Operator):
+    bl_idname = "operating_line.reject_proposal"
+    bl_label = "Reject Plan"
+    bl_description = "Reject the proposal without changing the active plan or scene"
+
+    def execute(self, _context):
+        companion = _companion()
+        if companion.reject_proposal():
+            self.report({"INFO"}, "Plan proposal rejected; active plan preserved")
+            return {"FINISHED"}
+        self.report({"ERROR"}, companion.error or "No plan proposal is awaiting review")
+        return {"CANCELLED"}
+
+
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
     bl_idname = "operating_line.toggle_overlay"
     bl_label = "Show or Hide Guidance"
@@ -158,6 +194,8 @@ class OPERATINGLINE_OT_toggle_branch(bpy.types.Operator):
 CLASSES = (
     OPERATINGLINE_OT_connect,
     OPERATINGLINE_OT_disconnect,
+    OPERATINGLINE_OT_accept_proposal,
+    OPERATINGLINE_OT_reject_proposal,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_back,

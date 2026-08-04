@@ -9,6 +9,9 @@ import {
   companionGuideRequestSchema,
   companionStateReportSchema,
   guidePlanSchema,
+  guideProposalDecisionSchema,
+  guideProposalSchema,
+  guideProposalSubmissionSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
@@ -25,6 +28,21 @@ const schemas = [
     'adapter-status.schema.json',
     'https://operatingline.dev/schema/v1/adapter-status.json',
     adapterStatusSchema,
+  ],
+  [
+    'guide-proposal-submission.schema.json',
+    'https://operatingline.dev/schema/v1/guide-proposal-submission.json',
+    guideProposalSubmissionSchema,
+  ],
+  [
+    'guide-proposal.schema.json',
+    'https://operatingline.dev/schema/v1/guide-proposal.json',
+    guideProposalSchema,
+  ],
+  [
+    'guide-proposal-decision.schema.json',
+    'https://operatingline.dev/schema/v1/guide-proposal-decision.json',
+    guideProposalDecisionSchema,
   ],
   [
     'companion-guide-request.schema.json',
