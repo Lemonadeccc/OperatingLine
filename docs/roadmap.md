@@ -29,12 +29,15 @@
 - [x] 跨目标结构规划质量基线：catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
+- [x] 供应商无关 Planner Packet：MCP Prompt、MCP Tool 与 HTTP 复用同一版本化构建器，提供一致的
+      PlanningContext、Proposal 草案 Schema 和 evaluate→propose 规则；生成事件进入 Eval，不依赖
+      已弃用的 MCP Sampling，也不在 Orchestrator 保存模型密钥。
 
 ## 后续里程碑
 
-- [ ] 任意目标语义规划与可选 planner 集成：由 Codex、Claude 或其他 MCP 客户端根据
-      PlanningContext 选择目标所需阶段并生成新 GuideProposal；扩展人工标注的跨目标数据集，不能把
-      当前确定性结构门禁写成“模型已经理解任意目标”。核心不绑定某一家模型。
+- [ ] 任意目标语义规划与可选 provider/plugin：由 Codex、Claude 或其他 MCP 客户端消费已完成的
+      Planner Packet，或由显式配置的 provider/plugin 生成新 GuideProposal；扩展人工标注的跨目标
+      数据集，不能把当前确定性提示和结构门禁写成“模型已经理解任意目标”。核心不绑定某一家模型。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
 - [ ] Eval 评分与数据治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分和

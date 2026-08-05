@@ -18,6 +18,14 @@ export const planningIntentSchema = z.strictObject({
 });
 export type PlanningIntent = z.infer<typeof planningIntentSchema>;
 
+export const planningProposalDraftSchema = z.strictObject({
+  targetAdapterId: z.string().trim().min(1).max(180),
+  catalogVersion: catalogVersionSchema,
+  planning: planningIntentSchema,
+  plan: guidePlanSchema,
+});
+export type PlanningProposalDraft = z.infer<typeof planningProposalDraftSchema>;
+
 export const planningQualityEvaluationRequestSchema = z.strictObject({
   targetAdapterId: z.string().trim().min(1).max(180),
   catalogVersion: catalogVersionSchema.optional(),

@@ -27,6 +27,7 @@ import {
   planningContextSchema,
   planningQualityBaselineVersion,
   planningQualityEvaluationRequestSchema,
+  planningPromptRequestSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
@@ -41,6 +42,7 @@ import { createActionCatalogRegistry } from './action-catalogs.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+import { buildPlanningPromptPacket } from './planning-prompt.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
 import {
   validateGuidePlanAgainstActionCatalog,
@@ -198,6 +200,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         payload: { request, context },
       });
       return context;
+    };
+
+    const getPlanningPrompt = (request: ReturnType<typeof planningPromptRequestSchema.parse>) => {
+      const context = getPlanningContext(
+        planningContextRequestSchema.parse({
+          targetAdapterId: request.targetAdapterId,
+          ...(request.catalogVersion === undefined
+            ? {}
+            : { catalogVersion: request.catalogVersion }),
+          goal: request.goal,
+          planId: request.planId,
+        }),
+      );
+      const packet = buildPlanningPromptPacket(context);
+      database.appendEvent({
+        id: randomUUID(),
+        eventType: 'planning.prompt.generated',
+        payload: { request, packet },
+      });
+      return packet;
     };
 
     const getEvalExport = (request: ReturnType<typeof evalExportRequestSchema.parse>) =>
@@ -407,6 +429,44 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           const request = planningQualityEvaluationRequestSchema.parse(requestInput);
           return {
             content: [{ type: 'text', text: JSON.stringify(getPlanningQuality(request)) }],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.planning.prompt.get',
+        {
+          description:
+            'Build a deterministic, versioned model prompt packet containing the exact host catalog, planning context, GuideProposal JSON contract, and evaluate-then-propose workflow. This does not call a model.',
+          inputSchema: planningPromptRequestSchema,
+        },
+        async (requestInput) => {
+          const request = planningPromptRequestSchema.parse(requestInput);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(getPlanningPrompt(request)) }],
+          };
+        },
+      );
+
+      server.registerPrompt(
+        'operatingline.plan_and_propose',
+        {
+          title: 'Plan and propose an OperatingLine guide',
+          description:
+            'Generate a complete host-specific GuideProposal candidate from a natural-language goal, then validate and submit it through OperatingLine tools.',
+          argsSchema: planningPromptRequestSchema,
+        },
+        async (requestInput) => {
+          const request = planningPromptRequestSchema.parse(requestInput);
+          const packet = getPlanningPrompt(request);
+          return {
+            description: `OperatingLine planning workflow for ${request.targetAdapterId}@${packet.context.catalog.catalogVersion}`,
+            messages: [
+              {
+                role: 'user' as const,
+                content: { type: 'text' as const, text: packet.renderedPrompt },
+              },
+            ],
           };
         },
       );
@@ -652,6 +712,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/planning/prompt', async (request, reply) => {
+      const parsedRequest = planningPromptRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return getPlanningPrompt(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'planning_prompt_unavailable',
+          message: error instanceof Error ? error.message : 'Unknown planning prompt error',
+        });
+      }
+    });
     runtimeApp.get('/api/v1/eval/export', async (request, reply) => {
       const parsedRequest = evalExportRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -849,4 +925,5 @@ export { createActionCatalogRegistry };
 export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+export { buildPlanningPromptPacket } from './planning-prompt.js';
 export { evaluatePlanningQuality } from './planning-quality.js';

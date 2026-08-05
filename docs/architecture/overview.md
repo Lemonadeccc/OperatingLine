@@ -38,6 +38,12 @@ PlanningQualityReport
   ├─ resource dependency + visible-guidance findings
   └─ no semantic or aesthetic score
 
+PlanningPromptPacket
+  ├─ exact PlanningContext + catalog version
+  ├─ strict GuideProposal draft JSON Schema
+  ├─ deterministic planning workflow instructions
+  └─ MCP Prompt / Tool / HTTP delivery, no embedded model
+
 GuideRevisionRequest
   ├─ requestId + adapterId + instanceId + catalogVersion
   ├─ complete immutable base Plan
@@ -118,7 +124,8 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `step_succeeded` transition，也不触发自动补偿。它不能被规划器或 eval 当作已验证成功；
 动作结果与观察判定、补偿策略的分离仍属于下一阶段。
 
-当前“AI 规划”边界是 model-neutral：Codex、Claude 或其他 MCP 客户端先调用
+当前“AI 规划”边界是 model-neutral：Codex、Claude 或其他 MCP 客户端先选择
+`operatingline.plan_and_propose` MCP Prompt、调用 `operatingline.planning.prompt.get` Tool，或直接调用
 `operatingline.planning.context`，取得目标宿主的精确版本化目录、Companion 状态、revision 提示、
 计划约束和目录声明的有序阶段。客户端根据自然语言目标选择 `requiredPhaseIds` 并生成完整
 GuidePlan，再调用 `operatingline.planning.evaluate`。版本化 `1.0.0` 质量门确定性检查根阶段树、
@@ -126,11 +133,18 @@ GuidePlan，再调用 `operatingline.planning.evaluate`。版本化 `1.0.0` 质�
 intent 重跑质量门，有 error 时不会持久化 Proposal。每次检查会追加
 `planning.quality.evaluated` 事件用于 replay/Eval。
 
+Planner Packet `1.0.0` 把完整上下文、严格 Proposal 草案 JSON Schema 和相同工作流规则作为一个
+确定性协议对象；同一构建器为 MCP Prompt 提供渲染文本，并让 MCP Tool/HTTP 返回完整 packet。
+`planning.prompt.generated` 进入同一证据链。Prompt 是用户控制入口，Tool 是模型控制入口，两者都由
+客户端选择模型和发送授权。
+Orchestrator 不调用模型、不读取供应商密钥，也不依赖从 2026-07-28 起已弃用的 MCP Sampling。
+
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段由调用方显式声明。质量报告
 没有总分，只证明候选 Plan 满足当前目录可表达的结构与资源流约束。它不判断结果是否好看、目标
 语义是否完整，也不替代 Blender Companion 对嵌套参数和真实宿主状态的最终验证。当前雪人与机器人
 两个可重放参考证明质量门不再只绑定一个题材，但不能外推为任意自然语言目标已经可靠。详细决策见
-[ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。
+[ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。Planner Packet 的供应商边界见
+[ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
 
 ## Eval/replay 证据边界
 
@@ -143,7 +157,8 @@ Orchestrator 通过 Proposal/RevisionRequest ID 解析跨事件关联，因此�
 
 内容摘要覆盖协议/格式版本、scope、目录、事件页、分页信息、汇总和数据处理声明，不包含随机
 `exportId`、`exportedAt` 或摘要自身。相同事实页因而得到相同 SHA-256。当前实现不自动脱敏，也不
-计算质量分数；`planning.quality.evaluated` 中的确定性 finding 与 `satisfied: false` observation
+计算质量分数；`planning.prompt.generated` 的输入契约、`planning.quality.evaluated` 中的确定性
+finding 与 `satisfied: false` observation
 都保持原始事实，不会被导出层改写成主观语义评分或执行失败结论。调用方在分享或训练前必须审核
 敏感内容。详细决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
@@ -170,6 +185,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0005](../adr/0005-versioned-action-catalog-planning-context.md)。
 跨目标规划阶段画像与确定性质量门见
 [ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。
+供应商无关 Planner Packet 见
+[ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

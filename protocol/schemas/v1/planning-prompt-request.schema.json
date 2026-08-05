@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "targetAdapterId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "catalogVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "planId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    }
+  },
+  "required": [
+    "targetAdapterId",
+    "goal",
+    "planId"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/planning-prompt-request.json"
+}

@@ -96,6 +96,13 @@ function planningContextMatches(payload: unknown, request: EvalExportRequest): b
   );
 }
 
+function planningPromptMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    stringAt(payload, 'packet', 'context', 'targetAdapterId') === request.targetAdapterId &&
+    stringAt(payload, 'packet', 'context', 'requestedPlanId') === request.planId
+  );
+}
+
 function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boolean {
   const plan = recordAt(payload, 'plan');
   const planId = stringAt(plan, 'id') ?? stringAt(payload, 'planId');
@@ -167,6 +174,8 @@ function eventMatches(
   switch (event.eventType) {
     case 'planning.context.generated':
       return planningContextMatches(event.payload, request);
+    case 'planning.prompt.generated':
+      return planningPromptMatches(event.payload, request);
     case 'planning.quality.evaluated':
       return (
         stringAt(event.payload, 'targetAdapterId') === request.targetAdapterId &&

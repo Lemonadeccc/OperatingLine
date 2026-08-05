@@ -23,6 +23,13 @@
 绑定为可重放案例；当前非雪人案例位于
 `fixtures/v1/planning/robot-preview.benchmark.json`。
 
+`planning-prompt-request.schema.json`、`planning-prompt-context.schema.json`、
+`planning-prompt-packet.schema.json` 和
+`planning-proposal-draft.schema.json` 定义供应商无关的模型交接契约。Packet 包含完整
+PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和确定性渲染提示；同一 packet
+构建器服务 MCP Prompt、MCP Tool 和 HTTP；Prompt 呈现渲染文本，Tool/HTTP 返回完整 packet。
+它不调用模型，也不改变宿主内人工接受门禁。
+
 `guide-revision-request.schema.json` 定义宿主创建的不可变节点修订请求；
 `guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
@@ -44,6 +51,8 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - 树形父子关系用于呈现和引用，`dependsOn` 用于执行调度。
 - 带 `planningPhases` 的目录必须把每个 action 恰好分配到一个阶段；旧目录没有阶段画像时，质量
   评估显式降级并产生 warning，不能伪装成完整检查。
+- Planner Packet 只为带阶段画像与质量门的目录生成；客户端必须把草案先交给质量门，再提交完整
+  Proposal，不能把 prompt 输出本身视为执行授权。
 - 步骤 ID 使用 `[A-Za-z0-9][A-Za-z0-9._:-]*`；ASCII 序关系保证不同语言的稳定排序一致。
 - 同一 Plan ID 的 `revision` 必须严格递增；切换到其他计划后也不能重新发布旧 revision。
 - AI 计划使用 `GuideProposal` 信封投递；接收和校验不等于接受，只有宿主内显式

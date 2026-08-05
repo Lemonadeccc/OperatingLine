@@ -20,6 +20,7 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 
 - 与计划关联的 PlanningContext（含用户目标和当时的完整目录）、完整 Plan/Proposal、节点修订请求、
   请求—Proposal 关联和人工接受/拒绝决定；
+- 与计划关联的版本化 Planner Packet、严格输出契约和固定工作流规则；
 - 与候选计划关联的确定性 planning-quality 请求、阶段覆盖和 error/warning findings；
 - 对应实例的逐步状态、observation、错误和 `step_rolled_back` 记录；
 - 所有被事件引用的精确 ActionCatalog 版本；没有历史引用时包含当前目标宿主的最新目录；

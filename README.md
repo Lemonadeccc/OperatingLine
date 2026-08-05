@@ -12,8 +12,9 @@
 > 与内容哈希的 Eval/replay 原始证据。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准；可选模型集成、参数表单编辑、自动评分/训练治理和第二
-> 宿主仍在路线图中。
+> Blender 4.5/5.1 中真实执行的机器人基准。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
+> HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；内置
+> 模型 provider、参数表单编辑、自动评分/训练治理和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -44,6 +45,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；Proposal 会再次执行同一确定性门禁。
   报告只有可追溯的 error/warning，不虚构主观分数。
+- **供应商无关 Planner Packet**：`operatingline.plan_and_propose` MCP Prompt、
+  `operatingline.planning.prompt.get` Tool 与 `POST /api/v1/planning/prompt` 复用同一版本化 packet
+  构建器；Prompt 呈现其中的 `renderedPrompt`，Tool/HTTP 返回完整 packet。它内含精确
+  PlanningContext、严格 GuideProposal 草案 JSON Schema 和 evaluate→propose 规则。客户端
+  选择自己的模型和发送授权；Orchestrator 不读取模型 API Key，也不使用已弃用的 MCP Sampling。
 - **节点引用与请求关联重规划**：Blender 的活动树和待审树都提供 `Ref`；Revision request 绑定
   完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
   更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
@@ -73,8 +79,9 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > [!IMPORTANT]
 > 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，以及“外部 AI 生成计划 → Blender 内
 > 预览 → 人工接受/拒绝”的通用审批基础，不是“AI 已能自动完成任意 Blender 任务”。
-> OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先调用
-> `operatingline.planning.context`，依据返回的阶段画像生成候选计划，再调用
+> OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先选择
+> `operatingline.plan_and_propose` Prompt 或调用 `operatingline.planning.prompt.get` Tool 取得统一规划
+> packet；也可继续直接调用 `operatingline.planning.context`。客户端依据阶段画像生成候选计划，再调用
 > `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录仍只覆盖 10 个已验证动作，
 > 阶段选择仍由外部模型根据目标声明，因此这不等于已经内置“任意任务自动拆解”。当前修订输入不是
 > 内置模型或流式聊天；已经支持可追溯的
@@ -128,6 +135,10 @@ action 可以安全地出现在多个步骤中。
 [ADR 0009](docs/adr/0009-linear-revision-threads-and-plan-diffs.md)。
 可分页修订消息历史与同实例接受门禁见
 [ADR 0010](docs/adr/0010-paginated-revision-history.md)。
+跨目标阶段画像与确定性质量门见
+[ADR 0011](docs/adr/0011-cross-target-planning-quality-gate.md)。
+供应商无关 Planner Packet 与 MCP Prompt 见
+[ADR 0012](docs/adr/0012-provider-neutral-planner-packets.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -197,8 +208,10 @@ pnpm dev
 3. `Bearer token` 填写同一个 Token；该字段使用 `SKIP_SAVE`，不会写入 `.blend`。
 4. 点击 `Connect`。连接成功后，Extension 会保留当前离线计划，并只拉取 ID/revision 更新的计划。
 5. 把 Codex、Claude 或其他 MCP Client 连接到 `http://127.0.0.1:43123/mcp`。AI 生成的计划
-   应先调用 `operatingline.planning.context`，传入目标宿主、自然语言 `goal` 和稳定 `planId`；根据
-   返回的精确 catalog、`planningPhases` 和 `recommendedRevision` 构造完整 GuidePlan。然后调用
+   可由用户选择 `operatingline.plan_and_propose` MCP Prompt，或让模型调用
+   `operatingline.planning.prompt.get`，传入目标宿主、自然语言 `goal` 和稳定 `planId`；没有这些
+   客户端能力时仍可直接调用 `operatingline.planning.context`。根据返回的精确 catalog、
+   `planningPhases`、`recommendedRevision` 和响应 Schema 构造完整 GuideProposal 草案。然后调用
    `operatingline.planning.evaluate`，传入目标、候选 Plan 和模型从目标中选择的
    `requiredPhaseIds`；解决全部 error 后再调用 `operatingline.guide.propose`，并把同一
    `{ goal, requiredPhaseIds }` 放入可选 `planning` 字段。Blender 内会出现待审树，
@@ -385,10 +398,11 @@ OPERATINGLINE_ACCESS_TOKEN=development-token OPERATINGLINE_PORT=43123 pnpm dev
 服务只监听 `127.0.0.1`，启动日志会输出 MCP endpoint。当前注册的 MCP tools 为
 `operatingline.health`、`operatingline.adapters.list`、`operatingline.companions.list`、
 `operatingline.action_catalog.get`、`operatingline.planning.context`、
-`operatingline.planning.evaluate`、
+`operatingline.planning.evaluate`、`operatingline.planning.prompt.get`、
 `operatingline.replan.requests.list`、`operatingline.replan.thread.get`、`operatingline.eval.export`、
 `operatingline.replan.propose`、
-`operatingline.guide.publish` 和 `operatingline.guide.propose`。
+`operatingline.guide.publish` 和 `operatingline.guide.propose`。此外注册了用户可选择的 MCP Prompt
+`operatingline.plan_and_propose`。
 
 ## 提交规范
 
@@ -408,8 +422,9 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 审批、Blender 内引导与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环，以及受限的
 现有 MCP Bridge。当前仍未完成：
 
-1. 接入可选 planner，并把当前两目标的结构质量基线扩展为更大、带人工语义判定的数据集；当前
-   Codex/Claude 等外部 MCP 客户端负责目标理解和阶段选择，OperatingLine 负责确定性验证。
+1. 在已完成的供应商无关 Planner Packet 上接入可选 provider/plugin，并把当前两目标的结构质量
+   基线扩展为更大、带人工语义判定的数据集；当前 Codex/Claude 等外部 MCP 客户端负责目标理解和
+   阶段选择，OperatingLine 负责确定性提示契约、验证和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。
 3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender

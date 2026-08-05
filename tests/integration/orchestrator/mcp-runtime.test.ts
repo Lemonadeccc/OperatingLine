@@ -58,6 +58,11 @@ interface McpToolResponse {
   };
 }
 
+interface McpResponse<TResult> {
+  result?: TResult;
+  error?: { code?: number; message?: string };
+}
+
 function companionReport(instanceId: string, sequence: number) {
   return {
     protocolVersion: '1.0.0',
@@ -85,6 +90,18 @@ async function callMcpTool(
   name: string,
   argumentsValue: unknown,
 ): Promise<McpToolResponse> {
+  return callMcpRequest<NonNullable<McpToolResponse['result']>>(runtime, id, 'tools/call', {
+    name,
+    arguments: argumentsValue,
+  });
+}
+
+async function callMcpRequest<TResult>(
+  runtime: RunningRuntime,
+  id: number,
+  method: string,
+  params?: unknown,
+): Promise<McpResponse<TResult>> {
   const response = await fetch(runtime.mcpEndpoint, {
     method: 'POST',
     headers: {
@@ -96,8 +113,8 @@ async function callMcpTool(
     body: JSON.stringify({
       jsonrpc: '2.0',
       id,
-      method: 'tools/call',
-      params: { name, arguments: argumentsValue },
+      method,
+      ...(params === undefined ? {} : { params }),
     }),
   });
   if (!response.ok) {
@@ -107,7 +124,7 @@ async function callMcpTool(
   if (dataLine === undefined) {
     throw new Error('MCP tool call did not return an SSE data event');
   }
-  return JSON.parse(dataLine.slice('data: '.length)) as McpToolResponse;
+  return JSON.parse(dataLine.slice('data: '.length)) as McpResponse<TResult>;
 }
 
 describe('OperatingLine runtime', () => {
@@ -156,6 +173,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.planning.evaluate' },
+            { name: 'operatingline.planning.prompt.get' },
             { name: 'operatingline.replan.requests.list' },
             { name: 'operatingline.replan.thread.get' },
             { name: 'operatingline.eval.export' },
@@ -248,6 +266,57 @@ describe('OperatingLine runtime', () => {
         },
       });
 
+      const promptToolResponse = await callMcpTool(
+        runtime,
+        110,
+        'operatingline.planning.prompt.get',
+        {
+          targetAdapterId: 'blender',
+          goal,
+          planId: 'mascot-prompt-demo',
+        },
+      );
+      const promptPacket = JSON.parse(promptToolResponse.result?.content?.[0]?.text ?? '{}') as {
+        formatVersion?: string;
+        context?: { requestedPlanId?: string; catalog?: { catalogVersion?: string } };
+        responseContract?: { schema?: { additionalProperties?: boolean } };
+        renderedPrompt?: string;
+      };
+      expect(promptPacket).toMatchObject({
+        formatVersion: '1.0.0',
+        context: {
+          requestedPlanId: 'mascot-prompt-demo',
+          catalog: { catalogVersion },
+        },
+        responseContract: { schema: { additionalProperties: false } },
+      });
+      expect(promptPacket.renderedPrompt).toContain('operatingline.planning.evaluate');
+
+      const prompts = await callMcpRequest<{
+        prompts?: Array<{ name?: string; title?: string }>;
+      }>(runtime, 1101, 'prompts/list');
+      expect(prompts.result?.prompts).toContainEqual(
+        expect.objectContaining({ name: 'operatingline.plan_and_propose' }),
+      );
+      const prompt = await callMcpRequest<{
+        description?: string;
+        messages?: Array<{ content?: { type?: string; text?: string } }>;
+      }>(runtime, 1102, 'prompts/get', {
+        name: 'operatingline.plan_and_propose',
+        arguments: {
+          targetAdapterId: 'blender',
+          catalogVersion,
+          goal,
+          planId: 'mascot-prompt-demo',
+        },
+      });
+      expect(prompt.error).toBeUndefined();
+      expect(prompt.result?.description).toContain(`blender@${catalogVersion}`);
+      expect(prompt.result?.messages?.[0]?.content).toMatchObject({
+        type: 'text',
+        text: promptPacket.renderedPrompt,
+      });
+
       const fixture = JSON.parse(
         readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
       ) as Record<string, unknown>;
@@ -312,6 +381,22 @@ describe('OperatingLine runtime', () => {
       });
       expect(httpQuality.status).toBe(200);
       await expect(httpQuality.json()).resolves.toMatchObject({ valid: true });
+
+      const httpPrompt = await fetch(`${runtime.baseUrl}/api/v1/planning/prompt`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          catalogVersion,
+          goal,
+          planId: 'mascot-prompt-demo',
+        }),
+      });
+      expect(httpPrompt.status).toBe(200);
+      await expect(httpPrompt.json()).resolves.toEqual(promptPacket);
 
       const unavailable = await callMcpTool(runtime, 14, 'operatingline.action_catalog.get', {
         targetAdapterId: 'gimp',
@@ -381,7 +466,7 @@ describe('OperatingLine runtime', () => {
 
     try {
       const goal = 'Create a beginner-friendly snowman and retain every rollback observation.';
-      await callMcpTool(runtime, 50, 'operatingline.planning.context', {
+      await callMcpTool(runtime, 50, 'operatingline.planning.prompt.get', {
         targetAdapterId: 'blender',
         goal,
         planId: plan.id,
@@ -478,7 +563,7 @@ describe('OperatingLine runtime', () => {
         targetAdapterId: 'blender',
         planId: plan.id,
         instanceId,
-        limit: 2,
+        limit: 3,
       });
       expect(firstResponse.result?.isError).not.toBe(true);
       const first = JSON.parse(firstResponse.result?.content?.[0]?.text ?? '{}') as {
@@ -495,9 +580,10 @@ describe('OperatingLine runtime', () => {
         catalogs: [{ adapterId: 'blender', catalogVersion }],
         page: { afterSequence: 0, hasMore: true },
         summary: {
-          matchedEventCount: 6,
+          matchedEventCount: 7,
           eventTypeCounts: {
             'planning.context.generated': 1,
+            'planning.prompt.generated': 1,
             'planning.quality.evaluated': 1,
             'guide.proposal.created': 1,
             'guide.proposal.decided': 1,
@@ -508,12 +594,21 @@ describe('OperatingLine runtime', () => {
         },
         dataHandling: { redaction: 'none', containsPotentiallySensitiveContent: true },
       });
-      expect(first.events).toHaveLength(2);
+      expect(first.events).toHaveLength(3);
       expect(first.events[0]).toMatchObject({
         eventType: 'planning.context.generated',
         payload: { context: { goal, requestedPlanId: plan.id } },
       });
       expect(first.events[1]).toMatchObject({
+        eventType: 'planning.prompt.generated',
+        payload: {
+          packet: {
+            formatVersion: '1.0.0',
+            context: { goal, requestedPlanId: plan.id },
+          },
+        },
+      });
+      expect(first.events[2]).toMatchObject({
         eventType: 'planning.quality.evaluated',
         payload: {
           plan: { id: plan.id, steps: plan.steps },
@@ -530,7 +625,7 @@ describe('OperatingLine runtime', () => {
         targetAdapterId: 'blender',
         planId: plan.id,
         instanceId,
-        limit: 2,
+        limit: 3,
       });
       const repeated = JSON.parse(repeatedResponse.result?.content?.[0]?.text ?? '{}') as {
         exportId: string;
@@ -575,7 +670,7 @@ describe('OperatingLine runtime', () => {
       expect(httpResponse.status).toBe(200);
       await expect(httpResponse.json()).resolves.toMatchObject({
         scope: { instanceId },
-        summary: { matchedEventCount: 6 },
+        summary: { matchedEventCount: 7 },
       });
 
       const malformed = await fetch(

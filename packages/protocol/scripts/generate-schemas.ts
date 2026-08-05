@@ -22,6 +22,10 @@ import {
   guideRevisionThreadHistorySchema,
   planningContextSchema,
   planningBenchmarkCaseSchema,
+  planningPromptContextSchema,
+  planningPromptPacketSchema,
+  planningPromptRequestSchema,
+  planningProposalDraftSchema,
   planningQualityEvaluationRequestSchema,
   planningQualityReportSchema,
 } from '../src/index.js';
@@ -31,6 +35,26 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'planning-prompt-context.schema.json',
+    'https://operatingline.dev/schema/v1/planning-prompt-context.json',
+    planningPromptContextSchema,
+  ],
+  [
+    'planning-prompt-request.schema.json',
+    'https://operatingline.dev/schema/v1/planning-prompt-request.json',
+    planningPromptRequestSchema,
+  ],
+  [
+    'planning-prompt-packet.schema.json',
+    'https://operatingline.dev/schema/v1/planning-prompt-packet.json',
+    planningPromptPacketSchema,
+  ],
+  [
+    'planning-proposal-draft.schema.json',
+    'https://operatingline.dev/schema/v1/planning-proposal-draft.json',
+    planningProposalDraftSchema,
+  ],
   [
     'planning-benchmark-case.schema.json',
     'https://operatingline.dev/schema/v1/planning-benchmark-case.json',
