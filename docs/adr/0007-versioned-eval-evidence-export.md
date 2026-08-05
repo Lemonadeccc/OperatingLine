@@ -21,6 +21,8 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 - 与计划关联的 PlanningContext（含用户目标和当时的完整目录）、完整 Plan/Proposal、节点修订请求、
   请求—Proposal 关联和人工接受/拒绝决定；
 - 与计划关联的版本化 Planner Packet、严格输出契约和固定工作流规则；
+- 与显式 Planner Provider 调用关联的 requested/completed/failed 事件；completed 保存经过严格验证的
+  草案、provider identity 与质量报告，failed 只保存清洗后的稳定错误码；
 - 与候选计划关联的确定性 planning-quality 请求、阶段覆盖和 error/warning findings；
 - 对应实例的逐步状态、observation、错误和 `step_rolled_back` 记录；
 - 所有被事件引用的精确 ActionCatalog 版本；没有历史引用时包含当前目标宿主的最新目录；
@@ -41,9 +43,10 @@ Plan，而不是只保存 ID/revision。
 
 ## 数据边界
 
-`0.1.0` 不自动脱敏。包内可能含用户目标、修订消息、动作参数、宿主观察和错误详情，协议明确标记
-`redaction: none` 和敏感内容警告。所有导出端点继续使用本地 Bearer Token；调用方在分享、上传或
-用于训练前负责审核和取得适当授权。
+`0.1.0` 不自动脱敏。包内可能含用户目标、provider 生成草案、修订消息、动作参数、宿主观察和错误
+详情，协议明确标记 `redaction: none` 和敏感内容警告。核心不保存 provider 原始响应、原始错误或
+私有推理，但经过严格解析的成功草案本身仍可能敏感。所有导出端点继续使用本地 Bearer Token；
+调用方在分享、上传或用于训练前负责审核和取得适当授权。
 
 实例 scope 会排除其他 Companion 的决策与状态。无实例 scope 用于计划级汇总，会包含该计划在目标
 adapter 下所有相关实例。尚未绑定 Plan 的 `connected` 报告不会被猜测归入某个计划。Proposal 与

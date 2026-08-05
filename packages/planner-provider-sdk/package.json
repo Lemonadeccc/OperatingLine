@@ -1,5 +1,5 @@
 {
-  "name": "@operatingline/test-kit",
+  "name": "@operatingline/planner-provider-sdk",
   "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
@@ -9,8 +9,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@operatingline/adapter-sdk": "workspace:*",
-    "@operatingline/planner-provider-sdk": "workspace:*",
     "@operatingline/protocol": "workspace:*"
   }
 }

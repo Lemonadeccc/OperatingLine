@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "generationAvailable": {
+      "type": "boolean"
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "contractVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 180
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "availability": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "available"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "not_configured",
+                      "disabled",
+                      "temporarily_unavailable"
+                    ]
+                  },
+                  "message": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "available",
+                  "reason",
+                  "message"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxConcurrency": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8
+              }
+            },
+            "required": [
+              "maxConcurrency"
+            ],
+            "additionalProperties": false
+          },
+          "dataHandling": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "executionLocation": {
+                    "type": "string",
+                    "const": "local"
+                  },
+                  "dataTransmission": {
+                    "type": "string",
+                    "const": "none"
+                  },
+                  "credentialManagement": {
+                    "type": "string",
+                    "const": "provider_managed"
+                  }
+                },
+                "required": [
+                  "executionLocation",
+                  "dataTransmission",
+                  "credentialManagement"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "executionLocation": {
+                    "type": "string",
+                    "const": "remote"
+                  },
+                  "dataTransmission": {
+                    "type": "string",
+                    "const": "provider_managed"
+                  },
+                  "credentialManagement": {
+                    "type": "string",
+                    "const": "provider_managed"
+                  }
+                },
+                "required": [
+                  "executionLocation",
+                  "dataTransmission",
+                  "credentialManagement"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "contractVersion",
+          "id",
+          "version",
+          "displayName",
+          "description",
+          "availability",
+          "limits",
+          "dataHandling"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contractVersion",
+    "generationAvailable",
+    "providers"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/planner-provider-list.json"
+}

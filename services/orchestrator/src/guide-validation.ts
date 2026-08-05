@@ -8,6 +8,7 @@ import type {
   GuideProposalDecision,
   GuideRevisionRequest,
 } from '@operatingline/protocol';
+import { validateActionArguments } from '@operatingline/protocol';
 
 export function validateGuidePlanStructure(plan: GuidePlan): string | null {
   const root = plan.steps.find((step) => step.id === plan.rootStepId);
@@ -66,20 +67,11 @@ export function validateGuidePlanAgainstActionCatalog(
       );
     }
 
-    const argumentNames = new Set(Object.keys(step.action.arguments));
-    const declaredNames = new Set(Object.keys(entry.argumentsSchema.properties));
-    const missingNames = (entry.argumentsSchema.required ?? []).filter(
-      (name) => !argumentNames.has(name),
-    );
-    const unknownNames = [...argumentNames].filter((name) => !declaredNames.has(name));
-    if (missingNames.length > 0 || unknownNames.length > 0) {
-      const details = [
-        missingNames.length > 0 ? `missing ${missingNames.sort().join(', ')}` : null,
-        unknownNames.length > 0 ? `unknown ${unknownNames.sort().join(', ')}` : null,
-      ]
-        .filter((value): value is string => value !== null)
-        .join('; ');
-      throw new Error(`Guide step ${step.id} arguments violate ${step.action.name}: ${details}`);
+    const argumentErrors = validateActionArguments(step.action.arguments, entry.argumentsSchema);
+    if (argumentErrors.length > 0) {
+      throw new Error(
+        `Guide step ${step.id} arguments violate ${step.action.name}: ${argumentErrors.join('; ')}`,
+      );
     }
 
     if (!entry.rollbackModes.includes(step.rollback.mode)) {

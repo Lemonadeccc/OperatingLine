@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "targetAdapterId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "catalogVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000
+    },
+    "planId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    }
+  },
+  "required": [
+    "targetAdapterId",
+    "goal",
+    "planId",
+    "requestId",
+    "providerId"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/planner-generate-request.json"
+}

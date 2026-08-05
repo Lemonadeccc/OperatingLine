@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { rollbackModeSchema } from './adapter.js';
+import { validateActionArgumentsSchema } from './action-arguments.js';
 import { companionStateReportSchema } from './companion.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
 import { catalogVersionSchema, planningQualityBaselineVersionSchema } from './version.js';
@@ -79,18 +80,18 @@ export function validateActionCatalog(catalog: ActionCatalog): void {
       );
     }
     actionNames.add(action.name);
-
-    const propertyNames = new Set(Object.keys(action.argumentsSchema.properties));
-    for (const requiredName of action.argumentsSchema.required ?? []) {
-      if (!propertyNames.has(requiredName)) {
-        throw new Error(`Action ${action.name} requires unknown argument property ${requiredName}`);
+    try {
+      validateActionArgumentsSchema(
+        action.argumentsSchema,
+        `action ${action.name}.argumentsSchema`,
+      );
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Action ${action.name} has invalid arguments schema: ${error.message}`, {
+          cause: error,
+        });
       }
-    }
-    if (
-      new Set(action.argumentsSchema.required ?? []).size !==
-      (action.argumentsSchema.required ?? []).length
-    ) {
-      throw new Error(`Action ${action.name} repeats a required argument property`);
+      throw error;
     }
   }
 

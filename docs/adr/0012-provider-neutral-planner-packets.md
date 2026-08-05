@@ -77,5 +77,5 @@ ActionCatalog 允许列表、确定性质量门、Proposal 校验和宿主内人
   约束；客户端决定是否把内容发送给外部模型。
 - 结构质量仍由 `planning.evaluate` 和 Proposal 门禁证明；自然语言语义完整性与审美质量仍需模型、
   人工审核和更大的标注数据集。
-- 后续可在独立 planner provider/plugin 中接入具体模型，但不能把供应商凭据或数据发送策略偷偷塞进
-  通用协议层。
+- ADR 0013 已在独立 `planner-provider-sdk` 中定义显式进程内插件边界；它复用本 ADR 的精确 packet，
+  但不把供应商凭据或数据发送策略塞进通用协议层，也不自动提交 Proposal。具体厂商插件仍未提供。

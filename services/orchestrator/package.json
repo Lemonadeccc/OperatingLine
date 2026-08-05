@@ -17,6 +17,7 @@
     "@operatingline/adapter-sdk": "workspace:*",
     "@operatingline/domain": "workspace:*",
     "@operatingline/persistence": "workspace:*",
+    "@operatingline/planner-provider-sdk": "workspace:*",
     "@operatingline/protocol": "workspace:*",
     "fastify": "5.11.2",
     "pino": "10.3.1",

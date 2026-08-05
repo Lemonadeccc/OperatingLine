@@ -28,6 +28,11 @@ import {
   planningProposalDraftSchema,
   planningQualityEvaluationRequestSchema,
   planningQualityReportSchema,
+  plannerGenerateRequestSchema,
+  plannerGenerationErrorSchema,
+  plannerGenerationResultSchema,
+  plannerProviderDescriptorSchema,
+  plannerProviderListSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
@@ -35,6 +40,31 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'planner-provider-descriptor.schema.json',
+    'https://operatingline.dev/schema/v1/planner-provider-descriptor.json',
+    plannerProviderDescriptorSchema,
+  ],
+  [
+    'planner-provider-list.schema.json',
+    'https://operatingline.dev/schema/v1/planner-provider-list.json',
+    plannerProviderListSchema,
+  ],
+  [
+    'planner-generate-request.schema.json',
+    'https://operatingline.dev/schema/v1/planner-generate-request.json',
+    plannerGenerateRequestSchema,
+  ],
+  [
+    'planner-generation-result.schema.json',
+    'https://operatingline.dev/schema/v1/planner-generation-result.json',
+    plannerGenerationResultSchema,
+  ],
+  [
+    'planner-generation-error.schema.json',
+    'https://operatingline.dev/schema/v1/planner-generation-error.json',
+    plannerGenerationErrorSchema,
+  ],
   [
     'planning-prompt-context.schema.json',
     'https://operatingline.dev/schema/v1/planning-prompt-context.json',

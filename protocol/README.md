@@ -30,6 +30,21 @@ PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和�
 构建器服务 MCP Prompt、MCP Tool 和 HTTP；Prompt 呈现渲染文本，Tool/HTTP 返回完整 packet。
 它不调用模型，也不改变宿主内人工接受门禁。
 
+`planner-provider-descriptor.schema.json`、`planner-provider-list.schema.json`、
+`planner-generate-request.schema.json`、`planner-generation-result.schema.json` 与
+`planner-generation-error.schema.json` 定义显式 Planner Provider 的公开边界。Descriptor 只披露
+provider identity、可用性、并发、执行位置、数据传输和凭据管理责任，不携带凭据；本地执行固定为
+`dataTransmission: none`，远端执行固定为 `provider_managed`。Generate 请求必须
+明确指定 `providerId` 与 UUID `requestId`；结果包含严格草案和对应质量报告，且
+`proposalCreated` 固定为 `false`。生成不是 Proposal 提交或宿主执行授权。
+
+ActionCatalog 的 `argumentsSchema` 使用受限、可移植的 JSON Schema 子集：object/array/string/
+number/integer/boolean/null、`required`、`properties`、`additionalProperties: false`、数组长度与唯一性、
+字符串长度/正则、数值范围、`enum`、`const`、`oneOf`、`anyOf`，以及目录中已有的资源 ID、对象名、
+骨骼名、目标 ID、父级无环和关键帧递增自定义约束。目录注册时拒绝未知或畸形 schema 关键字；
+Proposal 验证会递归检查嵌套参数。自由文本 description 仍只是说明，不能代替机器可执行约束，
+Companion 仍负责真实宿主状态和最终执行验证。
+
 `guide-revision-request.schema.json` 定义宿主创建的不可变节点修订请求；
 `guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
@@ -53,6 +68,14 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
   评估显式降级并产生 warning，不能伪装成完整检查。
 - Planner Packet 只为带阶段画像与质量门的目录生成；客户端必须把草案先交给质量门，再提交完整
   Proposal，不能把 prompt 输出本身视为执行授权。
+- Planner Provider 必须由嵌入方显式注入并由调用方按 `providerId` 选择；核心不定义默认 provider、
+  API Key、endpoint 或模型参数。默认 standalone 的 provider 列表为空。
+- Generate 可能按 provider 声明传输完整 packet 并产生费用。返回草案是不受信任输入；只有严格
+  Schema、packet identity、ActionCatalog 和质量校验都完成后才形成 generation result，且结果仍需
+  单独调用 `guide.propose`。Generation runtime error 使用 `retryMode` 明确区分可复用同一 ID、必须
+  使用新 ID 和不可重试；provider 已开始后的失败或中断不会用同一 `requestId` 自动重试。MCP 在进入
+  handler 前拒绝的畸形 tool 参数仍使用 MCP 自身的 `InvalidParams` 错误，而不是 generation runtime
+  error。
 - 步骤 ID 使用 `[A-Za-z0-9][A-Za-z0-9._:-]*`；ASCII 序关系保证不同语言的稳定排序一致。
 - 同一 Plan ID 的 `revision` 必须严格递增；切换到其他计划后也不能重新发布旧 revision。
 - AI 计划使用 `GuideProposal` 信封投递；接收和校验不等于接受，只有宿主内显式
@@ -69,7 +92,7 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - 请求关联重规划必须使用同一 Plan ID、请求绑定的精确 `catalogVersion` 和严格更高 revision；返回的
   Proposal 带 `targetInstanceId`、`revisionThread` 与确定性 `planDiff`，只投递给发起请求的 Companion。
 - AI 在生成可执行步骤前应读取目标宿主的精确 ActionCatalog/PlanningContext。Proposal 的动作名、
-  顶层参数、anchor、observation 和 rollback 必须属于该目录；宿主仍对嵌套参数和实际资源执行
+  嵌套参数、anchor、observation 和 rollback 必须属于该目录；宿主仍对实际资源和执行时状态进行
   最终校验。
 - Companion protocol v1 的单个 GuidePlan 中，所有非空 action 必须使用同一 `adapterId`；
   混合宿主计划必须拒绝，不能通过删减步骤破坏树、依赖、编号或 revision 语义。
@@ -80,8 +103,8 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
   匹配事件；`matchedEventCount` 是整个 scope 的数量，不是当前页数量。
 - Eval 内容哈希排除随机 `exportId`、`exportedAt` 和 `integrity`，其余顶层内容按
   `operatingline-json-sort-v1` 递归排序对象键后计算 SHA-256。
-- `redaction: none` 表示原始证据可能含用户目标、修订消息、动作参数、观察和错误；分享或训练前必须
-  由调用方审核和授权。
+- `redaction: none` 表示原始证据可能含用户目标、provider 生成草案、修订消息、动作参数、观察和
+  错误；分享或训练前必须由调用方审核和授权。
 
 重新生成协议：
 

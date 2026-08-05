@@ -7,6 +7,7 @@ import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
+import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
   actionCatalogRequestSchema,
   adapterStatusSchema,
@@ -25,6 +26,10 @@ import {
   guideRevisionThreadHistoryRequestSchema,
   planningContextRequestSchema,
   planningContextSchema,
+  plannerGenerateRequestSchema,
+  plannerGenerationErrorSchema,
+  plannerGenerationResultSchema,
+  plannerProviderListSchema,
   planningQualityBaselineVersion,
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
@@ -43,7 +48,15 @@ import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
+import {
+  createPlannerGenerationCoordinator,
+  plannerGenerationEvidenceEventTypes,
+  plannerGenerationErrorResponse,
+  plannerGenerationHttpStatus,
+  type PlannerGenerationCoordinator,
+} from './planner-generation.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
+import { createPlannerProviderRegistry } from './planner-provider-registry.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
@@ -58,6 +71,8 @@ export interface StartRuntimeOptions {
   accessToken: string;
   adapters?: readonly AppAdapter[];
   actionCatalogs?: readonly ActionCatalog[];
+  plannerProviders?: readonly PlannerProvider[];
+  plannerProviderTimeoutMs?: number;
   port?: number;
 }
 
@@ -100,10 +115,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ...(options.actionCatalogs ?? []),
     ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
   ]);
+  const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
   const database = openOperatingLineDatabase(options.databasePath);
   let app: ReturnType<typeof createMcpFastifyApp> | undefined;
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
+  let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
+    () => plannerGenerationCoordinator?.close() ?? plannerProviderRegistry.close(),
     () => app?.close(),
     () => mcpHandler?.close(),
     () => database.close(),
@@ -146,7 +164,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         .listLatestCompanionStates()
         .map((report) => companionStateReportSchema.parse(report));
 
-    const getPlanningContext = (request: ReturnType<typeof planningContextRequestSchema.parse>) => {
+    const getPlanningContext = (
+      request: ReturnType<typeof planningContextRequestSchema.parse>,
+      recordEvent = true,
+    ) => {
       const catalog = actionCatalogRegistry.get(request);
       const latestRevision =
         request.planId === undefined
@@ -194,15 +215,20 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               },
             }),
       });
-      database.appendEvent({
-        id: randomUUID(),
-        eventType: 'planning.context.generated',
-        payload: { request, context },
-      });
+      if (recordEvent) {
+        database.appendEvent({
+          id: randomUUID(),
+          eventType: 'planning.context.generated',
+          payload: { request, context },
+        });
+      }
       return context;
     };
 
-    const getPlanningPrompt = (request: ReturnType<typeof planningPromptRequestSchema.parse>) => {
+    const getPlanningPrompt = (
+      request: ReturnType<typeof planningPromptRequestSchema.parse>,
+      recordEvents = true,
+    ) => {
       const context = getPlanningContext(
         planningContextRequestSchema.parse({
           targetAdapterId: request.targetAdapterId,
@@ -212,13 +238,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           goal: request.goal,
           planId: request.planId,
         }),
+        recordEvents,
       );
       const packet = buildPlanningPromptPacket(context);
-      database.appendEvent({
-        id: randomUUID(),
-        eventType: 'planning.prompt.generated',
-        payload: { request, packet },
-      });
+      if (recordEvents) {
+        database.appendEvent({
+          id: randomUUID(),
+          eventType: 'planning.prompt.generated',
+          payload: { request, packet },
+        });
+      }
       return packet;
     };
 
@@ -258,6 +287,27 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
       return report;
     };
+
+    plannerGenerationCoordinator = createPlannerGenerationCoordinator({
+      registry: plannerProviderRegistry,
+      ...(options.plannerProviderTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: options.plannerProviderTimeoutMs }),
+      existingEvents: database.listExecutionEventsByTypes(plannerGenerationEvidenceEventTypes),
+      buildPacket: (request) => getPlanningPrompt(request, false),
+      evaluateDraft: (packet, draft) =>
+        evaluatePlanningQuality(
+          planningQualityEvaluationRequestSchema.parse({
+            targetAdapterId: draft.targetAdapterId,
+            catalogVersion: draft.catalogVersion,
+            goal: draft.planning.goal,
+            requiredPhaseIds: draft.planning.requiredPhaseIds,
+            plan: draft.plan,
+          }),
+          packet.context.catalog,
+        ),
+      appendEvent: (event) => database.appendEvent(event),
+    });
 
     const createProposal = (input: {
       targetAdapterId: string;
@@ -445,6 +495,58 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text', text: JSON.stringify(getPlanningPrompt(request)) }],
           };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.planner.providers.list',
+        {
+          description:
+            'List explicitly configured planner providers and their availability, concurrency, data-transmission, and credential-management disclosures. The list never contains credentials.',
+          inputSchema: z.strictObject({}),
+          outputSchema: plannerProviderListSchema,
+        },
+        async () => {
+          const providerList = plannerProviderRegistry.list();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(providerList) }],
+            structuredContent: providerList,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.planner.generate',
+        {
+          description:
+            'Explicitly invoke one configured planner provider with a versioned Planner Packet. This may transmit task data or incur provider cost according to the provider disclosure. The result is validated but is not submitted as a GuideProposal and cannot execute in a host.',
+          inputSchema: plannerGenerateRequestSchema,
+          outputSchema: plannerGenerationResultSchema,
+        },
+        async (requestInput) => {
+          const request = plannerGenerateRequestSchema.parse(requestInput);
+          try {
+            const result = await plannerGenerationCoordinator!.generate(request);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(result),
+                },
+              ],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, request.requestId)),
+                },
+              ],
+            };
+          }
         },
       );
 
@@ -728,6 +830,32 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/planner/providers', async () => plannerProviderRegistry.list());
+    runtimeApp.post('/api/v1/planner/generate', async (request, reply) => {
+      const parsedRequest = plannerGenerateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: parsedRequestId.success ? parsedRequestId.data : null,
+            message: 'Planner generation request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return await plannerGenerationCoordinator!.generate(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
     runtimeApp.get('/api/v1/eval/export', async (request, reply) => {
       const parsedRequest = evalExportRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -893,6 +1021,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           adapterId: catalog.adapterId,
           catalogVersion: catalog.catalogVersion,
         })),
+        plannerProviders: plannerProviderRegistry.list().providers.map((provider) => ({
+          id: provider.id,
+          version: provider.version,
+          available: provider.availability.available,
+        })),
         mcpEndpoint,
       },
     });
@@ -926,4 +1059,12 @@ export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';
+export {
+  createPlannerGenerationCoordinator,
+  PlannerGenerationRuntimeError,
+  plannerGenerationEvidenceEventTypes,
+  plannerGenerationErrorResponse,
+  plannerGenerationHttpStatus,
+} from './planner-generation.js';
 export { evaluatePlanningQuality } from './planning-quality.js';
+export { createPlannerProviderRegistry } from './planner-provider-registry.js';

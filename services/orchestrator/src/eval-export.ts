@@ -17,7 +17,7 @@ const dataHandling = {
   redaction: 'none',
   containsPotentiallySensitiveContent: true,
   warning:
-    'This export may contain user-authored goals, revision messages, action arguments, host observations, and error details. Review it before sharing or training.',
+    'This export may contain user-authored goals, provider-generated drafts, revision messages, action arguments, host observations, and error details. Review it before sharing or training.',
 } as const;
 
 type JsonRecord = Record<string, unknown>;
@@ -103,6 +103,13 @@ function planningPromptMatches(payload: unknown, request: EvalExportRequest): bo
   );
 }
 
+function plannerGenerationMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    stringAt(payload, 'targetAdapterId') === request.targetAdapterId &&
+    stringAt(payload, 'planId') === request.planId
+  );
+}
+
 function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boolean {
   const plan = recordAt(payload, 'plan');
   const planId = stringAt(plan, 'id') ?? stringAt(payload, 'planId');
@@ -176,6 +183,10 @@ function eventMatches(
       return planningContextMatches(event.payload, request);
     case 'planning.prompt.generated':
       return planningPromptMatches(event.payload, request);
+    case 'planning.provider.generation.requested':
+    case 'planning.provider.generation.completed':
+    case 'planning.provider.generation.failed':
+      return plannerGenerationMatches(event.payload, request);
     case 'planning.quality.evaluated':
       return (
         stringAt(event.payload, 'targetAdapterId') === request.targetAdapterId &&

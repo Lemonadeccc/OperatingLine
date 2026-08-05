@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "string",
+      "enum": [
+        "planner_invalid_request",
+        "planner_provider_not_found",
+        "planner_provider_unavailable",
+        "planner_generation_busy",
+        "planner_generation_conflict",
+        "planner_generation_already_attempted",
+        "planner_generation_timeout",
+        "planner_runtime_stopping",
+        "planner_provider_failed",
+        "planner_output_invalid",
+        "planner_identity_mismatch",
+        "planner_catalog_invalid",
+        "planner_persistence_failed",
+        "planner_internal_failed"
+      ]
+    },
+    "requestId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retryMode": {
+      "type": "string",
+      "enum": [
+        "same_request_id",
+        "new_request_id",
+        "never"
+      ]
+    }
+  },
+  "required": [
+    "error",
+    "requestId",
+    "message",
+    "retryMode"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/planner-generation-error.json"
+}

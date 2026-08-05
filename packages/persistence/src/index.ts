@@ -93,6 +93,7 @@ export interface OperatingLineDatabase {
   appendEvent(event: ExecutionEventInput): void;
   countEvents(): number;
   listExecutionEvents(afterSequence: number, limit: number): StoredExecutionEvent[];
+  listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
   recordGuideReplanProposal<T extends GuideProposalInput>(
     proposal: T,
@@ -280,6 +281,12 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (6, datetime('now'));
+
+    CREATE INDEX IF NOT EXISTS execution_events_type_sequence
+    ON execution_events (event_type, sequence);
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (7, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -455,6 +462,32 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT payload FROM companion_latest_states ORDER BY adapter_id, instance_id
   `);
 
+  const parseExecutionEventRow = (row: unknown): StoredExecutionEvent => {
+    const candidate = row as {
+      sequence?: unknown;
+      id?: unknown;
+      event_type?: unknown;
+      payload?: unknown;
+      created_at?: unknown;
+    };
+    if (
+      typeof candidate.sequence !== 'number' ||
+      typeof candidate.id !== 'string' ||
+      typeof candidate.event_type !== 'string' ||
+      typeof candidate.payload !== 'string' ||
+      typeof candidate.created_at !== 'string'
+    ) {
+      throw new Error('SQLite returned an invalid execution event');
+    }
+    return {
+      sequence: candidate.sequence,
+      id: candidate.id,
+      eventType: candidate.event_type,
+      payload: JSON.parse(candidate.payload) as unknown,
+      createdAt: candidate.created_at,
+    };
+  };
+
   return {
     appendEvent(event) {
       insertEvent.run(
@@ -478,31 +511,28 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
         throw new Error('Execution event limit must be an integer between 1 and 10000');
       }
-      return listEvents.all(afterSequence, limit).map((row) => {
-        const candidate = row as {
-          sequence?: unknown;
-          id?: unknown;
-          event_type?: unknown;
-          payload?: unknown;
-          created_at?: unknown;
-        };
-        if (
-          typeof candidate.sequence !== 'number' ||
-          typeof candidate.id !== 'string' ||
-          typeof candidate.event_type !== 'string' ||
-          typeof candidate.payload !== 'string' ||
-          typeof candidate.created_at !== 'string'
-        ) {
-          throw new Error('SQLite returned an invalid execution event');
-        }
-        return {
-          sequence: candidate.sequence,
-          id: candidate.id,
-          eventType: candidate.event_type,
-          payload: JSON.parse(candidate.payload) as unknown,
-          createdAt: candidate.created_at,
-        };
-      });
+      return listEvents.all(afterSequence, limit).map(parseExecutionEventRow);
+    },
+    listExecutionEventsByTypes(eventTypes) {
+      if (eventTypes.length < 1 || eventTypes.length > 100) {
+        throw new Error('Execution event type query must contain between 1 and 100 values');
+      }
+      if (
+        eventTypes.some((eventType) => eventType.trim().length === 0) ||
+        new Set(eventTypes).size !== eventTypes.length
+      ) {
+        throw new Error('Execution event type query values must be nonempty and unique');
+      }
+      const placeholders = eventTypes.map(() => '?').join(', ');
+      return sqlite
+        .prepare(
+          `SELECT sequence, id, event_type, payload, created_at
+           FROM execution_events
+           WHERE event_type IN (${placeholders})
+           ORDER BY sequence`,
+        )
+        .all(...eventTypes)
+        .map(parseExecutionEventRow);
     },
     recordGuideProposal(proposal) {
       const payload = canonicalJson(proposal);

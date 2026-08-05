@@ -51,7 +51,7 @@ operatingline.guide.propose
 - 读取或修改的字符串逻辑资源由计划内动作创建，并通过 `dependsOn` 的传递闭包连接。
 - 非共享逻辑资源没有多个创建者。
 - 可执行步骤具有语义锚点；目录支持观察时，步骤提供至少一个预期观察。
-- 既有 GuidePlan 结构、单宿主、action/顶层参数、anchor/observation/rollback 目录约束仍通过。
+- 既有 GuidePlan 结构、单宿主、action/递归参数、anchor/observation/rollback 目录约束仍通过。
 
 报告只含 `error`、`warning`、阶段覆盖和计数，不含 `score`。外部模型负责根据自然语言目标选择
 所需阶段；Orchestrator 不解析关键词来假装理解目标。Proposal 提交可携带相同的 `planning.goal +
@@ -66,8 +66,8 @@ output；它在 Blender 4.5.3 与 5.1.1 中真实完成 6 个动作、生成 320
 ## 边界
 
 - 这是结构与资源流质量门，不判断“机器人是否好看”或自然语言目标是否被完整满足。
-- ActionCatalog 的嵌套参数仍由 Blender Companion 的动作验证器作为最终执行边界；质量报告不是
-  宿主执行成功证明。
+- ActionCatalog 的受支持 JSON Schema 子集由通用 Proposal 边界递归验证；Blender Companion 仍是
+  实际资源和执行时宿主状态的最终边界。质量报告不是宿主执行成功证明。
 - 目录未声明的拓扑、雕刻、modifier、权重绘制或任意 Python 仍必须是 actionless/manual 节点。
 - 人工接受 Proposal 与逐步 Next/Back 不变；质量门不能代替宿主内审批。
 

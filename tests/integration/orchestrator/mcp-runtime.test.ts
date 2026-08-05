@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
-import { FakeBlenderAdapter } from '@operatingline/test-kit';
+import { FakeBlenderAdapter, FakePlannerProvider } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
 
 import {
@@ -55,6 +55,7 @@ interface McpToolResponse {
   result?: {
     isError?: boolean;
     content?: Array<{ type?: string; text?: string }>;
+    structuredContent?: unknown;
   };
 }
 
@@ -143,6 +144,15 @@ describe('OperatingLine runtime', () => {
         database: 'ready',
         adapters: [{ id: 'fake-blender', connected: true }],
       });
+      const emptyProviders = await fetch(`${runtime.baseUrl}/api/v1/planner/providers`, {
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(emptyProviders.status).toBe(200);
+      await expect(emptyProviders.json()).resolves.toEqual({
+        contractVersion: '1.0.0',
+        generationAvailable: false,
+        providers: [],
+      });
 
       const listResponse = await fetch(runtime.mcpEndpoint, {
         method: 'POST',
@@ -174,6 +184,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.planning.evaluate' },
             { name: 'operatingline.planning.prompt.get' },
+            { name: 'operatingline.planner.providers.list' },
+            { name: 'operatingline.planner.generate' },
             { name: 'operatingline.replan.requests.list' },
             { name: 'operatingline.replan.thread.get' },
             { name: 'operatingline.eval.export' },
@@ -439,6 +451,173 @@ describe('OperatingLine runtime', () => {
     } finally {
       await runtime.stop();
     }
+  });
+
+  it('invokes an explicit planner provider without creating a proposal', async () => {
+    const fixture = JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    ) as Record<string, unknown> & { id: string; revision: number };
+    const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+    const provider = new FakePlannerProvider(({ packet }) => ({
+      targetAdapterId: packet.context.targetAdapterId,
+      catalogVersion: packet.context.catalog.catalogVersion,
+      planning: { goal: packet.context.goal, requiredPhaseIds },
+      plan: {
+        ...structuredClone(fixture),
+        id: packet.context.requestedPlanId,
+        revision: packet.context.recommendedRevision,
+      },
+    }));
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      plannerProviders: [provider],
+    });
+    const generationRequest = {
+      requestId: randomUUID(),
+      providerId: 'fake-planner',
+      targetAdapterId: 'blender',
+      catalogVersion,
+      goal: 'Create a complete snowman and render a preview.',
+      planId: 'provider-generated-snowman',
+    };
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+
+    try {
+      const providerList = await callMcpTool(
+        runtime,
+        200,
+        'operatingline.planner.providers.list',
+        {},
+      );
+      expect(JSON.parse(providerList.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        contractVersion: '1.0.0',
+        generationAvailable: true,
+        providers: [
+          {
+            id: 'fake-planner',
+            availability: { available: true },
+            dataHandling: { credentialManagement: 'provider_managed' },
+          },
+        ],
+      });
+
+      const missingRequest = {
+        ...generationRequest,
+        requestId: randomUUID(),
+        providerId: 'missing-planner',
+      };
+      const missingMcp = await callMcpTool(
+        runtime,
+        203,
+        'operatingline.planner.generate',
+        missingRequest,
+      );
+      expect(missingMcp.result?.isError).toBe(true);
+      const missingMcpError = JSON.parse(missingMcp.result?.content?.[0]?.text ?? '{}') as Record<
+        string,
+        unknown
+      >;
+      expect(missingMcpError).toEqual({
+        error: 'planner_provider_not_found',
+        requestId: missingRequest.requestId,
+        message: 'Planner provider missing-planner is not registered',
+        retryMode: 'same_request_id',
+      });
+      const missingHttp = await fetch(`${runtime.baseUrl}/api/v1/planner/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(missingRequest),
+      });
+      expect(missingHttp.status).toBe(404);
+      await expect(missingHttp.json()).resolves.toEqual(missingMcpError);
+
+      const invalidRequestId = randomUUID();
+      const invalidHttp = await fetch(`${runtime.baseUrl}/api/v1/planner/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...generationRequest,
+          requestId: invalidRequestId,
+          apiKey: 'INVALID_REQUEST_SECRET',
+        }),
+      });
+      expect(invalidHttp.status).toBe(400);
+      const invalidError = await invalidHttp.json();
+      expect(invalidError).toEqual({
+        error: 'planner_invalid_request',
+        requestId: invalidRequestId,
+        message: 'Planner generation request violates the strict public contract',
+        retryMode: 'never',
+      });
+      expect(JSON.stringify(invalidError)).not.toContain('INVALID_REQUEST_SECRET');
+
+      const generated = await callMcpTool(
+        runtime,
+        201,
+        'operatingline.planner.generate',
+        generationRequest,
+      );
+      expect(generated.result?.isError).not.toBe(true);
+      const result = JSON.parse(generated.result?.content?.[0]?.text ?? '{}') as Record<
+        string,
+        unknown
+      >;
+      expect(result).toMatchObject({
+        requestId: generationRequest.requestId,
+        status: 'ready',
+        proposalCreated: false,
+        draft: {
+          targetAdapterId: 'blender',
+          catalogVersion,
+          plan: { id: generationRequest.planId, revision: 1 },
+        },
+        planningQuality: { valid: true },
+      });
+      expect(generated.result?.structuredContent).toEqual(result);
+
+      const httpList = await fetch(`${runtime.baseUrl}/api/v1/planner/providers`, { headers });
+      expect(httpList.status).toBe(200);
+      await expect(httpList.json()).resolves.toMatchObject({ generationAvailable: true });
+
+      const repeated = await fetch(`${runtime.baseUrl}/api/v1/planner/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(generationRequest),
+      });
+      expect(repeated.status).toBe(200);
+      await expect(repeated.json()).resolves.toEqual(result);
+      expect(provider.inputs).toHaveLength(1);
+
+      const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
+      await expect(guide.json()).resolves.toEqual({ plan: null });
+
+      const evidence = await callMcpTool(runtime, 202, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: generationRequest.planId,
+      });
+      const bundle = JSON.parse(evidence.result?.content?.[0]?.text ?? '{}') as {
+        events?: Array<{ eventType?: string }>;
+        summary?: { eventTypeCounts?: Record<string, number> };
+      };
+      expect(bundle.summary?.eventTypeCounts).toMatchObject({
+        'planning.context.generated': 1,
+        'planning.prompt.generated': 1,
+        'planning.provider.generation.requested': 1,
+        'planning.quality.evaluated': 1,
+        'planning.provider.generation.completed': 1,
+      });
+      expect(bundle.events?.map((event) => event.eventType)).not.toContain(
+        'guide.proposal.created',
+      );
+    } finally {
+      await runtime.stop();
+    }
+    expect(provider.closeCalls).toBe(1);
   });
 
   it('exports a paginated replay bundle with planning, approval, observations, and rollback', async () => {

@@ -1,4 +1,5 @@
 export * from './adapter.js';
+export * from './action-arguments.js';
 export * from './catalog.js';
 export * from './companion.js';
 export * from './diff.js';
@@ -7,6 +8,7 @@ export * from './guide.js';
 export * from './history.js';
 export * from './planning.js';
 export * from './prompt.js';
+export * from './provider.js';
 export * from './proposal.js';
 export * from './revision.js';
 export * from './runtime.js';

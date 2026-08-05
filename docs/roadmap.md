@@ -32,12 +32,18 @@
 - [x] 供应商无关 Planner Packet：MCP Prompt、MCP Tool 与 HTTP 复用同一版本化构建器，提供一致的
       PlanningContext、Proposal 草案 Schema 和 evaluate→propose 规则；生成事件进入 Eval，不依赖
       已弃用的 MCP Sampling，也不在 Orchestrator 保存模型密钥。
+- [x] 显式 Planner Provider 契约与运行时边界：嵌入方可注入进程内插件，MCP/HTTP 可列出并明确选择
+      provider；核心只发送严格 Planner Packet，验证返回草案、identity、嵌套 ActionCatalog 参数和
+      结构质量，固定返回 `proposalCreated: false`，并记录可重放 requested/completed/failed 证据。
+      默认 standalone 保持 provider-free，核心不读取凭据或自动选择模型。
 
 ## 后续里程碑
 
-- [ ] 任意目标语义规划与可选 provider/plugin：由 Codex、Claude 或其他 MCP 客户端消费已完成的
-      Planner Packet，或由显式配置的 provider/plugin 生成新 GuideProposal；扩展人工标注的跨目标
-      数据集，不能把当前确定性提示和结构门禁写成“模型已经理解任意目标”。核心不绑定某一家模型。
+- [ ] 具体厂商插件与任意目标语义规划：基于已完成的 provider SDK 独立实现、配置和发布具体模型
+      插件，并扩展人工标注的跨目标数据集。当前仓库没有 OpenAI、Claude 或其他厂商实现；确定性
+      packet、Schema 和质量门不能写成“模型已经理解任意目标”。同进程插件也不是强安全隔离。
+- [ ] 节点聊天引用与局部重规划：把现有不可变节点引用、线性 revision thread 和完整 Proposal
+      审批流接到具体规划器，但不允许 provider 直接 patch 活动计划或绕过 `guide.propose`。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
 - [ ] Eval 评分与数据治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分和

@@ -82,6 +82,17 @@ describe('OperatingLine persistence', () => {
         payload: { plan: { id: 'snowman', revision: 1 } },
       },
     ]);
+    expect(database.listExecutionEventsByTypes(['guide.plan.published'])).toMatchObject([
+      {
+        sequence: 2,
+        eventType: 'guide.plan.published',
+        payload: { plan: { id: 'snowman', revision: 1 } },
+      },
+    ]);
+    expect(() => database.listExecutionEventsByTypes([])).toThrow('between 1 and 100');
+    expect(() => database.listExecutionEventsByTypes(['same', 'same'])).toThrow(
+      'nonempty and unique',
+    );
     expect(() => database.listExecutionEvents(-1, 1)).toThrow('non-negative');
     expect(() => database.listExecutionEvents(0, 10_001)).toThrow('between 1 and 10000');
     database.close();
@@ -413,8 +424,16 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 6,
+        count: 7,
       });
+      expect(
+        inspected
+          .prepare(
+            `SELECT name FROM sqlite_master
+             WHERE type = 'index' AND name = 'execution_events_type_sequence'`,
+          )
+          .get(),
+      ).toEqual({ name: 'execution_events_type_sequence' });
       expect(
         inspected
           .prepare("SELECT name FROM pragma_table_info('execution_events') ORDER BY cid")

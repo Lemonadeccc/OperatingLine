@@ -90,6 +90,12 @@ importers:
 
   packages/persistence: {}
 
+  packages/planner-provider-sdk:
+    dependencies:
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/protocol:
     dependencies:
       zod:
@@ -101,6 +107,9 @@ importers:
       '@operatingline/adapter-sdk':
         specifier: workspace:*
         version: link:../adapter-sdk
+      '@operatingline/planner-provider-sdk':
+        specifier: workspace:*
+        version: link:../planner-provider-sdk
       '@operatingline/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -128,6 +137,9 @@ importers:
       '@operatingline/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@operatingline/planner-provider-sdk':
+        specifier: workspace:*
+        version: link:../../packages/planner-provider-sdk
       '@operatingline/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

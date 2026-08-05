@@ -44,6 +44,12 @@ PlanningPromptPacket
   ├─ deterministic planning workflow instructions
   └─ MCP Prompt / Tool / HTTP delivery, no embedded model
 
+PlannerProvider
+  ├─ explicitly injected in-process plugin + public descriptor
+  ├─ receives one exact PlanningPromptPacket + AbortSignal
+  ├─ returns an untrusted PlanningProposalDraft
+  └─ strict validation + quality evidence, never auto-proposes
+
 GuideRevisionRequest
   ├─ requestId + adapterId + instanceId + catalogVersion
   ├─ complete immutable base Plan
@@ -141,10 +147,54 @@ Orchestrator 不调用模型、不读取供应商密钥，也不依赖从 2026-0
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段由调用方显式声明。质量报告
 没有总分，只证明候选 Plan 满足当前目录可表达的结构与资源流约束。它不判断结果是否好看、目标
-语义是否完整，也不替代 Blender Companion 对嵌套参数和真实宿主状态的最终验证。当前雪人与机器人
+语义是否完整；通用边界会递归验证目录的机器可执行参数 Schema，Blender Companion 仍负责真实资源
+与执行时宿主状态的最终验证。当前雪人与机器人
 两个可重放参考证明质量门不再只绑定一个题材，但不能外推为任意自然语言目标已经可靠。详细决策见
 [ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。Planner Packet 的供应商边界见
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
+
+可选 Planner Provider 建立在 packet 之上。只有嵌入 `startRuntime` 的 composition root 显式传入
+`plannerProviders`，对应 provider 才会注册；默认 standalone 不读取 provider 配置、凭据或任意模块。
+MCP `operatingline.planner.providers.list` 与 HTTP `GET /api/v1/planner/providers` 只返回公开
+descriptor，包含可用性、并发限制、执行位置、数据传输和“凭据由 provider 管理”的声明，不包含密钥。
+本地执行只能声明不传输，远端执行必须声明 provider-managed 传输，矛盾组合会被协议拒绝。
+调用方必须在每次生成时向 MCP `operatingline.planner.generate` 或 HTTP
+`POST /api/v1/planner/generate` 明确给出 `providerId` 与 UUID `requestId`；核心没有默认 provider，
+也不做自动选择。
+
+```text
+explicit caller
+    │ providerId + requestId + goal
+    ▼
+Orchestrator ── exact Planner Packet ──> injected PlannerProvider
+    │                                      │ provider-owned credentials/network/cost
+    │<──── untrusted PlanningProposalDraft ┘
+    ▼
+canonical packet copy + strict schema + immutable identity + nested ActionCatalog + quality checks
+    │
+    └─ PlannerGenerationResult { status, draft, planningQuality, proposalCreated: false }
+                                               │ separate explicit call
+                                               ▼
+                                 operatingline.guide.propose
+                                               │
+                                               ▼
+                                      in-host human approval
+```
+
+Generate 可能把用户目标、Companion 状态和完整 ActionCatalog 传给远端服务并产生费用；公开 descriptor
+只做披露，不替调用方作授权决定。核心不把 API Key、endpoint 或模型参数放进 wire schema，也不持久化
+provider 原始错误、原始响应或私有推理。它会持久化成功生成的严格草案、质量报告和 requested/completed
+事件供 Eval 使用，因此草案仍可能敏感。运行时对 provider 输出设置大小、并发与超时边界，并把
+`AbortSignal` 传给插件；取消是协作式的，忽略 signal 的插件或上游请求可能在核心已经返回超时后继续。
+进程内插件能访问所在进程的权限和内存，所以这是清晰的依赖边界，不是进程级安全隔离。
+
+同一 `requestId` 的同内容并发调用共享一个结果；已完成调用可跨重启按证据重放。已经失败、超时或只
+留下 requested 证据的 ID 不会被核心自动重试，以免重复付费或产生重复外部副作用；调用方确认后必须
+使用新 UUID 发起显式重试。错误的 `retryMode` 会区分可复用原 ID、必须使用新 ID 和不可重试。启动时
+只通过事件类型索引读取 generation 证据，不扫描完整 Eval 账本。生成结果不会创建 GuideProposal、
+不会投递 Companion，也不会修改 Blender。
+即使 `status: ready`，调用方仍需另行 `guide.propose`，而 Proposal 仍可能因其间出现的新 revision
+而被正常拒绝。详细决策见 [ADR 0013](../adr/0013-explicit-planner-provider-boundary.md)。
 
 ## Eval/replay 证据边界
 
@@ -157,7 +207,8 @@ Orchestrator 通过 Proposal/RevisionRequest ID 解析跨事件关联，因此�
 
 内容摘要覆盖协议/格式版本、scope、目录、事件页、分页信息、汇总和数据处理声明，不包含随机
 `exportId`、`exportedAt` 或摘要自身。相同事实页因而得到相同 SHA-256。当前实现不自动脱敏，也不
-计算质量分数；`planning.prompt.generated` 的输入契约、`planning.quality.evaluated` 中的确定性
+计算质量分数；`planning.prompt.generated` 的输入契约、provider 生成的严格草案、
+`planning.quality.evaluated` 中的确定性
 finding 与 `satisfied: false` observation
 都保持原始事实，不会被导出层改写成主观语义评分或执行失败结论。调用方在分享或训练前必须审核
 敏感内容。详细决策见
@@ -187,6 +238,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。
 供应商无关 Planner Packet 见
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
+显式 Planner Provider 边界见
+[ADR 0013](../adr/0013-explicit-planner-provider-boundary.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

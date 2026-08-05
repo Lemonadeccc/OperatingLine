@@ -51,6 +51,13 @@ describe('action catalog protocol', () => {
       'requires unknown argument property',
     );
 
+    const unknownKeyword = structuredClone(blenderActionCatalog);
+    const propertySchema = unknownKeyword.actions[0]!.argumentsSchema.properties.resourceId as {
+      format?: string;
+    };
+    propertySchema.format = 'uuid';
+    expect(() => validateActionCatalog(unknownKeyword)).toThrow('unknown keyword format');
+
     const repeatedPhaseAction = structuredClone(blenderActionCatalog);
     repeatedPhaseAction.planningPhases![1]!.actionNames.push(
       repeatedPhaseAction.planningPhases![0]!.actionNames[0]!,
