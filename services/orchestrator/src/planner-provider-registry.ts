@@ -7,14 +7,20 @@ import {
   type PlannerProviderList,
 } from '@operatingline/protocol';
 
-interface RegisteredPlannerProvider {
+export interface RegisteredPlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
   readonly provider: PlannerProvider;
 }
 
+export interface RegisteredReplanningProvider extends RegisteredPlannerProvider {
+  readonly provider: PlannerProvider & Required<Pick<PlannerProvider, 'replan'>>;
+}
+
 export interface PlannerProviderRegistry {
   find(providerId: string): RegisteredPlannerProvider | null;
+  findReplanner(providerId: string): RegisteredReplanningProvider | null;
   list(): PlannerProviderList;
+  listReplanners(): PlannerProviderList;
   close(): Promise<void>;
 }
 
@@ -52,18 +58,32 @@ export function createPlannerProviderRegistry(
   }
 
   let closePromise: Promise<void> | undefined;
+  const listProviders = (candidates: readonly RegisteredPlannerProvider[]): PlannerProviderList => {
+    const descriptors = candidates
+      .map(({ descriptor }) => plannerProviderDescriptorSchema.parse(descriptor))
+      .sort((left, right) => left.id.localeCompare(right.id));
+    return plannerProviderListSchema.parse({
+      contractVersion: plannerProviderContractVersion,
+      generationAvailable: descriptors.some((descriptor) => descriptor.availability.available),
+      providers: descriptors,
+    });
+  };
   return {
     find: (providerId) => registered.get(providerId) ?? null,
-    list: () => {
-      const descriptors = [...registered.values()]
-        .map(({ descriptor }) => plannerProviderDescriptorSchema.parse(descriptor))
-        .sort((left, right) => left.id.localeCompare(right.id));
-      return plannerProviderListSchema.parse({
-        contractVersion: plannerProviderContractVersion,
-        generationAvailable: descriptors.some((descriptor) => descriptor.availability.available),
-        providers: descriptors,
-      });
+    findReplanner: (providerId) => {
+      const candidate = registered.get(providerId);
+      return candidate !== undefined && typeof candidate.provider.replan === 'function'
+        ? (candidate as RegisteredReplanningProvider)
+        : null;
     },
+    list: () => listProviders([...registered.values()]),
+    listReplanners: () =>
+      listProviders(
+        [...registered.values()].filter(
+          (candidate): candidate is RegisteredReplanningProvider =>
+            typeof candidate.provider.replan === 'function',
+        ),
+      ),
     close: () => {
       closePromise ??= (async () => {
         const closeProvider = async ({

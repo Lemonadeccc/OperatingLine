@@ -1,6 +1,7 @@
 # `@operatingline/openai-planner-provider`
 
-可选的 OpenAI Responses API Planner Provider。它只实现
+可选的 OpenAI Responses API Planner Provider。它同时实现初始 `generate()` 和类型化局部
+`replan()`，只依赖
 `@operatingline/planner-provider-sdk` 的边缘接口，不是 Orchestrator 核心依赖，也不会被默认
 `pnpm dev` 自动加载。
 
@@ -37,9 +38,14 @@ await startRuntime({
   边界，Planner Packet 不会因环境中的 `OPENAI_LOG=debug` 进入 SDK 日志。
 - 当前使用 JSON Object 模式。Planner Packet 仍携带完整响应 Schema，但其中目录驱动的动态 action
   和 observation 参数不满足 OpenAI Strict Structured Outputs 的受限 Schema 子集。返回 JSON 必须
-  再经过核心的严格 Schema、identity、ActionCatalog 与规划质量验证。
-- Provider 只返回未经信任的 JSON 值，不调用 `guide.propose`，不投递 Companion，也不操作 Blender。
+  再经过核心的严格 Schema、identity、ActionCatalog 与规划质量验证；局部重规划还要通过
+  `referenced_subtrees_v1` locality 门禁。
+- 初始 `generate()` 发送 `PlanningPromptPacket.renderedPrompt`；局部 `replan()` 发送独立的
+  `ReplanningPromptPacket.renderedPrompt`。两者使用相同 Responses 请求、取消和错误清洗边界。
+- Provider 只返回未经信任的 JSON 值，不调用 `guide.propose` 或 `replan.propose`，不投递 Companion，
+  也不操作 Blender。局部生成结果必须由调用方携带 canonical `generationRequestId` 另行送审。
 - Provider 是进程内可信依赖，不是插件沙箱；目标、宿主状态和 ActionCatalog 会发送到远端。
 
 默认运行入口保持 provider-free。需要直接运行时使用仓库根脚本 `pnpm dev:openai`，并先阅读
-`services/openai-runtime/README.md` 的凭据和传输说明。
+`services/openai-runtime/README.md` 的凭据、传输、调用顺序和权限说明。严格校验只能证明输出符合当前
+机器约束，不能证明模型正确理解了任意目标或节点修改。

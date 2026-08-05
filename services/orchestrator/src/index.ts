@@ -30,9 +30,13 @@ import {
   plannerGenerationErrorSchema,
   plannerGenerationResultSchema,
   plannerProviderListSchema,
+  plannerReplanGenerateRequestSchema,
+  plannerReplanGenerationResultSchema,
   planningQualityBaselineVersion,
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
+  replanningPromptPacketSchema,
+  replanningPromptRequestSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
@@ -47,16 +51,27 @@ import { createActionCatalogRegistry } from './action-catalogs.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import {
   createPlannerGenerationCoordinator,
+  PlannerGenerationRuntimeError,
   plannerGenerationEvidenceEventTypes,
   plannerGenerationErrorResponse,
   plannerGenerationHttpStatus,
+  restoreInitialPlannerProviderInvocations,
   type PlannerGenerationCoordinator,
 } from './planner-generation.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
+import { createPlannerProviderInvocationManager } from './planner-provider-invocation.js';
 import { createPlannerProviderRegistry } from './planner-provider-registry.js';
+import {
+  createPlannerReplanGenerationCoordinator,
+  plannerReplanGenerationEvidenceEventTypes,
+  restoreReplanPlannerProviderInvocations,
+  type PlannerReplanGenerationCoordinator,
+} from './planner-replan-generation.js';
+import { createReplanningService } from './replanning-service.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuideRevisionRequest,
@@ -120,8 +135,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let app: ReturnType<typeof createMcpFastifyApp> | undefined;
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
+  let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
-    () => plannerGenerationCoordinator?.close() ?? plannerProviderRegistry.close(),
+    () =>
+      plannerGenerationCoordinator?.close() ??
+      plannerReplanGenerationCoordinator?.close() ??
+      plannerProviderRegistry.close(),
     () => app?.close(),
     () => mcpHandler?.close(),
     () => database.close(),
@@ -135,8 +154,25 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       adapters,
       mcpEndpoint: null,
     };
-    let activePlan: GuidePlan | null = null;
+    const publishedPlans = database
+      .listExecutionEventsByTypes(['guide.plan.published'])
+      .map((event) =>
+        guidePlanSchema.parse(
+          event.payload !== null &&
+            typeof event.payload === 'object' &&
+            !Array.isArray(event.payload)
+            ? (event.payload as Record<string, unknown>)['plan']
+            : undefined,
+        ),
+      );
+    let activePlan: GuidePlan | null = publishedPlans.at(-1) ?? null;
     const latestPublishedRevisionByPlanId = new Map<string, number>();
+    for (const plan of publishedPlans) {
+      latestPublishedRevisionByPlanId.set(
+        plan.id,
+        Math.max(latestPublishedRevisionByPlanId.get(plan.id) ?? 0, plan.revision),
+      );
+    }
     const latestProposedRevisionByPlanId = new Map(
       database
         .listLatestGuidePlanRevisions()
@@ -288,12 +324,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       return report;
     };
 
-    plannerGenerationCoordinator = createPlannerGenerationCoordinator({
+    const existingPlannerGenerationEvents = database.listExecutionEventsByTypes(
+      plannerGenerationEvidenceEventTypes,
+    );
+    const existingPlannerReplanEvents = database.listExecutionEventsByTypes(
+      plannerReplanGenerationEvidenceEventTypes,
+    );
+    const plannerProviderInvocationManager = createPlannerProviderInvocationManager({
       registry: plannerProviderRegistry,
       ...(options.plannerProviderTimeoutMs === undefined
         ? {}
         : { timeoutMs: options.plannerProviderTimeoutMs }),
-      existingEvents: database.listExecutionEventsByTypes(plannerGenerationEvidenceEventTypes),
+      restoredInvocations: [
+        ...restoreInitialPlannerProviderInvocations(existingPlannerGenerationEvents),
+        ...restoreReplanPlannerProviderInvocations(existingPlannerReplanEvents),
+      ],
+    });
+    plannerGenerationCoordinator = createPlannerGenerationCoordinator({
+      registry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      existingEvents: existingPlannerGenerationEvents,
       buildPacket: (request) => getPlanningPrompt(request, false),
       evaluateDraft: (packet, draft) =>
         evaluatePlanningQuality(
@@ -308,7 +358,6 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ),
       appendEvent: (event) => database.appendEvent(event),
     });
-
     const createProposal = (input: {
       targetAdapterId: string;
       targetInstanceId?: string;
@@ -316,6 +365,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       plan: GuidePlan;
       replan?: {
         requestId: string;
+        generationRequestId?: string;
         basePlan: GuidePlan;
         revisionThread: NonNullable<
           ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
@@ -381,7 +431,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (input.replan === undefined) {
         database.recordGuideProposal(proposal);
       } else {
-        database.recordGuideReplanProposal(proposal, input.replan.requestId);
+        database.recordGuideReplanProposal(
+          proposal,
+          input.replan.requestId,
+          input.replan.generationRequestId,
+        );
       }
       latestProposedRevisionByPlanId.set(input.plan.id, input.plan.revision);
       return { proposal, planningQuality };
@@ -399,6 +453,40 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       revisionThread: proposal.revisionThread ?? null,
       planDiff: proposal.planDiff ?? null,
       planningQuality,
+    });
+
+    const replanningService = createReplanningService({
+      database,
+      actionCatalogRegistry,
+      listCompanionStates,
+      resolveTargetRevision: (planId, baseRevision) =>
+        Math.max(
+          baseRevision,
+          latestPublishedRevisionByPlanId.get(planId) ?? 0,
+          latestProposedRevisionByPlanId.get(planId) ?? 0,
+          activePlan?.id === planId ? activePlan.revision : 0,
+        ) + 1,
+      completedGeneration: (requestId) =>
+        plannerReplanGenerationCoordinator?.completedResult(requestId) ?? null,
+      createProposal,
+    });
+    plannerReplanGenerationCoordinator = createPlannerReplanGenerationCoordinator({
+      registry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      existingEvents: existingPlannerReplanEvents,
+      buildPacket: (request) => replanningService.getPrompt(request, false),
+      evaluateDraft: (packet, draft) =>
+        evaluatePlanningQuality(
+          planningQualityEvaluationRequestSchema.parse({
+            targetAdapterId: packet.context.revisionRequest.adapterId,
+            catalogVersion: draft.catalogVersion,
+            goal: draft.planning.goal,
+            requiredPhaseIds: draft.planning.requiredPhaseIds,
+            plan: draft.plan,
+          }),
+          packet.context.catalog,
+        ),
+      appendEvent: (event) => database.appendEvent(event),
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
@@ -574,6 +662,83 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.replan.providers.list',
+        {
+          description:
+            'List configured planner providers that explicitly support typed local replanning. The list never contains credentials.',
+          inputSchema: z.strictObject({}),
+          outputSchema: plannerProviderListSchema,
+        },
+        async () => {
+          const providerList = plannerProviderRegistry.listReplanners();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(providerList) }],
+            structuredContent: providerList,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.replan.prompt.get',
+        {
+          description:
+            'Build a deterministic typed local-replan packet from one pending immutable host request, its exact ActionCatalog, live instance state, and referenced-subtree scope. This does not call a model or create a Proposal.',
+          inputSchema: replanningPromptRequestSchema,
+          outputSchema: replanningPromptPacketSchema,
+        },
+        async (requestInput) => {
+          const request = replanningPromptRequestSchema.parse(requestInput);
+          try {
+            const packet = replanningService.getPrompt(request);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(packet) }],
+              structuredContent: packet,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, null)),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.replan.generate',
+        {
+          description:
+            'Explicitly invoke a replan-capable Provider for one pending host revision request. The complete draft passes identity, locality, ActionCatalog, and quality gates but never creates or accepts a Proposal.',
+          inputSchema: plannerReplanGenerateRequestSchema,
+          outputSchema: plannerReplanGenerationResultSchema,
+        },
+        async (requestInput) => {
+          const request = plannerReplanGenerateRequestSchema.parse(requestInput);
+          try {
+            const result = await plannerReplanGenerationCoordinator!.generate(request);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, request.requestId)),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.replan.requests.list',
         {
           description:
@@ -629,55 +794,50 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         {
           description:
             'Attach one complete newer GuidePlan proposal to a pending revision request. This never patches or executes the base plan and still requires in-host acceptance.',
-          inputSchema: guideReplanSubmissionSchema,
+          inputSchema: deferMcpInputValidation(guideReplanSubmissionSchema),
         },
         async (submissionInput) => {
-          const submission = guideReplanSubmissionSchema.parse(submissionInput);
-          const storedRequest = database.getGuideRevisionRequest(submission.requestId);
-          if (storedRequest === null) {
-            throw new Error(`Unknown guide revision request: ${submission.requestId}`);
-          }
-          const revisionRequest = guideRevisionRequestSchema.parse(storedRequest);
-          if (submission.plan.id !== revisionRequest.basePlan.id) {
-            throw new Error(
-              `Replanned guide id ${submission.plan.id} must match base plan ${revisionRequest.basePlan.id}`,
+          const parsedSubmission = guideReplanSubmissionSchema.safeParse(submissionInput);
+          if (!parsedSubmission.success) {
+            const error = new PlannerGenerationRuntimeError(
+              'planner_invalid_request',
+              'Replan proposal submission violates the strict protocol contract',
+              'never',
             );
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, null)),
+                },
+              ],
+            };
           }
-          if (submission.plan.revision <= revisionRequest.basePlan.revision) {
-            throw new Error(
-              `Replanned guide revision ${submission.plan.revision} must be newer than base revision ${revisionRequest.basePlan.revision}`,
-            );
+          const submission = parsedSubmission.data;
+          try {
+            const result = replanningService.propose(submission);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(result),
+                },
+              ],
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(
+                    plannerGenerationErrorResponse(error, submission.generationRequestId ?? null),
+                  ),
+                },
+              ],
+            };
           }
-          if (submission.catalogVersion !== revisionRequest.catalogVersion) {
-            throw new Error(
-              `Replan catalog ${submission.catalogVersion} must match revision request catalog ${revisionRequest.catalogVersion}`,
-            );
-          }
-          if (revisionRequest.revisionThread === undefined) {
-            throw new Error(
-              `Guide revision request ${revisionRequest.requestId} uses legacy protocol without a revision thread`,
-            );
-          }
-          const { proposal, planningQuality } = createProposal({
-            targetAdapterId: revisionRequest.adapterId,
-            targetInstanceId: revisionRequest.instanceId,
-            catalogVersion: submission.catalogVersion,
-            plan: submission.plan,
-            replan: {
-              requestId: revisionRequest.requestId,
-              basePlan: revisionRequest.basePlan,
-              revisionThread: revisionRequest.revisionThread,
-            },
-            ...(submission.planning === undefined ? {} : { planning: submission.planning }),
-          });
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(proposalResult(proposal, planningQuality)),
-              },
-            ],
-          };
         },
       );
 
@@ -856,6 +1016,54 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
       }
     });
+    runtimeApp.get('/api/v1/replan/providers', async () =>
+      plannerProviderRegistry.listReplanners(),
+    );
+    runtimeApp.post('/api/v1/replan/prompt', async (request, reply) => {
+      const parsedRequest = replanningPromptRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: null,
+            message: 'Planner replan prompt request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return replanningService.getPrompt(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, null));
+      }
+    });
+    runtimeApp.post('/api/v1/replan/generate', async (request, reply) => {
+      const parsedRequest = plannerReplanGenerateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: parsedRequestId.success ? parsedRequestId.data : null,
+            message: 'Planner replan generation request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return await plannerReplanGenerationCoordinator!.generate(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
     runtimeApp.get('/api/v1/eval/export', async (request, reply) => {
       const parsedRequest = evalExportRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
@@ -886,6 +1094,29 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           error: 'revision_thread_not_found',
           message: error instanceof Error ? error.message : 'Unknown revision history error',
         });
+      }
+    });
+    runtimeApp.post('/api/v1/replan/propose', async (request, reply) => {
+      const parsedSubmission = guideReplanSubmissionSchema.safeParse(request.body);
+      if (!parsedSubmission.success) {
+        const error = new PlannerGenerationRuntimeError(
+          'planner_invalid_request',
+          'Replan proposal submission violates the strict protocol contract',
+          'never',
+        );
+        return reply.code(400).send(plannerGenerationErrorResponse(error, null));
+      }
+      try {
+        return replanningService.propose(parsedSubmission.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(
+            plannerGenerationErrorResponse(
+              error,
+              parsedSubmission.data.generationRequestId ?? null,
+            ),
+          );
       }
     });
     runtimeApp.get('/api/v1/companion/guide', async (request, reply) => {
@@ -1058,6 +1289,11 @@ export { createActionCatalogRegistry };
 export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+export {
+  createLocalReplanScope,
+  evaluateLocalReplanScope,
+  normalizeLocalReplanRoots,
+} from './local-replan-scope.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';
 export {
   createPlannerGenerationCoordinator,
@@ -1065,6 +1301,13 @@ export {
   plannerGenerationEvidenceEventTypes,
   plannerGenerationErrorResponse,
   plannerGenerationHttpStatus,
+  restoreInitialPlannerProviderInvocations,
 } from './planner-generation.js';
 export { evaluatePlanningQuality } from './planning-quality.js';
 export { createPlannerProviderRegistry } from './planner-provider-registry.js';
+export {
+  createPlannerReplanGenerationCoordinator,
+  plannerReplanGenerationEvidenceEventTypes,
+  restoreReplanPlannerProviderInvocations,
+} from './planner-replan-generation.js';
+export { buildReplanningPromptPacket } from './replanning-prompt.js';

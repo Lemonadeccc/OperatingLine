@@ -2,6 +2,7 @@ import type { AdapterCapabilities, AppAdapter } from '@operatingline/adapter-sdk
 import type {
   PlannerProvider,
   PlannerProviderGenerateInput,
+  PlannerProviderReplanInput,
 } from '@operatingline/planner-provider-sdk';
 import {
   guideProtocolVersion,
@@ -47,10 +48,15 @@ export class FakeBlenderAdapter implements AppAdapter {
 export type FakePlannerProviderHandler = (
   input: PlannerProviderGenerateInput,
 ) => unknown | Promise<unknown>;
+export type FakePlannerProviderReplanHandler = (
+  input: PlannerProviderReplanInput,
+) => unknown | Promise<unknown>;
 
 export class FakePlannerProvider implements PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
   readonly inputs: PlannerProviderGenerateInput[] = [];
+  readonly replanInputs: PlannerProviderReplanInput[] = [];
+  readonly replan?: (input: PlannerProviderReplanInput) => Promise<unknown>;
   closeCalls = 0;
   private readonly handler: FakePlannerProviderHandler;
 
@@ -70,9 +76,16 @@ export class FakePlannerProvider implements PlannerProvider {
         credentialManagement: 'provider_managed',
       },
     },
+    replanHandler?: FakePlannerProviderReplanHandler,
   ) {
     this.handler = handler;
     this.descriptor = descriptor;
+    if (replanHandler !== undefined) {
+      this.replan = async (input) => {
+        this.replanInputs.push(input);
+        return replanHandler(input);
+      };
+    }
   }
 
   async generate(input: PlannerProviderGenerateInput): Promise<unknown> {

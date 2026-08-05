@@ -95,6 +95,7 @@ export const guideRevisionRequestListSchema = z.strictObject({
 export type GuideRevisionRequestList = z.infer<typeof guideRevisionRequestListSchema>;
 
 export const guideReplanSubmissionSchema = z.strictObject({
+  generationRequestId: z.uuid().optional(),
   requestId: z.uuid(),
   catalogVersion: catalogVersionSchema,
   planning: planningIntentSchema.optional(),

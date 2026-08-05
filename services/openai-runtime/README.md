@@ -27,7 +27,41 @@ pnpm dev:openai
 - `OPERATINGLINE_DATABASE_PATH`：默认 `.data/operating-line-openai.db`。
 - `OPERATINGLINE_PORT`：默认 `0`，由系统选择空闲回环端口。
 
-运行后先调用 `operatingline.planner.providers.list` 查看数据传输声明，再显式选择返回的
-`providerId` 调用 `operatingline.planner.generate`。生成结果始终是未经信任但已由核心验证的草案，
-不会创建 Proposal 或操作 Blender；调用方仍需单独提交 `operatingline.guide.propose`，随后由宿主
-用户接受或拒绝。
+## 调用顺序
+
+初始规划：
+
+1. 调用 `operatingline.planner.providers.list`，检查远端传输、凭据管理、可用性和并发声明。
+2. 使用返回的 `providerId` 和一个新 UUID `requestId` 调用 `operatingline.planner.generate`。
+3. 检查 `status` 与 `planningQuality`。该结果固定 `proposalCreated: false`。
+4. 只有确定要送入宿主审查时，才把草案显式提交给 `operatingline.guide.propose`。
+
+节点局部重规划：
+
+1. 用户先在 Blender 中提交带节点 `Ref` 的 Revision request；调用
+   `operatingline.replan.requests.list` 取得其 `requestId`。
+2. 调用 `operatingline.replan.providers.list` 并检查同一 provider 披露；可先用
+   `operatingline.replan.prompt.get` 查看不会触发模型调用的类型化 packet。
+3. 用一个不同于 revision request ID 的新 UUID 作为 generation `requestId`，连同
+   `revisionRequestId + providerId` 调用 `operatingline.replan.generate`。
+4. 只有结果为 `ready` 且 `planningQuality.valid`、`locality.valid` 均为 true 时，才把返回的 canonical
+   `draft` 原样映射到 `operatingline.replan.propose`，并额外传入
+   `generationRequestId: <generation requestId>`。任何编辑或过期 revision 都会被拒绝。
+5. Proposal 仍只进入发起 Blender 实例的只读审查；宿主用户 Accept 后才会安装，之后仍需用户执行
+   `Start`/`Next` 才会修改场景。
+
+HTTP 对应入口依次为 `GET /api/v1/replan/providers`、`POST /api/v1/replan/prompt`、
+`POST /api/v1/replan/generate` 和 `POST /api/v1/replan/propose`。所有 MCP/HTTP 请求都需要本地 Bearer
+Token。
+
+| 操作                   | 可能调用 OpenAI/计费 | 创建 Proposal | 安装或执行计划 |
+| ---------------------- | -------------------- | ------------- | -------------- |
+| `replan.prompt.get`    | 否                   | 否            | 否             |
+| `replan.generate`      | 是                   | 否            | 否             |
+| `replan.propose`       | 否                   | 是            | 否             |
+| Blender Accept         | 否                   | 审批既有提案  | 只安装         |
+| Blender `Start`/`Next` | 否                   | 否            | 用户显式执行   |
+
+成功生成的严格草案、质量/locality 报告和 provenance 会进入未自动脱敏的 Eval 证据。确定性校验只证明
+Schema、identity、目录、引用子树范围和当前结构质量规则成立，不证明 OpenAI 已正确理解任意目标或修订
+消息。

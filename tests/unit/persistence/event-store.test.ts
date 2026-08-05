@@ -215,7 +215,8 @@ describe('OperatingLine persistence', () => {
     expect(database.listPendingGuideRevisionRequests(undefined, 1)).toEqual([request]);
 
     const proposal = guideProposal('snowman', 4);
-    database.recordGuideReplanProposal(proposal, request.requestId);
+    const generationRequestId = randomUUID();
+    database.recordGuideReplanProposal(proposal, request.requestId, generationRequestId);
     expect(database.listPendingGuideRevisionRequests('blender', 20)).toEqual([]);
     expect(database.listPendingGuideRevisionRequests('gimp', 20)).toEqual([otherAdapter]);
     expect(database.getPendingGuideProposal('blender', randomUUID())).toEqual(proposal);
@@ -225,7 +226,48 @@ describe('OperatingLine persistence', () => {
     expect(() =>
       database.recordGuideReplanProposal(guideProposal('unknown', 1), randomUUID()),
     ).toThrow('Unknown guide revision request');
-    expect(database.countEvents()).toBe(4);
+    expect(
+      database.listExecutionEventsByTypes(['planning.provider.replan.proposed']),
+    ).toMatchObject([
+      {
+        eventType: 'planning.provider.replan.proposed',
+        payload: {
+          generationRequestId,
+          revisionRequestId: request.requestId,
+          proposalId: proposal.proposalId,
+        },
+      },
+    ]);
+    expect(
+      database.getExecutionEvent(`planning-replan-proposed:${generationRequestId}`),
+    ).toMatchObject({
+      eventType: 'planning.provider.replan.proposed',
+      payload: { generationRequestId, revisionRequestId: request.requestId },
+    });
+    expect(database.getExecutionEvent('missing-event')).toBeNull();
+    expect(database.countEvents()).toBe(5);
+    database.close();
+  });
+
+  it('rolls back a generated replan proposal when provenance evidence cannot be written', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const request = revisionRequest();
+    const proposal = guideProposal('snowman', 4);
+    const generationRequestId = randomUUID();
+    expect(database.recordGuideRevisionRequest(request)).toBe('accepted');
+    database.appendEvent({
+      id: `planning-replan-proposed:${generationRequestId}`,
+      eventType: 'test.provenance.conflict',
+      payload: {},
+    });
+
+    expect(() =>
+      database.recordGuideReplanProposal(proposal, request.requestId, generationRequestId),
+    ).toThrow();
+
+    expect(database.getGuideReplanProposalForRequest(request.requestId)).toBeNull();
+    expect(database.listPendingGuideRevisionRequests('blender', 20)).toEqual([request]);
+    expect(database.listLatestGuidePlanRevisions()).toEqual([]);
     database.close();
   });
 

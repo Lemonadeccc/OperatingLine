@@ -1,0 +1,1187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "revisionRequest": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "adapterId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "catalogVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "basePlan": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "enum": [
+                "1.0.0",
+                "1.1.0"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rootStepId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "steps": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "parentId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    }
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "intent": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "explanation": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "ready",
+                      "running",
+                      "waiting_approval",
+                      "verifying",
+                      "succeeded",
+                      "failed",
+                      "stale",
+                      "rolled_back"
+                    ]
+                  },
+                  "action": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "adapterId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "arguments": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {}
+                          }
+                        },
+                        "required": [
+                          "adapterId",
+                          "name",
+                          "arguments"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "anchors": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "object"
+                            },
+                            "objectName": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "objectName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "world_position"
+                            },
+                            "position": {
+                              "minItems": 3,
+                              "maxItems": 3,
+                              "type": "array",
+                              "items": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "position"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "operator"
+                            },
+                            "operatorId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "menuPath": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "operatorId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "owned_control"
+                            },
+                            "surfaceId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "controlId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "surfaceId",
+                            "controlId"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "unavailable"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "expectedObservations": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "parameters": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "parameters"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "rollback": {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "native_undo",
+                          "checkpoint_restore",
+                          "compensating_action",
+                          "unsupported"
+                        ]
+                      },
+                      "checkpointRequired": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "checkpointRequired"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "parentId",
+                  "order",
+                  "dependsOn",
+                  "title",
+                  "intent",
+                  "explanation",
+                  "state",
+                  "action",
+                  "anchors",
+                  "expectedObservations",
+                  "rollback"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "id",
+            "revision",
+            "title",
+            "rootStepId",
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        "references": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "nodeNumber": {
+                "type": "string",
+                "pattern": "^[1-9]\\d*(?:\\.[1-9]\\d*)*$"
+              }
+            },
+            "required": [
+              "nodeId",
+              "nodeNumber"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "revisionThread": {
+          "type": "object",
+          "properties": {
+            "threadId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "turn": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "parentRequestId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "threadId",
+            "turn",
+            "parentRequestId"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "turn": {
+                    "const": 1
+                  }
+                },
+                "required": [
+                  "turn"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "parentRequestId": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "turn": {
+                    "minimum": 2
+                  }
+                },
+                "required": [
+                  "turn"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "parentRequestId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "adapterId",
+        "catalogVersion",
+        "instanceId",
+        "basePlan",
+        "references",
+        "message",
+        "occurredAt"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "protocolVersion": {
+                "const": "1.1.0"
+              }
+            },
+            "required": [
+              "protocolVersion"
+            ]
+          },
+          "then": {
+            "required": [
+              "revisionThread"
+            ]
+          }
+        }
+      ]
+    },
+    "targetRevision": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "catalog": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
+        },
+        "catalogVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "adapterId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapterVersionRange": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hostVersionRange": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "planningNotes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "planningPhases": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "order": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "selectionGuidance": {
+                "type": "string",
+                "minLength": 1
+              },
+              "actionNames": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "id",
+              "order",
+              "title",
+              "description",
+              "selectionGuidance",
+              "actionNames"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "actions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "argumentsSchema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "object"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "required": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "properties": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "additionalProperties": {
+                    "type": "boolean",
+                    "const": false
+                  }
+                },
+                "required": [
+                  "type",
+                  "properties",
+                  "additionalProperties"
+                ],
+                "additionalProperties": false
+              },
+              "resourceEffects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "create",
+                        "read",
+                        "mutate",
+                        "artifact"
+                      ]
+                    },
+                    "resourceType": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "argumentPath": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "derivedResourceTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "access",
+                    "resourceType",
+                    "argumentPath",
+                    "derivedResourceTypes",
+                    "description"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "supportedAnchorKinds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "object",
+                    "world_position",
+                    "operator",
+                    "owned_control",
+                    "unavailable"
+                  ]
+                }
+              },
+              "supportedObservationKinds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "rollbackModes": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "native_undo",
+                    "checkpoint_restore",
+                    "compensating_action",
+                    "unsupported"
+                  ]
+                }
+              },
+              "safety": {
+                "type": "object",
+                "properties": {
+                  "sideEffect": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "scene_write",
+                      "managed_file_write"
+                    ]
+                  },
+                  "requiresPlanApproval": {
+                    "type": "boolean"
+                  },
+                  "networkAccess": {
+                    "type": "boolean"
+                  },
+                  "fileAccess": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "managed_temp"
+                    ]
+                  }
+                },
+                "required": [
+                  "sideEffect",
+                  "requiresPlanApproval",
+                  "networkAccess",
+                  "fileAccess"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "name",
+              "title",
+              "description",
+              "argumentsSchema",
+              "resourceEffects",
+              "supportedAnchorKinds",
+              "supportedObservationKinds",
+              "rollbackModes",
+              "safety"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "catalogVersion",
+        "adapterId",
+        "adapterVersionRange",
+        "hostVersionRange",
+        "title",
+        "description",
+        "planningNotes",
+        "actions"
+      ],
+      "additionalProperties": false
+    },
+    "companionState": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "enum": [
+                "1.0.0",
+                "1.1.0"
+              ]
+            },
+            "reportId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sequence": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "adapterId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "companionVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hostVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plan": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "ready",
+                "running",
+                "completed",
+                "error"
+              ]
+            },
+            "activeStepId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completedStepIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "uniqueItems": true
+            },
+            "transition": {
+              "type": "string",
+              "enum": [
+                "connected",
+                "plan_loaded",
+                "walkthrough_started",
+                "step_succeeded",
+                "step_rolled_back",
+                "error"
+              ]
+            },
+            "stepId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "observations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "satisfied": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "occurredAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "reportId",
+            "sequence",
+            "adapterId",
+            "instanceId",
+            "companionVersion",
+            "hostVersion",
+            "plan",
+            "phase",
+            "activeStepId",
+            "completedStepIds",
+            "transition",
+            "stepId",
+            "observations",
+            "error",
+            "occurredAt"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "transition": {
+                    "enum": [
+                      "step_succeeded",
+                      "step_rolled_back"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "stepId": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "transition": {
+                    "const": "error"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "phase": {
+                    "const": "error"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "error": {
+                    "type": "string"
+                  }
+                }
+              },
+              "then": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "transition": {
+                        "const": "error"
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "phase": {
+                        "const": "error"
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "phase": {
+                    "enum": [
+                      "ready",
+                      "running",
+                      "completed"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "transition": {
+                    "enum": [
+                      "plan_loaded",
+                      "walkthrough_started",
+                      "step_succeeded",
+                      "step_rolled_back"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "activeStepId": {
+                    "type": "string"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "plan": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "policyVersion": {
+          "type": "string",
+          "const": "referenced_subtrees_v1"
+        },
+        "mode": {
+          "type": "string",
+          "const": "referenced_subtrees"
+        },
+        "referencedRootIds": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "normalizedRootIds": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "completePlanRequired": {
+              "type": "boolean",
+              "const": true
+            },
+            "planTitleMutable": {
+              "type": "boolean",
+              "const": false
+            },
+            "rootStepIdMutable": {
+              "type": "boolean",
+              "const": false
+            },
+            "outsideScopeMutable": {
+              "type": "boolean",
+              "const": false
+            },
+            "referencedRootAttachmentMutable": {
+              "type": "boolean",
+              "const": false
+            },
+            "descendantMoves": {
+              "type": "string",
+              "const": "within_same_normalized_root"
+            },
+            "newSteps": {
+              "type": "string",
+              "const": "within_normalized_roots"
+            },
+            "noOpAllowed": {
+              "type": "boolean",
+              "const": false
+            }
+          },
+          "required": [
+            "completePlanRequired",
+            "planTitleMutable",
+            "rootStepIdMutable",
+            "outsideScopeMutable",
+            "referencedRootAttachmentMutable",
+            "descendantMoves",
+            "newSteps",
+            "noOpAllowed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "policyVersion",
+        "mode",
+        "referencedRootIds",
+        "normalizedRootIds",
+        "rules"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "revisionRequest",
+    "targetRevision",
+    "catalog",
+    "companionState",
+    "scope"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/replanning-prompt-context.json"
+}

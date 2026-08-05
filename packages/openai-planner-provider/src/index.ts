@@ -1,6 +1,7 @@
 import type {
   PlannerProvider,
   PlannerProviderGenerateInput,
+  PlannerProviderReplanInput,
 } from '@operatingline/planner-provider-sdk';
 import {
   plannerProviderContractVersion,
@@ -141,13 +142,21 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
   }
 
   async generate(input: PlannerProviderGenerateInput): Promise<unknown> {
+    return this.requestJson(input.packet.renderedPrompt, input.signal);
+  }
+
+  async replan(input: PlannerProviderReplanInput): Promise<unknown> {
+    return this.requestJson(input.packet.renderedPrompt, input.signal);
+  }
+
+  private async requestJson(renderedPrompt: string, signal: AbortSignal): Promise<unknown> {
     if (this.apiKey === undefined) {
       throw new OpenAIPlannerProviderError(
         'not_configured',
         'The OpenAI planner provider is not configured.',
       );
     }
-    if (input.signal.aborted) {
+    if (signal.aborted) {
       throw abortedError();
     }
 
@@ -156,16 +165,16 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
       const client = await this.getClient();
       const request = {
         model: this.model,
-        input: input.packet.renderedPrompt,
+        input: renderedPrompt,
         max_output_tokens: openAIPlannerMaximumOutputTokens,
         store: false,
         stream: false,
         text: { format: { type: 'json_object' } },
       } satisfies OpenAIResponsesRequest;
       request satisfies ResponseCreateParamsNonStreaming;
-      response = await client.responses.create(request, { signal: input.signal });
+      response = await client.responses.create(request, { signal });
     } catch {
-      if (input.signal.aborted) {
+      if (signal.aborted) {
         throw abortedError();
       }
       throw new OpenAIPlannerProviderError('request_failed', 'The OpenAI planner request failed.');

@@ -68,8 +68,10 @@ describe('guide revision request protocol', () => {
 
   it('requires an exact catalog version and a complete newer-plan candidate for replan', () => {
     const plan = readPlan() as Record<string, unknown>;
+    const generationRequestId = randomUUID();
     expect(
       guideReplanSubmissionSchema.safeParse({
+        generationRequestId,
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
         plan: { ...plan, revision: 5 },
@@ -79,6 +81,15 @@ describe('guide revision request protocol', () => {
       guideReplanSubmissionSchema.safeParse({
         requestId: randomUUID(),
         plan: { ...plan, revision: 5 },
+      }).success,
+    ).toBe(false);
+    expect(
+      guideReplanSubmissionSchema.safeParse({
+        generationRequestId,
+        requestId: randomUUID(),
+        catalogVersion: '1.0.0',
+        plan: { ...plan, revision: 5 },
+        generationResult: 'must-not-be-embedded',
       }).success,
     ).toBe(false);
   });

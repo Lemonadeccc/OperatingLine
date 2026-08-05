@@ -110,6 +110,59 @@ function plannerGenerationMatches(payload: unknown, request: EvalExportRequest):
   );
 }
 
+function replanningContextMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    stringAt(payload, 'context', 'revisionRequest', 'adapterId') === request.targetAdapterId &&
+    stringAt(payload, 'context', 'revisionRequest', 'basePlan', 'id') === request.planId &&
+    (request.instanceId === undefined ||
+      stringAt(payload, 'context', 'revisionRequest', 'instanceId') === request.instanceId)
+  );
+}
+
+function replanningPromptMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    stringAt(payload, 'packet', 'context', 'revisionRequest', 'adapterId') ===
+      request.targetAdapterId &&
+    stringAt(payload, 'packet', 'context', 'revisionRequest', 'basePlan', 'id') ===
+      request.planId &&
+    (request.instanceId === undefined ||
+      stringAt(payload, 'packet', 'context', 'revisionRequest', 'instanceId') ===
+        request.instanceId)
+  );
+}
+
+function plannerReplanGenerationMatches(payload: unknown, request: EvalExportRequest): boolean {
+  const adapterId =
+    stringAt(payload, 'targetAdapterId') ?? stringAt(payload, 'result', 'targetAdapterId');
+  const planId = stringAt(payload, 'planId') ?? stringAt(payload, 'result', 'draft', 'plan', 'id');
+  const instanceId =
+    stringAt(payload, 'targetInstanceId') ?? stringAt(payload, 'result', 'targetInstanceId');
+  return (
+    adapterId === request.targetAdapterId &&
+    planId === request.planId &&
+    (request.instanceId === undefined || instanceId === request.instanceId)
+  );
+}
+
+function planningQualityMatches(payload: unknown, request: EvalExportRequest): boolean {
+  if (
+    stringAt(payload, 'targetAdapterId') !== request.targetAdapterId ||
+    stringAt(payload, 'plan', 'id') !== request.planId
+  ) {
+    return false;
+  }
+  if (request.instanceId === undefined) {
+    return true;
+  }
+  const targetInstanceId = stringAt(payload, 'targetInstanceId');
+  const isReplanEvaluation =
+    stringAt(payload, 'revisionRequestId') !== null ||
+    stringAt(payload, 'generationRequestId') !== null;
+  return isReplanEvaluation
+    ? targetInstanceId === request.instanceId
+    : targetInstanceId === null || targetInstanceId === request.instanceId;
+}
+
 function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boolean {
   const plan = recordAt(payload, 'plan');
   const planId = stringAt(plan, 'id') ?? stringAt(payload, 'planId');
@@ -183,15 +236,28 @@ function eventMatches(
       return planningContextMatches(event.payload, request);
     case 'planning.prompt.generated':
       return planningPromptMatches(event.payload, request);
+    case 'planning.replan.context.generated':
+      return replanningContextMatches(event.payload, request);
+    case 'planning.replan.prompt.generated':
+      return replanningPromptMatches(event.payload, request);
     case 'planning.provider.generation.requested':
     case 'planning.provider.generation.completed':
     case 'planning.provider.generation.failed':
       return plannerGenerationMatches(event.payload, request);
-    case 'planning.quality.evaluated':
+    case 'planning.provider.replan.requested':
+    case 'planning.provider.replan.completed':
+    case 'planning.provider.replan.failed':
+      return plannerReplanGenerationMatches(event.payload, request);
+    case 'planning.provider.replan.proposed': {
+      const revisionRequestId = stringAt(event.payload, 'revisionRequestId');
+      const proposalId = stringAt(event.payload, 'proposalId');
       return (
-        stringAt(event.payload, 'targetAdapterId') === request.targetAdapterId &&
-        stringAt(event.payload, 'plan', 'id') === request.planId
+        (revisionRequestId !== null && requestIds.has(revisionRequestId)) ||
+        (proposalId !== null && proposalIds.has(proposalId))
       );
+    }
+    case 'planning.quality.evaluated':
+      return planningQualityMatches(event.payload, request);
     case 'guide.plan.published':
       return publishedPlanMatches(event.payload, request);
     case 'guide.proposal.created': {

@@ -33,6 +33,12 @@ import {
   plannerGenerationResultSchema,
   plannerProviderDescriptorSchema,
   plannerProviderListSchema,
+  plannerReplanDraftSchema,
+  plannerReplanGenerateRequestSchema,
+  plannerReplanGenerationResultSchema,
+  replanningPromptContextSchema,
+  replanningPromptPacketSchema,
+  replanningPromptRequestSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
@@ -84,6 +90,36 @@ const schemas = [
     'planning-proposal-draft.schema.json',
     'https://operatingline.dev/schema/v1/planning-proposal-draft.json',
     planningProposalDraftSchema,
+  ],
+  [
+    'replanning-prompt-context.schema.json',
+    'https://operatingline.dev/schema/v1/replanning-prompt-context.json',
+    replanningPromptContextSchema,
+  ],
+  [
+    'replanning-prompt-request.schema.json',
+    'https://operatingline.dev/schema/v1/replanning-prompt-request.json',
+    replanningPromptRequestSchema,
+  ],
+  [
+    'replanning-prompt-packet.schema.json',
+    'https://operatingline.dev/schema/v1/replanning-prompt-packet.json',
+    replanningPromptPacketSchema,
+  ],
+  [
+    'planner-replan-draft.schema.json',
+    'https://operatingline.dev/schema/v1/planner-replan-draft.json',
+    plannerReplanDraftSchema,
+  ],
+  [
+    'planner-replan-generate-request.schema.json',
+    'https://operatingline.dev/schema/v1/planner-replan-generate-request.json',
+    plannerReplanGenerateRequestSchema,
+  ],
+  [
+    'planner-replan-generation-result.schema.json',
+    'https://operatingline.dev/schema/v1/planner-replan-generation-result.json',
+    plannerReplanGenerationResultSchema,
   ],
   [
     'planning-benchmark-case.schema.json',

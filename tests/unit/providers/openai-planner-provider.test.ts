@@ -1,4 +1,7 @@
-import type { PlanningPromptPacket } from '@operatingline/planner-provider-sdk';
+import type {
+  PlanningPromptPacket,
+  ReplanningPromptPacket,
+} from '@operatingline/planner-provider-sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -13,6 +16,9 @@ import {
 const packet = {
   renderedPrompt: 'Return a planning proposal as JSON.',
 } as PlanningPromptPacket;
+const replanPacket = {
+  renderedPrompt: 'Return a complete local replan as JSON.',
+} as ReplanningPromptPacket;
 
 function makeClient(response: OpenAIResponsesResult): {
   client: OpenAIResponsesClient;
@@ -58,6 +64,37 @@ describe('OpenAI Responses planner provider', () => {
         stream: false,
         text: { format: { type: 'json_object' } },
       } satisfies OpenAIResponsesRequest,
+      { signal },
+    );
+  });
+
+  it('uses the exact typed replan prompt and caller abort signal', async () => {
+    const { client, create } = makeClient({
+      status: 'completed',
+      output_text: '{"requestId":"revision-request"}',
+    });
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+    const signal = new AbortController().signal;
+
+    expect(provider.replan).toBeDefined();
+    await expect(
+      provider.replan?.({
+        requestId: '57c52870-1a07-450c-84c0-691083751fab',
+        packet: replanPacket,
+        signal,
+      }),
+    ).resolves.toEqual({ requestId: 'revision-request' });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: replanPacket.renderedPrompt,
+        store: false,
+        stream: false,
+        text: { format: { type: 'json_object' } },
+      }),
       { signal },
     );
   });

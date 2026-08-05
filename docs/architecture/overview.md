@@ -6,9 +6,9 @@ OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主
 锚点翻译成 Blender Operator、VS Code Command、GIMP Procedure 等实际能力。
 无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
 AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
-事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表、PlanningContext 和 Eval/replay
-证据导出。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担宿主内
-视觉呈现。
+事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表、PlanningContext、类型化 provider
+局部重规划和 Eval/replay 证据导出。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议
+消费者，不承担宿主内视觉呈现。
 
 ```text
 GuidePlan
@@ -46,8 +46,8 @@ PlanningPromptPacket
 
 PlannerProvider
   ├─ explicitly injected in-process plugin + public descriptor
-  ├─ receives one exact PlanningPromptPacket + AbortSignal
-  ├─ returns an untrusted PlanningProposalDraft
+  ├─ generate(PlanningPromptPacket) + optional replan(ReplanningPromptPacket)
+  ├─ receives an AbortSignal and returns an untrusted JSON draft
   └─ strict validation + quality evidence, never auto-proposes
 
 GuideRevisionRequest
@@ -55,6 +55,18 @@ GuideRevisionRequest
   ├─ complete immutable base Plan
   ├─ stable nodeId + user-visible nodeNumber references
   └─ user-authored revision message
+
+ReplanningPromptPacket
+  ├─ immutable revision request + exact catalog + instance state
+  ├─ referenced_subtrees_v1 deterministic locality scope
+  ├─ strict complete PlannerReplanDraft JSON Schema
+  └─ provider-free MCP Tool/HTTP delivery or explicit provider.replan()
+
+PlannerReplanGenerationResult
+  ├─ canonical complete draft + Plan diff
+  ├─ identity + locality + catalog + quality evidence
+  ├─ proposalCreated: false
+  └─ explicit canonical replan.propose required
 
 GuideRevisionThreadHistory
   ├─ thread + adapter + instance scope
@@ -154,6 +166,18 @@ Orchestrator 不内置模型，也不通过关键词假装理解目标；目标�
 [ADR 0011](../adr/0011-cross-target-planning-quality-gate.md)。Planner Packet 的供应商边界见
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
 
+节点局部重规划使用独立的 `ReplanningPromptPacket 1.0.0`。MCP
+`operatingline.replan.prompt.get` 与 HTTP `POST /api/v1/replan/prompt` 从一个仍 pending 的线性 thread
+head 构建相同 packet；其中绑定完整 immutable base Plan、引用节点、精确 ActionCatalog、发起实例最新
+状态、确定性目标 revision 和 `referenced_subtrees_v1` scope。该入口只生成 packet，不调用模型或创建
+Proposal。外部 MCP 客户端也可以直接消费 packet，自行生成完整新 Plan，再通过既有 evaluate/propose
+边界送审。
+
+`referenced_subtrees_v1` 会去除被另一个引用根包含的重复内层根。输出必须是完整 Plan，且 title、
+`rootStepId`、scope root 的 `parentId + order` 和 scope 外步骤不变；既有后代不能跨规范化 scope 移动，
+新步骤只能加入 scope 内，并且不能是 no-op。这些条件由 Orchestrator 根据 base/target Plan
+确定性检查，不依赖 provider 遵守 prompt。Locality 只证明变化范围符合规则，不证明自然语言修改正确。
+
 可选 Planner Provider 建立在 packet 之上。只有嵌入 `startRuntime` 的 composition root 显式传入
 `plannerProviders`，对应 provider 才会注册；默认 standalone 不读取 provider 配置、凭据或任意模块。
 MCP `operatingline.planner.providers.list` 与 HTTP `GET /api/v1/planner/providers` 只返回公开
@@ -162,6 +186,13 @@ descriptor，包含可用性、并发限制、执行位置、数据传输和“�
 调用方必须在每次生成时向 MCP `operatingline.planner.generate` 或 HTTP
 `POST /api/v1/planner/generate` 明确给出 `providerId` 与 UUID `requestId`；核心没有默认 provider，
 也不做自动选择。
+
+Provider SDK 的 `generate()` 为必选，`replan()` 为可选。只有实现 `replan()` 的 provider 才会出现在
+MCP `operatingline.replan.providers.list` / HTTP `GET /api/v1/replan/providers`，并可被
+`operatingline.replan.generate` / `POST /api/v1/replan/generate` 显式调用。初始与局部协调器共享同一
+invocation manager，因此 provider/全局并发、同一 `adapter + planId` 排他、超时、关闭、持久 request ID
+和 at-most-once 重试规则跨两种 operation 一致；request identity 还包含 operation，不能在 initial 与
+replan 间复用同一个 UUID。
 
 ```text
 explicit caller
@@ -181,6 +212,32 @@ canonical packet copy + strict schema + immutable identity + nested ActionCatalo
                                                ▼
                                       in-host human approval
 ```
+
+局部生成同样不会隐式送审：
+
+```text
+pending GuideRevisionRequest
+    │ prompt.get (no model, no Proposal)
+    ▼
+ReplanningPromptPacket ── explicit replan.generate ──> provider.replan()
+    │<──────── untrusted complete PlannerReplanDraft ────────┘
+    ▼
+identity + referenced-subtree locality + ActionCatalog + quality checks
+    │
+    └─ { status, draft, planDiff, locality, proposalCreated: false }
+                                               │ exact draft + generationRequestId
+                                               ▼
+                                  explicit replan.propose
+                                               │
+                                               ▼
+                         instance-scoped Proposal → in-host Accept/Reject
+```
+
+带 `generationRequestId` 的 `replan.propose` 必须逐字段等于 completed generation 中的 canonical draft，
+并再次核对 immutable request、实例、当前目标 revision、locality 和质量门。成功时 Proposal、revision
+request 关联、revision-proposed 事件与 provider-generation provenance 在一个数据库事务中写入。这样
+`generate` 的数据传输/费用授权、创建可审批 Proposal 和宿主内接受是三个独立状态转换。没有
+`generationRequestId` 的 provider-free 外部客户端路径继续兼容，但不会声称来自某次 provider generation。
 
 首个具体实现 `@operatingline/openai-planner-provider` 使用官方 OpenAI JavaScript/TypeScript SDK 的
 Responses API。构造 provider 时必须给出明确模型；独立 `services/openai-runtime` 还要求
@@ -208,9 +265,11 @@ ActionCatalog 约束的动态 records，不符合厂商严格 Structured Outputs
 
 该 provider 的公开 descriptor 声明 `executionLocation: remote`、
 `dataTransmission: provider_managed` 与 `credentialManagement: provider_managed`。它不公开模型凭据；
-模型只存在于 provider 配置和描述文本，不进入通用 generate wire request。生成不会自动连接 Blender
-节点修订、不创建 Proposal，也不证明任意目标的语义规划质量。具体决策见
-[ADR 0014](../adr/0014-openai-responses-planner-provider.md)。
+模型只存在于 provider 配置和描述文本，不进入通用 generate wire request。该实现用同一清洗后的
+Responses JSON 边界支持初始 `generate()` 与局部 `replan()`；两者都不会自动创建 Proposal，也不证明
+任意目标或节点修改的语义规划质量。具体厂商决策见
+[ADR 0014](../adr/0014-openai-responses-planner-provider.md)，类型化局部重规划决策见
+[ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
 
 Generate 可能把用户目标、Companion 状态和完整 ActionCatalog 传给远端服务并产生费用；公开 descriptor
 只做披露，不替调用方作授权决定。核心不把 API Key、endpoint 或模型参数放进 wire schema，也不持久化
@@ -242,7 +301,8 @@ Orchestrator 通过 Proposal/RevisionRequest ID 解析跨事件关联，因此�
 `planning.quality.evaluated` 中的确定性
 finding 与 `satisfied: false` observation
 都保持原始事实，不会被导出层改写成主观语义评分或执行失败结论。调用方在分享或训练前必须审核
-敏感内容。详细决策见
+敏感内容。Replan packet、provider requested/completed/failed 和显式 propose provenance 也按
+adapter、Plan 与可选 instance 路由到同一证据包。详细决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
 
 ## 宿主执行记录与补偿
@@ -273,6 +333,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0013](../adr/0013-explicit-planner-provider-boundary.md)。
 OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0014](../adr/0014-openai-responses-planner-provider.md)。
+类型化 Provider 节点局部重规划见
+[ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

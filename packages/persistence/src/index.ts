@@ -94,10 +94,12 @@ export interface OperatingLineDatabase {
   countEvents(): number;
   listExecutionEvents(afterSequence: number, limit: number): StoredExecutionEvent[];
   listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
+  getExecutionEvent(id: string): StoredExecutionEvent | null;
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
   recordGuideReplanProposal<T extends GuideProposalInput>(
     proposal: T,
     revisionRequestId: string,
+    generationRequestId?: string,
   ): void;
   getPendingGuideProposal(adapterId: string, instanceId: string): unknown | null;
   listLatestGuidePlanRevisions(): Array<{ planId: string; revision: number }>;
@@ -300,6 +302,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     WHERE sequence > ?
     ORDER BY sequence
     LIMIT ?
+  `);
+  const findEvent = sqlite.prepare(`
+    SELECT sequence, id, event_type, payload, created_at
+    FROM execution_events
+    WHERE id = ?
   `);
   const insertGuideProposal = sqlite.prepare(`
     INSERT INTO guide_proposals (
@@ -534,6 +541,13 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         .all(...eventTypes)
         .map(parseExecutionEventRow);
     },
+    getExecutionEvent(id) {
+      if (id.trim().length === 0) {
+        throw new Error('Execution event id must be nonempty');
+      }
+      const row = findEvent.get(id);
+      return row === undefined ? null : parseExecutionEventRow(row);
+    },
     recordGuideProposal(proposal) {
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
@@ -558,7 +572,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw error;
       }
     },
-    recordGuideReplanProposal(proposal, revisionRequestId) {
+    recordGuideReplanProposal(proposal, revisionRequestId, generationRequestId) {
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
@@ -594,6 +608,19 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           }),
           linkedAt,
         );
+        if (generationRequestId !== undefined) {
+          insertEvent.run(
+            `planning-replan-proposed:${generationRequestId}`,
+            'planning.provider.replan.proposed',
+            canonicalJson({
+              generationRequestId,
+              revisionRequestId,
+              proposalId: proposal.proposalId,
+              occurredAt: linkedAt,
+            }),
+            linkedAt,
+          );
+        }
         sqlite.exec('COMMIT;');
       } catch (error) {
         sqlite.exec('ROLLBACK;');

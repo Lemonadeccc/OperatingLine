@@ -14,9 +14,11 @@
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
 > Blender 4.5/5.1 中真实执行的机器人基准。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
-> 也可显式注入进程内 Planner Provider，以同一 packet 生成经严格验证但尚未提交的草案。仓库现已
-> 提供一个可选的 OpenAI Responses Provider 和独立 opt-in composition root；默认 standalone 仍不
-> 加载厂商 SDK 或凭据。参数表单编辑、任意目标语义数据集、自动评分/训练治理和第二宿主仍在路线图中。
+> 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
+> `ReplanningPromptPacket 1.0.0`、引用子树 locality 门禁和可选 provider `replan()`，但生成与创建
+> Proposal 仍是两个显式步骤。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
+> 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。节点聊天 UI、任意目标语义
+> 数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -61,7 +63,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **可选 OpenAI Responses Provider**：`@operatingline/openai-planner-provider` 使用官方 OpenAI
   JavaScript/TypeScript SDK 的 Responses API。调用方必须显式提供模型和凭据；请求固定
   `store: false`、最多 32,768 个输出 token、SDK `maxRetries: 0`，并把核心的 `AbortSignal` 传给
-  SDK。当前 packet 的动态
+  SDK。Provider 的 `generate()` 和 `replan()` 分别消费初始与局部 packet。当前 packet 的动态
   action arguments 与 observation parameters 不符合厂商严格 Structured Outputs 子集，因此插件使用
   JSON Object mode，返回值仍由 OperatingLine 核心执行权威的严格 Schema、identity、catalog 和质量
   校验。独立的 `services/openai-runtime` 只在 `pnpm dev:openai` 时装配该远端 provider；公开
@@ -70,6 +72,13 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
   更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
   携带精确的 Plan/节点/字段/参数差异，结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
+- **类型化 Provider 局部重规划**：`ReplanningPromptPacket 1.0.0` 绑定 pending immutable request、
+  精确目录、实例状态、完整 base Plan 和 `referenced_subtrees_v1` scope。MCP/HTTP 提供独立的
+  replan provider list、prompt、generate 与 propose 入口；初始/局部生成共享并发、超时、取消和持久
+  request ID 管理。`generate` 会严格检查 identity、目录、规划质量、Plan diff 与局部性，但固定
+  `proposalCreated: false`。要把 provider 草案送审，`replan.propose` 必须携带 canonical
+  `generationRequestId` 且逐字段匹配草案，才会原子记录 Proposal/request/provenance；随后仍须宿主用户
+  接受。既有 provider-free 完整 Plan 提交路径继续兼容。
 - **修订消息历史**：`operatingline.replan.thread.get` 与对应 HTTP 接口从规范化持久化记录还原每轮
   用户请求、完整 Proposal、Plan diff 和同实例人工决策。默认读取最新页，使用 `beforeTurn` 向前
   分页；Blender Sidebar 可查看最近三轮、展开已加载轮次并继续加载更早内容。
@@ -102,10 +111,10 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 阶段选择仍由外部模型或显式注入的 provider 根据目标声明，因此这不等于已经内置“任意任务自动
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
-> 隔离。当前修订输入不是
-> 内置模型或流式聊天；已经支持可追溯的
-> 多轮线性 thread、Plan diff 与完整的结构化修订消息历史，但尚未提供用户可编辑参数表单、显式
-> 分支/合并或实时模型对话。自动评分/训练数据治理和第二宿主也尚未完成。
+> 隔离。当前修订输入不是流式聊天；已经支持可追溯的多轮线性 thread、Plan diff、结构化历史，以及
+> 显式 provider-backed local replan，但尚未提供新的节点聊天 UI、provider 自动选择/调用、自动语义
+> 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality 与结构质量门只证明机器约束，
+> 不证明模型理解了任意修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -162,6 +171,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0013](docs/adr/0013-explicit-planner-provider-boundary.md)。
 首个具体插件的 OpenAI Responses 调用与数据边界见
 [ADR 0014](docs/adr/0014-openai-responses-planner-provider.md)。
+类型化 Provider 节点局部重规划、canonical propose 与 provenance 见
+[ADR 0015](docs/adr/0015-typed-provider-local-replanning.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -249,16 +260,33 @@ pnpm dev
    provider 已开始后的失败、超时或进程中断不会自动重试，显式重试需使用新的 UUID。默认 `pnpm dev`
    standalone 没有配置 provider，因此列表为空且不会调用模型。
 6. 若要修改某个局部节点，在活动树或待审树点击 `Ref`，在 `Revision request` 中描述变化并发送。
-   MCP 客户端调用 `operatingline.replan.requests.list` 读取请求，再调用
-   `operatingline.replan.propose` 提交 `{ requestId, catalogVersion, plan }`。`plan` 必须是同一 Plan ID
-   的完整更高 revision；Blender 会把它作为新的待审 Proposal 展示，并列出 Plan/节点/参数差异，
-   而不会直接执行。只有接受后再次提交引用才会成为同一 thread 的下一轮。调用
+   MCP 客户端先调用 `operatingline.replan.requests.list` 读取 pending request。Provider-free 客户端可用
+   `operatingline.replan.prompt.get` 取得独立的类型化 packet，自行生成完整更高 revision，再直接调用
+   `operatingline.replan.propose`。显式 provider 路径先调用 `operatingline.replan.providers.list` 检查
+   数据传输声明，再用一个不同于宿主 revision request ID 的新 UUID 调用
+   `operatingline.replan.generate`，传入 `{ requestId, revisionRequestId, providerId }`。该调用可能传输数据
+   并产生费用，但固定 `proposalCreated: false`；只有 `status: ready`、`planningQuality.valid` 与
+   `locality.valid` 都成立时，才能把 canonical `draft` 原样提交给 `operatingline.replan.propose`，并额外
+   携带 `generationRequestId: <generate requestId>`。任何草案编辑或过期 revision 都会失败。
+   `replan.propose` 只创建发起实例的待审 Proposal；Blender 会显示 Plan/节点/参数差异，不会直接执行。
+   用户 Accept 后只安装计划，仍由后续 `Start`/`Next` 显式执行。只有接受后再次提交引用才会成为同一
+   thread 的下一轮。调用
    `operatingline.replan.thread.get` 并传入 `{ threadId, targetAdapterId, instanceId, beforeTurn?, limit? }`
    可分页读取完整结构化历史。
 7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，传入
    `{ targetAdapterId, planId, instanceId?, afterSequence?, limit? }`；也可请求
    `GET /api/v1/eval/export`。继续分页时把上一页 `nextAfterSequence` 作为新游标。导出未自动脱敏，
    分享或用于训练前必须检查目标文本、修订消息、动作参数、观察和错误详情。
+
+局部重规划的权限边界：
+
+| 操作                     | 调用 provider/可能计费 | 创建 Proposal | 安装或执行计划 |
+| ------------------------ | ---------------------- | ------------- | -------------- |
+| `replan.prompt.get`      | 否                     | 否            | 否             |
+| `replan.generate`        | 是                     | 否            | 否             |
+| `replan.propose`         | 否                     | 是            | 否             |
+| Blender `Accept Plan`    | 否                     | 审批既有提案  | 只安装         |
+| Blender `Start` / `Next` | 否                     | 否            | 用户显式执行   |
 
 ### 显式启用 OpenAI Planner Provider
 
@@ -274,10 +302,12 @@ pnpm dev:openai
 ```
 
 该入口只注册 OpenAI provider，不会自动调用模型。调用方仍须先读取
-`operatingline.planner.providers.list` 的远端传输声明，再显式提供 `providerId` 与新 UUID 调用
-`operatingline.planner.generate`。Planner Packet 中的目标、宿主状态和 ActionCatalog 会发送给 OpenAI；
-成功返回的严格草案与质量报告会进入 OperatingLine 的未脱敏 Eval 证据。生成不会创建 Proposal、修改
-Blender 或执行节点，后续仍须单独调用 `operatingline.guide.propose` 并由宿主用户接受。
+`operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
+提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`。Packet 中的目标或修订
+消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、质量/locality 报告和 provenance
+会进入 OperatingLine 的未脱敏 Eval 证据。生成不会创建 Proposal、修改 Blender 或执行节点；初始规划
+仍须单独调用 `guide.propose`，局部规划须用 canonical `generationRequestId` 调用 `replan.propose`，两者
+都必须由宿主用户接受。
 
 例如，MCP 客户端在规划前使用：
 
@@ -450,8 +480,9 @@ OPERATINGLINE_ACCESS_TOKEN=development-token OPERATINGLINE_PORT=43123 pnpm dev
 `operatingline.action_catalog.get`、`operatingline.planning.context`、
 `operatingline.planning.evaluate`、`operatingline.planning.prompt.get`、
 `operatingline.planner.providers.list`、`operatingline.planner.generate`、
-`operatingline.replan.requests.list`、`operatingline.replan.thread.get`、`operatingline.eval.export`、
-`operatingline.replan.propose`、
+`operatingline.replan.providers.list`、`operatingline.replan.requests.list`、
+`operatingline.replan.prompt.get`、`operatingline.replan.generate`、
+`operatingline.replan.thread.get`、`operatingline.replan.propose`、`operatingline.eval.export`、
 `operatingline.guide.publish` 和 `operatingline.guide.propose`。此外注册了用户可选择的 MCP Prompt
 `operatingline.plan_and_propose`。
 
@@ -474,8 +505,9 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 现有 MCP Bridge。当前仍未完成：
 
 1. 把当前两目标的结构质量基线扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
-   插件已经完成，但它不证明任意目标语义规划可靠，也未接入 Blender 节点聊天或局部重规划。
-   OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
+   插件及类型化局部重规划后端已经完成，但它们不证明任意目标语义规划可靠；Blender 仍未接入新的
+   节点聊天 UI、流式对话或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据
+   和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。
 3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender

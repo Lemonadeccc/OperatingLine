@@ -171,7 +171,10 @@ describe('OperatingLine runtime', () => {
         .split('\n')
         .find((line) => line.startsWith('data: '));
       expect(dataLine).toBeDefined();
-      expect(JSON.parse(dataLine!.slice('data: '.length))).toMatchObject({
+      const toolsPayload = JSON.parse(dataLine!.slice('data: '.length)) as {
+        result?: { tools?: Array<{ name?: string; inputSchema?: unknown }> };
+      };
+      expect(toolsPayload).toMatchObject({
         result: {
           tools: [
             { name: 'operatingline.health' },
@@ -186,6 +189,9 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.planning.prompt.get' },
             { name: 'operatingline.planner.providers.list' },
             { name: 'operatingline.planner.generate' },
+            { name: 'operatingline.replan.providers.list' },
+            { name: 'operatingline.replan.prompt.get' },
+            { name: 'operatingline.replan.generate' },
             { name: 'operatingline.replan.requests.list' },
             { name: 'operatingline.replan.thread.get' },
             { name: 'operatingline.eval.export' },
@@ -194,6 +200,14 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.guide.propose' },
           ],
         },
+      });
+      expect(
+        toolsPayload.result?.tools?.find((tool) => tool.name === 'operatingline.replan.propose')
+          ?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId', 'catalogVersion', 'plan'],
+        additionalProperties: false,
       });
 
       const plan = JSON.parse(
@@ -620,6 +634,305 @@ describe('OperatingLine runtime', () => {
     expect(provider.closeCalls).toBe(1);
   });
 
+  it('generates a typed local replan before explicitly proposing its exact draft', async () => {
+    const basePlan = JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    ) as {
+      id: string;
+      revision: number;
+      steps: Array<{ id: string; title: string }>;
+    };
+    const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+    const provider = new FakePlannerProvider(
+      () => {
+        throw new Error('Initial generation must not run in the local replan flow');
+      },
+      {
+        contractVersion: '1.0.0',
+        id: 'fake-planner',
+        version: '0.1.0',
+        displayName: 'Fake Local Replanner',
+        description: 'Deterministic provider for the runtime local replan integration test.',
+        availability: { available: true },
+        limits: { maxConcurrency: 1 },
+        dataHandling: {
+          executionLocation: 'local',
+          dataTransmission: 'none',
+          credentialManagement: 'provider_managed',
+        },
+      },
+      ({ packet }) => {
+        const plan = structuredClone(packet.context.revisionRequest.basePlan);
+        plan.revision = packet.context.targetRevision;
+        const head = plan.steps.find((step) => step.id === 'snowman.model.head');
+        if (head === undefined) {
+          throw new Error('Snowman fixture is missing the referenced head step');
+        }
+        head.title = 'Create a larger beginner-friendly snowman head';
+        return {
+          requestId: packet.context.revisionRequest.requestId,
+          catalogVersion: packet.context.catalog.catalogVersion,
+          planning: { goal: packet.context.revisionRequest.message, requiredPhaseIds },
+          plan,
+        };
+      },
+    );
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      plannerProviders: [provider],
+    });
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    const revisionRequestId = randomUUID();
+    const instanceId = randomUUID();
+    const revisionRequest = {
+      protocolVersion: '1.1.0',
+      requestId: revisionRequestId,
+      adapterId: 'blender',
+      catalogVersion,
+      instanceId,
+      basePlan,
+      references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+      message: 'Make only the referenced snowman head larger and easier to understand.',
+      revisionThread: {
+        threadId: revisionRequestId,
+        turn: 1,
+        parentRequestId: null,
+      },
+      occurredAt: new Date().toISOString(),
+    };
+    const generationRequest = {
+      requestId: randomUUID(),
+      revisionRequestId,
+      providerId: 'fake-planner',
+    };
+
+    try {
+      const revisionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(revisionRequest),
+      });
+      expect(revisionResponse.status).toBe(200);
+      await expect(revisionResponse.json()).resolves.toEqual({
+        result: 'accepted',
+        requestId: revisionRequestId,
+      });
+
+      const providersResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/providers`, {
+        headers,
+      });
+      expect(providersResponse.status).toBe(200);
+      await expect(providersResponse.json()).resolves.toMatchObject({
+        generationAvailable: true,
+        providers: [{ id: 'fake-planner', availability: { available: true } }],
+      });
+
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ revisionRequestId }),
+      });
+      expect(promptResponse.status).toBe(200);
+      await expect(promptResponse.json()).resolves.toMatchObject({
+        formatVersion: '1.0.0',
+        operation: 'local_replan',
+        context: {
+          revisionRequest: { requestId: revisionRequestId },
+          targetRevision: basePlan.revision + 1,
+          scope: { normalizedRootIds: ['snowman.model.head'] },
+        },
+        workflow: { submitToolName: 'operatingline.replan.propose' },
+      });
+
+      const generateResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(generationRequest),
+      });
+      expect(generateResponse.status).toBe(200);
+      const generated = (await generateResponse.json()) as {
+        requestId: string;
+        status: string;
+        proposalCreated: boolean;
+        draft: {
+          requestId: string;
+          catalogVersion: string;
+          planning: { goal: string; requiredPhaseIds: string[] };
+          plan: typeof basePlan;
+        };
+      };
+      expect(generated).toMatchObject({
+        requestId: generationRequest.requestId,
+        status: 'ready',
+        proposalCreated: false,
+        draft: {
+          requestId: revisionRequestId,
+          catalogVersion,
+          plan: { id: basePlan.id, revision: basePlan.revision + 1 },
+        },
+      });
+      expect(provider.replanInputs).toHaveLength(1);
+
+      const alternateGenerationRequest = {
+        ...generationRequest,
+        requestId: randomUUID(),
+      };
+      const alternateGenerateResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/generate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(alternateGenerationRequest),
+      });
+      expect(alternateGenerateResponse.status).toBe(200);
+      const alternateGenerated = (await alternateGenerateResponse.json()) as typeof generated;
+      expect(alternateGenerated.draft).toEqual(generated.draft);
+      expect(provider.replanInputs).toHaveLength(2);
+
+      const guideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      guideUrl.searchParams.set('adapterId', 'blender');
+      guideUrl.searchParams.set('instanceId', instanceId);
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+
+      const exactSubmission = {
+        generationRequestId: generationRequest.requestId,
+        requestId: revisionRequestId,
+        catalogVersion: generated.draft.catalogVersion,
+        planning: generated.draft.planning,
+        plan: generated.draft.plan,
+      };
+      const tamperedPlan = structuredClone(generated.draft.plan);
+      tamperedPlan.steps.find((step) => step.id === 'snowman.model.head')!.title =
+        'Tampered after generation';
+      const tamperedResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...exactSubmission, plan: tamperedPlan }),
+      });
+      expect(tamperedResponse.status).toBe(422);
+      await expect(tamperedResponse.json()).resolves.toMatchObject({
+        error: 'planner_identity_mismatch',
+        requestId: generationRequest.requestId,
+        retryMode: 'never',
+      });
+
+      const proposeResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(exactSubmission),
+      });
+      expect(proposeResponse.status).toBe(200);
+      const proposed = (await proposeResponse.json()) as {
+        proposalId: string;
+        duplicate: boolean;
+      };
+      expect(proposed).toMatchObject({ duplicate: false });
+      expect(proposed.proposalId).toEqual(expect.any(String));
+
+      await expect(
+        fetch(guideUrl, { headers }).then((response) => response.json()),
+      ).resolves.toMatchObject({
+        plan: null,
+        proposal: {
+          proposalId: proposed.proposalId,
+          revisionRequestId,
+          targetInstanceId: instanceId,
+          plan: { id: basePlan.id, revision: basePlan.revision + 1 },
+        },
+      });
+
+      const repeatedResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(exactSubmission),
+      });
+      expect(repeatedResponse.status).toBe(200);
+      await expect(repeatedResponse.json()).resolves.toMatchObject({
+        proposalId: proposed.proposalId,
+        duplicate: true,
+      });
+
+      const otherGenerationResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...exactSubmission,
+          generationRequestId: alternateGenerationRequest.requestId,
+        }),
+      });
+      expect(otherGenerationResponse.status).toBe(409);
+      await expect(otherGenerationResponse.json()).resolves.toMatchObject({
+        error: 'planner_revision_request_not_pending',
+        requestId: alternateGenerationRequest.requestId,
+        retryMode: 'never',
+      });
+
+      const otherInstanceRevisionRequestId = randomUUID();
+      const otherInstanceRevision = {
+        ...revisionRequest,
+        requestId: otherInstanceRevisionRequestId,
+        instanceId: randomUUID(),
+        message: 'INSTANCE_B_PRIVATE_REVISION_MESSAGE',
+        revisionThread: {
+          threadId: otherInstanceRevisionRequestId,
+          turn: 1,
+          parentRequestId: null,
+        },
+      };
+      const otherRevisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/revision-request`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(otherInstanceRevision),
+        },
+      );
+      expect(otherRevisionResponse.status).toBe(200);
+      const otherInstanceGenerationResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/replan/generate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            requestId: randomUUID(),
+            revisionRequestId: otherInstanceRevisionRequestId,
+            providerId: 'fake-planner',
+          }),
+        },
+      );
+      expect(otherInstanceGenerationResponse.status).toBe(200);
+
+      const evalUrl = new URL('/api/v1/eval/export', runtime.baseUrl);
+      evalUrl.searchParams.set('targetAdapterId', 'blender');
+      evalUrl.searchParams.set('planId', basePlan.id);
+      evalUrl.searchParams.set('instanceId', instanceId);
+      const evalBundle = (await fetch(evalUrl, { headers }).then((response) =>
+        response.json(),
+      )) as {
+        summary: { eventTypeCounts: Record<string, number> };
+        events: Array<{ eventType: string; payload: unknown }>;
+      };
+      expect(evalBundle.summary.eventTypeCounts).toMatchObject({
+        'planning.provider.replan.requested': 2,
+        'planning.provider.replan.completed': 2,
+        'planning.provider.replan.proposed': 1,
+      });
+      expect(
+        evalBundle.events.some((event) => event.eventType === 'planning.provider.replan.proposed'),
+      ).toBe(true);
+      expect(JSON.stringify(evalBundle)).not.toContain('privateReasoning');
+      expect(JSON.stringify(evalBundle)).not.toContain('INSTANCE_B_PRIVATE_REVISION_MESSAGE');
+    } finally {
+      await runtime.stop();
+    }
+    expect(provider.closeCalls).toBe(1);
+  });
+
   it('exports a paginated replay bundle with planning, approval, observations, and rollback', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -952,15 +1265,64 @@ describe('OperatingLine runtime', () => {
         revision: 5,
         title: 'Create a snowman with a larger head',
       };
-      const wrongCatalog = await callMcpTool(runtime, 18, 'operatingline.replan.propose', {
+      const malformedSubmission = {
+        requestId,
+        privateSecret: 'MALFORMED_REPLAN_INPUT_SECRET',
+      };
+      const malformedHttp = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(malformedSubmission),
+      });
+      expect(malformedHttp.status).toBe(400);
+      const malformedHttpError = await malformedHttp.json();
+      const malformedMcp = await callMcpTool(
+        runtime,
+        179,
+        'operatingline.replan.propose',
+        malformedSubmission,
+      );
+      expect(malformedMcp.result).toMatchObject({ isError: true });
+      const malformedMcpError = JSON.parse(
+        malformedMcp.result?.content?.[0]?.text ?? '{}',
+      ) as unknown;
+      expect(malformedMcpError).toEqual(malformedHttpError);
+      expect(malformedMcpError).toEqual({
+        error: 'planner_invalid_request',
+        requestId: null,
+        message: 'Replan proposal submission violates the strict protocol contract',
+        retryMode: 'never',
+      });
+      expect(JSON.stringify(malformedMcpError)).not.toContain('MALFORMED_REPLAN_INPUT_SECRET');
+      const invalidSubmission = {
         requestId,
         catalogVersion: '0.9.0',
         plan: replanned,
+      };
+      const wrongCatalogHttp = await fetch(`${runtime.baseUrl}/api/v1/replan/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(invalidSubmission),
       });
-      expect(wrongCatalog.result).toMatchObject({ isError: true });
-      expect(wrongCatalog.result?.content?.[0]?.text).toContain(
-        `must match revision request catalog ${catalogVersion}`,
+      expect(wrongCatalogHttp.status).toBe(422);
+      const wrongCatalogHttpError = await wrongCatalogHttp.json();
+      const wrongCatalog = await callMcpTool(
+        runtime,
+        18,
+        'operatingline.replan.propose',
+        invalidSubmission,
       );
+      expect(wrongCatalog.result).toMatchObject({ isError: true });
+      const wrongCatalogMcpError = JSON.parse(
+        wrongCatalog.result?.content?.[0]?.text ?? '{}',
+      ) as unknown;
+      expect(wrongCatalogMcpError).toEqual(wrongCatalogHttpError);
+      expect(wrongCatalogMcpError).toMatchObject({
+        error: 'planner_replan_submission_invalid',
+        requestId: null,
+        message: expect.stringContaining(`must match revision request catalog ${catalogVersion}`),
+        retryMode: 'never',
+      });
       const proposed = await callMcpTool(runtime, 19, 'operatingline.replan.propose', {
         requestId,
         catalogVersion,
@@ -1515,6 +1877,51 @@ describe('OperatingLine runtime', () => {
           headers: { authorization: `Bearer ${accessToken}` },
         });
         await expect(response.json()).resolves.toEqual({ companions: [report] });
+      } finally {
+        await restarted.stop();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the latest published Plan and its revision watermark after restart', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-plan-runtime-test-'));
+    const databasePath = join(directory, 'state.db');
+    const plan = JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    ) as { id: string; revision: number };
+    const headers = { authorization: `Bearer ${accessToken}` };
+    try {
+      const firstRuntime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+      });
+      const published = await callMcpTool(firstRuntime, 60, 'operatingline.guide.publish', plan);
+      expect(published.result?.isError).not.toBe(true);
+      await firstRuntime.stop();
+
+      const restarted = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+      });
+      try {
+        await expect(
+          fetch(`${restarted.baseUrl}/api/v1/guide`, { headers }).then((response) =>
+            response.json(),
+          ),
+        ).resolves.toMatchObject({ plan: { id: plan.id, revision: plan.revision } });
+        const contextUrl = new URL('/api/v1/planning/context', restarted.baseUrl);
+        contextUrl.searchParams.set('targetAdapterId', 'blender');
+        contextUrl.searchParams.set('planId', plan.id);
+        await expect(
+          fetch(contextUrl, { headers }).then((response) => response.json()),
+        ).resolves.toMatchObject({
+          requestedPlanId: plan.id,
+          recommendedRevision: plan.revision + 1,
+        });
       } finally {
         await restarted.stop();
       }

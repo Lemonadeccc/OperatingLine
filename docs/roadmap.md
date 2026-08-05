@@ -42,18 +42,27 @@
       `AbortSignal`。当前动态 action/observation records 使用 JSON Object mode，核心继续执行权威
       严格验证。独立 `services/openai-runtime` 与 `pnpm dev:openai` 显式装配该远端、provider-managed
       插件，不改变默认 standalone。
+- [x] 类型化 Provider 节点局部重规划：独立 `ReplanningPromptPacket 1.0.0` 绑定 immutable request、
+      精确目录、实例状态与 `referenced_subtrees_v1` scope；Provider 可选实现 `replan()`，MCP/HTTP 提供
+      list/prompt/generate/propose 顺序。初始与局部生成共享调用、并发、超时和持久 request ID 管理；
+      `generate` 固定不建 Proposal，只有携带 canonical `generationRequestId` 的显式 `replan.propose` 才在
+      同一事务记录 Proposal、请求关联与 provenance。相关事件已进入 Eval 路由；OpenAI opt-in provider
+      同时支持初始规划和局部重规划，默认 standalone 仍 provider-free。
 
 ## 后续里程碑
 
-- [ ] 任意目标语义规划数据集：扩展当前雪人和机器人基线，建立更大的人工标注跨目标数据集与验收
-      rubric。首个 OpenAI 插件只完成厂商调用边界；确定性 packet、JSON 输出、严格 Schema 和质量门
-      都不能写成“模型已经理解任意目标”。同进程插件也不是强安全隔离。
-- [ ] 节点聊天引用与局部重规划：把现有不可变节点引用、线性 revision thread 和完整 Proposal
-      审批流接到具体规划器，但不允许 provider 直接 patch 活动计划或绕过 `guide.propose`。
+- [ ] 更大的人工 Eval：扩展当前雪人和机器人基线，建立人工标注的跨目标数据集、语义验收 rubric 与
+      真实 provider 对照评测。确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
+      “模型已经理解任意目标”；同进程插件也不是强安全隔离。
+- [ ] 节点聊天引用 UI、自然语言聊天与自动语义重规划：当前已完成原生 `Ref` + Revision request、
+      类型化 provider local replan 和完整 Proposal 审批，但仍是显式异步工具链；尚无新的对话式引用 UI、
+      流式聊天、provider 自动选择/调用或基于语义置信度的自动重规划。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
-- [ ] Eval 评分与数据治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分和
-      训练流水线。
+- [ ] 骨骼与动画深化：在当前四骨骼刚性绑定和三段姿态关键帧之外，扩展可审查 rig、蒙皮/权重、动画
+      编辑、观察与安全回退能力。
+- [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
+      训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。
 - [ ] 补做 OMX 正式双通道审查：执行说明见
       [OMX 正式双通道代码审查待办](quality/omx-code-review.md)。
