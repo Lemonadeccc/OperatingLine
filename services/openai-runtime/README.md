@@ -33,7 +33,10 @@ pnpm dev:openai
 
 1. 调用 `operatingline.planner.providers.list`，检查远端传输、凭据管理、可用性和并发声明。
 2. 使用返回的 `providerId` 和一个新 UUID `requestId` 调用 `operatingline.planner.generate`。
-3. 检查 `status` 与 `planningQuality`。该结果固定 `proposalCreated: false`。
+3. 检查 `status` 与 `planningQuality`。Blender `1.3.0` 使用 Planning Packet `1.1.0` 和 quality baseline
+   `1.1.0`；草案必须把每条具体需求通过 `planning.capabilityCoverage` 映射到 catalog capability 和
+   action 匹配的可执行叶子。历史目录继续使用 packet/baseline `1.0.0`。该结果固定
+   `proposalCreated: false`。
 4. 只有确定要送入宿主审查时，才把草案显式提交给 `operatingline.guide.propose`。
 
 节点局部重规划：
@@ -47,6 +50,7 @@ pnpm dev:openai
 4. 只有结果为 `ready` 且 `planningQuality.valid`、`locality.valid` 均为 true 时，才把返回的 canonical
    `draft` 原样映射到 `operatingline.replan.propose`，并额外传入
    `generationRequestId: <generation requestId>`。任何编辑或过期 revision 都会被拒绝。
+   Capability-aware replan 的 coverage 还只能引用规范化引用子树内的可执行叶子。
 5. Proposal 仍只进入发起 Blender 实例的只读审查；宿主用户 Accept 后才会安装，之后仍需用户执行
    `Start`/`Next` 才会修改场景。
 
@@ -62,6 +66,9 @@ Token。
 | Blender Accept         | 否                   | 审批既有提案  | 只安装         |
 | Blender `Start`/`Next` | 否                   | 否            | 用户显式执行   |
 
-成功生成的严格草案、质量/locality 报告和 provenance 会进入未自动脱敏的 Eval 证据。确定性校验只证明
-Schema、identity、目录、引用子树范围和当前结构质量规则成立，不证明 OpenAI 已正确理解任意目标或修订
-消息。
+成功生成的严格草案、coverage、quality/locality 报告和 provenance 会进入未自动脱敏的 Eval 证据。
+缺失、未知、action 不匹配或局部范围外的 coverage 会产生 `needs_revision`，不会创建 Proposal。
+确定性校验只证明 Schema、identity、目录、引用子树范围、coverage 可追溯性和当前结构质量规则成立，
+不产生语义分数，不自动选择 provider，也不证明 OpenAI 已正确理解任意目标或修订消息。Proposal 审批和
+`Start`/`Next` 场景执行边界保持不变。完整决策见
+[ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。

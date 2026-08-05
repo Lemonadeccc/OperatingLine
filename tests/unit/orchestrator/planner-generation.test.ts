@@ -10,6 +10,7 @@ import {
   evaluatePlanningQuality,
   PlannerGenerationRuntimeError,
   plannerGenerationErrorResponse,
+  restoreInitialPlannerProviderInvocations,
 } from '@operatingline/orchestrator';
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
 import {
@@ -27,6 +28,19 @@ const snowmanFixture = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
 ) as PlanningProposalDraft['plan'];
 const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+const capabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'complete-snowman',
+      statement: 'Create and render the complete snowman.',
+      coverage: [
+        { capabilityId: 'geometry.primitive_assembly', stepIds: ['snowman.model.head'] },
+        { capabilityId: 'output.png_preview', stepIds: ['snowman.render.preview'] },
+      ],
+    },
+  ],
+};
 
 function packetFor(request: PlanningPromptRequest): PlanningPromptPacket {
   return buildPlanningPromptPacket(
@@ -36,7 +50,7 @@ function packetFor(request: PlanningPromptRequest): PlanningPromptPacket {
       goal: request.goal,
       requestedPlanId: request.planId,
       recommendedRevision: 1,
-      catalog: blenderActionCatalog,
+      catalog: { ...blenderActionCatalog, adapterId: request.targetAdapterId },
       companionStates: [],
       constraints: {
         singleAdapterPlan: true,
@@ -55,7 +69,7 @@ function packetFor(request: PlanningPromptRequest): PlanningPromptPacket {
       },
       qualityGate: {
         toolName: 'operatingline.planning.evaluate',
-        baselineVersion: '1.0.0',
+        baselineVersion: '1.1.0',
         requiredPhaseSelection: 'planner_declared_from_goal',
         description: 'Evaluate the generated draft.',
       },
@@ -67,7 +81,7 @@ function validDraft(packet: PlanningPromptPacket): PlanningProposalDraft {
   return {
     targetAdapterId: packet.context.targetAdapterId,
     catalogVersion: packet.context.catalog.catalogVersion,
-    planning: { goal: packet.context.goal, requiredPhaseIds },
+    planning: { goal: packet.context.goal, requiredPhaseIds, capabilityCoverage },
     plan: {
       ...structuredClone(snowmanFixture),
       id: packet.context.requestedPlanId,
@@ -137,6 +151,7 @@ function harnessForProviders(
           catalogVersion: draft.catalogVersion,
           goal: draft.planning.goal,
           requiredPhaseIds: draft.planning.requiredPhaseIds,
+          capabilityCoverage: draft.planning.capabilityCoverage,
           plan: draft.plan,
         },
         packet.context.catalog,
@@ -217,6 +232,27 @@ describe('planner generation coordinator', () => {
     expect(events.some((event) => event.eventType.startsWith('guide.proposal'))).toBe(false);
     await coordinator.close();
     expect(provider.closeCalls).toBe(1);
+  });
+
+  it('returns needs_revision for a schema-valid capability draft missing coverage', async () => {
+    const provider = new FakePlannerProvider(({ packet }) => {
+      const draft = validDraft(packet);
+      delete draft.planning.capabilityCoverage;
+      return draft;
+    });
+    const { coordinator } = harness(provider);
+
+    const result = await coordinator.generate(request());
+
+    expect(result).toMatchObject({
+      status: 'needs_revision',
+      proposalCreated: false,
+      planningQuality: {
+        valid: false,
+        findings: [expect.objectContaining({ code: 'coverage.missing' })],
+      },
+    });
+    await coordinator.close();
   });
 
   it('fails before packet construction for missing or unavailable providers', async () => {
@@ -470,6 +506,41 @@ describe('planner generation coordinator', () => {
     await expect(restored.coordinator.generate(input)).resolves.toEqual(expected);
     expect(restoredProvider.inputs).toHaveLength(0);
     await restored.coordinator.close();
+  });
+
+  it('rejects forged restored ready evidence without capability coverage or exact versions', async () => {
+    const originalProvider = new FakePlannerProvider(({ packet }) => validDraft(packet));
+    const original = harness(originalProvider);
+    const input = request();
+    await original.coordinator.generate(input);
+    const completed = asStoredEvents(original.events).find(
+      (event) => event.eventType === 'planning.provider.generation.completed',
+    );
+    await original.coordinator.close();
+    if (completed === undefined) {
+      throw new Error('Expected completed planner generation evidence');
+    }
+
+    const missingCoverage = structuredClone(completed);
+    const missingCoverageResult = (
+      missingCoverage.payload as {
+        result: {
+          draft: { planning: { capabilityCoverage?: unknown } };
+          planningQuality: { capabilityCoverage?: unknown };
+        };
+      }
+    ).result;
+    delete missingCoverageResult.draft.planning.capabilityCoverage;
+    delete missingCoverageResult.planningQuality.capabilityCoverage;
+    expect(() => restoreInitialPlannerProviderInvocations([missingCoverage])).toThrow();
+
+    const mismatchedVersion = structuredClone(completed);
+    (
+      mismatchedVersion.payload as {
+        result: { packetFormatVersion: string };
+      }
+    ).result.packetFormatVersion = '1.0.0';
+    expect(() => restoreInitialPlannerProviderInvocations([mismatchedVersion])).toThrow();
   });
 
   it.each([

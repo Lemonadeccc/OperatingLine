@@ -4,7 +4,10 @@
   "properties": {
     "formatVersion": {
       "type": "string",
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
     },
     "operation": {
       "type": "string",
@@ -581,6 +584,47 @@
                 "additionalProperties": false
               }
             },
+            "semanticCapabilities": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "selectionGuidance": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actionNames": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "title",
+                  "description",
+                  "selectionGuidance",
+                  "actionNames"
+                ],
+                "additionalProperties": false
+              }
+            },
             "actions": {
               "minItems": 1,
               "type": "array",
@@ -773,7 +817,23 @@
             "planningNotes",
             "actions"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "type": "object",
+                "required": [
+                  "semanticCapabilities"
+                ]
+              },
+              "then": {
+                "type": "object",
+                "required": [
+                  "planningPhases"
+                ]
+              }
+            }
+          ]
         },
         "companionState": {
           "anyOf": [
@@ -1259,6 +1319,48 @@
     "renderedPrompt"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "catalog": {
+                "type": "object",
+                "required": [
+                  "semanticCapabilities"
+                ]
+              }
+            },
+            "required": [
+              "catalog"
+            ]
+          }
+        },
+        "required": [
+          "context"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "formatVersion": {
+            "const": "1.1.0"
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "formatVersion": {
+            "const": "1.0.0"
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "__schema0": {
       "anyOf": [

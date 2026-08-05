@@ -24,6 +24,16 @@ const basePlan = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
 ) as GuidePlan;
 const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+const capabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'larger-head',
+      statement: 'Make the referenced snowman head larger.',
+      coverage: [{ capabilityId: 'geometry.primitive_assembly', stepIds: ['snowman.model.head'] }],
+    },
+  ],
+};
 
 function validDraft(packet: ReplanningPromptPacket) {
   const plan = structuredClone(packet.context.revisionRequest.basePlan);
@@ -36,7 +46,11 @@ function validDraft(packet: ReplanningPromptPacket) {
   return {
     requestId: packet.context.revisionRequest.requestId,
     catalogVersion: packet.context.catalog.catalogVersion,
-    planning: { goal: packet.context.revisionRequest.message, requiredPhaseIds },
+    planning: {
+      goal: packet.context.revisionRequest.message,
+      requiredPhaseIds,
+      capabilityCoverage,
+    },
     plan,
   };
 }

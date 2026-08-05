@@ -103,6 +103,9 @@ function sortedFindings(findings: PlanningQualityFinding[]): PlanningQualityFind
 export function evaluatePlanningQuality(
   input: PlanningQualityEvaluationRequest,
   catalogInput: ActionCatalog,
+  options: {
+    readonly allowedCoverageStepIds?: ReadonlySet<string>;
+  } = {},
 ): PlanningQualityReport {
   const request = planningQualityEvaluationRequestSchema.parse(input);
   const catalog = actionCatalogSchema.parse(catalogInput);
@@ -187,6 +190,90 @@ export function evaluatePlanningQuality(
       step.action !== null,
   );
   const stepsById = new Map(request.plan.steps.map((step) => [step.id, step]));
+
+  const semanticCapabilities = catalog.semanticCapabilities;
+  if (semanticCapabilities === undefined) {
+    if (request.capabilityCoverage !== undefined) {
+      addFinding({
+        code: 'coverage.profile_unavailable',
+        severity: 'error',
+        message: `Action catalog ${catalog.adapterId}@${catalog.catalogVersion} has no semantic capability profile`,
+        stepIds: [],
+        phaseIds: [],
+      });
+    }
+  } else if (request.capabilityCoverage === undefined) {
+    addFinding({
+      code: 'coverage.missing',
+      severity: 'error',
+      message: `A concrete requirement-to-capability-to-step coverage mapping is required for ${catalog.adapterId}@${catalog.catalogVersion}`,
+      stepIds: [],
+      phaseIds: [],
+    });
+  } else {
+    const capabilitiesById = new Map(
+      semanticCapabilities.map((capability) => [capability.id, capability] as const),
+    );
+    for (const requirement of request.capabilityCoverage.requirements) {
+      for (const coverage of requirement.coverage) {
+        const capability = capabilitiesById.get(coverage.capabilityId);
+        if (capability === undefined) {
+          addFinding({
+            code: 'coverage.unknown_capability',
+            severity: 'error',
+            message: `Requirement ${requirement.requirementId} references unknown capability ${coverage.capabilityId}`,
+            stepIds: [...coverage.stepIds].sort(),
+            phaseIds: [],
+          });
+        }
+        const allowedActions = new Set(capability?.actionNames ?? []);
+        for (const stepId of coverage.stepIds) {
+          const step = stepsById.get(stepId);
+          if (step === undefined) {
+            addFinding({
+              code: 'coverage.step_missing',
+              severity: 'error',
+              message: `Requirement ${requirement.requirementId} maps capability ${coverage.capabilityId} to nonexistent step ${stepId}`,
+              stepIds: [stepId],
+              phaseIds: [],
+            });
+            continue;
+          }
+          if (step.action === null) {
+            addFinding({
+              code: 'coverage.step_not_executable',
+              severity: 'error',
+              message: `Requirement ${requirement.requirementId} maps capability ${coverage.capabilityId} to actionless step ${stepId}`,
+              stepIds: [stepId],
+              phaseIds: [],
+            });
+            continue;
+          }
+          if (capability !== undefined && !allowedActions.has(step.action.name)) {
+            addFinding({
+              code: 'coverage.action_mismatch',
+              severity: 'error',
+              message: `Step ${stepId} action ${step.action.name} does not implement capability ${capability.id}`,
+              stepIds: [stepId],
+              phaseIds: [],
+            });
+          }
+          if (
+            options.allowedCoverageStepIds !== undefined &&
+            !options.allowedCoverageStepIds.has(stepId)
+          ) {
+            addFinding({
+              code: 'coverage.step_out_of_scope',
+              severity: 'error',
+              message: `Step ${stepId} is outside the allowed capability coverage scope`,
+              stepIds: [stepId],
+              phaseIds: [],
+            });
+          }
+        }
+      }
+    }
+  }
 
   if (planningPhases.length === 0) {
     addFinding({
@@ -388,7 +475,8 @@ export function evaluatePlanningQuality(
   const errorCount = orderedFindings.filter((finding) => finding.severity === 'error').length;
   return planningQualityReportSchema.parse({
     protocolVersion: guideProtocolVersion,
-    baselineVersion: planningQualityBaselineVersion,
+    baselineVersion:
+      catalog.semanticCapabilities === undefined ? '1.0.0' : planningQualityBaselineVersion,
     targetAdapterId: request.targetAdapterId,
     catalogVersion: catalog.catalogVersion,
     goal: request.goal ?? null,
@@ -404,6 +492,9 @@ export function evaluatePlanningQuality(
       requiredPhaseCount: request.requiredPhaseIds.length,
     },
     phases,
+    ...(catalog.semanticCapabilities === undefined || request.capabilityCoverage === undefined
+      ? {}
+      : { capabilityCoverage: request.capabilityCoverage }),
     findings: orderedFindings,
   });
 }

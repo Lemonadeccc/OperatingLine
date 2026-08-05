@@ -11,14 +11,18 @@
 `guide-proposal-*` 定义 AI 提案、服务端信封和宿主决策。它们与 GuidePlan Schema 一样由
 `packages/protocol` 生成；任何宿主不得自行增加未版本化字段。
 
-`action-catalog.schema.json` 定义宿主发布的版本化允许动作目录；`planning-context.schema.json`
+`action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
+`semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。
 目录规范数据由适配器拥有，例如 Blender 位于
 `adapters/blender/catalog/v1/action-catalog.json`，不放进通用协议包硬编码。
 
 `planning-quality-evaluation-request.schema.json` 与 `planning-quality-report.schema.json` 定义
 模型无关的候选计划质量门。报告验证 catalog 阶段分组/顺序、调用方声明的目标所需阶段、资源
-创建与依赖、语义锚点和观察，只返回确定性 finding 与通过状态，不定义主观模型分数。
+创建与依赖、语义锚点和观察。对带能力画像的目录，它还验证 provider 声明的
+`requirement -> capability -> executable leaf` 覆盖链：能力与步骤必须存在，步骤必须可执行且 action
+属于该能力；局部重规划的步骤还必须位于允许范围内。报告只返回确定性 finding 与通过状态，不定义
+语义或审美分数。
 `planning-benchmark-case.schema.json` 把自然语言目标、精确目录版本、所需阶段与一个完整参考 Plan
 绑定为可重放案例；当前非雪人案例位于
 `fixtures/v1/planning/robot-preview.benchmark.json`。
@@ -26,7 +30,9 @@
 `planning-prompt-request.schema.json`、`planning-prompt-context.schema.json`、
 `planning-prompt-packet.schema.json` 和
 `planning-proposal-draft.schema.json` 定义供应商无关的模型交接契约。Packet 包含完整
-PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和确定性渲染提示；同一 packet
+PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和确定性渲染提示；带
+`semanticCapabilities` 的目录使用格式 `1.1.0` 并要求 `planning.capabilityCoverage`，历史目录使用
+格式 `1.0.0` 生成和回放。同一 packet
 构建器服务 MCP Prompt、MCP Tool 和 HTTP；Prompt 呈现渲染文本，Tool/HTTP 返回完整 packet。
 它不调用模型，也不改变宿主内人工接受门禁。
 
@@ -35,7 +41,7 @@ PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和�
 `planner-generation-error.schema.json` 定义显式 Planner Provider 的公开边界。Descriptor 只披露
 provider identity、可用性、并发、执行位置、数据传输和凭据管理责任，不携带凭据；本地执行固定为
 `dataTransmission: none`，远端执行固定为 `provider_managed`。Generate 请求必须
-明确指定 `providerId` 与 UUID `requestId`；结果包含严格草案和对应质量报告，且
+明确指定 `providerId` 与 UUID `requestId`；结果包含严格草案、对应质量报告和原样 coverage 证据，且
 `proposalCreated` 固定为 `false`。生成不是 Proposal 提交或宿主执行授权。
 
 ActionCatalog 的 `argumentsSchema` 使用受限、可移植的 JSON Schema 子集：object/array/string/
@@ -56,7 +62,8 @@ Proposal 投递的精确 Plan/节点/字段前后值。`1.0.0` payload 仍可读
 
 `eval-export-request.schema.json` 与 `eval-export-bundle.schema.json` 定义按 adapter、Plan 和可选
 Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录版本、相关完整计划与提案、人工
-决定、步骤 observation/rollback、稳定事件序列、汇总和内容 SHA-256；它不定义或暗示质量分数。
+决定、provider coverage 声明及 planning-quality 事件、步骤 observation/rollback、稳定事件序列、
+汇总和内容 SHA-256；它不定义或暗示质量分数。
 
 ## 版本规则
 
@@ -66,12 +73,18 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - 树形父子关系用于呈现和引用，`dependsOn` 用于执行调度。
 - 带 `planningPhases` 的目录必须把每个 action 恰好分配到一个阶段；旧目录没有阶段画像时，质量
   评估显式降级并产生 warning，不能伪装成完整检查。
+- 带 `semanticCapabilities` 的目录必须保证 capability ID 唯一、每项能力至少声明一个同目录 action，
+  且 capability 内 action 不重复。Blender `1.3.0` 当前发布七项能力；`1.0.0`–`1.2.0` 保持历史版本。
 - Planner Packet 只为带阶段画像与质量门的目录生成；客户端必须把草案先交给质量门，再提交完整
   Proposal，不能把 prompt 输出本身视为执行授权。
+- Planning/Replanning Packet 对 capability-aware 目录使用 `1.1.0`，对历史目录使用 `1.0.0`；对应
+  planning-quality baseline 分别为 `1.1.0` 与 `1.0.0`。历史目录不得携带新 coverage。
 - Planner Provider 必须由嵌入方显式注入并由调用方按 `providerId` 选择；核心不定义默认 provider、
   API Key、endpoint 或模型参数。默认 standalone 的 provider 列表为空。
 - Generate 可能按 provider 声明传输完整 packet 并产生费用。返回草案是不受信任输入；只有严格
-  Schema、packet identity、ActionCatalog 和质量校验都完成后才形成 generation result，且结果仍需
+  Schema、packet identity、ActionCatalog、coverage 和质量校验都完成后才形成 generation result。
+  缺少 coverage、未知 capability、不存在/actionless 的步骤、action 不匹配或局部范围外映射都会使
+  结果为 `needs_revision`；不会自动创建 Proposal。结果仍需
   单独调用 `guide.propose`。Generation runtime error 使用 `retryMode` 明确区分可复用同一 ID、必须
   使用新 ID 和不可重试；provider 已开始后的失败或中断不会用同一 `requestId` 自动重试。MCP 在进入
   handler 前拒绝的畸形 tool 参数仍使用 MCP 自身的 `InvalidParams` 错误，而不是 generation runtime
@@ -105,6 +118,10 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
   `operatingline-json-sort-v1` 递归排序对象键后计算 SHA-256。
 - `redaction: none` 表示原始证据可能含用户目标、provider 生成草案、修订消息、动作参数、观察和
   错误；分享或训练前必须由调用方审核和授权。
+
+目录约束覆盖的完整兼容、失败与非评分决策见
+[ADR 0017](../docs/adr/0017-catalog-grounded-goal-coverage.md)。它不授予 provider 自动选择、场景修改、
+Proposal 接受或执行权限，也不证明 provider 正确理解了任意目标。
 
 重新生成协议：
 

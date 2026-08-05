@@ -11,6 +11,47 @@ import { startRuntime } from '@operatingline/orchestrator';
 
 const accessToken = 'openai-runtime-test-access-token';
 const catalogVersion = blenderActionCatalog.catalogVersion;
+const snowmanCapabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'complete-snowman',
+      statement: 'Create and render the complete snowman.',
+      coverage: [
+        { capabilityId: 'geometry.ground_plane', stepIds: ['snowman.scene.ground'] },
+        {
+          capabilityId: 'geometry.primitive_assembly',
+          stepIds: [
+            'snowman.model.body_lower',
+            'snowman.model.body_upper',
+            'snowman.model.head',
+            'snowman.details.face',
+            'snowman.details.buttons',
+            'snowman.details.arms',
+          ],
+        },
+        {
+          capabilityId: 'appearance.principled_palette',
+          stepIds: [
+            'snowman.materials.snow',
+            'snowman.materials.accessories',
+            'snowman.materials.ground',
+          ],
+        },
+        { capabilityId: 'animation.rigid_armature', stepIds: ['snowman.animation.rig'] },
+        {
+          capabilityId: 'animation.rigid_pose_keyframes',
+          stepIds: ['snowman.animation.pose'],
+        },
+        {
+          capabilityId: 'render.scene_setup',
+          stepIds: ['snowman.lighting.scene', 'snowman.lighting.rig'],
+        },
+        { capabilityId: 'output.png_preview', stepIds: ['snowman.render.preview'] },
+      ],
+    },
+  ],
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -84,6 +125,7 @@ describe('OpenAI planner provider runtime integration', () => {
       planning: {
         goal,
         requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+        capabilityCoverage: snowmanCapabilityCoverage,
       },
       plan: { ...fixture, id: planId, revision: 1 },
     };
@@ -171,7 +213,7 @@ describe('OpenAI planner provider runtime integration', () => {
       expect(upstreamHeaders.get('x-ambient-header')).toBeNull();
       expect(JSON.parse(String(upstream?.init?.body))).toMatchObject({
         model: 'test-model',
-        input: expect.stringContaining(goal),
+        input: expect.stringContaining('"protocolVersion": "1.1.0"'),
         max_output_tokens: 32_768,
         store: false,
         stream: false,
@@ -184,10 +226,26 @@ describe('OpenAI planner provider runtime integration', () => {
         `${runtime.baseUrl}/api/v1/eval/export?targetAdapterId=blender&planId=${planId}`,
         { headers },
       );
-      const bundle = (await evidence.json()) as { events?: Array<{ eventType?: string }> };
+      const bundle = (await evidence.json()) as {
+        events?: Array<{ eventType?: string; payload?: Record<string, unknown> }>;
+      };
       expect(bundle.events?.map((event) => event.eventType)).not.toContain(
         'guide.proposal.created',
       );
+      const qualityEvent = bundle.events?.find(
+        (event) => event.eventType === 'planning.quality.evaluated',
+      );
+      expect(qualityEvent?.payload).toMatchObject({
+        capabilityCoverage: snowmanCapabilityCoverage,
+        report: {
+          baselineVersion: '1.1.0',
+          capabilityCoverage: snowmanCapabilityCoverage,
+          valid: true,
+        },
+      });
+      expect(
+        (qualityEvent?.payload?.['report'] as Record<string, unknown>)['score'],
+      ).toBeUndefined();
       const sdkLogs = sdkLogSpies
         .flatMap((spy) => spy.mock.calls)
         .map((arguments_) => format(...arguments_))

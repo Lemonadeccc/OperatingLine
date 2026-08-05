@@ -27,6 +27,70 @@
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
           }
+        },
+        "capabilityCoverage": {
+          "type": "object",
+          "properties": {
+            "policyVersion": {
+              "type": "string",
+              "const": "catalog_capability_coverage_v1"
+            },
+            "requirements": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "requirementId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000
+                  },
+                  "coverage": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "capabilityId": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "stepIds": {
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "capabilityId",
+                        "stepIds"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "requirementId",
+                  "statement",
+                  "coverage"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "policyVersion",
+            "requirements"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

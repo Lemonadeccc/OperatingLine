@@ -20,6 +20,57 @@ import {
 
 const accessToken = 'test-token-with-at-least-16-characters';
 const catalogVersion = blenderActionCatalog.catalogVersion;
+const snowmanCapabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'complete-snowman',
+      statement: 'Create and render the complete snowman.',
+      coverage: [
+        { capabilityId: 'geometry.ground_plane', stepIds: ['snowman.scene.ground'] },
+        {
+          capabilityId: 'geometry.primitive_assembly',
+          stepIds: [
+            'snowman.model.body_lower',
+            'snowman.model.body_upper',
+            'snowman.model.head',
+            'snowman.details.face',
+            'snowman.details.buttons',
+            'snowman.details.arms',
+          ],
+        },
+        {
+          capabilityId: 'appearance.principled_palette',
+          stepIds: [
+            'snowman.materials.snow',
+            'snowman.materials.accessories',
+            'snowman.materials.ground',
+          ],
+        },
+        { capabilityId: 'animation.rigid_armature', stepIds: ['snowman.animation.rig'] },
+        {
+          capabilityId: 'animation.rigid_pose_keyframes',
+          stepIds: ['snowman.animation.pose'],
+        },
+        {
+          capabilityId: 'render.scene_setup',
+          stepIds: ['snowman.lighting.scene', 'snowman.lighting.rig'],
+        },
+        { capabilityId: 'output.png_preview', stepIds: ['snowman.render.preview'] },
+      ],
+    },
+  ],
+};
+const snowmanHeadCapabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'larger-head',
+      statement: 'Make the referenced snowman head larger.',
+      coverage: [{ capabilityId: 'geometry.primitive_assembly', stepIds: ['snowman.model.head'] }],
+    },
+  ],
+};
 
 async function availablePort(): Promise<number> {
   const probe = createServer();
@@ -288,7 +339,7 @@ describe('OperatingLine runtime', () => {
         submission: { toolName: 'operatingline.guide.propose' },
         qualityGate: {
           toolName: 'operatingline.planning.evaluate',
-          baselineVersion: '1.0.0',
+          baselineVersion: '1.1.0',
         },
       });
 
@@ -309,7 +360,7 @@ describe('OperatingLine runtime', () => {
         renderedPrompt?: string;
       };
       expect(promptPacket).toMatchObject({
-        formatVersion: '1.0.0',
+        formatVersion: '1.1.0',
         context: {
           requestedPlanId: 'mascot-prompt-demo',
           catalog: { catalogVersion },
@@ -353,6 +404,7 @@ describe('OperatingLine runtime', () => {
         catalogVersion,
         goal,
         requiredPhaseIds,
+        capabilityCoverage: snowmanCapabilityCoverage,
         plan,
       });
       expect(JSON.parse(qualityResponse.result?.content?.[0]?.text ?? '{}')).toMatchObject({
@@ -366,7 +418,7 @@ describe('OperatingLine runtime', () => {
           await callMcpTool(runtime, 12, 'operatingline.guide.propose', {
             targetAdapterId: 'blender',
             catalogVersion,
-            planning: { goal, requiredPhaseIds },
+            planning: { goal, requiredPhaseIds, capabilityCoverage: snowmanCapabilityCoverage },
             plan,
           })
         ).result?.isError,
@@ -402,6 +454,7 @@ describe('OperatingLine runtime', () => {
           catalogVersion,
           goal,
           requiredPhaseIds,
+          capabilityCoverage: snowmanCapabilityCoverage,
           plan,
         }),
       });
@@ -475,7 +528,11 @@ describe('OperatingLine runtime', () => {
     const provider = new FakePlannerProvider(({ packet }) => ({
       targetAdapterId: packet.context.targetAdapterId,
       catalogVersion: packet.context.catalog.catalogVersion,
-      planning: { goal: packet.context.goal, requiredPhaseIds },
+      planning: {
+        goal: packet.context.goal,
+        requiredPhaseIds,
+        capabilityCoverage: snowmanCapabilityCoverage,
+      },
       plan: {
         ...structuredClone(fixture),
         id: packet.context.requestedPlanId,
@@ -672,7 +729,11 @@ describe('OperatingLine runtime', () => {
         return {
           requestId: packet.context.revisionRequest.requestId,
           catalogVersion: packet.context.catalog.catalogVersion,
-          planning: { goal: packet.context.revisionRequest.message, requiredPhaseIds },
+          planning: {
+            goal: packet.context.revisionRequest.message,
+            requiredPhaseIds,
+            capabilityCoverage: snowmanHeadCapabilityCoverage,
+          },
           plan,
         };
       },
@@ -739,7 +800,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(promptResponse.status).toBe(200);
       await expect(promptResponse.json()).resolves.toMatchObject({
-        formatVersion: '1.0.0',
+        formatVersion: '1.1.0',
         operation: 'local_replan',
         context: {
           revisionRequest: { requestId: revisionRequestId },
@@ -971,6 +1032,11 @@ describe('OperatingLine runtime', () => {
       const proposed = await callMcpTool(runtime, 51, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
         catalogVersion,
+        planning: {
+          goal,
+          requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+          capabilityCoverage: snowmanCapabilityCoverage,
+        },
         plan,
       });
       const proposal = JSON.parse(proposed.result?.content?.[0]?.text ?? '{}') as {
@@ -1095,7 +1161,7 @@ describe('OperatingLine runtime', () => {
         eventType: 'planning.prompt.generated',
         payload: {
           packet: {
-            formatVersion: '1.0.0',
+            formatVersion: '1.1.0',
             context: { goal, requestedPlanId: plan.id },
           },
         },
@@ -1104,9 +1170,17 @@ describe('OperatingLine runtime', () => {
         eventType: 'planning.quality.evaluated',
         payload: {
           plan: { id: plan.id, steps: plan.steps },
-          report: { valid: true, baselineVersion: '1.0.0' },
+          capabilityCoverage: snowmanCapabilityCoverage,
+          report: {
+            valid: true,
+            baselineVersion: '1.1.0',
+            capabilityCoverage: snowmanCapabilityCoverage,
+          },
         },
       });
+      expect(
+        (first.events[2]?.payload['report'] as Record<string, unknown>)['score'],
+      ).toBeUndefined();
       const firstContent = structuredClone(first) as Record<string, unknown>;
       delete firstContent['exportId'];
       delete firstContent['exportedAt'];
@@ -1326,6 +1400,11 @@ describe('OperatingLine runtime', () => {
       const proposed = await callMcpTool(runtime, 19, 'operatingline.replan.propose', {
         requestId,
         catalogVersion,
+        planning: {
+          goal: revisionRequest.message,
+          requiredPhaseIds: ['geometry'],
+          capabilityCoverage: snowmanHeadCapabilityCoverage,
+        },
         plan: replanned,
       });
       expect(JSON.parse(proposed.result?.content?.[0]?.text ?? '{}')).toMatchObject({
@@ -1503,6 +1582,11 @@ describe('OperatingLine runtime', () => {
       const continuedProposal = await callMcpTool(runtime, 22, 'operatingline.replan.propose', {
         requestId: continuedRequestId,
         catalogVersion,
+        planning: {
+          goal: continuedRequest.message,
+          requiredPhaseIds: ['geometry'],
+          capabilityCoverage: snowmanHeadCapabilityCoverage,
+        },
         plan: continuedPlan,
       });
       expect(JSON.parse(continuedProposal.result?.content?.[0]?.text ?? '{}')).toMatchObject({
@@ -1662,6 +1746,11 @@ describe('OperatingLine runtime', () => {
       ) as { id: string; revision: number };
       const proposed = await callMcpTool(runtime, 30, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
+        planning: {
+          goal: 'Create and render the complete snowman.',
+          requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+          capabilityCoverage: snowmanCapabilityCoverage,
+        },
         plan,
       });
       expect(proposed.result?.isError).not.toBe(true);
@@ -1754,6 +1843,11 @@ describe('OperatingLine runtime', () => {
       });
       const proposed = await callMcpTool(runtime, 40, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
+        planning: {
+          goal: 'Create and render the complete snowman.',
+          requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+          capabilityCoverage: snowmanCapabilityCoverage,
+        },
         plan,
       });
       expect(proposed.result?.isError).not.toBe(true);
@@ -1775,6 +1869,11 @@ describe('OperatingLine runtime', () => {
 
       const stale = await callMcpTool(runtime, 41, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
+        planning: {
+          goal: 'Create and render the complete snowman.',
+          requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+          capabilityCoverage: snowmanCapabilityCoverage,
+        },
         plan,
       });
       expect(stale.result).toMatchObject({ isError: true });

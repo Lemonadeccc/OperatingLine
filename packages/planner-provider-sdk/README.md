@@ -26,7 +26,10 @@ export interface PlannerProvider {
 ```
 
 `generate()` 返回 `unknown` 是有意的：provider 输出不被信任，Orchestrator 必须重新解析严格的
-`PlanningProposalDraft`，核对 packet identity、递归 ActionCatalog 参数和确定性规划质量。插件不得把
+`PlanningProposalDraft`，核对 packet identity、递归 ActionCatalog 参数、目录能力覆盖链和确定性规划质量。
+Blender catalog `1.3.0` 的 packet 格式为 `1.1.0`；provider 必须在 `planning.capabilityCoverage` 中把
+每条具体需求映射到真实 catalog capability，再映射到 action 匹配的可执行叶子。历史无能力目录继续
+使用 packet `1.0.0`。插件不得把
 “生成完成”解释为 Proposal 已创建；公开结果的 `proposalCreated` 固定为 `false`。
 
 ## 注入
@@ -50,7 +53,8 @@ const runtime = await startRuntime({
 `operatingline.planner.providers.list` 检查公开 descriptor，再用
 `operatingline.planner.generate` 明确传入 `providerId`、UUID `requestId`、目标、Plan ID 和可选目录
 版本。核心没有默认 provider，也不会自动提交返回草案。调用方检查 `status` 与
-`planningQuality` 后，仍须另行调用 `operatingline.guide.propose`；宿主内用户接受后才可执行。
+`planningQuality` 后，仍须另行调用 `operatingline.guide.propose`；宿主内用户接受后才可执行。缺失、
+未知、不匹配或范围外的 coverage 会返回 `needs_revision`，不会生成 Proposal。
 
 ## Descriptor 要求
 
@@ -75,11 +79,13 @@ Descriptor 是公开数据，不得包含 API Key、访问令牌、私有 endpoi
   传播和处理 signal，否则外部调用可能在核心返回后继续。核心并行调用插件 `close()`，默认在 5 秒
   后停止等待并返回清洗错误；同步阻塞同一 JavaScript 线程的恶意插件仍无法由进程内边界强制终止。
 - 核心限制输出大小并清洗公开错误，不持久化原始 provider 响应、原始错误或私有推理。成功解析的
-  草案、质量报告和 generation 事件会进入未脱敏 Eval 证据，可能包含敏感内容。
+  草案、coverage、质量报告和 generation 事件会进入未脱敏 Eval 证据，可能包含敏感内容。核心不把
+  coverage 升级为语义分数，也不据此自动选择 provider。
 - 同一 `requestId` 的同内容并发调用会共享进行中的结果，已完成结果可按持久证据重放。错误对象通过
   `retryMode` 区分 `same_request_id`、`new_request_id` 和 `never`；Provider 已开始后的失败、超时或
   中断不会自动再次使用原 ID，确认需要重试后使用新 UUID，避免重复费用或外部副作用。
 
 公共协议和完整决策见
 [协议说明](../../protocol/README.md)与
-[ADR 0013](../../docs/adr/0013-explicit-planner-provider-boundary.md)。
+[ADR 0013](../../docs/adr/0013-explicit-planner-provider-boundary.md)。目录约束目标覆盖见
+[ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。

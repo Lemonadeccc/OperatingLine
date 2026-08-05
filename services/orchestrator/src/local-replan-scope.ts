@@ -84,6 +84,19 @@ export function createLocalReplanScope(request: GuideRevisionRequest): LocalRepl
   });
 }
 
+export function localReplanCoverageStepIds(
+  request: GuideRevisionRequest,
+  targetPlan: GuidePlan,
+): ReadonlySet<string> {
+  const normalizedRoots = new Set(normalizeLocalReplanRoots(request));
+  const targetSteps = stepMap(targetPlan);
+  return new Set(
+    targetPlan.steps
+      .filter((step) => owningScopeRoot(step.id, targetSteps, normalizedRoots) !== null)
+      .map((step) => step.id),
+  );
+}
+
 function isEmptyDiff(diff: GuidePlanDiff): boolean {
   return diff.planChanges.length === 0 && diff.stepChanges.length === 0;
 }

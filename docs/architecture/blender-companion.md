@@ -131,8 +131,8 @@ Proposal 不得覆盖 Provider Proposal。队列满只显示本地错误，不�
 帧姿态，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light 和一台 Camera，
 最后在扩展管理的临时目录生成帧 20 的 320 × 320 Eevee PNG。
 
-当前动作目录 `1.2.0` 允许以下 10 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0` 供精确回放：
+当前动作目录 `1.3.0` 允许以下 10 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_uv_sphere`
@@ -144,6 +144,18 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、
 - `blender.render_scene.create`
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
+
+`1.3.0` 还发布七项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、Principled
+material palette、rigid armature、rigid pose keyframes、render scene setup 和 PNG preview output。
+Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
+再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
+action 不匹配或范围外的映射使 quality baseline `1.1.0` 失败并返回 `needs_revision`，不会产生
+Proposal。历史目录继续使用 packet/baseline `1.0.0` 回放。
+
+该 coverage 随 planning-quality 事件进入 Eval，不进入 Blender GuideProposal 信封，也不改变
+Revision Workspace、Accept/Reject 或 `Start`/`Next`。它只证明 provider 声明可追溯到真实目录动作，
+不证明需求抽取、参数语义或最终视觉结果正确。完整决策见
+[ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
 注册表按步骤 ID 绑定 action，而不是假设 action 名唯一。一个步骤的 receipt 可以同时记录多个
 Blender datablock、mutation 和渲染产物；资源解析同时核对 pointer、receipt token、logical ID、
@@ -180,7 +192,8 @@ Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
 ## 非雪人规划基准
 
 `protocol/fixtures/v1/planning/robot-preview.benchmark.json` 是首个版本化跨目标案例。它把“创建并
-渲染一个友好风格机器人”绑定到 catalog `1.2.0`、目标所需阶段和完整参考 Plan。该目标明确不需要
+渲染一个友好风格机器人”绑定到历史 catalog `1.2.0`、目标所需阶段和完整参考 Plan，因此继续以
+quality baseline `1.0.0` 作为精确 replay fixture，不携带 `1.3.0` coverage。该目标明确不需要
 Animation，只使用 Geometry、Materials、Render setup 与 Output；六个叶子动作创建地面、批量
 机器人部件、调色板、隔离渲染场景、灯光/相机和 320 × 320 PNG。
 

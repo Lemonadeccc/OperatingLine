@@ -16,6 +16,10 @@ const snowmanPlan = (): GuidePlan =>
     JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8')),
   );
 
+const historicalCatalog = blenderActionCatalogs.find(
+  (catalog) => catalog.catalogVersion === '1.2.0',
+)!;
+
 const evaluate = (plan: GuidePlan, requiredPhaseIds: string[] = []) =>
   evaluatePlanningQuality(
     {
@@ -25,7 +29,7 @@ const evaluate = (plan: GuidePlan, requiredPhaseIds: string[] = []) =>
       requiredPhaseIds,
       plan,
     },
-    blenderActionCatalog,
+    historicalCatalog,
   );
 
 describe('planning quality baseline', () => {
@@ -61,7 +65,7 @@ describe('planning quality baseline', () => {
         requiredPhaseIds: benchmark.requiredPhaseIds,
         plan: benchmark.referencePlan,
       },
-      blenderActionCatalog,
+      historicalCatalog,
     );
     expect(report).toMatchObject({
       valid: true,
@@ -116,7 +120,7 @@ describe('planning quality baseline', () => {
   });
 
   it('degrades honestly for a historical catalog without phase metadata', () => {
-    const historicalCatalog = blenderActionCatalogs.find(
+    const historicalCatalogWithoutPhases = blenderActionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.1.0',
     )!;
     const report = evaluatePlanningQuality(
@@ -126,10 +130,101 @@ describe('planning quality baseline', () => {
         requiredPhaseIds: [],
         plan: snowmanPlan(),
       },
-      historicalCatalog,
+      historicalCatalogWithoutPhases,
     );
     expect(report).toMatchObject({ valid: true, summary: { warningCount: 1 } });
     expect(report.findings[0]).toMatchObject({ code: 'phase.profile_unavailable' });
+    expect(report.baselineVersion).toBe('1.0.0');
+  });
+
+  it('enforces catalog-grounded capability coverage without producing a score', () => {
+    const plan = snowmanPlan();
+    const validCoverage = {
+      policyVersion: 'catalog_capability_coverage_v1' as const,
+      requirements: [
+        {
+          requirementId: 'snowman-head',
+          statement: 'Create the snowman head.',
+          coverage: [
+            {
+              capabilityId: 'geometry.primitive_assembly',
+              stepIds: ['snowman.model.head'],
+            },
+          ],
+        },
+      ],
+    };
+    const valid = evaluatePlanningQuality(
+      {
+        targetAdapterId: 'blender',
+        catalogVersion: blenderActionCatalog.catalogVersion,
+        requiredPhaseIds: [],
+        capabilityCoverage: validCoverage,
+        plan,
+      },
+      blenderActionCatalog,
+    );
+    expect(valid).toMatchObject({ valid: true, baselineVersion: '1.1.0' });
+    expect(valid.capabilityCoverage).toEqual(validCoverage);
+    expect(valid).not.toHaveProperty('score');
+
+    const missing = evaluatePlanningQuality(
+      {
+        targetAdapterId: 'blender',
+        catalogVersion: blenderActionCatalog.catalogVersion,
+        plan,
+      },
+      blenderActionCatalog,
+    );
+    expect(missing.findings).toContainEqual(expect.objectContaining({ code: 'coverage.missing' }));
+
+    const invalidCoverage = structuredClone(validCoverage);
+    invalidCoverage.requirements = [
+      {
+        requirementId: 'invalid',
+        statement: 'Invalid mappings.',
+        coverage: [
+          { capabilityId: 'unknown.capability', stepIds: ['missing.step'] },
+          {
+            capabilityId: 'geometry.primitive_assembly',
+            stepIds: ['snowman.model', 'missing.step'],
+          },
+          { capabilityId: 'output.png_preview', stepIds: ['snowman.model.head'] },
+        ],
+      },
+    ];
+    const invalid = evaluatePlanningQuality(
+      {
+        targetAdapterId: 'blender',
+        catalogVersion: blenderActionCatalog.catalogVersion,
+        capabilityCoverage: invalidCoverage,
+        plan,
+      },
+      blenderActionCatalog,
+      { allowedCoverageStepIds: new Set(['snowman.render.preview']) },
+    );
+    expect(invalid.findings.map((finding) => finding.code)).toEqual(
+      expect.arrayContaining([
+        'coverage.unknown_capability',
+        'coverage.step_missing',
+        'coverage.step_not_executable',
+        'coverage.action_mismatch',
+        'coverage.step_out_of_scope',
+      ]),
+    );
+
+    const unsupported = evaluatePlanningQuality(
+      {
+        targetAdapterId: 'blender',
+        catalogVersion: historicalCatalog.catalogVersion,
+        capabilityCoverage: validCoverage,
+        plan,
+      },
+      historicalCatalog,
+    );
+    expect(unsupported.findings).toContainEqual(
+      expect.objectContaining({ code: 'coverage.profile_unavailable' }),
+    );
   });
 
   it('emits a strict versioned report contract', () => {

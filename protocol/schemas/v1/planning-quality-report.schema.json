@@ -11,7 +11,10 @@
     },
     "baselineVersion": {
       "type": "string",
-      "const": "1.0.0"
+      "enum": [
+        "1.0.0",
+        "1.1.0"
+      ]
     },
     "targetAdapterId": {
       "type": "string",
@@ -157,6 +160,70 @@
         "additionalProperties": false
       }
     },
+    "capabilityCoverage": {
+      "type": "object",
+      "properties": {
+        "policyVersion": {
+          "type": "string",
+          "const": "catalog_capability_coverage_v1"
+        },
+        "requirements": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "requirementId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              "coverage": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "capabilityId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "stepIds": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "capabilityId",
+                    "stepIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "requirementId",
+              "statement",
+              "coverage"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "policyVersion",
+        "requirements"
+      ],
+      "additionalProperties": false
+    },
     "findings": {
       "type": "array",
       "items": {
@@ -217,5 +284,101 @@
     "findings"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "baselineVersion": {
+            "const": "1.0.0"
+          }
+        },
+        "required": [
+          "baselineVersion"
+        ]
+      },
+      "then": {
+        "not": {
+          "type": "object",
+          "required": [
+            "capabilityCoverage"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "baselineVersion": {
+            "const": "1.1.0"
+          }
+        },
+        "required": [
+          "baselineVersion"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "if": {
+          "type": "object",
+          "required": [
+            "capabilityCoverage"
+          ]
+        },
+        "then": {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "type": "array",
+              "not": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "const": "coverage.missing"
+                    },
+                    "severity": {
+                      "const": "error"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "severity"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "else": {
+          "type": "object",
+          "properties": {
+            "valid": {
+              "const": false
+            },
+            "findings": {
+              "type": "array",
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "const": "coverage.missing"
+                  },
+                  "severity": {
+                    "const": "error"
+                  }
+                },
+                "required": [
+                  "code",
+                  "severity"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$id": "https://operatingline.dev/schema/v1/planning-quality-report.json"
 }

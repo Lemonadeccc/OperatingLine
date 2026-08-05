@@ -257,6 +257,9 @@ export function createPlannerReplanGenerationCoordinator(
             catalogVersion: draft.catalogVersion,
             goal: draft.planning.goal,
             requiredPhaseIds: draft.planning.requiredPhaseIds,
+            ...(draft.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: draft.planning.capabilityCoverage }),
             plan: draft.plan,
             report: planningQuality,
           },

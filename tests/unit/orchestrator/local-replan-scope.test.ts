@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createLocalReplanScope,
   evaluateLocalReplanScope,
+  localReplanCoverageStepIds,
 } from '../../../services/orchestrator/src/local-replan-scope.js';
 
 const basePlan = JSON.parse(
@@ -80,6 +81,15 @@ describe('referenced-subtree local replan scope', () => {
       referencedRootIds: ['snowman.model.head', 'snowman.model'],
       normalizedRootIds: ['snowman.model'],
     });
+    expect([...localReplanCoverageStepIds(revisionRequest, targetPlan())].sort()).toEqual(
+      basePlan.steps
+        .filter(
+          (candidate) =>
+            candidate.id === 'snowman.model' || candidate.id.startsWith('snowman.model.'),
+        )
+        .map((candidate) => candidate.id)
+        .sort(),
+    );
   });
 
   it('allows a Plan-root reference to cover every descendant but not Plan fields', () => {

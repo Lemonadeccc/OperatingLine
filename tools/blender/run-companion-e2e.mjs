@@ -19,6 +19,100 @@ const revisedRootTitle = 'Create a snowman with a larger reviewed head';
 const twiceRevisedRootTitle = 'Create a fully reviewed snowman with a larger head';
 const childTimeoutMs = 60_000;
 
+function fullSnowmanCapabilityCoverage() {
+  return {
+    policyVersion: 'catalog_capability_coverage_v1',
+    requirements: [
+      {
+        requirementId: 'ground',
+        statement: 'Create a ground plane for the snowman.',
+        coverage: [{ capabilityId: 'geometry.ground_plane', stepIds: ['snowman.scene.ground'] }],
+      },
+      {
+        requirementId: 'model',
+        statement: 'Assemble the complete snowman from supported primitives.',
+        coverage: [
+          {
+            capabilityId: 'geometry.primitive_assembly',
+            stepIds: [
+              'snowman.model.body_lower',
+              'snowman.model.body_upper',
+              'snowman.model.head',
+              'snowman.details.face',
+              'snowman.details.buttons',
+              'snowman.details.arms',
+            ],
+          },
+        ],
+      },
+      {
+        requirementId: 'appearance',
+        statement: 'Apply the snowman material palette.',
+        coverage: [
+          {
+            capabilityId: 'appearance.principled_palette',
+            stepIds: [
+              'snowman.materials.snow',
+              'snowman.materials.accessories',
+              'snowman.materials.ground',
+            ],
+          },
+        ],
+      },
+      {
+        requirementId: 'rig',
+        statement: 'Create the rigid snowman armature.',
+        coverage: [
+          { capabilityId: 'animation.rigid_armature', stepIds: ['snowman.animation.rig'] },
+        ],
+      },
+      {
+        requirementId: 'motion',
+        statement: 'Create the requested snowman pose keyframes.',
+        coverage: [
+          {
+            capabilityId: 'animation.rigid_pose_keyframes',
+            stepIds: ['snowman.animation.pose'],
+          },
+        ],
+      },
+      {
+        requirementId: 'render-setup',
+        statement: 'Prepare the isolated render scene, lighting, and camera.',
+        coverage: [
+          {
+            capabilityId: 'render.scene_setup',
+            stepIds: ['snowman.lighting.scene', 'snowman.lighting.rig'],
+          },
+        ],
+      },
+      {
+        requirementId: 'preview',
+        statement: 'Render the snowman preview as a PNG artifact.',
+        coverage: [{ capabilityId: 'output.png_preview', stepIds: ['snowman.render.preview'] }],
+      },
+    ],
+  };
+}
+
+function headRevisionCapabilityCoverage(message) {
+  return {
+    policyVersion: 'catalog_capability_coverage_v1',
+    requirements: [
+      {
+        requirementId: 'head-revision',
+        statement: message,
+        coverage: [
+          {
+            capabilityId: 'geometry.primitive_assembly',
+            stepIds: ['snowman.model.head'],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function listen(server) {
   return new Promise((resolveListen, reject) => {
     server.once('error', reject);
@@ -193,6 +287,11 @@ const proxy = createServer(async (request, response) => {
           {
             requestId: revisionRequest.requestId,
             catalogVersion: revisionRequest.catalogVersion,
+            planning: {
+              goal: revisionRequest.message,
+              requiredPhaseIds: ['geometry'],
+              capabilityCoverage: headRevisionCapabilityCoverage(revisionRequest.message),
+            },
             plan: revisedPlan,
           },
         );
@@ -227,6 +326,12 @@ try {
   );
   const proposed = await callMcpTool(runtime, 1, 'operatingline.guide.propose', {
     targetAdapterId: 'blender',
+    catalogVersion: '1.3.0',
+    planning: {
+      goal,
+      requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+      capabilityCoverage: fullSnowmanCapabilityCoverage(),
+    },
     plan: fixture,
   });
   assert.notEqual(
@@ -275,7 +380,7 @@ try {
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.2.0');
+  assert.equal(revisionRequests[0].catalogVersion, '1.3.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -397,7 +502,7 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.2.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.3.0');
   assert.equal(evalBundle.page.hasMore, false);
   assert.equal(evalBundle.summary.matchedEventCount, 18 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });
@@ -416,7 +521,10 @@ try {
       (event) =>
         event.eventType === 'planning.quality.evaluated' &&
         event.payload.report.valid === true &&
-        event.payload.report.baselineVersion === '1.0.0',
+        event.payload.report.baselineVersion === '1.1.0' &&
+        event.payload.report.capabilityCoverage?.policyVersion ===
+          'catalog_capability_coverage_v1' &&
+        !Object.hasOwn(event.payload.report, 'score'),
     ),
   );
   assert.ok(

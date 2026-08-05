@@ -11,6 +11,8 @@ import {
   type PlannerProviderDescriptor,
 } from '@operatingline/protocol';
 
+export * from './synthetic-canvas.js';
+
 export class FakeBlenderAdapter implements AppAdapter {
   readonly id = 'fake-blender';
   readonly version = '0.1.0';

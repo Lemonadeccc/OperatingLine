@@ -114,22 +114,62 @@ export const plannerReplanDraftSchema = guideReplanSubmissionSchema
   .extend({ planning: planningIntentSchema });
 export type PlannerReplanDraft = z.infer<typeof plannerReplanDraftSchema>;
 
-export const replanningPromptFormatVersion = '1.0.0' as const;
-export const replanningPromptPacketSchema = z.strictObject({
-  formatVersion: z.literal(replanningPromptFormatVersion),
-  operation: z.literal('local_replan'),
-  context: replanningPromptContextSchema,
-  responseContract: z.strictObject({
-    mediaType: z.literal('application/json'),
-    schema: z.record(z.string(), z.json()),
-  }),
-  workflow: z.strictObject({
-    evaluateToolName: z.literal('operatingline.planning.evaluate'),
-    submitToolName: z.literal('operatingline.replan.propose'),
-    instructions: z.array(z.string().min(1)).min(1),
-  }),
-  renderedPrompt: z.string().min(1),
-});
+export const supportedReplanningPromptFormatVersions = ['1.0.0', '1.1.0'] as const;
+export const replanningPromptFormatVersion = '1.1.0' as const;
+export const replanningPromptFormatVersionSchema = z.enum(supportedReplanningPromptFormatVersions);
+const replanningPromptPacketJsonSchemaMetadata = {
+  allOf: [
+    {
+      if: {
+        type: 'object',
+        properties: {
+          context: {
+            type: 'object',
+            properties: {
+              catalog: { type: 'object', required: ['semanticCapabilities'] },
+            },
+            required: ['catalog'],
+          },
+        },
+        required: ['context'],
+      },
+      then: { type: 'object', properties: { formatVersion: { const: '1.1.0' } } },
+      else: { type: 'object', properties: { formatVersion: { const: '1.0.0' } } },
+    },
+  ],
+} as const;
+
+export const replanningPromptPacketSchema = z
+  .strictObject({
+    formatVersion: replanningPromptFormatVersionSchema,
+    operation: z.literal('local_replan'),
+    context: replanningPromptContextSchema,
+    responseContract: z.strictObject({
+      mediaType: z.literal('application/json'),
+      schema: z.record(z.string(), z.json()),
+    }),
+    workflow: z.strictObject({
+      evaluateToolName: z.literal('operatingline.planning.evaluate'),
+      submitToolName: z.literal('operatingline.replan.propose'),
+      instructions: z.array(z.string().min(1)).min(1),
+    }),
+    renderedPrompt: z.string().min(1),
+  })
+  .superRefine((packet, context) => {
+    const expectedFormatVersion =
+      packet.context.catalog.semanticCapabilities === undefined
+        ? '1.0.0'
+        : replanningPromptFormatVersion;
+    if (packet.formatVersion !== expectedFormatVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['formatVersion'],
+        message:
+          'Replanning packet format must be 1.1.0 if and only if semantic capabilities exist',
+      });
+    }
+  })
+  .meta(replanningPromptPacketJsonSchemaMetadata);
 export type ReplanningPromptPacket = z.infer<typeof replanningPromptPacketSchema>;
 
 export const localReplanFindingCodeSchema = z.enum([
@@ -194,6 +234,108 @@ export const plannerReplanGenerateRequestSchema = replanningPromptRequestSchema
   });
 export type PlannerReplanGenerateRequest = z.infer<typeof plannerReplanGenerateRequestSchema>;
 
+const plannerReplanGenerationResultJsonSchemaMetadata = {
+  allOf: [
+    {
+      if: {
+        type: 'object',
+        properties: { packetFormatVersion: { const: '1.0.0' } },
+        required: ['packetFormatVersion'],
+      },
+      then: {
+        type: 'object',
+        properties: {
+          planningQuality: {
+            type: 'object',
+            properties: { baselineVersion: { const: '1.0.0' } },
+            required: ['baselineVersion'],
+          },
+        },
+      },
+      else: {
+        type: 'object',
+        properties: {
+          planningQuality: {
+            type: 'object',
+            properties: { baselineVersion: { const: '1.1.0' } },
+            required: ['baselineVersion'],
+          },
+        },
+      },
+    },
+    {
+      if: {
+        type: 'object',
+        properties: { status: { const: 'ready' } },
+        required: ['status'],
+      },
+      then: {
+        type: 'object',
+        properties: {
+          locality: {
+            type: 'object',
+            properties: { valid: { const: true } },
+            required: ['valid'],
+          },
+          planDiff: { type: 'object' },
+          planningQuality: {
+            properties: { valid: { const: true } },
+            required: ['valid'],
+          },
+        },
+      },
+      else: {
+        anyOf: [
+          {
+            type: 'object',
+            properties: {
+              locality: {
+                type: 'object',
+                properties: { valid: { const: false } },
+                required: ['valid'],
+              },
+            },
+          },
+          { type: 'object', properties: { planDiff: { type: 'null' } } },
+          {
+            type: 'object',
+            properties: {
+              planningQuality: {
+                type: 'object',
+                properties: { valid: { const: false } },
+                required: ['valid'],
+              },
+            },
+          },
+        ],
+      },
+    },
+    {
+      if: {
+        type: 'object',
+        properties: {
+          packetFormatVersion: { const: '1.1.0' },
+          status: { const: 'ready' },
+        },
+        required: ['packetFormatVersion', 'status'],
+      },
+      then: {
+        type: 'object',
+        properties: {
+          draft: {
+            type: 'object',
+            properties: {
+              planning: { type: 'object', required: ['capabilityCoverage'] },
+            },
+            required: ['planning'],
+          },
+          planningQuality: { type: 'object', required: ['capabilityCoverage'] },
+        },
+      },
+    },
+  ],
+} as const;
+
 export const plannerReplanGenerationResultSchema = z
   .strictObject({
     formatVersion: plannerGenerationFormatVersionSchema,
@@ -206,7 +348,7 @@ export const plannerReplanGenerationResultSchema = z
       id: plannerProviderIdSchema,
       version: catalogVersionSchema,
     }),
-    packetFormatVersion: z.literal(replanningPromptFormatVersion),
+    packetFormatVersion: replanningPromptFormatVersionSchema,
     status: plannerGenerationStatusSchema,
     draft: plannerReplanDraftSchema,
     planDiff: guidePlanDiffSchema.nullable(),
@@ -225,6 +367,19 @@ export const plannerReplanGenerationResultSchema = z
       quality.requiredPhaseIds.every(
         (phaseId, index) => phaseId === draft.planning.requiredPhaseIds[index],
       );
+    const capabilityCoverageMatches =
+      quality.baselineVersion === '1.0.0'
+        ? quality.capabilityCoverage === undefined
+        : JSON.stringify(quality.capabilityCoverage) ===
+          JSON.stringify(draft.planning.capabilityCoverage);
+    if (result.packetFormatVersion !== quality.baselineVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['packetFormatVersion'],
+        message:
+          'Replanning packet format version must match the planning quality baseline version',
+      });
+    }
     if (
       draft.requestId !== result.revisionRequestId ||
       quality.targetAdapterId !== result.targetAdapterId ||
@@ -235,7 +390,8 @@ export const plannerReplanGenerationResultSchema = z
       locality.basePlan.id !== draft.plan.id ||
       locality.targetPlan.id !== draft.plan.id ||
       locality.targetPlan.revision !== draft.plan.revision ||
-      !requiredPhasesMatch
+      !requiredPhasesMatch ||
+      !capabilityCoverageMatches
     ) {
       context.addIssue({
         code: 'custom',
@@ -263,7 +419,8 @@ export const plannerReplanGenerationResultSchema = z
         message: 'Replan status must match quality, locality, and diff validity',
       });
     }
-  });
+  })
+  .meta(plannerReplanGenerationResultJsonSchemaMetadata);
 export type PlannerReplanGenerationResult = z.infer<typeof plannerReplanGenerationResultSchema>;
 
 const plannerReplanEventScopeSchema = z.strictObject({
@@ -280,7 +437,7 @@ const plannerReplanEventScopeSchema = z.strictObject({
 });
 
 export const plannerReplanRequestedEventSchema = plannerReplanEventScopeSchema.extend({
-  packetFormatVersion: z.literal(replanningPromptFormatVersion),
+  packetFormatVersion: replanningPromptFormatVersionSchema,
   occurredAt: z.iso.datetime({ offset: true }),
 });
 export type PlannerReplanRequestedEvent = z.infer<typeof plannerReplanRequestedEventSchema>;

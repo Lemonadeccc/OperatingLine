@@ -40,7 +40,7 @@ function context(catalog = blenderActionCatalog) {
       : {
           qualityGate: {
             toolName: 'operatingline.planning.evaluate',
-            baselineVersion: '1.0.0',
+            baselineVersion: catalog.semanticCapabilities === undefined ? '1.0.0' : '1.1.0',
             requiredPhaseSelection: 'planner_declared_from_goal',
             description: 'Evaluate the complete plan before proposal submission.',
           },
@@ -56,12 +56,12 @@ describe('planning prompt packet', () => {
     expect(first).toEqual(second);
     expect(planningPromptPacketSchema.parse(first)).toEqual(first);
     expect(first).toMatchObject({
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       context: {
         goal: 'Create a friendly robot and render a preview',
         requestedPlanId: 'robot-generated',
         recommendedRevision: 3,
-        catalog: { catalogVersion: '1.2.0' },
+        catalog: { catalogVersion: '1.3.0' },
       },
       responseContract: {
         mediaType: 'application/json',
@@ -79,6 +79,7 @@ describe('planning prompt packet', () => {
     expect(first.renderedPrompt).toContain('RESPONSE_JSON_SCHEMA');
     expect(first.renderedPrompt).toContain('Return one JSON object only');
     expect(first.workflow.instructions[0]).toContain('output.plan.id = context.requestedPlanId');
+    expect(first.renderedPrompt).toContain('planning.capabilityCoverage');
   });
 
   it('requires a phased catalog instead of pretending historical coverage', () => {
@@ -89,6 +90,17 @@ describe('planning prompt packet', () => {
     expect(() => buildPlanningPromptPacket(context(historicalCatalog))).toThrow(
       'does not support the planning prompt quality workflow',
     );
+  });
+
+  it('preserves the historical 1.0 packet contract for a phased catalog without capabilities', () => {
+    const historicalCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.2.0',
+    );
+    expect(historicalCatalog).toBeDefined();
+    const packet = buildPlanningPromptPacket(context(historicalCatalog));
+    expect(packet.formatVersion).toBe('1.0.0');
+    expect(packet.context.qualityGate.baselineVersion).toBe('1.0.0');
+    expect(packet.renderedPrompt).not.toContain('planning.capabilityCoverage');
   });
 
   it('publishes strict prompt and proposal schemas', () => {

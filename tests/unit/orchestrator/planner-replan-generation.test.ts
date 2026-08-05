@@ -23,13 +23,26 @@ import {
 } from '../../../services/orchestrator/src/planner-provider-invocation.js';
 import { PlannerGenerationRuntimeError } from '../../../services/orchestrator/src/planner-provider-errors.js';
 import { createPlannerProviderRegistry } from '../../../services/orchestrator/src/planner-provider-registry.js';
-import { createPlannerReplanGenerationCoordinator } from '../../../services/orchestrator/src/planner-replan-generation.js';
+import {
+  createPlannerReplanGenerationCoordinator,
+  restoreReplanPlannerProviderInvocations,
+} from '../../../services/orchestrator/src/planner-replan-generation.js';
 import { buildReplanningPromptPacket } from '../../../services/orchestrator/src/replanning-prompt.js';
 
 const basePlan = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
 ) as GuidePlan;
 const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
+const capabilityCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'larger-head',
+      statement: 'Make the referenced snowman head larger.',
+      coverage: [{ capabilityId: 'geometry.primitive_assembly', stepIds: ['snowman.model.head'] }],
+    },
+  ],
+};
 
 function revisionRequest() {
   const requestId = randomUUID();
@@ -80,7 +93,11 @@ function validDraft(packet: ReplanningPromptPacket): PlannerReplanDraft {
   return {
     requestId: packet.context.revisionRequest.requestId,
     catalogVersion: packet.context.catalog.catalogVersion,
-    planning: { goal: packet.context.revisionRequest.message, requiredPhaseIds },
+    planning: {
+      goal: packet.context.revisionRequest.message,
+      requiredPhaseIds,
+      capabilityCoverage,
+    },
     plan,
   };
 }
@@ -152,6 +169,7 @@ function harness(
           catalogVersion: draft.catalogVersion,
           goal: draft.planning.goal,
           requiredPhaseIds: draft.planning.requiredPhaseIds,
+          capabilityCoverage: draft.planning.capabilityCoverage,
           plan: draft.plan,
         },
         packet.context.catalog,
@@ -221,6 +239,34 @@ describe('planner replan generation coordinator', () => {
         },
       }).success,
     ).toBe(false);
+    expect(
+      plannerReplanGenerationResultSchema.safeParse({
+        ...result,
+        packetFormatVersion: '1.0.0',
+      }).success,
+    ).toBe(false);
+    await coordinator.close();
+  });
+
+  it('returns needs_revision for a schema-valid local draft missing capability coverage', async () => {
+    const revision = revisionRequest();
+    const provider = providerWithReplan(({ packet }) => {
+      const draft = validDraft(packet);
+      delete draft.planning.capabilityCoverage;
+      return draft;
+    });
+    const { coordinator } = harness(provider, revision);
+
+    const result = await coordinator.generate(generationRequest(revision));
+
+    expect(result).toMatchObject({
+      status: 'needs_revision',
+      proposalCreated: false,
+      planningQuality: {
+        valid: false,
+        findings: [expect.objectContaining({ code: 'coverage.missing' })],
+      },
+    });
     await coordinator.close();
   });
 
@@ -425,6 +471,41 @@ describe('planner replan generation coordinator', () => {
     expect(restored.coordinator.completedResult(input.requestId)).toEqual(expected);
     expect(restoredProvider.replanInputs).toHaveLength(0);
     await restored.coordinator.close();
+  });
+
+  it('rejects forged restored ready replan evidence without coverage or exact versions', async () => {
+    const revision = revisionRequest();
+    const originalProvider = providerWithReplan(({ packet }) => validDraft(packet));
+    const original = harness(originalProvider, revision);
+    await original.coordinator.generate(generationRequest(revision));
+    const completed = asStoredEvents(original.events).find(
+      (event) => event.eventType === 'planning.provider.replan.completed',
+    );
+    await original.coordinator.close();
+    if (completed === undefined) {
+      throw new Error('Expected completed planner replan evidence');
+    }
+
+    const missingCoverage = structuredClone(completed);
+    const missingCoverageResult = (
+      missingCoverage.payload as {
+        result: {
+          draft: { planning: { capabilityCoverage?: unknown } };
+          planningQuality: { capabilityCoverage?: unknown };
+        };
+      }
+    ).result;
+    delete missingCoverageResult.draft.planning.capabilityCoverage;
+    delete missingCoverageResult.planningQuality.capabilityCoverage;
+    expect(() => restoreReplanPlannerProviderInvocations([missingCoverage])).toThrow();
+
+    const mismatchedVersion = structuredClone(completed);
+    (
+      mismatchedVersion.payload as {
+        result: { packetFormatVersion: string };
+      }
+    ).result.packetFormatVersion = '1.0.0';
+    expect(() => restoreReplanPlannerProviderInvocations([mismatchedVersion])).toThrow();
   });
 
   it.each(['planning.provider.replan.requested', 'planning.provider.replan.failed'] as const)(

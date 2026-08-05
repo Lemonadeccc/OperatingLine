@@ -10,7 +10,7 @@ import {
   type PlanningPromptPacket,
 } from '@operatingline/protocol';
 
-const workflowInstructions = [
+const historicalWorkflowInstructions = [
   'Map identity fields exactly: output.targetAdapterId = context.targetAdapterId; output.catalogVersion = context.catalog.catalogVersion; output.planning.goal = context.goal; output.plan.protocolVersion = context.protocolVersion; output.plan.id = context.requestedPlanId; output.plan.revision = context.recommendedRevision.',
   'Select only goal-relevant planning phase ids, preserve catalog phase order, and place them in planning.requiredPhaseIds.',
   'Use one actionless root and one ordered root-level actionless group for every selected phase that has executable work.',
@@ -21,6 +21,9 @@ const workflowInstructions = [
   'Return one JSON object only. Do not wrap it in Markdown and do not include explanations outside the JSON object.',
   'Call operatingline.planning.evaluate with the candidate fields first; resolve every error before calling operatingline.guide.propose with the complete JSON object.',
 ] as const;
+
+const capabilityCoverageInstruction =
+  'Decompose the goal into concrete requirements and map every requirement through planning.capabilityCoverage to catalog semantic capability ids and executable leaf step ids whose actions belong to those capabilities.';
 
 export function buildPlanningPromptPacket(contextInput: PlanningContext): PlanningPromptPacket {
   const context = planningContextSchema.parse(contextInput);
@@ -37,6 +40,14 @@ export function buildPlanningPromptPacket(contextInput: PlanningContext): Planni
     );
   }
   const promptContext = planningPromptContextSchema.parse(context);
+  const capabilityAware = context.catalog.semanticCapabilities !== undefined;
+  const workflowInstructions = capabilityAware
+    ? [
+        ...historicalWorkflowInstructions.slice(0, 2),
+        capabilityCoverageInstruction,
+        ...historicalWorkflowInstructions.slice(2),
+      ]
+    : historicalWorkflowInstructions;
 
   const responseSchema = z.toJSONSchema(planningProposalDraftSchema, {
     target: 'draft-2020-12',
@@ -54,7 +65,7 @@ export function buildPlanningPromptPacket(contextInput: PlanningContext): Planni
   ].join('\n\n');
 
   return planningPromptPacketSchema.parse({
-    formatVersion: planningPromptFormatVersion,
+    formatVersion: capabilityAware ? planningPromptFormatVersion : '1.0.0',
     context: promptContext,
     responseContract: {
       mediaType: 'application/json',

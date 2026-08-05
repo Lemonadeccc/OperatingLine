@@ -171,6 +171,12 @@ describe('planner provider protocol', () => {
     expect(
       plannerGenerationResultSchema.safeParse({ ...result, status: 'needs_revision' }).success,
     ).toBe(false);
+    expect(
+      plannerGenerationResultSchema.safeParse({
+        ...result,
+        packetFormatVersion: '1.1.0',
+      }).success,
+    ).toBe(false);
   });
 
   it('publishes explicit request-id retry modes instead of an ambiguous boolean', () => {

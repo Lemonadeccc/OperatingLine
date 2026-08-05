@@ -26,9 +26,15 @@
       可按 `beforeTurn` 向前查询，Blender 可查看最近轮次、展开已加载内容并继续加载更早页面。
 - [x] Eval/replay 证据导出：按 adapter、Plan 和可选实例导出目标、精确目录、完整提案、人工决策、
       步骤观察与回退；使用稳定事件序列、分页和内容哈希，且不虚构质量评分。
-- [x] 跨目标结构规划质量基线：catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
+- [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.3.0` 发布七项 `semanticCapabilities`；
+      capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
+      `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
+      action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
+      coverage 随 quality 事件进入 Eval，但不产生语义分数或自动创建 Proposal。见
+      [ADR 0017](adr/0017-catalog-grounded-goal-coverage.md)。
 - [x] 供应商无关 Planner Packet：MCP Prompt、MCP Tool 与 HTTP 复用同一版本化构建器，提供一致的
       PlanningContext、Proposal 草案 Schema 和 evaluate→propose 规则；生成事件进入 Eval，不依赖
       已弃用的 MCP Sampling，也不在 Orchestrator 保存模型密钥。
@@ -42,7 +48,7 @@
       `AbortSignal`。当前动态 action/observation records 使用 JSON Object mode，核心继续执行权威
       严格验证。独立 `services/openai-runtime` 与 `pnpm dev:openai` 显式装配该远端、provider-managed
       插件，不改变默认 standalone。
-- [x] 类型化 Provider 节点局部重规划：独立 `ReplanningPromptPacket 1.0.0` 绑定 immutable request、
+- [x] 类型化 Provider 节点局部重规划：当前 capability-aware `ReplanningPromptPacket 1.1.0` 绑定 immutable request、
       精确目录、实例状态与 `referenced_subtrees_v1` scope；Provider 可选实现 `replan()`，MCP/HTTP 提供
       list/prompt/generate/propose 顺序。初始与局部生成共享调用、并发、超时和持久 request ID 管理；
       `generate` 固定不建 Proposal，只有携带 canonical `generationRequestId` 的显式 `replan.propose` 才在
@@ -61,7 +67,8 @@
 ## 后续里程碑
 
 - [ ] 更大的人工 Eval：扩展当前雪人和机器人基线，建立人工标注的跨目标数据集、语义验收 rubric 与
-      真实 provider 对照评测。确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
+      真实 provider 对照评测。已完成的 capability trace 只证明 provider 声明可追溯到目录 action；
+      确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
       “模型已经理解任意目标”；同进程插件也不是强安全隔离。
 - [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化 provider
       local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、

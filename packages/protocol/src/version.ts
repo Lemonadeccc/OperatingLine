@@ -5,5 +5,8 @@ export const catalogVersionSchema = z
   .string()
   .regex(catalogVersionPattern, 'Catalog versions must use stable semantic version form x.y.z');
 
-export const planningQualityBaselineVersion = '1.0.0' as const;
-export const planningQualityBaselineVersionSchema = z.literal(planningQualityBaselineVersion);
+export const supportedPlanningQualityBaselineVersions = ['1.0.0', '1.1.0'] as const;
+export const planningQualityBaselineVersion = '1.1.0' as const;
+export const planningQualityBaselineVersionSchema = z.enum(
+  supportedPlanningQualityBaselineVersions,
+);

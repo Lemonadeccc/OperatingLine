@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.2.0",
+  "catalogVersion": "1.3.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -61,6 +61,60 @@
       "title": "Output",
       "description": "Render a managed PNG preview from the prepared scene.",
       "selectionGuidance": "Select when the goal asks for an image result; render_setup must also be selected.",
+      "actionNames": ["blender.render.execute_preview"]
+    }
+  ],
+  "semanticCapabilities": [
+    {
+      "id": "geometry.ground_plane",
+      "title": "Ground plane",
+      "description": "Create an owned planar surface that grounds the visible assembly.",
+      "selectionGuidance": "Select when the goal needs a floor, stage, or other flat supporting surface.",
+      "actionNames": ["blender.mesh.create_plane"]
+    },
+    {
+      "id": "geometry.primitive_assembly",
+      "title": "Primitive assembly",
+      "description": "Construct an owned model from supported sphere, cone, and cylinder primitives.",
+      "selectionGuidance": "Select when the requested form can be represented by one sphere or a bounded batch of supported primitives.",
+      "actionNames": ["blender.mesh.create_uv_sphere", "blender.mesh.create_primitive_batch"]
+    },
+    {
+      "id": "appearance.principled_palette",
+      "title": "Principled material palette",
+      "description": "Create and assign owned Principled materials with explicit visible surface properties.",
+      "selectionGuidance": "Select when the goal specifies color, roughness, metallic response, or a reusable material palette.",
+      "actionNames": [
+        "blender.material.create_and_assign",
+        "blender.material.create_palette_and_assign"
+      ]
+    },
+    {
+      "id": "animation.rigid_armature",
+      "title": "Rigid armature",
+      "description": "Create and bind an owned rigid armature for supported object parts.",
+      "selectionGuidance": "Select when owned parts need a reusable rigid hierarchy for posing or animation.",
+      "actionNames": ["blender.rig.create_armature"]
+    },
+    {
+      "id": "animation.rigid_pose_keyframes",
+      "title": "Rigid pose keyframes",
+      "description": "Author explicit pose keyframes for an owned rigid armature.",
+      "selectionGuidance": "Select when the goal requests bounded rigid motion or poses at named frames.",
+      "actionNames": ["blender.animation.create_pose_keyframes"]
+    },
+    {
+      "id": "render.scene_setup",
+      "title": "Render scene setup",
+      "description": "Prepare an isolated owned render scene with world, lighting, camera, and collection linkage.",
+      "selectionGuidance": "Select before rendered output whenever the goal needs controlled presentation.",
+      "actionNames": ["blender.render_scene.create", "blender.render_rig.create"]
+    },
+    {
+      "id": "output.png_preview",
+      "title": "PNG preview output",
+      "description": "Render a managed PNG preview artifact from the prepared scene.",
+      "selectionGuidance": "Select when the goal asks for a rendered image or preview artifact.",
       "actionNames": ["blender.render.execute_preview"]
     }
   ],

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { guideStepIdSchema } from './guide.js';
 import { planningProposalDraftSchema, planningQualityReportSchema } from './planning.js';
-import { planningPromptFormatVersion, planningPromptRequestSchema } from './prompt.js';
+import { planningPromptFormatVersionSchema, planningPromptRequestSchema } from './prompt.js';
 import { catalogVersionSchema } from './version.js';
 
 export const plannerProviderContractVersion = '1.0.0' as const;
@@ -86,6 +86,76 @@ export const plannerGenerationFormatVersionSchema = z.literal(plannerGenerationF
 export const plannerGenerationStatusSchema = z.enum(['ready', 'needs_revision']);
 export type PlannerGenerationStatus = z.infer<typeof plannerGenerationStatusSchema>;
 
+const plannerGenerationResultJsonSchemaMetadata = {
+  allOf: [
+    {
+      if: {
+        type: 'object',
+        properties: { packetFormatVersion: { const: '1.0.0' } },
+        required: ['packetFormatVersion'],
+      },
+      then: {
+        type: 'object',
+        properties: {
+          planningQuality: {
+            type: 'object',
+            properties: { baselineVersion: { const: '1.0.0' } },
+            required: ['baselineVersion'],
+          },
+        },
+      },
+      else: {
+        type: 'object',
+        properties: {
+          planningQuality: {
+            type: 'object',
+            properties: { baselineVersion: { const: '1.1.0' } },
+            required: ['baselineVersion'],
+          },
+        },
+      },
+    },
+    {
+      if: {
+        type: 'object',
+        properties: {
+          planningQuality: {
+            type: 'object',
+            properties: { valid: { const: true } },
+            required: ['valid'],
+          },
+        },
+        required: ['planningQuality'],
+      },
+      then: { type: 'object', properties: { status: { const: 'ready' } } },
+      else: { type: 'object', properties: { status: { const: 'needs_revision' } } },
+    },
+    {
+      if: {
+        type: 'object',
+        properties: {
+          packetFormatVersion: { const: '1.1.0' },
+          status: { const: 'ready' },
+        },
+        required: ['packetFormatVersion', 'status'],
+      },
+      then: {
+        type: 'object',
+        properties: {
+          draft: {
+            type: 'object',
+            properties: {
+              planning: { type: 'object', required: ['capabilityCoverage'] },
+            },
+            required: ['planning'],
+          },
+          planningQuality: { type: 'object', required: ['capabilityCoverage'] },
+        },
+      },
+    },
+  ],
+} as const;
+
 export const plannerGenerationResultSchema = z
   .strictObject({
     formatVersion: plannerGenerationFormatVersionSchema,
@@ -95,7 +165,7 @@ export const plannerGenerationResultSchema = z
       id: plannerProviderIdSchema,
       version: catalogVersionSchema,
     }),
-    packetFormatVersion: z.literal(planningPromptFormatVersion),
+    packetFormatVersion: planningPromptFormatVersionSchema,
     status: plannerGenerationStatusSchema,
     draft: planningProposalDraftSchema,
     planningQuality: planningQualityReportSchema,
@@ -111,13 +181,26 @@ export const plannerGenerationResultSchema = z
       quality.requiredPhaseIds.every(
         (phaseId, index) => phaseId === draft.planning.requiredPhaseIds[index],
       );
+    const capabilityCoverageMatches =
+      quality.baselineVersion === '1.0.0'
+        ? quality.capabilityCoverage === undefined
+        : JSON.stringify(quality.capabilityCoverage) ===
+          JSON.stringify(draft.planning.capabilityCoverage);
+    if (result.packetFormatVersion !== quality.baselineVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['packetFormatVersion'],
+        message: 'Planning packet format version must match the planning quality baseline version',
+      });
+    }
     if (
       quality.targetAdapterId !== draft.targetAdapterId ||
       quality.catalogVersion !== draft.catalogVersion ||
       quality.goal !== draft.planning.goal ||
       quality.plan.id !== draft.plan.id ||
       quality.plan.revision !== draft.plan.revision ||
-      !phaseIdsMatch
+      !phaseIdsMatch ||
+      !capabilityCoverageMatches
     ) {
       context.addIssue({
         code: 'custom',
@@ -132,7 +215,8 @@ export const plannerGenerationResultSchema = z
         message: 'Generation status must match planningQuality.valid',
       });
     }
-  });
+  })
+  .meta(plannerGenerationResultJsonSchemaMetadata);
 export type PlannerGenerationResult = z.infer<typeof plannerGenerationResultSchema>;
 
 export const plannerGenerationErrorCodeSchema = z.enum([
@@ -185,7 +269,7 @@ const plannerGenerationEventScopeSchema = z.strictObject({
 });
 
 export const plannerGenerationRequestedEventSchema = plannerGenerationEventScopeSchema.extend({
-  packetFormatVersion: z.literal(planningPromptFormatVersion),
+  packetFormatVersion: planningPromptFormatVersionSchema,
   occurredAt: z.iso.datetime({ offset: true }),
 });
 export type PlannerGenerationRequestedEvent = z.infer<typeof plannerGenerationRequestedEventSchema>;

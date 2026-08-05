@@ -57,6 +57,7 @@ import {
 } from './companion-replan-run.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
+import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
@@ -258,7 +259,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           : {
               qualityGate: {
                 toolName: 'operatingline.planning.evaluate',
-                baselineVersion: planningQualityBaselineVersion,
+                baselineVersion:
+                  catalog.semanticCapabilities === undefined
+                    ? '1.0.0'
+                    : planningQualityBaselineVersion,
                 requiredPhaseSelection: 'planner_declared_from_goal',
                 description:
                   'Declare the goal-relevant planning phases, evaluate the complete candidate, and resolve every error before proposal submission.',
@@ -331,6 +335,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           catalogVersion: catalog.catalogVersion,
           goal: request.goal ?? null,
           requiredPhaseIds: request.requiredPhaseIds,
+          ...(request.capabilityCoverage === undefined
+            ? {}
+            : { capabilityCoverage: request.capabilityCoverage }),
           plan: request.plan,
           report,
         },
@@ -366,6 +373,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             catalogVersion: draft.catalogVersion,
             goal: draft.planning.goal,
             requiredPhaseIds: draft.planning.requiredPhaseIds,
+            ...(draft.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: draft.planning.capabilityCoverage }),
             plan: draft.plan,
           }),
           packet.context.catalog,
@@ -402,6 +412,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             : {
                 goal: input.planning.goal,
                 requiredPhaseIds: input.planning.requiredPhaseIds,
+                ...(input.planning.capabilityCoverage === undefined
+                  ? {}
+                  : { capabilityCoverage: input.planning.capabilityCoverage }),
               }),
           plan: input.plan,
         }),
@@ -496,9 +509,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             catalogVersion: draft.catalogVersion,
             goal: draft.planning.goal,
             requiredPhaseIds: draft.planning.requiredPhaseIds,
+            ...(draft.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: draft.planning.capabilityCoverage }),
             plan: draft.plan,
           }),
           packet.context.catalog,
+          {
+            allowedCoverageStepIds: localReplanCoverageStepIds(
+              packet.context.revisionRequest,
+              draft.plan,
+            ),
+          },
         ),
       appendEvent: (event) => database.appendEvent(event),
     });
@@ -1359,6 +1381,7 @@ export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 export {
   createLocalReplanScope,
   evaluateLocalReplanScope,
+  localReplanCoverageStepIds,
   normalizeLocalReplanRoots,
 } from './local-replan-scope.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';

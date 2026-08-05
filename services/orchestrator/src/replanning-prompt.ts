@@ -9,7 +9,7 @@ import {
   type ReplanningPromptPacket,
 } from '@operatingline/protocol';
 
-const workflowInstructions = [
+const historicalWorkflowInstructions = [
   'Return one complete newer GuidePlan, never JSON Patch, changed nodes only, or a partial Plan.',
   'Copy output.requestId exactly from context.revisionRequest.requestId and output.catalogVersion exactly from context.catalog.catalogVersion.',
   'Set output.planning.goal exactly to context.revisionRequest.message and select only goal-relevant planning phase ids in catalog order.',
@@ -21,6 +21,9 @@ const workflowInstructions = [
   'The generated draft is not a Proposal. After deterministic evaluation, only an explicit operatingline.replan.propose call may create an in-host review Proposal.',
 ] as const;
 
+const capabilityCoverageInstruction =
+  'Decompose the revision request into concrete requirements and map every requirement through output.planning.capabilityCoverage to catalog semantic capability ids and executable leaf step ids inside the normalized referenced subtrees whose actions belong to those capabilities.';
+
 export function buildReplanningPromptPacket(
   contextInput: ReplanningPromptContext,
 ): ReplanningPromptPacket {
@@ -28,6 +31,14 @@ export function buildReplanningPromptPacket(
   if (context.revisionRequest.revisionThread === undefined) {
     throw new Error('A provider replan prompt requires a protocol 1.1 revision thread');
   }
+  const capabilityAware = context.catalog.semanticCapabilities !== undefined;
+  const workflowInstructions = capabilityAware
+    ? [
+        ...historicalWorkflowInstructions.slice(0, 3),
+        capabilityCoverageInstruction,
+        ...historicalWorkflowInstructions.slice(3),
+      ]
+    : historicalWorkflowInstructions;
 
   const responseSchema = z.toJSONSchema(plannerReplanDraftSchema, {
     target: 'draft-2020-12',
@@ -45,7 +56,7 @@ export function buildReplanningPromptPacket(
   ].join('\n\n');
 
   return replanningPromptPacketSchema.parse({
-    formatVersion: replanningPromptFormatVersion,
+    formatVersion: capabilityAware ? replanningPromptFormatVersion : '1.0.0',
     operation: 'local_replan',
     context,
     responseContract: {

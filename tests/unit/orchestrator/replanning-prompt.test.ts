@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalog, blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 import {
   guideRevisionRequestSchema,
   plannerReplanDraftSchema,
@@ -51,7 +51,7 @@ describe('typed replanning prompt packet', () => {
 
     expect(second).toEqual(first);
     expect(first).toMatchObject({
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       operation: 'local_replan',
       context: {
         revisionRequest: {
@@ -73,6 +73,7 @@ describe('typed replanning prompt packet', () => {
     expect(first.renderedPrompt).toContain('never JSON Patch');
     expect(first.renderedPrompt).toContain('Proposal');
     expect(first.renderedPrompt).toContain(request.message);
+    expect(first.renderedPrompt).toContain('output.planning.capabilityCoverage');
   });
 
   it('keeps packet, generation request, and complete draft contracts strict', () => {
@@ -101,6 +102,27 @@ describe('typed replanning prompt packet', () => {
         patch: [{ op: 'replace', path: '/steps/0/title', value: 'partial output' }],
       }).success,
     ).toBe(false);
+  });
+
+  it('preserves the historical 1.0 replan packet contract without capabilities', () => {
+    const request = revisionRequest();
+    const historicalCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.2.0',
+    );
+    expect(historicalCatalog).toBeDefined();
+    const historicalRequest = guideRevisionRequestSchema.parse({
+      ...request,
+      catalogVersion: historicalCatalog?.catalogVersion,
+    });
+    const packet = buildReplanningPromptPacket({
+      revisionRequest: historicalRequest,
+      targetRevision: basePlan.revision + 1,
+      catalog: historicalCatalog!,
+      companionState: null,
+      scope: createLocalReplanScope(historicalRequest),
+    });
+    expect(packet.formatVersion).toBe('1.0.0');
+    expect(packet.renderedPrompt).not.toContain('output.planning.capabilityCoverage');
   });
 
   it('publishes strict JSON Schemas for non-TypeScript replan clients', () => {

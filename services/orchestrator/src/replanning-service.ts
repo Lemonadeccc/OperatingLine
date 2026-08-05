@@ -26,7 +26,11 @@ import {
   validateGuideRevisionRequest,
   validateProposalTarget,
 } from './guide-validation.js';
-import { createLocalReplanScope, evaluateLocalReplanScope } from './local-replan-scope.js';
+import {
+  createLocalReplanScope,
+  evaluateLocalReplanScope,
+  localReplanCoverageStepIds,
+} from './local-replan-scope.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
 import { PlannerGenerationRuntimeError } from './planner-provider-errors.js';
 import { buildReplanningPromptPacket } from './replanning-prompt.js';
@@ -263,10 +267,16 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           : {
               goal: submission.planning.goal,
               requiredPhaseIds: submission.planning.requiredPhaseIds,
+              ...(submission.planning.capabilityCoverage === undefined
+                ? {}
+                : { capabilityCoverage: submission.planning.capabilityCoverage }),
             }),
         plan: submission.plan,
       }),
       submissionCatalog,
+      {
+        allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
+      },
     );
     if (!submittedQuality.valid) {
       throw new PlannerGenerationRuntimeError(
@@ -339,9 +349,15 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
             catalogVersion: submission.catalogVersion,
             goal: submittedDraft.data.planning.goal,
             requiredPhaseIds: submittedDraft.data.planning.requiredPhaseIds,
+            ...(submittedDraft.data.planning.capabilityCoverage === undefined
+              ? {}
+              : { capabilityCoverage: submittedDraft.data.planning.capabilityCoverage }),
             plan: submission.plan,
           }),
           catalog,
+          {
+            allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
+          },
         );
         return proposalResult(existingProposal, planningQuality, true);
       }
@@ -361,9 +377,15 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           catalogVersion: submission.catalogVersion,
           goal: submittedDraft.data.planning.goal,
           requiredPhaseIds: submittedDraft.data.planning.requiredPhaseIds,
+          ...(submittedDraft.data.planning.capabilityCoverage === undefined
+            ? {}
+            : { capabilityCoverage: submittedDraft.data.planning.capabilityCoverage }),
           plan: submission.plan,
         }),
         packet.context.catalog,
+        {
+          allowedCoverageStepIds: localReplanCoverageStepIds(revisionRequest, submission.plan),
+        },
       );
       if (
         !scopeEvaluation.locality.valid ||

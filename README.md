@@ -8,14 +8,16 @@
 > Blender 内预览任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.2.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
+> Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
 > 与内容哈希的 Eval/replay 原始证据。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
+> Blender 4.5/5.1 中真实执行的机器人基准。`1.3.0` 目录还发布七项 `semanticCapabilities`，要求
+> provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
-> `ReplanningPromptPacket 1.0.0`、引用子树 locality 门禁和可选 provider `replan()`；MCP 客户端仍以
+> capability-aware `PlanningPromptPacket` / `ReplanningPromptPacket 1.1.0`、引用子树 locality 门禁和可选
+> provider `replan()`；历史目录继续使用 `1.0.0` packet 精确回放。MCP 客户端仍以
 > 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认请求后，明确选择一个
 > 已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Replan Run；Runtime 只在 canonical
 > 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
@@ -46,22 +48,29 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **版本化协议**：定义 GuidePlan、GuideProposal/Decision、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
-  Schema、资源读写、观察、回退、安全边界、最新 Companion 状态和下一 Plan revision；未知动作、
+  Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
+  下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
-- **跨目标规划质量门**：Blender catalog `1.2.0` 把 10 个动作划分为 Geometry、Materials、
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.3.0` 把 10 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
-  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；Proposal 会再次执行同一确定性门禁。
-  报告只有可追溯的 error/warning，不虚构主观分数。
+  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；七项目录语义能力进一步要求 provider
+  声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的
+  映射会产生 error，使生成结果成为 `needs_revision`，不会创建 Proposal。Proposal 会再次执行同一
+  确定性门禁。当前目录使用 quality baseline `1.1.0`；历史目录仍以 `1.0.0` 回放。报告只有可追溯的
+  error/warning，不虚构语义或审美分数。
 - **供应商无关 Planner Packet**：`operatingline.plan_and_propose` MCP Prompt、
   `operatingline.planning.prompt.get` Tool 与 `POST /api/v1/planning/prompt` 复用同一版本化 packet
   构建器；Prompt 呈现其中的 `renderedPrompt`，Tool/HTTP 返回完整 packet。它内含精确
-  PlanningContext、严格 GuideProposal 草案 JSON Schema 和 evaluate→propose 规则。客户端
+  PlanningContext、严格 GuideProposal 草案 JSON Schema 和 evaluate→propose 规则。带
+  `semanticCapabilities` 的目录生成 packet `1.1.0` 并要求具体需求覆盖链；历史目录继续生成和解析
+  packet `1.0.0`。客户端
   选择自己的模型和发送授权；Orchestrator 不读取模型 API Key，也不使用已弃用的 MCP Sampling。
 - **显式 Planner Provider 边界**：嵌入 Orchestrator 的调用方可通过
   `@operatingline/planner-provider-sdk` 注入一个或多个进程内 provider，再由
   `operatingline.planner.providers.list` 与 `operatingline.planner.generate` 显式选择并调用。
   Provider 自己管理凭据和外部请求；generate 可能传输目标、宿主状态与目录并产生费用。返回值会
-  经过严格 Schema、identity、ActionCatalog 和规划质量校验，但始终带 `proposalCreated: false`；
+  经过严格 Schema、identity、ActionCatalog、需求覆盖链和规划质量校验，但始终带
+  `proposalCreated: false`；
   调用方仍须另行调用 `operatingline.guide.propose`，并由宿主内用户接受后才可执行。
 - **可选 OpenAI Responses Provider**：`@operatingline/openai-planner-provider` 使用官方 OpenAI
   JavaScript/TypeScript SDK 的 Responses API。调用方必须显式提供模型和凭据；请求固定
@@ -81,11 +90,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   引用可逐条移除，重复引用会去重，切换到不同基线前必须显式清空草稿；`Hide Guidance`
   只隐藏视口线、数字、状态和任务树，不删除工作区、草稿、Run、历史或场景。Provider 默认不选择，
   也不会自动调用。
-- **类型化 Provider 局部重规划**：`ReplanningPromptPacket 1.0.0` 绑定 pending immutable request、
+- **类型化 Provider 局部重规划**：当前 `ReplanningPromptPacket 1.1.0` 绑定 pending immutable request、
   精确目录、实例状态、完整 base Plan 和 `referenced_subtrees_v1` scope。MCP/HTTP 提供独立的
   replan provider list、prompt、generate 与 propose 入口；初始/局部生成共享并发、超时、取消和持久
   request ID 管理。`generate` 会严格检查 identity、目录、规划质量、Plan diff 与局部性，但固定
-  `proposalCreated: false`。要把 provider 草案送审，`replan.propose` 必须携带 canonical
+  `proposalCreated: false`。目录能力覆盖还必须指向规范化引用子树内、action 与能力匹配的可执行叶子；
+  历史无能力目录仍使用 packet `1.0.0` 回放。要把 provider 草案送审，`replan.propose` 必须携带 canonical
   `generationRequestId` 且逐字段匹配草案，才会原子记录 Proposal/request/provenance；随后仍须宿主用户
   接受。既有 provider-free 完整 Plan 提交路径继续兼容。
 - **宿主授权的异步 Replan Run**：Blender 只在 revision request 已由 Runtime acknowledgement 后开放
@@ -108,7 +118,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   用户请求、完整 Proposal、Plan diff 和同实例人工决策。默认读取最新页，使用 `beforeTurn` 向前
   分页；Blender Sidebar 可查看最近三轮、展开已加载轮次并继续加载更早内容。
 - **Eval/replay 证据导出**：MCP 或 HTTP 客户端可按 adapter、Plan 和可选 Companion 实例分页导出
-  用户目标、精确 ActionCatalog、完整 Proposal、人工决定、逐步 observation 与 rollback。Bundle
+  用户目标、精确 ActionCatalog、需求覆盖声明、planning-quality 事件、完整 Proposal、人工决定、
+  逐步 observation 与 rollback。Bundle
   自带稳定事件 sequence、内容 SHA-256 和未脱敏警告，但不会把遥测虚构成质量评分。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
@@ -132,15 +143,17 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先选择
 > `operatingline.plan_and_propose` Prompt 或调用 `operatingline.planning.prompt.get` Tool 取得统一规划
 > packet；也可继续直接调用 `operatingline.planning.context`。客户端依据阶段画像生成候选计划，再调用
-> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录仍只覆盖 10 个已验证动作，
+> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录仍只覆盖 10 个已验证动作和
+> 七项适配器声明的语义能力，
 > 阶段选择仍由外部模型或显式注入的 provider 根据目标声明，因此这不等于已经内置“任意任务自动
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
 > 隔离。当前修订输入不是流式聊天；已经支持 Blender 原生 Revision Workspace、可追溯的多轮线性
 > thread、Plan diff、结构化历史、显式 provider-backed local replan，以及宿主内逐次授权的异步
 > Replan Run，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
-> 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality 与结构质量门只证明机器约束，
-> 不证明模型理解了任意修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
+> 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality、结构质量门和需求覆盖链只证明
+> provider 的声明符合机器约束并可追溯到真实目录 action，不证明需求抽取正确、参数满足描述或模型
+> 理解了任意目标/修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -201,6 +214,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0015](docs/adr/0015-typed-provider-local-replanning.md)。
 宿主逐次授权、异步 Run、重启/重试与场景不变量见
 [ADR 0016](docs/adr/0016-host-mediated-asynchronous-replan-runs.md)。
+目录约束的目标需求覆盖证据、packet/baseline 兼容与非评分边界见
+[ADR 0017](docs/adr/0017-catalog-grounded-goal-coverage.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -273,10 +288,13 @@ pnpm dev
    可由用户选择 `operatingline.plan_and_propose` MCP Prompt，或让模型调用
    `operatingline.planning.prompt.get`，传入目标宿主、自然语言 `goal` 和稳定 `planId`；没有这些
    客户端能力时仍可直接调用 `operatingline.planning.context`。根据返回的精确 catalog、
-   `planningPhases`、`recommendedRevision` 和响应 Schema 构造完整 GuideProposal 草案。然后调用
+   `planningPhases`、`semanticCapabilities`、`recommendedRevision` 和响应 Schema 构造完整
+   GuideProposal 草案。对于 capability-aware packet `1.1.0`，provider 必须把目标拆成具体需求，并在
+   `planning.capabilityCoverage` 中把每条需求映射到目录 capability 和实现它的可执行叶子。然后调用
    `operatingline.planning.evaluate`，传入目标、候选 Plan 和模型从目标中选择的
-   `requiredPhaseIds`；解决全部 error 后再调用 `operatingline.guide.propose`，并把同一
-   `{ goal, requiredPhaseIds }` 放入可选 `planning` 字段。Blender 内会出现待审树，
+   `requiredPhaseIds` 及同一 coverage；解决全部 error 后再调用 `operatingline.guide.propose`，并把同一
+   `{ goal, requiredPhaseIds, capabilityCoverage }` 放入可选 `planning` 字段。历史目录的 packet
+   `1.0.0` 不接受 coverage。Blender 内会出现待审树，
    用户点击 `Accept Plan` 后它才成为活动计划。`operatingline.guide.publish` 保留为受信任调用方
    直接发布确定性计划的兼容路径，不经过人工审批。
    如果嵌入方已经显式注入 Planner Provider，可先调用 `operatingline.planner.providers.list` 查看
@@ -296,6 +314,8 @@ pnpm dev
    并产生费用，但固定 `proposalCreated: false`；只有 `status: ready`、`planningQuality.valid` 与
    `locality.valid` 都成立时，才能把 canonical `draft` 原样提交给 `operatingline.replan.propose`，并额外
    携带 `generationRequestId: <generate requestId>`。任何草案编辑或过期 revision 都会失败。
+   Capability-aware replan 还要求每条修订需求的 coverage 只引用规范化引用子树内、与目录能力匹配的
+   可执行叶子；否则状态为 `needs_revision`，不会进入 canonical propose。
    `replan.propose` 只创建发起实例的待审 Proposal；Blender 会显示 Plan/节点/参数差异，不会直接执行。
    用户 Accept 后只安装计划，仍由后续 `Start`/`Next` 显式执行。只有接受后再次提交引用才会成为同一
    thread 的下一轮。调用
@@ -339,7 +359,8 @@ pnpm dev:openai
 `operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
 提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`；Blender 路径则要求用户
 在 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Packet 中的目标或修订
-消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、质量/locality 报告和 provenance
+消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、需求覆盖链、
+quality/locality 报告和 provenance
 会进入 OperatingLine 的未脱敏 Eval 证据。底层 generation 不会创建 Proposal、修改 Blender 或执行
 节点；初始规划仍须单独调用 `guide.propose`。局部规划可以由外部调用方用 canonical
 `generationRequestId` 调用 `replan.propose`，或由已逐次确认的 Blender Replan Run 在 ready 时组合该
@@ -546,7 +567,7 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 审批、Blender 内引导与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环，以及受限的
 现有 MCP Bridge。当前仍未完成：
 
-1. 把当前两目标的结构质量基线扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
+1. 把当前两目标的结构质量基线和已完成的目录约束需求覆盖证据扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
    插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标语义规划
    可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动选择/调用或
    自动语义重规划。OperatingLine 核心
