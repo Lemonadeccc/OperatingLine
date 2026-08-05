@@ -7,8 +7,10 @@ OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主
 无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
 AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
 事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表、PlanningContext、类型化 provider
-局部重规划和 Eval/replay 证据导出。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议
-消费者，不承担宿主内视觉呈现。
+局部重规划和 Eval/replay 证据导出。独立 Human Eval 协议与内部 `@operatingline/eval-kit` 在离线数据集
+层验证 Provider Run、盲审 annotation、分歧裁决和无分数 comparison；它们不改变 Orchestrator 的
+Proposal 或宿主执行权威。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担
+宿主内视觉呈现。
 
 ```text
 GuidePlan
@@ -81,8 +83,33 @@ GuideRevisionThreadHistory
 EvalExportBundle
   ├─ adapter + Plan + optional instance scope
   ├─ exact catalogs + related immutable events
-  ├─ stable sequence cursor + aggregate counts
+  ├─ frozen snapshot id/upper sequence + stable cursor
+  ├─ aggregate counts inside the frozen event view
   └─ canonical content SHA-256 + raw-data warning
+
+HumanEvalSuite
+  ├─ versioned rubric + initial/local-replan cases
+  ├─ must/must_not/should requirements + content-addressed references
+  ├─ collecting/released/retired lifecycle
+  └─ blind review, no numeric score/ranking, no synthetic published runs
+
+ProviderEvalRun
+  ├─ exact case + packet + request + strict result/error
+  ├─ provider/model/API + host/catalog environment + generation settings
+  ├─ source event/artifact hashes + condition/treatment hashes
+  └─ no credentials, raw provider response, or private reasoning
+
+HumanEvalAnnotation / HumanEvalAdjudication
+  ├─ exact run + rubric content hashes
+  ├─ provider-blind per-criterion human judgments + evidence
+  ├─ supersession without history overwrite
+  └─ preserve disagreement, adjudicate independent current reviews
+
+HumanEvalComparisonReport
+  ├─ groups runs only by identical condition hash
+  ├─ preserves reviewer judgments and missing/incomplete states
+  ├─ published view excludes synthetic test fixtures
+  └─ no numeric score or provider ranking
 ```
 
 ## 接入等级
@@ -108,7 +135,8 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 ## Companion 同步契约
 
 首个 transport 使用经 Bearer Token 鉴权的回环 HTTP 短轮询：Companion 以
-`adapterId + instanceId` 标识实例，使用成对的 `knownPlanId + knownRevision` 拉取更新，并以
+`adapterId + instanceId` 标识实例，使用同组的
+`knownPlanId + knownRevision + knownPlanContentSha256` 拉取更新，并以
 唯一 `reportId`、单实例递增 `sequence` 回传状态。Orchestrator 将精确重试识别为 duplicate，
 拒绝旧 sequence，并把同 reportId 的不同内容识别为 conflict。
 
@@ -346,9 +374,15 @@ provider 原始错误、原始响应或私有推理。它会持久化成功生�
 `operatingline.eval.export` 与 `GET /api/v1/eval/export` 从同一追加式事件账本建立版本化证据包。
 `targetAdapterId + planId` 是必需 scope，`instanceId` 可把人工决定和状态限制到一个 Companion。
 Orchestrator 通过 Proposal/RevisionRequest ID 解析跨事件关联，因此决定与请求不必紧邻其完整计划。
-每个包携带引用到的精确 ActionCatalog、整个 scope 的计数和当前分页事件；`afterSequence` 使用数据库
-显式自增序列，跨重启稳定，单页最多 1,000 条。尚未带 Plan reference 的初始 `connected` 状态不会
-被猜测归入某个计划。
+每个包携带引用到的精确 ActionCatalog、整个冻结 scope 的计数和当前分页事件；`afterSequence` 使用
+数据库显式自增序列，跨重启稳定，单页最多 1,000 条。尚未带 Plan reference 的初始 `connected` 状态
+不会被猜测归入某个计划。
+
+Format `1.1.0` 的第一页固定使用 `afterSequence: 0`，冻结当时账本的 `snapshotUpperSequence`，并从
+format、scope、上界和精确 catalogs 派生 `snapshotId`。Continuation 必须同时提交
+`snapshotId + snapshotUpperSequence`，且 cursor 不得超过冻结上界。关系解析、事件匹配、目录选择和
+汇总都只读取该上界内的事件；翻页期间追加的新事件不会进入既有快照。Scope、目录或上界与 snapshot
+identity 不一致时显式拒绝，避免不同页面悄悄观察到不同账本状态。
 
 内容摘要覆盖协议/格式版本、scope、目录、事件页、分页信息、汇总和数据处理声明，不包含随机
 `exportId`、`exportedAt` 或摘要自身。相同事实页因而得到相同 SHA-256。当前实现不自动脱敏，也不
@@ -359,6 +393,41 @@ finding 与 `satisfied: false` observation
 敏感内容。Replan packet、provider requested/completed/failed 和显式 propose provenance 也按
 adapter、Plan 与可选 instance 路由到同一证据包。详细决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
+
+## Human Eval 证据边界
+
+Human Eval 是原始 Eval export 之上的独立、离线数据集层，不是 Orchestrator 的实时评分服务。
+`HumanEvalSuite` 固定 rubric、案例、精确 ActionCatalog 内容哈希、需求、reference artifact、采集状态和
+数据政策；
+`ProviderEvalRun` 捕获初始规划或局部重规划的精确公开 request/packet/result、Provider treatment、宿主
+条件、源事件与 artifact 哈希。Run 的 `conditionSha256` 隔离案例/packet/宿主环境，
+`treatmentSha256` 隔离 Provider profile 与 generation settings，防止把不同 catalog、模型参数或宿主
+版本伪装成同一对照。
+
+`HumanEvalAnnotation` 绑定精确 Run 与 rubric 哈希，reviewer 只以 pseudonym 和校准信息出现，且
+`providerIdentityVisible` 固定为 `false`。每个适用 criterion 都保留原始判断、理由和证据；更正通过
+supersession 新增记录。`HumanEvalAdjudication` 通过 annotation ID 与内容哈希引用同一 Run 上至少两名
+独立 reviewer 的当前记录。`HumanEvalComparisonReport` 按 condition 并列 Run，报告
+missing/incomplete/disagreement/adjudicated，保存源记录哈希和自身 integrity，不做数值评分、胜率或
+Provider 排名；published audience 自动排除 synthetic test fixture，并拒绝仅做结构校验、未读取实际
+artifact 的数据集。
+
+内部 workspace package `@operatingline/eval-kit` 负责 Schema、跨记录引用、精确 catalog/base Plan、
+内容/artifact 哈希、安全路径/大小边界、冻结 Eval-export page chain、Provider request/outcome 与宿主事件
+关联、annotation supersession、adjudication 和 released readiness 验证，并由 `pnpm eval:check` /
+`pnpm eval:report` 提供
+目录级入口。首个 `blender.core_planning@1.0.0` suite 有 7 个 collecting 案例、6 条 lineage，覆盖常规
+initial plan、adversarial 能力边界和 local replan；当前没有真实 Provider Run、人工 annotation 或
+adjudication，因此所有案例都必须报告 missing live Run，不能形成 Provider 结论。
+
+Released readiness 以 case-level stage coverage 约束证据，而不删除失败 treatment：可判断的执行结论
+必须绑定精确 Plan revision/实例/host build 的成功或 error 终态，可判断的视觉结论必须绑定实际读取的
+host project 与 rendered image；Provider failed、`needs_revision` 或缺少下游证据的 Run 继续以
+`unable_to_judge` 出现在对照中。
+
+Suite、Run、annotation 和 adjudication 均固定 `trainingUse: not_authorized`。本地 Eval、研究许可或
+reviewed public release 不能解释为训练授权；Eval export 的未脱敏内容也不会因被 Run 引用而自动完成
+数据审核。完整决策见 [ADR 0018](../adr/0018-versioned-human-eval-evidence.md)。
 
 ## 宿主执行记录与补偿
 
@@ -398,6 +467,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
+版本化人工 Eval 与无分数 Provider 对照见
+[ADR 0018](../adr/0018-versioned-human-eval-evidence.md)。
 线性 thread 与 Plan diff 见
 [ADR 0009](../adr/0009-linear-revision-threads-and-plan-diffs.md)；修订历史见
 [ADR 0010](../adr/0010-paginated-revision-history.md)。

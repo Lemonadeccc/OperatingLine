@@ -23,6 +23,10 @@ import {
   guideRevisionRequestSchema,
   guideRevisionThreadHistoryRequestSchema,
   guideRevisionThreadHistorySchema,
+  humanEvalAdjudicationSchema,
+  humanEvalAnnotationSchema,
+  humanEvalComparisonReportSchema,
+  humanEvalSuiteSchema,
   planningContextSchema,
   planningBenchmarkCaseSchema,
   planningPromptContextSchema,
@@ -39,6 +43,7 @@ import {
   plannerReplanDraftSchema,
   plannerReplanGenerateRequestSchema,
   plannerReplanGenerationResultSchema,
+  providerEvalRunSchema,
   replanningPromptContextSchema,
   replanningPromptPacketSchema,
   replanningPromptRequestSchema,
@@ -49,6 +54,31 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'human-eval-suite.schema.json',
+    'https://operatingline.dev/schema/v1/human-eval-suite.json',
+    humanEvalSuiteSchema,
+  ],
+  [
+    'provider-eval-run.schema.json',
+    'https://operatingline.dev/schema/v1/provider-eval-run.json',
+    providerEvalRunSchema,
+  ],
+  [
+    'human-eval-annotation.schema.json',
+    'https://operatingline.dev/schema/v1/human-eval-annotation.json',
+    humanEvalAnnotationSchema,
+  ],
+  [
+    'human-eval-adjudication.schema.json',
+    'https://operatingline.dev/schema/v1/human-eval-adjudication.json',
+    humanEvalAdjudicationSchema,
+  ],
+  [
+    'human-eval-comparison-report.schema.json',
+    'https://operatingline.dev/schema/v1/human-eval-comparison-report.json',
+    humanEvalComparisonReportSchema,
+  ],
   [
     'companion-replan-run-create-request.schema.json',
     'https://operatingline.dev/schema/v1/companion-replan-run-create-request.json',

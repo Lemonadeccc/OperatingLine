@@ -3,35 +3,78 @@ import { z } from 'zod';
 import { guidePlanSchema, guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
 import { guideProposalSchema } from './proposal.js';
 
+const companionContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+
 export const companionGuideRequestSchema = z
   .strictObject({
     adapterId: z.string().min(1),
     instanceId: z.uuid(),
     knownPlanId: z.string().min(1).optional(),
     knownRevision: z.coerce.number().int().positive().optional(),
+    knownPlanContentSha256: companionContentSha256Schema.optional(),
     knownProposalId: z.uuid().optional(),
   })
   .meta({
     dependentRequired: {
-      knownPlanId: ['knownRevision'],
-      knownRevision: ['knownPlanId'],
+      knownPlanId: ['knownRevision', 'knownPlanContentSha256'],
+      knownRevision: ['knownPlanId', 'knownPlanContentSha256'],
+      knownPlanContentSha256: ['knownPlanId', 'knownRevision'],
     },
   })
   .superRefine((request, context) => {
-    if ((request.knownPlanId === undefined) !== (request.knownRevision === undefined)) {
+    const knownPlanFields = [
+      request.knownPlanId,
+      request.knownRevision,
+      request.knownPlanContentSha256,
+    ];
+    const providedKnownPlanFields = knownPlanFields.filter((value) => value !== undefined).length;
+    if (providedKnownPlanFields !== 0 && providedKnownPlanFields !== knownPlanFields.length) {
       context.addIssue({
         code: 'custom',
-        message: 'knownPlanId and knownRevision must be provided together',
+        message: 'knownPlanId, knownRevision, and knownPlanContentSha256 must be provided together',
       });
     }
   });
 export type CompanionGuideRequest = z.infer<typeof companionGuideRequestSchema>;
 
-export const companionGuideDeliverySchema = z.strictObject({
-  protocolVersion: guideProtocolVersionSchema,
-  plan: guidePlanSchema.nullable(),
-  proposal: guideProposalSchema.nullable(),
-});
+export const companionGuideDeliverySchema = z
+  .strictObject({
+    protocolVersion: guideProtocolVersionSchema,
+    plan: guidePlanSchema.nullable(),
+    planContentSha256: companionContentSha256Schema.nullable(),
+    proposal: guideProposalSchema.nullable(),
+    proposalPlanContentSha256: companionContentSha256Schema.nullable(),
+  })
+  .meta({
+    allOf: [
+      {
+        if: { properties: { plan: { type: 'null' } }, required: ['plan'] },
+        then: { properties: { planContentSha256: { type: 'null' } } },
+        else: { properties: { planContentSha256: { type: 'string' } } },
+      },
+      {
+        if: { properties: { proposal: { type: 'null' } }, required: ['proposal'] },
+        then: { properties: { proposalPlanContentSha256: { type: 'null' } } },
+        else: { properties: { proposalPlanContentSha256: { type: 'string' } } },
+      },
+    ],
+  })
+  .superRefine((delivery, context) => {
+    if ((delivery.plan === null) !== (delivery.planContentSha256 === null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['planContentSha256'],
+        message: 'planContentSha256 must be present exactly when plan is present',
+      });
+    }
+    if ((delivery.proposal === null) !== (delivery.proposalPlanContentSha256 === null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['proposalPlanContentSha256'],
+        message: 'proposalPlanContentSha256 must be present exactly when proposal is present',
+      });
+    }
+  });
 export type CompanionGuideDelivery = z.infer<typeof companionGuideDeliverySchema>;
 
 export const companionPhaseSchema = z.enum(['idle', 'ready', 'running', 'completed', 'error']);
@@ -69,6 +112,8 @@ export const companionStateReportSchema = z
     companionVersion: z.string().min(1),
     hostVersion: z.string().min(1),
     plan: companionPlanReferenceSchema.nullable(),
+    planContentSha256: companionContentSha256Schema.nullable(),
+    executionId: z.uuid().nullable(),
     phase: companionPhaseSchema,
     activeStepId: guideStepIdSchema.nullable(),
     completedStepIds: z
@@ -112,7 +157,12 @@ export const companionStateReportSchema = z
       },
       {
         if: { properties: { phase: { enum: ['ready', 'running', 'completed'] } } },
-        then: { properties: { plan: { type: 'object' } } },
+        then: {
+          properties: {
+            plan: { type: 'object' },
+            planContentSha256: { type: 'string' },
+          },
+        },
       },
       {
         if: {
@@ -122,11 +172,35 @@ export const companionStateReportSchema = z
             },
           },
         },
-        then: { properties: { plan: { type: 'object' } } },
+        then: {
+          properties: {
+            plan: { type: 'object' },
+            planContentSha256: { type: 'string' },
+          },
+        },
       },
       {
         if: { properties: { activeStepId: { type: 'string' } } },
         then: { properties: { plan: { type: 'object' } } },
+      },
+      {
+        if: { properties: { plan: { type: 'null' } }, required: ['plan'] },
+        then: {
+          properties: {
+            planContentSha256: { type: 'null' },
+            executionId: { type: 'null' },
+          },
+        },
+        else: { properties: { planContentSha256: { type: 'string' } } },
+      },
+      {
+        if: { properties: { executionId: { type: 'string' } } },
+        then: {
+          properties: {
+            plan: { type: 'object' },
+            planContentSha256: { type: 'string' },
+          },
+        },
       },
     ],
   })
@@ -181,6 +255,20 @@ export const companionStateReportSchema = z
         code: 'custom',
         path: ['activeStepId'],
         message: 'activeStepId requires a plan reference',
+      });
+    }
+    if ((report.plan === null) !== (report.planContentSha256 === null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['planContentSha256'],
+        message: 'planContentSha256 must be present exactly when plan is present',
+      });
+    }
+    if (report.plan === null && report.executionId !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['executionId'],
+        message: 'executionId requires a plan reference and planContentSha256',
       });
     }
   });

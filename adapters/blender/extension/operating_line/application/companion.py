@@ -52,6 +52,7 @@ class CompanionController:
         self.last_report: dict[str, Any] | None = None
         self.last_delivered_sequence = 0
         self.pending_plan: dict[str, Any] | None = None
+        self.pending_plan_content_sha256: str | None = None
         self.proposed_plan: dict[str, Any] | None = None
         self.proposal_session: DemoSession | None = None
         self._proposal_candidates: dict[
@@ -72,6 +73,7 @@ class CompanionController:
         self._pending_revision_request_ids: set[str] = set()
         self._last_rejected_plan: tuple[Any, ...] | None = None
         self._last_rejected_proposal: tuple[Any, ...] | None = None
+        self._delivered_proposal_plan_content_sha256: str | None = None
 
     @property
     def connected(self) -> bool:
@@ -109,6 +111,7 @@ class CompanionController:
             self.instance_id,
             known_plan_id=session.plan_id,
             known_revision=session.revision,
+            known_plan_content_sha256=session.plan_content_sha256,
             known_revision_thread_id=(
                 self._active_revision_lineage.thread_id
                 if self._active_revision_lineage is not None
@@ -140,6 +143,7 @@ class CompanionController:
                 stopping.stop(flush_timeout=0.0)
         self._reap_stopping_transports(wait_timeout)
         self.pending_plan = None
+        self.pending_plan_content_sha256 = None
         self.proposed_plan = None
         self.proposal_session = None
         self._proposal_candidates.clear()
@@ -177,7 +181,10 @@ class CompanionController:
             self.status = "Disconnecting" if still_stopping else "Offline"
 
     @staticmethod
-    def _validated_session(plan: dict[str, Any]) -> DemoSession:
+    def _validated_session(
+        plan: dict[str, Any],
+        plan_content_sha256: str | None = None,
+    ) -> DemoSession:
         if not isinstance(plan, dict):
             raise ValueError("Plan must be a JSON object")
         if plan.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
@@ -196,6 +203,7 @@ class CompanionController:
             plan_id=plan_id,
             revision=revision,
             source_plan=plan,
+            plan_content_sha256=plan_content_sha256,
         )
 
     def _session_for_reference_scope(self, scope: str) -> DemoSession:
@@ -445,28 +453,52 @@ class CompanionController:
         self,
         plan: dict[str, Any],
         *,
+        plan_content_sha256: str | None = None,
         preserve_provider_handoff: bool = False,
     ) -> bool:
         """Validate fully before replacing the active session."""
         from .. import get_session, replace_session
 
-        replacement = self._validated_session(plan)
+        replacement = self._validated_session(plan, plan_content_sha256)
+        plan_content_sha256 = replacement.plan_content_sha256
         plan_id = replacement.plan_id
         revision = replacement.revision
         assert plan_id is not None and revision is not None
         current = get_session()
         if (
             current.plan_id == plan_id
+            and current.revision == revision
+            and current.plan_content_sha256 != plan_content_sha256
+        ):
+            raise ValueError(
+                "Plan id/revision was reused with different content"
+            )
+        if (
+            current.plan_id == plan_id
             and current.revision is not None
             and revision <= current.revision
         ):
             if self._transport is not None:
-                self._transport.accept_plan(plan_id, current.revision)
+                assert current.plan_content_sha256 is not None
+                self._transport.accept_plan(
+                    plan_id,
+                    current.revision,
+                    current.plan_content_sha256,
+                )
             self.status = f"Plan {plan_id} r{current.revision}"
             self.error = ""
             return True
         if current.receipts:
             pending = self.pending_plan
+            if (
+                pending is not None
+                and plan_id == pending.get("id")
+                and revision == pending.get("revision")
+                and self.pending_plan_content_sha256 != plan_content_sha256
+            ):
+                raise ValueError(
+                    "Pending plan id/revision was reused with different content"
+                )
             is_new_pending = (
                 pending is None
                 or plan_id != pending.get("id")
@@ -474,9 +506,15 @@ class CompanionController:
             )
             if is_new_pending:
                 self.pending_plan = plan
+                self.pending_plan_content_sha256 = plan_content_sha256
             accepted = self.pending_plan or plan
             if self._transport is not None:
-                self._transport.accept_plan(accepted["id"], accepted["revision"])
+                assert self.pending_plan_content_sha256 is not None
+                self._transport.accept_plan(
+                    accepted["id"],
+                    accepted["revision"],
+                    self.pending_plan_content_sha256,
+                )
             if is_new_pending:
                 message = (
                     "Plan update is pending; use Back to roll the walkthrough "
@@ -502,16 +540,26 @@ class CompanionController:
             and self.pending_plan.get("revision") == revision
         ):
             self.pending_plan = None
+            self.pending_plan_content_sha256 = None
         if self._transport is not None:
-            self._transport.accept_plan(plan_id, revision)
+            assert plan_content_sha256 is not None
+            self._transport.accept_plan(plan_id, revision, plan_content_sha256)
         self.status = f"Plan {plan_id} r{revision}"
         self.error = ""
         self._last_rejected_plan = None
         self.report("plan_loaded")
         return True
 
-    def stage_proposal(self, proposal: dict[str, Any]) -> bool:
+    def stage_proposal(
+        self,
+        proposal: dict[str, Any],
+        proposal_plan_content_sha256: str | None = None,
+    ) -> bool:
         """Validate an AI-authored proposal without replacing or executing a session."""
+        if proposal_plan_content_sha256 is None:
+            proposal_plan_content_sha256 = (
+                self._delivered_proposal_plan_content_sha256
+            )
         if not isinstance(proposal, dict):
             raise ValueError("Proposal must be a JSON object")
         required_fields = {
@@ -613,7 +661,10 @@ class CompanionController:
             raise ValueError("Proposal timestamp must include a timezone")
 
         proposed_plan = proposal.get("plan")
-        replacement = self._validated_session(proposed_plan)
+        replacement = self._validated_session(
+            proposed_plan,
+            proposal_plan_content_sha256,
+        )
         validate_plan_diff(proposal.get("planDiff"), proposed_plan)
         candidate_key = (revision_request_id, proposal_id)
         existing_candidate = self._proposal_candidates.get(candidate_key)
@@ -642,7 +693,11 @@ class CompanionController:
                 )
             self._proposal_candidates[candidate_key] = (proposal, replacement)
         else:
-            if existing_candidate[0] != proposal:
+            if (
+                existing_candidate[0] != proposal
+                or existing_candidate[1].plan_content_sha256
+                != replacement.plan_content_sha256
+            ):
                 raise ValueError(
                     "Proposal identity was reused with different content"
                 )
@@ -800,6 +855,7 @@ class CompanionController:
         accepted_session = self.proposal_session
         if not self.install_plan(
             proposal["plan"],
+            plan_content_sha256=self.proposal_session.plan_content_sha256,
             preserve_provider_handoff=(
                 expected_proposal_id == proposal_id
                 and proposal.get("revisionRequestId")
@@ -885,10 +941,15 @@ class CompanionController:
         self._reap_stopping_transports()
         if self.pending_plan is not None and not get_session().receipts:
             pending = self.pending_plan
+            pending_content_sha256 = self.pending_plan_content_sha256
             try:
-                self.install_plan(pending)
+                self.install_plan(
+                    pending,
+                    plan_content_sha256=pending_content_sha256,
+                )
             except (KeyError, TypeError, ValueError) as error:
                 self.pending_plan = None
+                self.pending_plan_content_sha256 = None
                 self.error = str(error)
                 self.status = "Plan rejected"
                 self.report("error", error=self.error)
@@ -902,7 +963,10 @@ class CompanionController:
                 if message.get("kind") == "plan":
                     plan = message.get("plan")
                     try:
-                        self.install_plan(plan)
+                        self.install_plan(
+                            plan,
+                            plan_content_sha256=message.get("planContentSha256"),
+                        )
                     except (KeyError, TypeError, ValueError) as error:
                         plan_id = plan.get("id") if isinstance(plan, dict) else None
                         revision = plan.get("revision") if isinstance(plan, dict) else None
@@ -915,8 +979,6 @@ class CompanionController:
                             and revision > 0
                             else None
                         )
-                        if rejected_key is not None:
-                            transport.accept_plan(*rejected_key)
                         rejection_fingerprint = (
                             ("plan", *rejected_key)
                             if rejected_key is not None
@@ -929,6 +991,9 @@ class CompanionController:
                             self.report("error", error=self.error)
                 elif message.get("kind") == "proposal":
                     proposal = message.get("proposal")
+                    self._delivered_proposal_plan_content_sha256 = message.get(
+                        "proposalPlanContentSha256"
+                    )
                     try:
                         self.stage_proposal(proposal)
                     except (KeyError, TypeError, ValueError) as error:
@@ -961,6 +1026,8 @@ class CompanionController:
                                 else "Plan proposal rejected"
                             )
                             self.report("error", error=self.error)
+                    finally:
+                        self._delivered_proposal_plan_content_sha256 = None
                 elif message.get("kind") == "revision_request_acknowledged":
                     request_id = message.get("requestId")
                     if isinstance(request_id, str):
@@ -1086,6 +1153,8 @@ class CompanionController:
                 if session.plan_id is not None and session.revision is not None
                 else None
             ),
+            "planContentSha256": session.plan_content_sha256,
+            "executionId": session.execution_id,
             "phase": phase,
             "activeStepId": active.id if active is not None else None,
             "completedStepIds": completed,

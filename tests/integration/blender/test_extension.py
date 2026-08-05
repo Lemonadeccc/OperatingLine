@@ -2,6 +2,7 @@
 
 import importlib.util
 from copy import deepcopy
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
@@ -43,6 +44,10 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
 from operating_line_extension.operating_line.application import (  # noqa: E402
     ActionReceipt,
     DemoSession,
+)
+from operating_line_extension.operating_line.application.session import (  # noqa: E402
+    _canonical_json_value_bytes,
+    canonical_plan_content_sha256,
 )
 from operating_line_extension.operating_line.application.companion import (  # noqa: E402
     CompanionController,
@@ -106,6 +111,9 @@ ACTION_STEPS = [step for step in BUNDLED_PLAN["steps"] if step["action"] is not 
 EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_STEPS)
 PLAN_REVISION = BUNDLED_PLAN["revision"]
 DYNAMIC_REVISION = PLAN_REVISION + 1
+FULL_PLAN_CONTENT_SHA256 = (
+    "73ca76a923816eb8d1073f6bf799d6563a7b0627ada0ac2fb92d8b9e4ec08f7a"
+)
 
 
 def assert_absent(name: str) -> None:
@@ -196,6 +204,80 @@ def assert_companion_and_plan_semantics() -> None:
     dynamic_plan["id"] = "live-snowman"
     dynamic_plan["revision"] = DYNAMIC_REVISION
     dynamic_plan["title"] = "Live snowman"
+    assert canonical_plan_content_sha256(FULL_PLAN) == FULL_PLAN_CONTENT_SHA256
+    for value, expected_sha256 in (
+        (1e-7, "69b47e10cce2f956c2d24354284f67ee84f3a0d9d072563498718fd1bb1a3cc3"),
+        (1e20, "1df21ce650e785b5d5abb0115da72f0198295bd3befc35ee7bb0bad6b4048c76"),
+        (-0.0, "5b87553ae592ab403ab5f5ebfb177424b7c26ca3de95a76b160ac1aef027f1de"),
+        (
+            {
+                "10": "ten",
+                "2": "two",
+                "é": "accent",
+                "😀": "emoji",
+                "text": "hello 😀",
+                "small": 1e-7,
+                "large": 1e20,
+                "zero": -0.0,
+            },
+            "53034233732c02e4a0058220b140da17c9fe8242f55c9455bdb7724529980149",
+        ),
+        (
+            ["😀", -0.0, 1e-7, 1e20],
+            "6cf88735d4a75d91930a01aaaeaaece30f54a260d2e10362321a70e42c598b66",
+        ),
+    ):
+        assert sha256(_canonical_json_value_bytes(value, set())).hexdigest() == expected_sha256
+    dynamic_plan_content_sha256 = canonical_plan_content_sha256(dynamic_plan)
+    try:
+        CompanionController._validated_session(dynamic_plan, "0" * 64)
+    except ValueError as error:
+        assert "does not match the source plan" in str(error)
+    else:
+        raise AssertionError("A delivery hash must match the exact canonical plan")
+    delivery_transport = CompanionTransport(
+        "http://127.0.0.1:43123",
+        "integration-token-123456",
+        str(uuid.uuid4()),
+    )
+    delivery_transport._request_json = lambda *_args, **_kwargs: {
+        "protocolVersion": "1.1.0",
+        "plan": deepcopy(dynamic_plan),
+        "planContentSha256": dynamic_plan_content_sha256,
+        "proposal": None,
+        "proposalPlanContentSha256": None,
+    }
+    delivery_transport._poll()
+    assert delivery_transport.incoming.get_nowait() == {
+        "kind": "plan",
+        "plan": dynamic_plan,
+        "planContentSha256": dynamic_plan_content_sha256,
+    }
+    delivery_transport._request_json = lambda *_args, **_kwargs: {
+        "protocolVersion": "1.1.0",
+        "plan": deepcopy(dynamic_plan),
+        "planContentSha256": dynamic_plan_content_sha256,
+        "proposal": None,
+    }
+    try:
+        delivery_transport._poll()
+    except ValueError as error:
+        assert "proposalPlanContentSha256" in str(error)
+    else:
+        raise AssertionError("Runtime delivery hash fields must be required")
+    assert delivery_transport.incoming.empty()
+    for invalid_hash in (None, "A" * 64, "0" * 63):
+        try:
+            delivery_transport._validated_delivery_hash(
+                invalid_hash,
+                present=True,
+                label="Runtime plan content SHA-256",
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Runtime delivery must reject an invalid plan hash")
+
     token = "integration-token-123456"
     requests: list[dict] = []
     reports: list[dict] = []
@@ -361,11 +443,18 @@ def assert_companion_and_plan_semantics() -> None:
             requests.append(query)
             known = query.get("knownPlanId") == ["live-snowman"] and query.get(
                 "knownRevision"
-            ) == [str(DYNAMIC_REVISION)]
+            ) == [str(DYNAMIC_REVISION)] and query.get(
+                "knownPlanContentSha256"
+            ) == [dynamic_plan_content_sha256]
             self._reply(
                 {
                     "protocolVersion": "1.1.0",
                     "plan": None if known else dynamic_plan,
+                    "planContentSha256": (
+                        None if known else dynamic_plan_content_sha256
+                    ),
+                    "proposal": None,
+                    "proposalPlanContentSha256": None,
                 }
             )
 
@@ -450,6 +539,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id=BUNDLED_PLAN["id"],
             known_revision=PLAN_REVISION,
+            known_plan_content_sha256=canonical_plan_content_sha256(BUNDLED_PLAN),
         )
         try:
             redirect_transport._request_json("GET", "/redirect")
@@ -471,6 +561,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id=session.plan_id,
             known_revision=session.revision,
+            known_plan_content_sha256=session.plan_content_sha256,
         )
         companion._transport = transport
         transport.start()
@@ -483,14 +574,25 @@ def assert_companion_and_plan_semantics() -> None:
                 and any(
                     query.get("knownPlanId") == ["live-snowman"]
                     and query.get("knownRevision") == [str(DYNAMIC_REVISION)]
+                    and query.get("knownPlanContentSha256")
+                    == [dynamic_plan_content_sha256]
                     for query in requests
                 )
             ):
                 break
             time.sleep(0.02)
         assert operating_line.get_session().plan_id == "live-snowman"
+        assert operating_line.get_session().plan_content_sha256 == (
+            dynamic_plan_content_sha256
+        )
+        assert companion.last_report["planContentSha256"] == (
+            dynamic_plan_content_sha256
+        )
         assert requests[0].get("knownPlanId") == [BUNDLED_PLAN["id"]]
         assert requests[0].get("knownRevision") == [str(PLAN_REVISION)]
+        assert requests[0].get("knownPlanContentSha256") == [
+            session.plan_content_sha256
+        ]
         assert all(query["adapterId"] == ["blender"] for query in requests)
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert server_thread.ident != main_thread_id
@@ -657,7 +759,11 @@ def assert_companion_and_plan_semantics() -> None:
             companion.provider_handoff.phase,
         ) == active_run_identity
         replace_operating_line_session(session_before_provider)
-        transport.accept_plan("live-snowman", DYNAMIC_REVISION)
+        transport.accept_plan(
+            "live-snowman",
+            DYNAMIC_REVISION,
+            dynamic_plan_content_sha256,
+        )
         transport.follow_revision_thread(revision_request["revisionThread"]["threadId"])
 
         unrelated_preview_plan = deepcopy(dynamic_plan)
@@ -737,6 +843,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert bpy.context.window_manager.operating_line_revision_message == blocked_message
         provider_plan = deepcopy(dynamic_plan)
         provider_plan["revision"] = DYNAMIC_REVISION + 1
+        provider_plan_content_sha256 = canonical_plan_content_sha256(provider_plan)
         provider_proposal = {
             "protocolVersion": "1.1.0",
             "proposalId": provider_proposal_id,
@@ -767,8 +874,14 @@ def assert_companion_and_plan_semantics() -> None:
             },
             "proposedAt": "2026-08-05T12:00:03Z",
         }
-        assert companion.stage_proposal(provider_proposal)
+        assert companion.stage_proposal(
+            provider_proposal,
+            provider_plan_content_sha256,
+        )
         assert companion.proposed_plan is provider_proposal
+        assert companion.proposal_session.plan_content_sha256 == (
+            provider_plan_content_sha256
+        )
         assert companion.stage_proposal(unrelated_proposal)
         assert companion.proposed_plan is provider_proposal
         assert companion.provider_handoff.complete_proposal_review(
@@ -825,6 +938,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
+            known_plan_content_sha256=dynamic_plan_content_sha256,
             timeout=0.1,
             poll_interval=0.05,
         )
@@ -1466,6 +1580,8 @@ def assert_companion_and_plan_semantics() -> None:
             "companionVersion",
             "hostVersion",
             "plan",
+            "planContentSha256",
+            "executionId",
             "phase",
             "activeStepId",
             "completedStepIds",
@@ -1480,6 +1596,9 @@ def assert_companion_and_plan_semantics() -> None:
             "id": "live-snowman",
             "revision": DYNAMIC_REVISION,
         }
+        assert isinstance(report["planContentSha256"], str)
+        assert len(report["planContentSha256"]) == 64
+        assert report["executionId"] is None
         assert report["phase"] == "ready" and report["error"] is None
 
         # A stale/unknown acknowledgement is an error and cannot advance the
@@ -1491,6 +1610,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
+            known_plan_content_sha256=dynamic_plan_content_sha256,
             timeout=0.2,
         )
         rejected_transport.send_report({"sequence": 99, "transition": "connected"})
@@ -1520,6 +1640,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
+            known_plan_content_sha256=dynamic_plan_content_sha256,
             timeout=5.0,
         )
         companion._transport = slow_transport
@@ -1547,6 +1668,7 @@ def assert_companion_and_plan_semantics() -> None:
             companion.instance_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
+            known_plan_content_sha256=dynamic_plan_content_sha256,
         )
         companion._transport = probe_transport
         before_malformed = companion.last_report["sequence"]
@@ -1713,6 +1835,92 @@ def assert_companion_and_plan_semantics() -> None:
     # Restore the bundled fallback for the remainder of the offline test.
     companion.install_plan(deepcopy(BUNDLED_PLAN))
     assert operating_line.get_session().plan_id == BUNDLED_PLAN["id"]
+
+    class IdentityGuardTransport:
+        def __init__(self):
+            self.incoming = Queue()
+            self.running = False
+            self.accepted_plans = []
+            self.proposal_decisions = []
+            self.reports = []
+
+        def accept_plan(self, plan_id, revision, plan_content_sha256):
+            self.accepted_plans.append((plan_id, revision, plan_content_sha256))
+
+        def decide_proposal(self, proposal_id, decision):
+            self.proposal_decisions.append((proposal_id, decision))
+
+        def send_report(self, report):
+            self.reports.append(report)
+
+    identity_controller = CompanionController()
+    identity_transport = IdentityGuardTransport()
+    identity_controller._transport = identity_transport
+    identity_collision = deepcopy(BUNDLED_PLAN)
+    identity_collision["title"] = "Same identity, different immutable content"
+    try:
+        identity_controller.install_plan(identity_collision)
+    except ValueError as error:
+        assert "id/revision was reused" in str(error)
+    else:
+        raise AssertionError("A plan identity must not be reusable for new content")
+    assert identity_transport.accepted_plans == []
+    assert operating_line.get_session().plan_content_sha256 == (
+        canonical_plan_content_sha256(BUNDLED_PLAN)
+    )
+    identity_transport.incoming.put(
+        {
+            "kind": "plan",
+            "plan": identity_collision,
+            "planContentSha256": canonical_plan_content_sha256(
+                identity_collision
+            ),
+        }
+    )
+    identity_controller.pump()
+    assert identity_transport.accepted_plans == []
+    assert operating_line.get_session().plan_content_sha256 == (
+        canonical_plan_content_sha256(BUNDLED_PLAN)
+    )
+    assert identity_controller.last_report["transition"] == "error"
+    assert "id/revision was reused" in identity_controller.last_report["error"]
+
+    # Older deliveries keep their established stale-ack behavior.
+    identity_controller._transport = None
+    future_identity_plan = deepcopy(BUNDLED_PLAN)
+    future_identity_plan["id"] = "immutable-identity-regression"
+    future_identity_plan["revision"] = PLAN_REVISION + 3
+    assert identity_controller.install_plan(future_identity_plan)
+    older_identity_plan = deepcopy(future_identity_plan)
+    older_identity_plan["revision"] -= 1
+    older_identity_plan["title"] = "Stale content remains stale"
+    assert identity_controller.install_plan(older_identity_plan)
+    assert operating_line.get_session().revision == future_identity_plan["revision"]
+    assert identity_controller.install_plan(deepcopy(BUNDLED_PLAN))
+
+    collision_proposal = {
+        "protocolVersion": "1.1.0",
+        "proposalId": str(uuid.uuid4()),
+        "targetAdapterId": "blender",
+        "targetInstanceId": identity_controller.instance_id,
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+        "plan": identity_collision,
+        "planDiff": None,
+        "proposedAt": "2026-08-04T11:59:00Z",
+    }
+    identity_controller._transport = identity_transport
+    assert identity_controller.stage_proposal(collision_proposal)
+    accepted_session = operating_line.get_session()
+    try:
+        identity_controller.accept_proposal()
+    except ValueError as error:
+        assert "id/revision was reused" in str(error)
+    else:
+        raise AssertionError("Proposal acceptance must enforce immutable plan identity")
+    assert identity_transport.accepted_plans == []
+    assert identity_transport.proposal_decisions == []
+    assert identity_controller.proposed_plan is collision_proposal
+    assert operating_line.get_session() is accepted_session
 
     # AI-authored proposals are fully validated and previewed without replacing
     # the accepted session or mutating the scene. Start/Next remain gated until
@@ -1890,16 +2098,50 @@ def assert_companion_and_plan_semantics() -> None:
     newer_plan = deepcopy(BUNDLED_PLAN)
     newer_plan["revision"] = PLAN_REVISION + 1
     assert companion.install_plan(newer_plan) is False
-    pending_error_sequence = companion.last_report["sequence"]
     assert companion.last_report["transition"] == "error"
     assert bpy.data.objects[EXPECTED[0]].as_pointer() == lower_pointer
+    conflicting_pending_plan = deepcopy(newer_plan)
+    conflicting_pending_plan["title"] = "Same pending identity, different content"
+    original_pending_hash = companion.pending_plan_content_sha256
+    try:
+        companion.install_plan(conflicting_pending_plan)
+    except ValueError as error:
+        assert "Pending plan id/revision was reused" in str(error)
+    else:
+        raise AssertionError("Pending plan identity must be immutable")
+    assert companion.pending_plan is newer_plan
+    assert companion.pending_plan_content_sha256 == original_pending_hash
+    pending_identity_transport = IdentityGuardTransport()
+    companion._transport = pending_identity_transport
+    pending_identity_transport.incoming.put(
+        {
+            "kind": "plan",
+            "plan": conflicting_pending_plan,
+            "planContentSha256": canonical_plan_content_sha256(
+                conflicting_pending_plan
+            ),
+        }
+    )
+    companion.pump()
+    assert pending_identity_transport.accepted_plans == []
+    assert companion.pending_plan is newer_plan
+    assert companion.pending_plan_content_sha256 == original_pending_hash
+    assert companion.last_report["transition"] == "error"
+    assert "Pending plan id/revision was reused" in companion.last_report["error"]
+    pending_collision_sequence = companion.last_report["sequence"]
+    companion._transport = None
     assert companion.install_plan(newer_plan) is False
-    assert companion.last_report["sequence"] == pending_error_sequence
+    assert companion.last_report["sequence"] == pending_collision_sequence
     alternate_plan = deepcopy(BUNDLED_PLAN)
     alternate_plan["id"] = "alternate-live-plan"
     alternate_plan["revision"] = PLAN_REVISION
-    assert companion.install_plan(alternate_plan) is False
+    alternate_plan_content_sha256 = canonical_plan_content_sha256(alternate_plan)
+    assert companion.install_plan(
+        alternate_plan,
+        plan_content_sha256=alternate_plan_content_sha256,
+    ) is False
     assert companion.pending_plan["id"] == "alternate-live-plan"
+    assert companion.pending_plan_content_sha256 == alternate_plan_content_sha256
     assert bpy.data.objects[EXPECTED[0]].as_pointer() == lower_pointer
     pending_session.back()
     companion.pump()
@@ -1907,6 +2149,9 @@ def assert_companion_and_plan_semantics() -> None:
     assert companion.pending_plan is None
     assert operating_line.get_session().plan_id == "alternate-live-plan"
     assert operating_line.get_session().revision == PLAN_REVISION
+    assert operating_line.get_session().plan_content_sha256 == (
+        alternate_plan_content_sha256
+    )
     assert companion.last_report["transition"] == "plan_loaded"
 
     # Disconnect is an explicit boundary: a queued remote plan must not install
@@ -2032,12 +2277,18 @@ def assert_companion_and_plan_semantics() -> None:
         },
     )
     strict_session.start()
+    strict_execution_id = strict_session.execution_id
+    assert strict_execution_id is not None
+    uuid.UUID(strict_execution_id)
     try:
         strict_session.next()
     except KeyError as error:
         assert error.args == ("action.strict",)
     else:
         raise AssertionError("Session must not resolve actions by action name")
+    assert strict_session.execution_id == strict_execution_id
+    strict_session.reset()
+    assert strict_session.execution_id is None
 
     assert_plan_rejected(
         [
@@ -2208,8 +2459,14 @@ def main() -> None:
         # scene unless the user explicitly opts into replacement.
         result = bpy.ops.operating_line.start()
         assert result == {"FINISHED"}
+        first_execution_id = session.execution_id
+        assert first_execution_id is not None
+        uuid.UUID(first_execution_id)
         assert operating_line.get_companion().last_report["transition"] == (
             "walkthrough_started"
+        )
+        assert operating_line.get_companion().last_report["executionId"] == (
+            first_execution_id
         )
         assert session.started and session.active_index == -1
         assert overlay_enabled() is True
@@ -2228,6 +2485,9 @@ def main() -> None:
         bpy.context.scene.operating_line_replace_factory_scene = True
         result = bpy.ops.operating_line.start()
         assert result == {"FINISHED"}
+        execution_id = session.execution_id
+        assert execution_id is not None and execution_id != first_execution_id
+        uuid.UUID(execution_id)
         for factory_name in ("Cube", "Camera", "Light"):
             assert_absent(factory_name)
 
@@ -2295,6 +2555,7 @@ def main() -> None:
             if index == len(ACTION_STEPS) - 1:
                 final_report = operating_line.get_companion().last_report
                 assert final_report["phase"] == "completed"
+                assert final_report["executionId"] == execution_id
                 assert final_report["activeStepId"] == step_data["id"]
                 assert final_report["completedStepIds"] == [
                     item["id"] for item in ACTION_STEPS

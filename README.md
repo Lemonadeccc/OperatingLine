@@ -8,8 +8,10 @@
 > Blender 内预览任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带稳定游标
-> 与内容哈希的 Eval/replay 原始证据。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
+> Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
+> `@operatingline/eval-kit`、7 个 `collecting` Blender 案例及 `eval:check`/`eval:report`；当前尚无真实
+> Provider Run 或人工 annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
 > Blender 4.5/5.1 中真实执行的机器人基准。`1.3.0` 目录还发布七项 `semanticCapabilities`，要求
@@ -22,8 +24,8 @@
 > 已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Replan Run；Runtime 只在 canonical
 > 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
 > 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。Blender 内已有可折叠的
-> Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、任意目标语义
-> 数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
+> Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、完成真实采集与
+> 独立盲审的任意目标语义数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
 
@@ -119,8 +121,28 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   分页；Blender Sidebar 可查看最近三轮、展开已加载轮次并继续加载更早内容。
 - **Eval/replay 证据导出**：MCP 或 HTTP 客户端可按 adapter、Plan 和可选 Companion 实例分页导出
   用户目标、精确 ActionCatalog、需求覆盖声明、planning-quality 事件、完整 Proposal、人工决定、
-  逐步 observation 与 rollback。Bundle
-  自带稳定事件 sequence、内容 SHA-256 和未脱敏警告，但不会把遥测虚构成质量评分。
+  逐步 observation 与 rollback。Format `1.1.0` 在第一页冻结事件账本上界；后续页必须携带同一
+  `snapshotId + snapshotUpperSequence`，因此翻页期间追加的新事件不会改变关系、汇总或后续页面。
+  Bundle 自带稳定事件 sequence、内容 SHA-256 和未脱敏警告；历史 format `1.0.0` 仍可由读取端解析，
+  新导出固定产生 `1.1.0`。导出不会把遥测虚构成质量评分。
+- **版本化人工 Eval 采集层**：独立 `HumanEvalSuite`、`ProviderEvalRun`、
+  `HumanEvalAnnotation`/`HumanEvalAdjudication` 和 `HumanEvalComparisonReport` 记录案例、精确运行条件、
+  盲审判断、分歧裁决与完整性缺口。内部 `@operatingline/eval-kit` 验证精确 catalog/base Plan、
+  packet/outcome、内容哈希、安全 artifact 路径与字节、冻结 live 事件链和跨记录引用，并生成内容寻址、
+  不含数值评分或 Provider 排名的对照报告。Published report 只能从完成 artifact 验证的数据集生成；
+  `released` 还强制要求真实 Provider treatment、独立盲审、分歧裁决、逐记录公开审核，以及每个声明
+  execution/artifact criterion 的至少一份精确宿主终态/环境绑定渲染覆盖。可判断的链路必须按
+  Provider `completed + ready` terminal → 精确 `planContentSha256` 的 Plan 发布或 Proposal accepted 授权 → 带非空
+  `executionId` 的宿主 terminal 排序；rendered image 还要绑定同一 terminal report/event，并通过实际
+  PNG 解码、palette/index 验证与宽高核对。Plan 内容身份使用跨 TypeScript/Python 一致的
+  `operatingline-json-value-v1`；同一 Plan ID/revision 的不同内容会被拒绝。Provider failed、
+  `needs_revision` 或缺少授权/下游证据的 treatment 以
+  `unable_to_judge` 保留；具备精确授权链的宿主 error 可保留 `not_met` 或 `partially_met`。两类失败都
+  不从对照中选择性删除。首个
+  `blender.core_planning@1.0.0` suite 有 7 个案例、6 条 lineage，覆盖 initial plan、local replan 和
+  adversarial 能力边界；它仍是 `collecting`，当前没有真实 Provider Run、annotation 或 adjudication。
+  Synthetic Run 仅用于测试，不能进入 published comparison；Suite、Run、annotation 和 adjudication 均为
+  `trainingUse: not_authorized`。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
   视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
@@ -153,7 +175,10 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > Replan Run，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
 > 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality、结构质量门和需求覆盖链只证明
 > provider 的声明符合机器约束并可追溯到真实目录 action，不证明需求抽取正确、参数满足描述或模型
-> 理解了任意目标/修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
+> 理解了任意目标/修改意图。人工 Eval 的版本化协议、验证工具和 7 个 collecting 案例已经完成，但真实
+> Provider 采集、每个 Run 至少两名独立 reviewer 的盲审、分歧裁决、真实宿主 artifact 与 released
+> comparison 均尚未完成，因此“更大的人工 Eval”整体仍未完成。自动评分/训练治理、骨骼动画深化和
+> 第二宿主也尚未完成；`trainingUse: not_authorized` 不授予任何训练权利。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
 > 调用的过渡方案，不参与新的专用 Companion 同步链路。
 
@@ -216,6 +241,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0016](docs/adr/0016-host-mediated-asynchronous-replan-runs.md)。
 目录约束的目标需求覆盖证据、packet/baseline 兼容与非评分边界见
 [ADR 0017](docs/adr/0017-catalog-grounded-goal-coverage.md)。
+版本化人工 Eval suite/run/annotation/adjudication、无分数 Provider 对照和数据授权边界见
+[ADR 0018](docs/adr/0018-versioned-human-eval-evidence.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -326,10 +353,12 @@ pnpm dev
    原生 dialog 确认。该确认只授权本次异步 Run；Retry 会换新 generation UUID 并再次确认。界面只轮询
    短状态请求，最终 Proposal 仍走相同的 diff 与 Accept/Reject 审批。默认 `pnpm dev` 无 Provider 时，
    该区域显示空列表，前述 MCP 路径继续可用。
-7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，传入
-   `{ targetAdapterId, planId, instanceId?, afterSequence?, limit? }`；也可请求
-   `GET /api/v1/eval/export`。继续分页时把上一页 `nextAfterSequence` 作为新游标。导出未自动脱敏，
-   分享或用于训练前必须检查目标文本、修订消息、动作参数、观察和错误详情。
+7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，第一页传入
+   `{ targetAdapterId, planId, instanceId?, afterSequence: 0, limit? }`；也可请求
+   `GET /api/v1/eval/export`。Format `1.1.0` 的第一页返回冻结的 `snapshotId` 和
+   `snapshotUpperSequence`。继续分页时必须同时提交这两个值，并把上一页 `nextAfterSequence` 作为新的
+   `afterSequence`；这样翻页期间追加的事件不会进入同一快照。导出未自动脱敏，分享或用于训练前必须
+   检查目标文本、修订消息、动作参数、观察和错误详情。
 
 局部重规划的权限边界：
 
@@ -500,6 +529,18 @@ pnpm check
 
 这会依次运行 ESLint、TypeScript 类型检查、Vitest、协议 Schema 漂移检查和 Prettier 格式检查。
 
+验证默认 Human Eval suite 并生成无分数 published-audience comparison：
+
+```bash
+pnpm eval:check
+pnpm eval:report
+```
+
+两个命令都可把同布局的数据集目录作为第一个参数。默认
+`protocol/fixtures/v1/eval/blender-core` 当前验证为 7 个案例、0 个 Run、0 个 annotation 和 0 个
+adjudication；report 会把全部案例标记为缺少 live Run，而不会伪造分数或排名。完整记录布局与采集
+规则见 [Human Eval scenarios](tests/scenarios/eval/README.md)。
+
 运行 Blender Extension 集成测试并构建安装包：
 
 ```bash
@@ -567,17 +608,19 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 审批、Blender 内引导与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环，以及受限的
 现有 MCP Bridge。当前仍未完成：
 
-1. 把当前两目标的结构质量基线和已完成的目录约束需求覆盖证据扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
-   插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标语义规划
-   可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动选择/调用或
-   自动语义重规划。OperatingLine 核心
-   仍只负责 packet、权威严格验证、证据和人工审批。
+1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
+   Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
+   每个 Run 仍需至少两名独立 reviewer 盲审，并附加真实宿主执行与渲染 artifact。首个可选 OpenAI
+   Responses 插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标
+   语义规划可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动
+   选择/调用或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。
 3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
    `undo_post`/`redo_post` 后再声明原生 Undo 能力。
-4. 在已完成的原始 eval/replay 证据导出之上增加显式评分器、数据脱敏与同意/保留策略、数据集切分
-   和训练流水线；当前导出不自动评分，也不应未经审核直接分享。
+4. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
+   同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
+   Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。
 5. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
 6. 在首个稳定发布前引入 Changesets 与自动发布流程。
 

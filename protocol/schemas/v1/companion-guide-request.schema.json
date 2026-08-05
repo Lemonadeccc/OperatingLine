@@ -20,6 +20,10 @@
       "exclusiveMinimum": 0,
       "maximum": 9007199254740991
     },
+    "knownPlanContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "knownProposalId": {
       "type": "string",
       "format": "uuid",
@@ -33,10 +37,16 @@
   "additionalProperties": false,
   "dependentRequired": {
     "knownPlanId": [
-      "knownRevision"
+      "knownRevision",
+      "knownPlanContentSha256"
     ],
     "knownRevision": [
-      "knownPlanId"
+      "knownPlanId",
+      "knownPlanContentSha256"
+    ],
+    "knownPlanContentSha256": [
+      "knownPlanId",
+      "knownRevision"
     ]
   },
   "$id": "https://operatingline.dev/schema/v1/companion-guide-request.json"

@@ -1,41 +1,100 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "targetAdapterId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 180
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "targetAdapterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "planId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "limit": {
+          "default": 250,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1000
+        },
+        "afterSequence": {
+          "default": 0,
+          "type": "number",
+          "const": 0
+        },
+        "snapshotId": {
+          "not": {}
+        },
+        "snapshotUpperSequence": {
+          "not": {}
+        }
+      },
+      "required": [
+        "targetAdapterId",
+        "planId",
+        "limit",
+        "afterSequence"
+      ],
+      "additionalProperties": false
     },
-    "planId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 180
-    },
-    "instanceId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "afterSequence": {
-      "default": 0,
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "limit": {
-      "default": 250,
-      "type": "integer",
-      "exclusiveMinimum": 0,
-      "maximum": 1000
+    {
+      "type": "object",
+      "properties": {
+        "targetAdapterId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "planId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "limit": {
+          "default": 250,
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1000
+        },
+        "afterSequence": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "snapshotId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "snapshotUpperSequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "targetAdapterId",
+        "planId",
+        "limit",
+        "afterSequence",
+        "snapshotId",
+        "snapshotUpperSequence"
+      ],
+      "additionalProperties": false
     }
-  },
-  "required": [
-    "targetAdapterId",
-    "planId",
-    "afterSequence",
-    "limit"
   ],
-  "additionalProperties": false,
   "$id": "https://operatingline.dev/schema/v1/eval-export-request.json"
 }

@@ -55,7 +55,11 @@ import {
   createCompanionReplanRunCoordinator,
   type CompanionReplanRunCoordinator,
 } from './companion-replan-run.js';
-import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
+import {
+  computePlanContentSha256,
+  createEvalExport,
+  readExecutionEventLedger,
+} from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
@@ -1216,15 +1220,25 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
       }
 
-      const { adapterId, instanceId, knownPlanId, knownRevision, knownProposalId } =
-        parsedRequest.data;
+      const {
+        adapterId,
+        instanceId,
+        knownPlanId,
+        knownRevision,
+        knownPlanContentSha256,
+        knownProposalId,
+      } = parsedRequest.data;
       const planAdapterId = activePlan?.steps.find((step) => step.action !== null)?.action
         ?.adapterId;
+      const activePlanContentSha256 =
+        activePlan === null ? null : computePlanContentSha256(activePlan);
       const callerHasActiveRevision =
         activePlan !== null &&
         knownPlanId === activePlan.id &&
         knownRevision !== undefined &&
-        knownRevision >= activePlan.revision;
+        (knownRevision > activePlan.revision ||
+          (knownRevision === activePlan.revision &&
+            knownPlanContentSha256 === activePlanContentSha256));
       const storedProposal = database.getPendingGuideProposal(adapterId, instanceId);
       const pendingProposal =
         storedProposal === null ? null : guideProposalSchema.parse(storedProposal);
@@ -1232,7 +1246,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       return companionGuideDeliverySchema.parse({
         protocolVersion: guideProtocolVersion,
         plan: planAdapterId === adapterId && !callerHasActiveRevision ? activePlan : null,
+        planContentSha256:
+          planAdapterId === adapterId && !callerHasActiveRevision ? activePlanContentSha256 : null,
         proposal: callerHasPendingProposal ? null : pendingProposal,
+        proposalPlanContentSha256:
+          callerHasPendingProposal || pendingProposal === null
+            ? null
+            : computePlanContentSha256(pendingProposal.plan),
       });
     });
     runtimeApp.post('/api/v1/companion/revision-request', async (request, reply) => {
@@ -1375,7 +1395,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 }
 
 export { createActionCatalogRegistry };
-export { canonicalizeEvalContent, computeEvalContentSha256 } from './eval-export.js';
+export {
+  canonicalizeEvalContent,
+  computeEvalContentSha256,
+  computePlanContentSha256,
+} from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 export {

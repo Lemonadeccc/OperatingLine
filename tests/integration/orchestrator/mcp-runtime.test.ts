@@ -14,6 +14,7 @@ import { openOperatingLineDatabase } from '@operatingline/persistence';
 
 import {
   computeEvalContentSha256,
+  computePlanContentSha256,
   startRuntime,
   type RunningRuntime,
 } from '@operatingline/orchestrator';
@@ -125,6 +126,8 @@ function companionReport(instanceId: string, sequence: number) {
     companionVersion: '0.1.0',
     hostVersion: '4.5.0',
     plan: null,
+    planContentSha256: null,
+    executionId: null,
     phase: 'idle',
     activeStepId: null,
     completedStepIds: [],
@@ -858,7 +861,13 @@ describe('OperatingLine runtime', () => {
       guideUrl.searchParams.set('instanceId', instanceId);
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
 
       const exactSubmission = {
         generationRequestId: generationRequest.requestId,
@@ -899,6 +908,8 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toMatchObject({
         plan: null,
+        planContentSha256: null,
+        proposalPlanContentSha256: computePlanContentSha256(generated.draft.plan),
         proposal: {
           proposalId: proposed.proposalId,
           revisionRequestId,
@@ -1063,6 +1074,7 @@ describe('OperatingLine runtime', () => {
         }).then((response) => response.json()),
       ).toEqual({ result: 'accepted' });
 
+      const executionId = randomUUID();
       const report = (
         sequence: number,
         transition: 'step_succeeded' | 'step_rolled_back',
@@ -1076,6 +1088,8 @@ describe('OperatingLine runtime', () => {
         companionVersion: '0.1.0',
         hostVersion: '4.5.3',
         plan: { id: plan.id, revision: plan.revision },
+        planContentSha256: computePlanContentSha256(plan),
+        executionId,
         phase: 'running',
         activeStepId: executableStepId,
         completedStepIds: transition === 'step_succeeded' ? [executableStepId] : [],
@@ -1128,12 +1142,16 @@ describe('OperatingLine runtime', () => {
         exportId: string;
         exportedAt: string;
         events: Array<{ eventType: string; payload: Record<string, unknown> }>;
-        page: { nextAfterSequence: number };
+        page: {
+          snapshotId: string;
+          snapshotUpperSequence: number;
+          nextAfterSequence: number;
+        };
         integrity: { contentSha256: string };
         [key: string]: unknown;
       };
       expect(first).toMatchObject({
-        formatVersion: '1.0.0',
+        formatVersion: '1.1.0',
         scope: { targetAdapterId: 'blender', planId: plan.id, instanceId },
         catalogs: [{ adapterId: 'blender', catalogVersion }],
         page: { afterSequence: 0, hasMore: true },
@@ -1200,18 +1218,38 @@ describe('OperatingLine runtime', () => {
       expect(repeated.exportId).not.toBe(first.exportId);
       expect(repeated.integrity.contentSha256).toBe(first.integrity.contentSha256);
 
+      const lateGoal = 'This event was appended after the eval snapshot was frozen.';
+      await callMcpTool(runtime, 522, 'operatingline.planning.context', {
+        targetAdapterId: 'blender',
+        goal: lateGoal,
+        planId: plan.id,
+      });
+
       const secondResponse = await callMcpTool(runtime, 53, 'operatingline.eval.export', {
         targetAdapterId: 'blender',
         planId: plan.id,
         instanceId,
         afterSequence: first.page.nextAfterSequence,
+        snapshotId: first.page.snapshotId,
+        snapshotUpperSequence: first.page.snapshotUpperSequence,
         limit: 100,
       });
       const second = JSON.parse(secondResponse.result?.content?.[0]?.text ?? '{}') as {
         events: Array<{ eventType: string; payload: Record<string, unknown> }>;
-        page: { hasMore: boolean };
+        page: {
+          snapshotId: string;
+          snapshotUpperSequence: number;
+          hasMore: boolean;
+        };
+        summary: { matchedEventCount: number };
       };
       expect(second.page.hasMore).toBe(false);
+      expect(second.page).toMatchObject({
+        snapshotId: first.page.snapshotId,
+        snapshotUpperSequence: first.page.snapshotUpperSequence,
+      });
+      expect(second.summary.matchedEventCount).toBe(7);
+      expect(JSON.stringify(second)).not.toContain(lateGoal);
       expect(second.events).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1228,6 +1266,34 @@ describe('OperatingLine runtime', () => {
         ]),
       );
 
+      const missingSnapshot = await callMcpTool(runtime, 531, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        afterSequence: first.page.nextAfterSequence,
+      });
+      expect(missingSnapshot.result?.isError).toBe(true);
+
+      const mismatchedSnapshot = await callMcpTool(runtime, 532, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        afterSequence: first.page.nextAfterSequence,
+        snapshotId: randomUUID(),
+        snapshotUpperSequence: first.page.snapshotUpperSequence,
+      });
+      expect(mismatchedSnapshot.result?.isError).toBe(true);
+
+      const outOfBoundsCursor = await callMcpTool(runtime, 533, 'operatingline.eval.export', {
+        targetAdapterId: 'blender',
+        planId: plan.id,
+        instanceId,
+        afterSequence: first.page.snapshotUpperSequence + 1,
+        snapshotId: first.page.snapshotId,
+        snapshotUpperSequence: first.page.snapshotUpperSequence,
+      });
+      expect(outOfBoundsCursor.result?.isError).toBe(true);
+
       const httpUrl = new URL('/api/v1/eval/export', runtime.baseUrl);
       httpUrl.searchParams.set('targetAdapterId', 'blender');
       httpUrl.searchParams.set('planId', plan.id);
@@ -1236,7 +1302,7 @@ describe('OperatingLine runtime', () => {
       expect(httpResponse.status).toBe(200);
       await expect(httpResponse.json()).resolves.toMatchObject({
         scope: { instanceId },
-        summary: { matchedEventCount: 7 },
+        summary: { matchedEventCount: 8 },
       });
 
       const malformed = await fetch(
@@ -1686,22 +1752,48 @@ describe('OperatingLine runtime', () => {
       await expect(delivered.json()).resolves.toMatchObject({
         protocolVersion: '1.1.0',
         plan: { id: plan.id, revision: plan.revision },
+        planContentSha256: computePlanContentSha256(plan),
+        proposalPlanContentSha256: null,
       });
 
       guideUrl.searchParams.set('knownPlanId', plan.id);
       guideUrl.searchParams.set('knownRevision', String(plan.revision));
+      guideUrl.searchParams.set('knownPlanContentSha256', computePlanContentSha256(plan));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
+
+      guideUrl.searchParams.set('knownPlanContentSha256', '0'.repeat(64));
+      await expect(
+        fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toMatchObject({
+        plan: { id: plan.id, revision: plan.revision },
+        planContentSha256: computePlanContentSha256(plan),
+      });
+      guideUrl.searchParams.set('knownPlanContentSha256', computePlanContentSha256(plan));
 
       guideUrl.searchParams.set('knownRevision', String(plan.revision + 2));
       await expect(
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
       guideUrl.searchParams.set('knownRevision', String(plan.revision));
 
       const nextRevision = { ...plan, revision: plan.revision + 1 };
@@ -1715,6 +1807,7 @@ describe('OperatingLine runtime', () => {
         ),
       ).resolves.toMatchObject({
         plan: { id: plan.id, revision: nextRevision.revision },
+        planContentSha256: computePlanContentSha256(nextRevision),
       });
 
       guideUrl.searchParams.set('adapterId', 'different-adapter');
@@ -1722,7 +1815,13 @@ describe('OperatingLine runtime', () => {
         fetch(guideUrl, { headers: { authorization: `Bearer ${accessToken}` } }).then((response) =>
           response.json(),
         ),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
     } finally {
       await runtime.stop();
     }
@@ -1771,6 +1870,8 @@ describe('OperatingLine runtime', () => {
       await expect(delivery.json()).resolves.toMatchObject({
         protocolVersion: '1.1.0',
         plan: null,
+        planContentSha256: null,
+        proposalPlanContentSha256: computePlanContentSha256(plan),
         proposal: {
           proposalId: proposalResult.proposalId,
           targetAdapterId: 'blender',
@@ -1781,7 +1882,13 @@ describe('OperatingLine runtime', () => {
       guideUrl.searchParams.set('knownProposalId', proposalResult.proposalId!);
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
 
       const decision = {
         protocolVersion: '1.1.0',
@@ -1810,7 +1917,13 @@ describe('OperatingLine runtime', () => {
       guideUrl.searchParams.delete('knownProposalId');
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
-      ).resolves.toEqual({ protocolVersion: '1.1.0', plan: null, proposal: null });
+      ).resolves.toEqual({
+        protocolVersion: '1.1.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+      });
 
       guideUrl.searchParams.set('instanceId', otherInstanceId);
       await expect(

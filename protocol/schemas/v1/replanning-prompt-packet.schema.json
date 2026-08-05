@@ -900,6 +900,29 @@
                     }
                   ]
                 },
+                "planContentSha256": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "executionId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "phase": {
                   "type": "string",
                   "enum": [
@@ -1005,6 +1028,8 @@
                 "companionVersion",
                 "hostVersion",
                 "plan",
+                "planContentSha256",
+                "executionId",
                 "phase",
                 "activeStepId",
                 "completedStepIds",
@@ -1110,6 +1135,9 @@
                     "properties": {
                       "plan": {
                         "type": "object"
+                      },
+                      "planContentSha256": {
+                        "type": "string"
                       }
                     }
                   }
@@ -1131,6 +1159,9 @@
                     "properties": {
                       "plan": {
                         "type": "object"
+                      },
+                      "planContentSha256": {
+                        "type": "string"
                       }
                     }
                   }
@@ -1147,6 +1178,54 @@
                     "properties": {
                       "plan": {
                         "type": "object"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "plan": {
+                        "type": "null"
+                      }
+                    },
+                    "required": [
+                      "plan"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "planContentSha256": {
+                        "type": "null"
+                      },
+                      "executionId": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  "else": {
+                    "properties": {
+                      "planContentSha256": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "executionId": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "plan": {
+                        "type": "object"
+                      },
+                      "planContentSha256": {
+                        "type": "string"
                       }
                     }
                   }

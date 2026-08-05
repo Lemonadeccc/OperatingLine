@@ -4,8 +4,9 @@
 `packages/protocol`，发布前由其生成 JSON Schema；Blender/Python 和未来的软件
 适配器只依赖版本化 Schema 与 fixtures，不依赖 Orchestrator 的实现语言或任何客户端。
 
-`protocol/fixtures` 是示例计划的唯一编辑源。Blender 构建和测试脚本会把离线所需 fixture
-同步到 Extension resources，并通过集成测试校验内容一致，禁止手工维护两份不同计划。
+`protocol/fixtures` 是版本化公开 fixture 的编辑源。Blender 构建和测试脚本会把离线所需 Plan fixture
+同步到 Extension resources，并通过集成测试校验内容一致，禁止手工维护两份不同计划；Human Eval
+suite 留在 `fixtures/v1/eval/`，由 `@operatingline/eval-kit` 直接验证，不复制进 Extension。
 
 `protocol/schemas/v1/companion-*` 定义通用 Companion 的计划/提案拉取与状态报告格式；
 `guide-proposal-*` 定义 AI 提案、服务端信封和宿主决策。它们与 GuidePlan Schema 一样由
@@ -63,7 +64,24 @@ Proposal 投递的精确 Plan/节点/字段前后值。`1.0.0` payload 仍可读
 `eval-export-request.schema.json` 与 `eval-export-bundle.schema.json` 定义按 adapter、Plan 和可选
 Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录版本、相关完整计划与提案、人工
 决定、provider coverage 声明及 planning-quality 事件、步骤 observation/rollback、稳定事件序列、
-汇总和内容 SHA-256；它不定义或暗示质量分数。
+汇总和内容 SHA-256；它不定义或暗示质量分数。Format `1.1.0` 的第一页冻结
+`snapshotUpperSequence` 并返回内容寻址的 `snapshotId`，后续页必须复用两者，因此导出期间新追加的
+事件不会改变同一快照的关系、汇总或页面内容。读取 schema 同时保留 format `1.0.0` 历史 Bundle；
+Orchestrator 只生成带冻结快照字段的 `1.1.0`，Human Eval live Run 也只接受 `1.1.0` 原始证据。
+
+`human-eval-suite.schema.json`、`provider-eval-run.schema.json`、
+`human-eval-annotation.schema.json`、`human-eval-adjudication.schema.json` 与
+`human-eval-comparison-report.schema.json` 定义独立 Human Eval format `1.0.0`。Suite 保存版本化 rubric、
+initial/local-replan 案例、精确 ActionCatalog 内容哈希、需求、数据处理和盲审政策；Run 保存精确
+packet/request/result、Provider 与模型/API profile、宿主环境、generation settings、区分 Provider/宿主
+关联的事件摘要和内容哈希 artifact；local replan 还绑定完整 immutable base Plan。Annotation 与
+adjudication 保存逐 criterion 人工判断和内容寻址分歧。Comparison 只按相同 condition 并列原始判断和
+缺失状态，自身也带 source-record hashes 与 integrity，不计算数值分数、胜率或 Provider 排名。
+
+首个 `fixtures/v1/eval/blender-core/suite.json` 是 `collecting` 状态的
+`blender.core_planning@1.0.0`：7 个案例组成 6 条 lineage，覆盖常规 initial plan、adversarial 能力
+边界和 local replan。当前没有真实 Provider Run、人工 annotation 或 adjudication；reference Plan 只是
+示例，不是唯一 ground truth。Synthetic Run 只用于测试，协议禁止它进入 published comparison。
 
 ## 版本规则
 
@@ -112,12 +130,46 @@ Companion 实例分页导出的 replay/eval 证据。Bundle 包含精确目录�
 - 没有 action 的计划缺少宿主路由信息，当前可发布和查询，但不会投递给 Companion。
 - Companion 身份使用 `adapterId + instanceId`；同一身份的 `sequence` 必须严格递增。
 - 同 `reportId` 只有完整 payload 一致时才是幂等重试；内容变化是 conflict，不是 stale。
-- Eval 分页使用追加式事件 `sequence`，而不是可能重复的时间戳。`nextAfterSequence` 是当前页最后一条
-  匹配事件；`matchedEventCount` 是整个 scope 的数量，不是当前页数量。
+- 同一 Plan `id + revision` 只有 `planContentSha256` 也一致时才是幂等重投；相同版本携带不同内容时，
+  Companion 必须拒绝，不能确认、安装或接受对应 Proposal。Companion 拉取水位必须同时携带
+  `knownPlanId + knownRevision + knownPlanContentSha256`；Orchestrator 只在版本与内容身份都匹配时抑制
+  同 revision 重投。
+- Eval 分页使用追加式事件 `sequence`，而不是可能重复的时间戳。第一页必须使用
+  `afterSequence: 0`，且不能伪造 snapshot 字段；响应冻结 `snapshotUpperSequence` 并返回
+  `snapshotId`。后续页必须同时提交这两个值，并令 `afterSequence` 不超过冻结上界。
+  `nextAfterSequence` 是当前页最后一条匹配事件；`matchedEventCount` 是冻结 scope 的数量，不是当前页
+  数量。冻结之后追加的事件只属于新的第一页导出。
 - Eval 内容哈希排除随机 `exportId`、`exportedAt` 和 `integrity`，其余顶层内容按
   `operatingline-json-sort-v1` 递归排序对象键后计算 SHA-256。
+- `planContentSha256` 单独使用跨 TypeScript/Python 一致的 `operatingline-json-value-v1`：值带显式
+  类型与长度，字符串和对象键按 UTF-8 编码，对象键按 UTF-8 字节排序，数字按有限 IEEE-754 binary64
+  大端字节编码且 `-0` 归一为 `0`。它不与 Eval/Human Eval 记录完整性哈希混用。
 - `redaction: none` 表示原始证据可能含用户目标、provider 生成草案、修订消息、动作参数、观察和
   错误；分享或训练前必须由调用方审核和授权。
+- Human Eval Suite、Run、annotation、adjudication 与派生 comparison 使用内容 SHA-256；Run 必须绑定
+  精确 case/catalog/base Plan、packet、结果、condition、treatment 和冻结 Eval-export pages，annotation
+  必须绑定精确 Run 与 rubric。更正 annotation 创建 superseding 记录，不覆盖历史；adjudication 通过
+  `annotationId + annotationContentSha256` 只处理同一 Run 上至少两名独立 reviewer 的当前记录。
+- 可判断的 Human Eval execution/artifact judgment 必须在冻结账本中证明严格因果顺序：匹配 Run 且
+  `result.status: ready` 的 Provider completed 终态之后，发布与 outcome 完全相同 `planContentSha256`
+  的 Plan，或创建同一精确
+  Plan 的 Proposal 并记录匹配 adapter/instance 的 `accepted` 决策；只有该授权之后的宿主终态才能作为
+  证据。宿主报告必须匹配精确 Plan ID/revision/hash、instance、环境和非空 `executionId`，不同 released
+  Run 不得复用同一 execution。
+- Rendered image 必须以 `planContentSha256 + executionId + terminalHostReportId +
+terminalHostEventSequence` 绑定同一宿主终态报告/事件和已声明的 host project。目录验证必须读取实际
+  `image/png` 字节、核对内容 SHA-256、完成 PNG chunk/CRC/scanline 解码，验证 palette 顺序、容量和
+  indexed pixel 引用，并核对解码尺寸与声明的 `width/height`；文件名、media type 或 PNG signature
+  不能单独充当视觉证据。
+- Human Eval policy 禁止数值评分和 Provider 排名，要求 reviewer 看不到 Provider identity，并把缺失
+  Run/annotation 与分歧原样报告。Published comparison 排除 `synthetic_test_fixture`，且只能由完成
+  artifact 字节验证的目录数据集生成。`released` 状态额外要求 live treatments、最低独立 reviewer 数、
+  分歧裁决、逐记录公开审核，以及每个声明 execution/artifact criterion 的 case-level 精确宿主终态/
+  环境绑定渲染覆盖；Provider failed、`needs_revision` 或缺少授权/下游证据的 treatment 以
+  `unable_to_judge` 留在 comparison 中，具备精确授权链的宿主 error 则可保留 `not_met` 或
+  `partially_met`。
+- 所有 Human Eval 记录固定 `trainingUse: not_authorized`。`local_eval`、`research` 或 reviewed public
+  release 都不能解释为训练授权；真实 Run 和人工 annotation 还需各自的数据审核。
 
 目录约束覆盖的完整兼容、失败与非评分决策见
 [ADR 0017](../docs/adr/0017-catalog-grounded-goal-coverage.md)。它不授予 provider 自动选择、场景修改、
@@ -128,4 +180,14 @@ Proposal 接受或执行权限，也不证明 provider 正确理解了任意目�
 ```bash
 pnpm schema:generate
 pnpm schema:check
+pnpm eval:check
+pnpm eval:report
 ```
+
+`eval:check` 和 `eval:report` 默认读取 `protocol/fixtures/v1/eval/blender-core`，也接受一个显式数据集
+目录。当前默认 suite 的已验证计数为 7 个案例、0 个 Run、0 个 annotation 和 0 个 adjudication；
+report 会诚实标记所有案例缺少 live Run，不代表任何 Provider 已通过评测。
+
+公开 JSON Schema 负责单记录形状和可静态表达的同记录约束；内容哈希重算、跨记录引用、受控 artifact
+root/字节、Eval-export page chain、base Plan 文件内容与发布就绪性必须通过 `@operatingline/eval-kit`
+验证，不能只运行通用 JSON Schema validator。

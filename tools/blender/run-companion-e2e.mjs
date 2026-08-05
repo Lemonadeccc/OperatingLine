@@ -495,7 +495,7 @@ try {
     evalResponse.result?.content?.[0]?.text ?? 'Eval export failed',
   );
   const evalBundle = JSON.parse(evalResponse.result?.content?.[0]?.text ?? '{}');
-  assert.equal(evalBundle.formatVersion, '1.0.0');
+  assert.equal(evalBundle.formatVersion, '1.1.0');
   assert.deepEqual(evalBundle.scope, {
     targetAdapterId: 'blender',
     planId,

@@ -268,6 +268,8 @@ describe('action catalog protocol', () => {
             companionVersion: '0.1.0',
             hostVersion: '5.1.1',
             plan: null,
+            planContentSha256: null,
+            executionId: null,
             phase: 'idle',
             activeStepId: null,
             completedStepIds: [],

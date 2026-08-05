@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "annotationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "caseRef": {
+      "type": "object",
+      "properties": {
+        "suiteId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "suiteVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "caseId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "caseContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "suiteId",
+        "suiteVersion",
+        "caseId",
+        "caseContentSha256"
+      ],
+      "additionalProperties": false
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "runContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "rubric": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "contentSha256"
+      ],
+      "additionalProperties": false
+    },
+    "reviewer": {
+      "type": "object",
+      "properties": {
+        "pseudonym": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "qualificationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "calibrationVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$"
+        }
+      },
+      "required": [
+        "pseudonym",
+        "qualificationId",
+        "calibrationVersion",
+        "locale"
+      ],
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "providerIdentityVisible": {
+          "type": "boolean",
+          "const": false
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "recommendation": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "revise",
+            "unable_to_judge"
+          ]
+        },
+        "judgments": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "criterionId": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "judgment": {
+                "type": "string",
+                "enum": [
+                  "met",
+                  "partially_met",
+                  "not_met",
+                  "unable_to_judge",
+                  "not_applicable"
+                ]
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "evidence": {
+                "minItems": 1,
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "requirement",
+                        "plan_step",
+                        "execution_event",
+                        "artifact",
+                        "run_output"
+                      ]
+                    },
+                    "locator": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "contentSha256": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "note": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "locator",
+                    "contentSha256",
+                    "note"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "criterionId",
+              "judgment",
+              "rationale",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "providerIdentityVisible",
+        "startedAt",
+        "completedAt",
+        "recommendation",
+        "judgments"
+      ],
+      "additionalProperties": false
+    },
+    "sourceKind": {
+      "type": "string",
+      "const": "human_annotation"
+    },
+    "supersedesAnnotationId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dataHandling": {
+      "type": "object",
+      "properties": {
+        "redaction": {
+          "type": "string",
+          "enum": [
+            "none",
+            "human_reviewed"
+          ]
+        },
+        "containsPotentiallySensitiveContent": {
+          "type": "boolean"
+        },
+        "permittedUses": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "local_eval",
+              "research"
+            ]
+          }
+        },
+        "trainingUse": {
+          "type": "string",
+          "const": "not_authorized"
+        },
+        "publicRelease": {
+          "type": "string",
+          "enum": [
+            "not_reviewed",
+            "reviewed"
+          ]
+        },
+        "warning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "redaction",
+        "containsPotentiallySensitiveContent",
+        "permittedUses",
+        "trainingUse",
+        "publicRelease",
+        "warning"
+      ],
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "canonicalization": {
+          "type": "string",
+          "const": "operatingline-json-sort-v1"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "algorithm",
+        "canonicalization",
+        "contentSha256"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "formatVersion",
+    "annotationId",
+    "caseRef",
+    "runId",
+    "runContentSha256",
+    "rubric",
+    "reviewer",
+    "review",
+    "sourceKind",
+    "supersedesAnnotationId",
+    "dataHandling",
+    "integrity"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/human-eval-annotation.json"
+}

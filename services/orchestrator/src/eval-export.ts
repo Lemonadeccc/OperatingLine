@@ -3,13 +3,14 @@ import { createHash } from 'node:crypto';
 import type { OperatingLineDatabase, StoredExecutionEvent } from '@operatingline/persistence';
 import {
   actionCatalogSchema,
+  canonicalizeProtocolJsonValue,
   evalExecutionEventSchema,
-  evalExportBundleSchema,
+  currentEvalExportBundleSchema,
   evalExportFormatVersion,
   guideProtocolVersion,
   type ActionCatalog,
   type EvalExecutionEvent,
-  type EvalExportBundle,
+  type CurrentEvalExportBundle,
   type EvalExportRequest,
 } from '@operatingline/protocol';
 
@@ -429,6 +430,16 @@ export function computeEvalContentSha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeEvalContent(value)).digest('hex');
 }
 
+export function computePlanContentSha256(value: unknown): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
+}
+
+function evalSnapshotId(value: unknown): string {
+  const digest = createHash('sha256').update(canonicalizeEvalContent(value)).digest('hex');
+  const variant = ((Number.parseInt(digest[16]!, 16) & 0x3) | 0x8).toString(16);
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${variant}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
+
 export function readExecutionEventLedger(database: OperatingLineDatabase): StoredExecutionEvent[] {
   const events: StoredExecutionEvent[] = [];
   let afterSequence = 0;
@@ -446,9 +457,20 @@ export function readExecutionEventLedger(database: OperatingLineDatabase): Store
   }
 }
 
-export function createEvalExport(options: EvalExportOptions): EvalExportBundle {
-  const relations = collectRelations(options.events, options.request);
-  const matchingEvents = options.events.filter((event) =>
+export function createEvalExport(options: EvalExportOptions): CurrentEvalExportBundle {
+  const ledgerUpperSequence = options.events.reduce(
+    (maximum, event) => Math.max(maximum, event.sequence),
+    0,
+  );
+  const snapshotUpperSequence = options.request.snapshotUpperSequence ?? ledgerUpperSequence;
+  if (snapshotUpperSequence > ledgerUpperSequence) {
+    throw new Error(
+      `Eval snapshot upper sequence ${snapshotUpperSequence} exceeds ledger sequence ${ledgerUpperSequence}`,
+    );
+  }
+  const snapshotEvents = options.events.filter((event) => event.sequence <= snapshotUpperSequence);
+  const relations = collectRelations(snapshotEvents, options.request);
+  const matchingEvents = snapshotEvents.filter((event) =>
     eventMatches(event, options.request, relations.proposalIds, relations.requestIds),
   );
   const pageCandidates = matchingEvents.filter(
@@ -460,6 +482,21 @@ export function createEvalExport(options: EvalExportOptions): EvalExportBundle {
     .map((event): EvalExecutionEvent => evalExecutionEventSchema.parse(event));
   const nextAfterSequence = pageEvents.at(-1)?.sequence ?? options.request.afterSequence;
   const catalogs = resolveCatalogs(options.request, matchingEvents, options.availableCatalogs);
+  const snapshotId = evalSnapshotId({
+    formatVersion: evalExportFormatVersion,
+    scope: {
+      targetAdapterId: options.request.targetAdapterId,
+      planId: options.request.planId,
+      instanceId: options.request.instanceId ?? null,
+    },
+    snapshotUpperSequence,
+    catalogs,
+  });
+  if (options.request.snapshotId !== undefined && options.request.snapshotId !== snapshotId) {
+    throw new Error(
+      'Eval snapshotId does not match the requested scope, upper sequence, or catalogs',
+    );
+  }
   const content = {
     protocolVersion: guideProtocolVersion,
     formatVersion: evalExportFormatVersion,
@@ -471,6 +508,8 @@ export function createEvalExport(options: EvalExportOptions): EvalExportBundle {
     catalogs,
     events: pageEvents,
     page: {
+      snapshotId,
+      snapshotUpperSequence,
       afterSequence: options.request.afterSequence,
       nextAfterSequence,
       hasMore,
@@ -479,7 +518,7 @@ export function createEvalExport(options: EvalExportOptions): EvalExportBundle {
     dataHandling,
   };
 
-  return evalExportBundleSchema.parse({
+  return currentEvalExportBundleSchema.parse({
     ...content,
     exportId: options.exportId,
     exportedAt: options.exportedAt,

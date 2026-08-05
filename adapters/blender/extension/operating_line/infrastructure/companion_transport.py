@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import ipaddress
 import json
+import re
 from http.client import HTTPConnection, HTTPException, HTTPResponse
 from queue import Empty, Queue
 import socket
@@ -33,6 +34,7 @@ REPLAN_RUN_STATUSES = frozenset(
     }
 )
 TERMINAL_REPLAN_RUN_STATUSES = REPLAN_RUN_STATUSES - {"queued", "generating"}
+CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 def validate_companion_url(value: str) -> str:
@@ -79,6 +81,7 @@ class CompanionTransport:
         *,
         known_plan_id: str | None = None,
         known_revision: int | None = None,
+        known_plan_content_sha256: str | None = None,
         known_proposal_id: str | None = None,
         known_revision_thread_id: str | None = None,
         poll_interval: float = 1.0,
@@ -109,10 +112,27 @@ class CompanionTransport:
         self._thread: threading.Thread | None = None
         self._flush_deadline = 0.0
         self._last_delivered_sequence = 0
-        if (known_plan_id is None) != (known_revision is None):
-            raise ValueError("Known plan id and revision must be provided together")
+        known_plan_fields = (
+            known_plan_id,
+            known_revision,
+            known_plan_content_sha256,
+        )
+        provided_known_plan_fields = sum(
+            value is not None for value in known_plan_fields
+        )
+        if provided_known_plan_fields not in (0, len(known_plan_fields)):
+            raise ValueError(
+                "Known plan id, revision, and content SHA-256 must be provided together"
+            )
+        if known_plan_content_sha256 is not None and CONTENT_SHA256_PATTERN.fullmatch(
+            known_plan_content_sha256
+        ) is None:
+            raise ValueError(
+                "Known plan content SHA-256 must be 64 lowercase hex characters"
+            )
         self._known_plan_id = known_plan_id
         self._known_revision = known_revision
+        self._known_plan_content_sha256 = known_plan_content_sha256
         self._known_proposal_id = known_proposal_id
         self._revision_thread_id = self._validated_optional_uuid(
             known_revision_thread_id,
@@ -167,9 +187,26 @@ class CompanionTransport:
     def send_report(self, report: dict[str, Any]) -> None:
         self.outgoing.put(report)
 
-    def accept_plan(self, plan_id: str, revision: int) -> None:
+    def accept_plan(
+        self,
+        plan_id: str,
+        revision: int,
+        plan_content_sha256: str,
+    ) -> None:
+        if (
+            not isinstance(plan_content_sha256, str)
+            or CONTENT_SHA256_PATTERN.fullmatch(plan_content_sha256) is None
+        ):
+            raise ValueError(
+                "Accepted plan content SHA-256 must be 64 lowercase hex characters"
+            )
         self.control.put(
-            {"kind": "plan_accepted", "planId": plan_id, "revision": revision}
+            {
+                "kind": "plan_accepted",
+                "planId": plan_id,
+                "revision": revision,
+                "planContentSha256": plan_content_sha256,
+            }
         )
 
     @staticmethod
@@ -351,6 +388,8 @@ class CompanionTransport:
             query["knownPlanId"] = self._known_plan_id
         if self._known_revision is not None:
             query["knownRevision"] = str(self._known_revision)
+        if self._known_plan_content_sha256 is not None:
+            query["knownPlanContentSha256"] = self._known_plan_content_sha256
         if self._known_proposal_id is not None:
             query["knownProposalId"] = self._known_proposal_id
         response = self._request_json(
@@ -360,12 +399,24 @@ class CompanionTransport:
         )
         if response.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
             raise ValueError("Unsupported companion protocol version")
+        if "planContentSha256" not in response:
+            raise ValueError("Runtime delivery must contain planContentSha256")
         plan = response.get("plan")
-        if plan is not None:
-            if not isinstance(plan, dict):
-                raise ValueError("Runtime plan must be an object or null")
-            self.incoming.put({"kind": "plan", "plan": plan})
+        plan_content_sha256 = self._validated_delivery_hash(
+            response.get("planContentSha256"),
+            present=plan is not None,
+            label="Runtime plan content SHA-256",
+        )
+        if plan is not None and not isinstance(plan, dict):
+            raise ValueError("Runtime plan must be an object or null")
+        if "proposalPlanContentSha256" not in response:
+            raise ValueError("Runtime delivery must contain proposalPlanContentSha256")
         proposal = response.get("proposal")
+        proposal_plan_content_sha256 = self._validated_delivery_hash(
+            response.get("proposalPlanContentSha256"),
+            present=proposal is not None,
+            label="Runtime proposal plan content SHA-256",
+        )
         if proposal is not None:
             if not isinstance(proposal, dict):
                 raise ValueError("Runtime proposal must be an object or null")
@@ -382,8 +433,38 @@ class CompanionTransport:
                         "Proposal revision thread id",
                     )
                     self._revision_history_signature = None
-            self.incoming.put({"kind": "proposal", "proposal": proposal})
+        if plan is not None:
+            self.incoming.put(
+                {
+                    "kind": "plan",
+                    "plan": plan,
+                    "planContentSha256": plan_content_sha256,
+                }
+            )
+        if proposal is not None:
+            self.incoming.put(
+                {
+                    "kind": "proposal",
+                    "proposal": proposal,
+                    "proposalPlanContentSha256": proposal_plan_content_sha256,
+                }
+            )
         self._poll_revision_history()
+
+    @staticmethod
+    def _validated_delivery_hash(
+        value: Any,
+        *,
+        present: bool,
+        label: str,
+    ) -> str | None:
+        if not present:
+            if value is not None:
+                raise ValueError(f"{label} must be null when its payload is absent")
+            return None
+        if not isinstance(value, str) or CONTENT_SHA256_PATTERN.fullmatch(value) is None:
+            raise ValueError(f"{label} must be 64 lowercase hex characters")
+        return value
 
     def _poll_revision_history(self) -> None:
         thread_id = self._revision_thread_id
@@ -489,6 +570,9 @@ class CompanionTransport:
                     if control.get("kind") == "plan_accepted":
                         self._known_plan_id = str(control["planId"])
                         self._known_revision = int(control["revision"])
+                        self._known_plan_content_sha256 = str(
+                            control["planContentSha256"]
+                        )
                     elif control.get("kind") == "proposal_seen":
                         self._known_proposal_id = str(control["proposalId"])
                     elif control.get("kind") == "follow_revision_thread":

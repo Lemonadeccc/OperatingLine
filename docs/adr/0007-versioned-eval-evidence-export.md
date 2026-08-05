@@ -12,9 +12,14 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 
 ## 决策
 
-定义 `EvalExportBundle` format `1.0.0`，通过 MCP `operatingline.eval.export` 和鉴权 HTTP
+定义 `EvalExportBundle` format `1.1.0`，通过 MCP `operatingline.eval.export` 和鉴权 HTTP
 `GET /api/v1/eval/export` 提供。请求必须指定 `targetAdapterId + planId`，可选限制到一个
-`instanceId`，并使用稳定的 `afterSequence + limit` 游标分页。
+`instanceId`，并使用稳定的 `afterSequence + limit` 游标分页。首屏响应冻结全局事件账本的
+`snapshotUpperSequence`，并返回绑定 scope、上界和目录内容的确定性 `snapshotId`；所有续页必须
+原样回传这两个字段。导出端拒绝缺失或不匹配的快照字段、超过上界的游标，以及超过当前账本的
+上界。面向 format `1.0.0` 实现的客户端，其首屏请求仍可由 `1.1.0` 服务处理，但旧式无快照续页
+必须重新从首屏开始。协议读取端保留独立的 `1.0.0` Bundle schema 与 `1.0.0 | 1.1.0` 联合 parser，
+因此历史 evidence 仍可离线解析；Orchestrator 只生成当前 `1.1.0` Bundle。
 
 一个证据包包含：
 
@@ -28,6 +33,10 @@ ActionCatalog、PlanningContext、GuideProposal、人工决策和 Companion 状�
 - 所有被事件引用的精确 ActionCatalog 版本；没有历史引用时包含当前目标宿主的最新目录；
 - 整个匹配集合的事件类型、transition 和 decision 计数，以及当前事件页；
 - `operatingline-json-sort-v1` 规范化后的 SHA-256 内容摘要。
+
+关系解析、事件匹配、目录引用、summary、页内容和 `hasMore` 都只读取不超过
+`snapshotUpperSequence` 的事件。因而首屏完成后追加的新事件不会污染同一快照的续页；调用方需另
+起一个不带快照字段的首屏请求，才能观察更新后的账本。
 
 摘要输入是除 `exportId`、`exportedAt` 和 `integrity` 外的全部顶层内容，因此相同 scope、目录、
 事件页和汇总会得到相同哈希，导出信封的随机 ID 与时间不会改变它。对象键按字典序递归排序，数组

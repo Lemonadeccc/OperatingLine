@@ -29,6 +29,9 @@ importers:
       '@operatingline/domain':
         specifier: workspace:*
         version: link:packages/domain
+      '@operatingline/eval-kit':
+        specifier: workspace:*
+        version: link:packages/eval-kit
       '@operatingline/openai-planner-provider':
         specifier: workspace:*
         version: link:packages/openai-planner-provider
@@ -90,6 +93,12 @@ importers:
         version: link:../protocol
 
   packages/domain: {}
+
+  packages/eval-kit:
+    dependencies:
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/openai-planner-provider:
     dependencies:

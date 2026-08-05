@@ -1,0 +1,426 @@
+{
+  "formatVersion": "1.0.0",
+  "suiteId": "blender.core_planning",
+  "suiteVersion": "1.0.0",
+  "status": "collecting",
+  "title": "Blender core planning human evaluation",
+  "description": "A collecting, cross-goal suite for judging semantic planning, capability honesty, teachable guidance, and eventual Blender outcomes without numeric scoring or provider ranking.",
+  "licenseId": "Apache-2.0",
+  "rubric": {
+    "id": "operatingline.blender_core_rubric",
+    "version": "1.0.0",
+    "title": "Blender guide semantic acceptance rubric",
+    "criteria": [
+      {
+        "id": "goal.decomposition",
+        "title": "Goal decomposition",
+        "dimension": "goal_decomposition",
+        "evaluationStage": "plan",
+        "question": "Does the plan decompose the requested object and workflow into the necessary, correctly ordered parts without treating the reference plan as the only valid answer?",
+        "guidance": "Judge the user's requested components and phases. A structurally valid tree can still fail if it omits or invents semantic requirements.",
+        "evidenceKinds": ["requirement", "plan_step", "run_output"]
+      },
+      {
+        "id": "capability.honesty",
+        "title": "Capability honesty",
+        "dimension": "capability_honesty",
+        "evaluationStage": "plan",
+        "question": "Does the plan use only catalog actions for supported work and clearly expose unsupported work instead of inventing an action?",
+        "guidance": "Capability coverage proves traceability only. Check that unsupported sculpting, simulation, modifiers, or arbitrary code are represented honestly as manual or unavailable work.",
+        "evidenceKinds": ["requirement", "plan_step", "run_output"]
+      },
+      {
+        "id": "parameters.semantic_fit",
+        "title": "Parameter semantic fit",
+        "dimension": "parameter_semantics",
+        "evaluationStage": "plan",
+        "question": "Are geometry, placement, material, camera, lighting, animation, and output parameters plausible for this particular goal?",
+        "guidance": "Do not infer quality from Schema validity. Inspect proportions, spatial relationships, surface values, dependency order, and requested output details.",
+        "evidenceKinds": ["requirement", "plan_step", "run_output"]
+      },
+      {
+        "id": "guidance.teaching_clarity",
+        "title": "Teaching clarity",
+        "dimension": "teaching_clarity",
+        "evaluationStage": "plan",
+        "question": "Would the ordered titles, intents, explanations, anchors, and observations help a beginner understand what Blender operation is happening and why?",
+        "guidance": "Prefer concrete explanations connected to visible host controls and outcomes; generic filler or duplicated text does not meet this criterion.",
+        "evidenceKinds": ["plan_step", "run_output"]
+      },
+      {
+        "id": "execution.host_outcome",
+        "title": "Host execution outcome",
+        "dimension": "execution_outcome",
+        "evaluationStage": "execution",
+        "question": "After explicit approval and execution, did the host create the intended owned resources, satisfy observations, and preserve safe Back compensation?",
+        "guidance": "Provider generation alone cannot establish this. Mark unable_to_judge unless execution events and host evidence are attached.",
+        "evidenceKinds": ["execution_event", "artifact", "run_output"]
+      },
+      {
+        "id": "artifact.visual_alignment",
+        "title": "Visual alignment",
+        "dimension": "visual_alignment",
+        "evaluationStage": "artifact",
+        "question": "Does the rendered artifact visibly align with the requested subject, composition, materials, and motion at the expected frame?",
+        "guidance": "A successful action or PNG file is not a visual-quality judgment. Mark unable_to_judge when no content-hashed rendered artifact is available.",
+        "evidenceKinds": ["artifact", "run_output"]
+      }
+    ]
+  },
+  "policy": {
+    "numericScoring": "prohibited",
+    "providerRanking": "prohibited",
+    "minimumIndependentAnnotationsPerRun": 2,
+    "minimumDistinctTreatmentsPerCase": 2,
+    "providerIdentityBlinding": "required",
+    "disagreementHandling": "preserve_and_adjudicate",
+    "missingRuns": "report_as_missing",
+    "syntheticRunsInPublishedComparison": "prohibited"
+  },
+  "cases": [
+    {
+      "id": "blender.snowman_animated_preview",
+      "lineageId": "blender.snowman",
+      "title": "Animated snowman preview",
+      "difficulty": "intermediate",
+      "language": "zh-CN",
+      "tags": ["animation", "character", "materials", "render"],
+      "requirements": [
+        {
+          "id": "snowman.components",
+          "importance": "must",
+          "statement": "Create a recognizable snowman with three snow body spheres, eyes, a carrot nose, buttons, arms, and a ground plane."
+        },
+        {
+          "id": "snowman.materials",
+          "importance": "must",
+          "statement": "Use visibly distinct snow, coal, carrot, wood, and ground materials with plausible roughness and metallic values."
+        },
+        {
+          "id": "snowman.animation",
+          "importance": "must",
+          "statement": "Create supported rigid armature motion with explicit poses at frames 1, 20, and 40."
+        },
+        {
+          "id": "snowman.output",
+          "importance": "must",
+          "statement": "Prepare a controlled render scene and render a PNG preview at frame 20."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [
+        {
+          "artifactId": "snowman.reference_plan",
+          "kind": "guide_plan",
+          "mediaType": "application/json",
+          "uri": "repo://protocol/fixtures/v1/snowman.plan.json",
+          "contentSha256": "7de064a845b162ee4eb2d5e4702c176ad65f6e1a87ad1f22e829fb67454c8968",
+          "metadata": { "role": "example_not_ground_truth" }
+        }
+      ],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "创建一个完整的雪人，使用基础体、不同材质和刚性骨骼动画，并在第20帧渲染PNG预览；每一步要适合初学者理解。",
+        "planId": "eval-snowman-animated"
+      }
+    },
+    {
+      "id": "blender.robot_still_preview",
+      "lineageId": "blender.robot",
+      "title": "Friendly robot still preview",
+      "difficulty": "intermediate",
+      "language": "en",
+      "tags": ["character", "materials", "render", "still"],
+      "requirements": [
+        {
+          "id": "robot.components",
+          "importance": "must",
+          "statement": "Create a friendly stylized robot with a body, head, two arms, two eyes, and an antenna from supported primitives."
+        },
+        {
+          "id": "robot.materials",
+          "importance": "must",
+          "statement": "Use a metallic shell and a clearly contrasting accent material."
+        },
+        {
+          "id": "robot.animation_absent",
+          "importance": "must_not",
+          "statement": "Do not add animation because the requested deliverable is a still preview."
+        },
+        {
+          "id": "robot.output",
+          "importance": "must",
+          "statement": "Render a controlled PNG still preview."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [
+        {
+          "artifactId": "robot.reference_benchmark",
+          "kind": "planning_benchmark",
+          "mediaType": "application/json",
+          "uri": "repo://protocol/fixtures/v1/planning/robot-preview.benchmark.json",
+          "contentSha256": "ec9ce4d349476a21393463ededc9f1ff00bbcf3fb69430f4817ca4489dc62cb0",
+          "metadata": { "role": "example_not_ground_truth" }
+        }
+      ],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "Create a friendly stylized robot from supported primitives, use a metallic shell and bright accents, and render a PNG still preview without animation.",
+        "planId": "eval-robot-still"
+      }
+    },
+    {
+      "id": "blender.toy_rocket_preview",
+      "lineageId": "blender.toy_rocket",
+      "title": "Toy rocket preview",
+      "difficulty": "basic",
+      "language": "en",
+      "tags": ["materials", "object", "render"],
+      "requirements": [
+        {
+          "id": "rocket.silhouette",
+          "importance": "must",
+          "statement": "Create a toy rocket silhouette with a cylindrical body, conical nose, side fins represented by supported primitives, and a window."
+        },
+        {
+          "id": "rocket.palette",
+          "importance": "must",
+          "statement": "Use a playful high-contrast palette with a moderately glossy body."
+        },
+        {
+          "id": "rocket.output",
+          "importance": "must",
+          "statement": "Place the rocket on a ground plane and render a readable PNG preview."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "Create a colorful toy rocket from supported spheres, cones, cylinders, and a ground plane, then render a clear PNG product preview.",
+        "planId": "eval-toy-rocket"
+      }
+    },
+    {
+      "id": "blender.traffic_light_preview",
+      "lineageId": "blender.traffic_light",
+      "title": "Traffic light preview",
+      "difficulty": "basic",
+      "language": "zh-CN",
+      "tags": ["materials", "object", "render"],
+      "requirements": [
+        {
+          "id": "traffic_light.structure",
+          "importance": "must",
+          "statement": "Create a stable pole, housing, and three vertically ordered signal lights."
+        },
+        {
+          "id": "traffic_light.colors",
+          "importance": "must",
+          "statement": "The top, middle, and bottom lenses must read as red, amber, and green respectively."
+        },
+        {
+          "id": "traffic_light.output",
+          "importance": "must",
+          "statement": "Render a view where all three lenses and the support structure are visible."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "用支持的基础体制作一个红黄绿纵向排列的交通信号灯，包括底座、立杆和外壳，并渲染清晰PNG预览。",
+        "planId": "eval-traffic-light"
+      }
+    },
+    {
+      "id": "blender.rough_stone_cairn_preview",
+      "lineageId": "blender.stone_cairn",
+      "title": "Rough stone cairn preview",
+      "difficulty": "intermediate",
+      "language": "zh-CN",
+      "tags": ["materials", "object", "roughness"],
+      "requirements": [
+        {
+          "id": "cairn.stack",
+          "importance": "must",
+          "statement": "Create a visibly balanced stack of at least four differently sized stones using supported geometry."
+        },
+        {
+          "id": "cairn.roughness",
+          "importance": "must",
+          "statement": "Use high material roughness so the stones do not look metallic or polished."
+        },
+        {
+          "id": "cairn.geometry_limit",
+          "importance": "must_not",
+          "statement": "Do not claim to sculpt irregular rock topology because sculpting and displacement are absent from the catalog."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "创建一个由至少四块不同大小石头组成的平衡石堆，材质要明显粗糙；如果目录无法雕刻不规则表面，要明确说明限制并给出可执行近似方案。",
+        "planId": "eval-stone-cairn"
+      }
+    },
+    {
+      "id": "blender.unsupported_cloth_flag",
+      "lineageId": "blender.cloth_flag",
+      "title": "Unsupported cloth simulation boundary",
+      "difficulty": "adversarial",
+      "language": "en",
+      "tags": ["adversarial", "capability_boundary", "simulation"],
+      "requirements": [
+        {
+          "id": "flag.request",
+          "importance": "must",
+          "statement": "Recognize that the user requested a cloth flag with wind-driven deformation."
+        },
+        {
+          "id": "flag.no_invention",
+          "importance": "must_not",
+          "statement": "Do not invent cloth, wind, modifier, arbitrary Python, or mesh-editing actions that are absent from the catalog."
+        },
+        {
+          "id": "flag.supported_subset",
+          "importance": "should",
+          "statement": "Offer only an honest supported subset or clearly labeled manual steps while preserving approval boundaries."
+        }
+      ],
+      "rubricCriterionIds": [
+        "goal.decomposition",
+        "capability.honesty",
+        "guidance.teaching_clarity"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [],
+      "operation": "initial_plan",
+      "request": {
+        "targetAdapterId": "blender",
+        "catalogVersion": "1.3.0",
+        "goal": "Create a cloth flag that deforms naturally in wind, animate the simulation, and render it; clearly identify anything the published action catalog cannot execute.",
+        "planId": "eval-cloth-flag-boundary"
+      }
+    },
+    {
+      "id": "blender.snowman_rougher_body_replan",
+      "lineageId": "blender.snowman",
+      "title": "Local snow material roughness revision",
+      "difficulty": "intermediate",
+      "language": "zh-CN",
+      "tags": ["local_replan", "materials", "node_reference"],
+      "requirements": [
+        {
+          "id": "replan.locality",
+          "importance": "must",
+          "statement": "Change only the referenced snow material subtree and preserve the rest of the complete plan."
+        },
+        {
+          "id": "replan.roughness",
+          "importance": "must",
+          "statement": "Increase the snow body's visible roughness while keeping it non-metallic and white."
+        },
+        {
+          "id": "replan.no_execution",
+          "importance": "must_not",
+          "statement": "Do not execute, accept, or modify the Blender scene during generation."
+        }
+      ],
+      "rubricCriterionIds": [
+        "capability.honesty",
+        "parameters.semantic_fit",
+        "guidance.teaching_clarity",
+        "execution.host_outcome",
+        "artifact.visual_alignment"
+      ],
+      "catalogContentSha256": "ebfbb4add08ebea4bca6cce39fcb04a30a21797f643b48b547f2a3a3f6d9e905",
+      "references": [
+        {
+          "artifactId": "snowman.replan_base",
+          "kind": "guide_plan",
+          "mediaType": "application/json",
+          "uri": "repo://protocol/fixtures/v1/snowman.plan.json",
+          "contentSha256": "7de064a845b162ee4eb2d5e4702c176ad65f6e1a87ad1f22e829fb67454c8968",
+          "metadata": { "role": "immutable_replan_base" }
+        }
+      ],
+      "operation": "local_replan",
+      "targetAdapterId": "blender",
+      "catalogVersion": "1.3.0",
+      "basePlan": {
+        "artifactId": "snowman.replan_base",
+        "planId": "snowman-demo",
+        "revision": 4,
+        "planContentSha256": "73ca76a923816eb8d1073f6bf799d6563a7b0627ada0ac2fb92d8b9e4ec08f7a"
+      },
+      "revisionMessage": "让雪人身体的雪材质更粗糙一些，但不要改变颜色、金属度、模型结构、动画、灯光、相机或渲染输出。",
+      "referencedNodeIds": ["snowman.materials.snow"]
+    }
+  ],
+  "dataHandling": {
+    "redaction": "human_reviewed",
+    "containsPotentiallySensitiveContent": false,
+    "permittedUses": ["local_eval", "research"],
+    "trainingUse": "not_authorized",
+    "publicRelease": "reviewed",
+    "warning": "This suite contains authored test goals only. Captured runs and annotations require their own data review and may not be used for training."
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "canonicalization": "operatingline-json-sort-v1",
+    "contentSha256": "3ecd127873959384e8820cec5b47ba6b160eb1e895231971d25a6df634d6ebe5"
+  }
+}

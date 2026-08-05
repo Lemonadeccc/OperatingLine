@@ -25,7 +25,9 @@
 - [x] 可分页修订消息历史：从规范化请求、Proposal 与同实例人工决策派生完整 turn 记录；MCP/HTTP
       可按 `beforeTurn` 向前查询，Blender 可查看最近轮次、展开已加载内容并继续加载更早页面。
 - [x] Eval/replay 证据导出：按 adapter、Plan 和可选实例导出目标、精确目录、完整提案、人工决策、
-      步骤观察与回退；使用稳定事件序列、分页和内容哈希，且不虚构质量评分。
+      步骤观察与回退；format `1.1.0` 在第一页冻结 `snapshotUpperSequence`，后续页必须复用
+      `snapshotId + snapshotUpperSequence`，因此新追加事件不会改变同一次导出的关系、汇总或分页内容。
+      Bundle 继续使用内容哈希，且不虚构质量评分。
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
@@ -63,13 +65,28 @@
       Orchestrator 持久化授权后立即返回 `202`，后台复用严格 provider generation 与 canonical propose；
       Blender 只做短状态轮询。单实例 Run/待决 Proposal 互斥，失败或重启不自动重试；所有生成状态和
       Proposal preview 都不改场景或 active Session，仍需 Accept/Reject，`Next` 才执行动作。
+- [x] 人工 Eval 采集基础设施：新增独立 `HumanEvalSuite`、`ProviderEvalRun`、
+      `HumanEvalAnnotation`/`HumanEvalAdjudication` 与无分数 `HumanEvalComparisonReport` 协议，内部
+      `@operatingline/eval-kit` 验证跨记录引用、精确 catalog/base Plan、内容哈希、安全 artifact、冻结
+      live 事件链、盲审/裁决和 released readiness；published report 要求 artifact-verified dataset。
+      `pnpm eval:check` 与 `pnpm eval:report` 可验证和报告目录数据集。首个 Blender suite 处于
+      `collecting`，包含 7 个案例、6 条 lineage，并禁止 synthetic Run 进入 published comparison。
+      见 [ADR 0018](adr/0018-versioned-human-eval-evidence.md)。
 
 ## 后续里程碑
 
-- [ ] 更大的人工 Eval：扩展当前雪人和机器人基线，建立人工标注的跨目标数据集、语义验收 rubric 与
-      真实 provider 对照评测。已完成的 capability trace 只证明 provider 声明可追溯到目录 action；
-      确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
-      “模型已经理解任意目标”；同进程插件也不是强安全隔离。
+- [ ] 更大的人工 Eval：把已完成的版本化采集基础设施推进为经过真实采集、独立盲审和数据审核的
+      released 数据集。Capability trace 只证明 provider 声明可追溯到目录 action；确定性 packet、JSON
+      输出、严格 Schema、locality 和质量门都不能写成“模型已经理解任意目标”；同进程插件也不是强
+      安全隔离。
+  - [x] 定义无分数 suite/run/annotation/adjudication/comparison 协议、`@operatingline/eval-kit`、
+        `eval:check`/`eval:report`，并提交 7 个 `collecting` Blender 案例，覆盖 initial plan、local replan
+        和 adversarial 能力边界。
+  - [ ] 按明确的数据披露与可能费用确认，为 7 个案例采集真实 Provider Run；当前 `runCount` 为 0。
+  - [ ] 为每个 Run 取得至少两名校准 reviewer 的 provider-blind annotation，保留并按需 adjudicate
+        分歧；当前 `annotationCount` 与 `adjudicationCount` 均为 0。
+  - [ ] 附加真实 Blender 执行事件与内容哈希渲染 artifact，完成人工数据审核后再把 suite 从
+        `collecting` 推进到 `released` 并发布 comparison。
 - [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化 provider
       local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
       provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、

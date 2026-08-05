@@ -3,9 +3,88 @@
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+import hashlib
+import math
+import re
+import struct
 from typing import Any
+import uuid
 
 from ..domain import TaskNode, executable_steps
+
+
+def _length_delimited(value: bytes) -> bytes:
+    return str(len(value)).encode("ascii") + b":" + value
+
+
+def _valid_unicode_bytes(value: str) -> bytes:
+    try:
+        return value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise ValueError(
+            "Canonical JSON strings must contain valid Unicode"
+        ) from error
+
+
+def _canonical_json_value_bytes(value: Any, ancestors: set[int]) -> bytes:
+    if value is None:
+        return b"n"
+    if value is False:
+        return b"f"
+    if value is True:
+        return b"t"
+    if isinstance(value, (int, float)):
+        try:
+            number = float(value)
+        except OverflowError as error:
+            raise ValueError("Canonical JSON numbers must be finite") from error
+        if not math.isfinite(number):
+            raise ValueError("Canonical JSON numbers must be finite")
+        if number == 0:
+            number = 0.0
+        return b"d" + struct.pack(">d", number).hex().encode("ascii")
+    if isinstance(value, str):
+        encoded = _valid_unicode_bytes(value)
+        return b"s" + str(len(encoded)).encode("ascii") + b":" + encoded
+    if not isinstance(value, (list, dict)):
+        raise ValueError("Value is not a JSON value")
+    identity = id(value)
+    if identity in ancestors:
+        raise ValueError("Canonical JSON values must not contain cycles")
+    ancestors.add(identity)
+    try:
+        if isinstance(value, list):
+            items = [
+                _length_delimited(_canonical_json_value_bytes(item, ancestors))
+                for item in value
+            ]
+            return b"a" + str(len(value)).encode("ascii") + b":" + b"".join(items)
+        entries: list[tuple[bytes, Any]] = []
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("Canonical JSON object keys must be strings")
+            entries.append((_valid_unicode_bytes(key), item))
+        entries.sort(key=lambda entry: entry[0])
+        parts = [b"o" + str(len(entries)).encode("ascii") + b":"]
+        for key_bytes, item in entries:
+            encoded_key = (
+                b"s"
+                + str(len(key_bytes)).encode("ascii")
+                + b":"
+                + key_bytes
+            )
+            parts.append(_length_delimited(encoded_key))
+            parts.append(
+                _length_delimited(_canonical_json_value_bytes(item, ancestors))
+            )
+        return b"".join(parts)
+    finally:
+        ancestors.remove(identity)
+
+
+def canonical_plan_content_sha256(plan: Mapping[str, Any]) -> str:
+    """Hash a semantic JSON plan identically across JavaScript and Python."""
+    return hashlib.sha256(_canonical_json_value_bytes(dict(plan), set())).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,17 +176,36 @@ class DemoSession:
         plan_id: str | None = "snowman-demo",
         revision: int | None = 1,
         source_plan: Mapping[str, Any] | None = None,
+        plan_content_sha256: str | None = None,
     ) -> None:
         self.root = root
         self._actions = actions
         self.plan_id = plan_id
         self.revision = revision
+        if plan_content_sha256 is not None and re.fullmatch(
+            r"[0-9a-f]{64}", plan_content_sha256
+        ) is None:
+            raise ValueError("Plan content SHA-256 must be 64 lowercase hex characters")
         self._source_plan = deepcopy(dict(source_plan)) if source_plan is not None else None
         if self._source_plan is not None and (
             self._source_plan.get("id") != plan_id
             or self._source_plan.get("revision") != revision
         ):
             raise ValueError("Session source plan identity does not match plan id/revision")
+        expected_plan_content_sha256 = (
+            canonical_plan_content_sha256(self._source_plan)
+            if self._source_plan is not None
+            else None
+        )
+        if (
+            plan_content_sha256 is not None
+            and plan_content_sha256 != expected_plan_content_sha256
+        ):
+            raise ValueError("Plan content SHA-256 does not match the source plan")
+        self.plan_content_sha256 = (
+            plan_content_sha256 or expected_plan_content_sha256
+        )
+        self.execution_id: str | None = None
         self.steps = executable_steps(root)
         self.active_index = -1
         self.started = False
@@ -155,6 +253,7 @@ class DemoSession:
 
     def start(self) -> None:
         self.reset()
+        self.execution_id = str(uuid.uuid4())
         self.started = True
 
     def _step_actions(self, step: TaskNode) -> tuple[ExecuteAction, RollbackAction]:
@@ -205,3 +304,4 @@ class DemoSession:
         self.receipts.clear()
         self.active_index = -1
         self.started = False
+        self.execution_id = None

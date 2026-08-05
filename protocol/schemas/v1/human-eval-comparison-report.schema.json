@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "audience": {
+      "type": "string",
+      "enum": [
+        "development",
+        "published"
+      ]
+    },
+    "suite": {
+      "type": "object",
+      "properties": {
+        "suiteId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "suiteVersion": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "suiteId",
+        "suiteVersion",
+        "contentSha256"
+      ],
+      "additionalProperties": false
+    },
+    "sourceRecords": {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "sourceKind": {
+                "type": "string",
+                "enum": [
+                  "live_provider_invocation",
+                  "synthetic_test_fixture"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "contentSha256",
+              "sourceKind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "annotations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "contentSha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "adjudications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "contentSha256"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "runs",
+        "annotations",
+        "adjudications"
+      ],
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "numericScoring": {
+          "type": "boolean",
+          "const": false
+        },
+        "providerRanking": {
+          "type": "boolean",
+          "const": false
+        },
+        "interpretation": {
+          "type": "string",
+          "const": "human_judgments_only"
+        }
+      },
+      "required": [
+        "numericScoring",
+        "providerRanking",
+        "interpretation"
+      ],
+      "additionalProperties": false
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "caseId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "conditionGroups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "conditionSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "runs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "runId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "runContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "sourceKind": {
+                        "type": "string",
+                        "enum": [
+                          "live_provider_invocation",
+                          "synthetic_test_fixture"
+                        ]
+                      },
+                      "treatmentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "providerId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "providerVersion": {
+                        "type": "string",
+                        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                      },
+                      "requestedModel": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "completed",
+                          "failed"
+                        ]
+                      },
+                      "annotationState": {
+                        "type": "string",
+                        "enum": [
+                          "missing",
+                          "incomplete",
+                          "complete",
+                          "disagreement_preserved",
+                          "adjudicated"
+                        ]
+                      },
+                      "annotations": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "annotationId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "annotationContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "reviewerPseudonym": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "recommendation": {
+                              "type": "string",
+                              "enum": [
+                                "accept",
+                                "revise",
+                                "unable_to_judge"
+                              ]
+                            },
+                            "judgments": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "criterionId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "judgment": {
+                                    "type": "string",
+                                    "enum": [
+                                      "met",
+                                      "partially_met",
+                                      "not_met",
+                                      "unable_to_judge",
+                                      "not_applicable"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "criterionId",
+                                  "judgment"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "annotationId",
+                            "annotationContentSha256",
+                            "reviewerPseudonym",
+                            "recommendation",
+                            "judgments"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "adjudication": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "adjudicationId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "adjudicationContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "adjudicatorPseudonym": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "judgments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "criterionId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "judgment": {
+                                      "type": "string",
+                                      "enum": [
+                                        "met",
+                                        "partially_met",
+                                        "not_met",
+                                        "unable_to_judge",
+                                        "not_applicable"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "criterionId",
+                                    "judgment"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "adjudicationId",
+                              "adjudicationContentSha256",
+                              "adjudicatorPseudonym",
+                              "judgments"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "runId",
+                      "runContentSha256",
+                      "sourceKind",
+                      "treatmentSha256",
+                      "providerId",
+                      "providerVersion",
+                      "requestedModel",
+                      "outcome",
+                      "annotationState",
+                      "annotations",
+                      "adjudication"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "conditionSha256",
+                "runs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "missingLiveRun": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "caseId",
+          "conditionGroups",
+          "missingLiveRun"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "properties": {
+        "caseCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "runCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "liveRunCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "includedSyntheticRunCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "excludedSyntheticRunCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "currentAnnotationCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rawAnnotationRecordCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "adjudicationCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "casesWithoutLiveRuns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          }
+        },
+        "runsBelowAnnotationMinimum": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      },
+      "required": [
+        "caseCount",
+        "runCount",
+        "liveRunCount",
+        "includedSyntheticRunCount",
+        "excludedSyntheticRunCount",
+        "currentAnnotationCount",
+        "rawAnnotationRecordCount",
+        "adjudicationCount",
+        "casesWithoutLiveRuns",
+        "runsBelowAnnotationMinimum"
+      ],
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "canonicalization": {
+          "type": "string",
+          "const": "operatingline-json-sort-v1"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "algorithm",
+        "canonicalization",
+        "contentSha256"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "formatVersion",
+    "generatedAt",
+    "audience",
+    "suite",
+    "sourceRecords",
+    "policy",
+    "cases",
+    "completeness",
+    "integrity"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/human-eval-comparison-report.json"
+}

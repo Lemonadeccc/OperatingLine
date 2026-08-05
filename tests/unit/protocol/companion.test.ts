@@ -20,6 +20,8 @@ function stateReport() {
     companionVersion: '0.1.0',
     hostVersion: '4.5.0',
     plan: null,
+    planContentSha256: null,
+    executionId: null,
     phase: 'idle',
     activeStepId: null,
     completedStepIds: [],
@@ -39,6 +41,7 @@ describe('companion protocol', () => {
         instanceId: randomUUID(),
         knownPlanId: 'snowman',
         knownRevision: '2',
+        knownPlanContentSha256: 'a'.repeat(64),
       }).success,
     ).toBe(true);
     expect(companionStateReportSchema.safeParse(stateReport()).success).toBe(true);
@@ -46,14 +49,18 @@ describe('companion protocol', () => {
       companionGuideDeliverySchema.safeParse({
         protocolVersion: '1.0.0',
         plan: null,
+        planContentSha256: null,
         proposal: null,
+        proposalPlanContentSha256: null,
       }).success,
     ).toBe(true);
     expect(
       companionGuideDeliverySchema.safeParse({
         protocolVersion: '1.0.0',
         plan: null,
+        planContentSha256: null,
         proposal: null,
+        proposalPlanContentSha256: null,
         extra: true,
       }).success,
     ).toBe(false);
@@ -63,13 +70,19 @@ describe('companion protocol', () => {
   });
 
   it('requires known plan fields to be provided together', () => {
-    expect(
-      companionGuideRequestSchema.safeParse({
-        adapterId: 'blender',
-        instanceId: randomUUID(),
-        knownPlanId: 'snowman',
-      }).success,
-    ).toBe(false);
+    for (const incompleteIdentity of [
+      { knownPlanId: 'snowman' },
+      { knownPlanId: 'snowman', knownRevision: 2 },
+      { knownRevision: 2, knownPlanContentSha256: 'a'.repeat(64) },
+    ]) {
+      expect(
+        companionGuideRequestSchema.safeParse({
+          adapterId: 'blender',
+          instanceId: randomUUID(),
+          ...incompleteIdentity,
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it('accepts a standalone known proposal watermark', () => {
@@ -111,6 +124,52 @@ describe('companion protocol', () => {
         error: 'host connection failed',
       }).success,
     ).toBe(true);
+
+    const plan = { id: 'snowman', revision: 2 };
+    expect(
+      companionStateReportSchema.safeParse({
+        ...stateReport(),
+        plan,
+        planContentSha256: 'a'.repeat(64),
+        executionId: randomUUID(),
+        phase: 'running',
+        transition: 'walkthrough_started',
+      }).success,
+    ).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...stateReport(),
+        plan,
+        planContentSha256: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...stateReport(),
+        executionId: randomUUID(),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('binds guide delivery hashes to their corresponding plan payloads', () => {
+    expect(
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.0.0',
+        plan: null,
+        planContentSha256: 'a'.repeat(64),
+        proposal: null,
+        proposalPlanContentSha256: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.0.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: 'b'.repeat(64),
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects duplicate completed step ids and non-strict observations', () => {
@@ -139,8 +198,9 @@ describe('companion protocol', () => {
     };
 
     expect(requestSchema.dependentRequired).toEqual({
-      knownPlanId: ['knownRevision'],
-      knownRevision: ['knownPlanId'],
+      knownPlanId: ['knownRevision', 'knownPlanContentSha256'],
+      knownRevision: ['knownPlanId', 'knownPlanContentSha256'],
+      knownPlanContentSha256: ['knownPlanId', 'knownRevision'],
     });
     expect(stateSchema.additionalProperties).toBe(false);
     expect(stateSchema.properties?.completedStepIds?.uniqueItems).toBe(true);
