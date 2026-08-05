@@ -6,7 +6,8 @@
 
 - `Panel` / `UILayout`：Sidebar 任务树和 Start、Next、Back。
 - `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
-- `Panel` / `UILayout`：活动树与待审树的节点 `Ref`、Revision request 输入及发送状态。
+- `Panel` / `UILayout`：可折叠 Revision Workspace，包含活动树/待审树节点 `Ref`、逐条移除、
+  独立修订正文、历史、Plan diff 与 Accept/Reject。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
@@ -71,23 +72,27 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `guide.propose` 路径始终进入独立审查状态：Blender 完整验证计划结构、动作允许列表与参数，
-只创建不执行的预览 Session，并在 Sidebar 显示 proposal ID 对应的计划标题、revision、目标宿主、
-只读任务树以及 Accept/Reject。存在提案时 Start/Next 在 UI 与 Operator 两层都被门禁，Back 保留，
+只创建不执行的预览 Session，并在 Revision Workspace 显示 proposal ID 对应的计划标题、
+revision、目标宿主、Plan diff、只读任务树以及 Accept/Reject。存在提案时 Start/Next 在 UI 与
+Operator 两层都被门禁，Back 保留，
 以便活动会话回到起点。Accept 只有在 receipt 为空时才原子替换活动 Session，仍不会执行第一个
 action；Reject 只清除预览。两种决策由网络线程异步回传且按宿主实例幂等。Disconnect 会取消
 本地 pending 更新和待审提案。
 
-活动树和待审树的每个节点都提供 `Ref`。同一草稿最多引用 8 个节点，并且不能混合两个 Plan
-基线；切换基线会清空旧引用。发送时 Companion 把完整 base Plan、稳定节点 ID、当时的树编号、
+活动树和待审树的每个节点都提供 `Ref`。引用以结构化行显示，不插入或篡改用户正文；重复点击
+去重，每条可独立移除。同一草稿最多引用 8 个节点，且不能混合两个 Plan 基线；尝试引用其他
+基线会显式失败，保留当前引用和正文，需用户先 `Clear Draft`。发送时 Companion 把完整 base Plan、
+稳定节点 ID、当时的树编号、
 打包目录版本和消息放入后台队列。请求确认或暂时失败只更新 UI 状态，不调用 `bpy` 场景 API。
 Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blender 在主线程再次核对后才建立
 只读预览。Protocol `1.1.0` 的 Proposal 还必须带线性 thread 元数据和 Plan diff；Panel 在 Accept 前
 显示 `+ / - / ~ / moved`、变化节点、字段和可紧凑表示的 action 参数前后值。接受请求关联 Proposal
-后，新的 active-plan 引用会继承 `threadId`、递增 turn 并把上一 request 作为 parent。输入区仍明确
-称为 Revision request，因为当前没有内置模型或流式回复。后台 transport 还会读取当前 thread 的
+后，新的 active-plan 引用会继承 `threadId`、递增 turn 并把上一 request 作为 parent。Revision Workspace
+明确称为修订操作日志，而不是 Chat，因为当前没有内置模型、自动 provider 选择/调用或流式回复。点击
+`Send Request` 只进入认证的后台队列，不执行 Blender action。后台 transport 还会读取当前 thread 的
 最新历史页；主线程验证 request/proposal/diff/decision 关系并在 Sidebar 显示最近三轮。用户可展开
 全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
-不会调用场景 API。
+不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、历史、执行进度或场景状态。
 
 ## revision 4 雪人执行切片
 

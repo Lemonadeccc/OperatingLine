@@ -26,6 +26,7 @@ STATE = os.environ.get("OPERATINGLINE_VISUAL_STATE", "forward")
 OUTPUT_NAMES = {
     "initial": "guidance-initial.png",
     "revision": "guidance-revision-request.png",
+    "revision-collapsed": "guidance-revision-collapsed.png",
     "proposal": "guidance-proposal-review.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
@@ -87,7 +88,7 @@ def view3d_context():
 def configure_state():
     if STATE == "initial":
         assert session.active_index == -1
-    elif STATE == "revision":
+    elif STATE in {"revision", "revision-collapsed"}:
         assert bpy.ops.operating_line.reference_node(
             scope="active",
             node_id="snowman.model.head",
@@ -96,6 +97,10 @@ def configure_state():
             "Make this head slightly larger and rougher"
         )
         assert extension.get_companion().revision_reference_scope == "active"
+        if STATE == "revision-collapsed":
+            bpy.context.window_manager.operating_line_revision_workspace_expanded = (
+                False
+            )
     elif STATE == "proposal":
         plan_path = (
             ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
@@ -216,7 +221,7 @@ def configure_state():
             "references": [
                 {"nodeId": "snowman.model.head", "nodeNumber": "1.2.3"}
             ],
-            "message": "@1.2.3 Make this head slightly larger and rougher",
+            "message": "Make this head slightly larger and rougher",
             "revisionThread": revision_thread,
             "occurredAt": "2026-08-04T11:59:00Z",
         }
@@ -360,7 +365,7 @@ def assert_guidance_pixels():
         flush=True,
     )
 
-    if STATE in {"initial", "revision", "proposal"}:
+    if STATE in {"initial", "revision", "revision-collapsed", "proposal"}:
         assert next_step > 0.0003
         assert locked > 0.0001
         assert completed < 0.00003 and back < 0.00003

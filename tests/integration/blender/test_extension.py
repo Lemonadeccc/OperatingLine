@@ -43,12 +43,15 @@ from operating_line_extension.operating_line.application import (  # noqa: E402
     ActionReceipt,
     DemoSession,
 )
+from operating_line_extension.operating_line.application.companion import (  # noqa: E402
+    CompanionController,
+)
 from operating_line_extension.operating_line.presentation.operators import (  # noqa: E402
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_start,
 )
-from operating_line_extension.operating_line.presentation.panel import (  # noqa: E402
+from operating_line_extension.operating_line.presentation.revision_workspace import (  # noqa: E402
     _display_columns,
     _wrap_history_message,
 )
@@ -351,25 +354,65 @@ def assert_companion_and_plan_semantics() -> None:
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert server_thread.ident != main_thread_id
 
-        # Ref creates a stable node citation in Blender. Send queues one full,
-        # immutable base plan for an MCP planner and does not mutate the scene.
+        # The revision workspace keeps structured references separate from the
+        # user-authored request body. References are ordered, de-duplicated,
+        # and removable one at a time without changing the base session or scene.
+        session_before_request = operating_line.get_session()
         scene_objects_before_request = {
             item.as_pointer() for item in bpy.data.objects
         }
+        bpy.context.window_manager.operating_line_revision_message = (
+            "Make the selected parts slightly rougher"
+        )
         assert bpy.ops.operating_line.reference_node(
             scope="active",
             node_id="snowman.model.head",
         ) == {"FINISHED"}
-        assert bpy.context.window_manager.operating_line_revision_message == "@1.1.3 "
-        bpy.context.window_manager.operating_line_revision_message += (
-            "Make the head slightly rougher"
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Make the selected parts slightly rougher"
+        )
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.body_upper",
+        ) == {"FINISHED"}
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.head", "snowman.model.body_upper")
+        assert bpy.ops.operating_line.remove_revision_reference(
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.body_upper",)
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Make the selected parts slightly rougher"
+        )
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.body_upper", "snowman.model.head")
+        assert operating_line.get_session() is session_before_request
+        assert {item.as_pointer() for item in bpy.data.objects} == (
+            scene_objects_before_request
         )
         assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
         assert bpy.context.window_manager.operating_line_revision_message == ""
+        assert "queued locally" in companion.revision_request_status
+        assert operating_line.get_session() is session_before_request
+        assert {item.as_pointer() for item in bpy.data.objects} == (
+            scene_objects_before_request
+        )
         request_deadline = time.monotonic() + 4.0
         while time.monotonic() < request_deadline:
             companion.pump()
-            if revision_requests and "stored for MCP planner" in (
+            if revision_requests and "stored in runtime for MCP planner" in (
                 companion.revision_request_status
             ):
                 break
@@ -383,11 +426,10 @@ def assert_companion_and_plan_semantics() -> None:
         assert revision_request["instanceId"] == companion.instance_id
         assert revision_request["basePlan"] == dynamic_plan
         assert revision_request["references"] == [
-            {"nodeId": "snowman.model.head", "nodeNumber": "1.1.3"}
+            {"nodeId": "snowman.model.body_upper", "nodeNumber": "1.1.2"},
+            {"nodeId": "snowman.model.head", "nodeNumber": "1.1.3"},
         ]
-        assert revision_request["message"] == (
-            "@1.1.3 Make the head slightly rougher"
-        )
+        assert revision_request["message"] == "Make the selected parts slightly rougher"
         assert revision_request["revisionThread"] == {
             "threadId": revision_request["requestId"],
             "turn": 1,
@@ -409,6 +451,97 @@ def assert_companion_and_plan_semantics() -> None:
             scene_objects_before_request
         )
 
+        # The application boundary enforces the documented eight-reference
+        # limit without dropping the existing structured selection or body.
+        maximum_reference_ids = (
+            "snowman",
+            "snowman.scene",
+            "snowman.scene.ground",
+            "snowman.model",
+            "snowman.model.body_lower",
+            "snowman.model.body_upper",
+            "snowman.model.head",
+            "snowman.details",
+        )
+        limit_controller = CompanionController()
+        assert limit_controller.stage_proposal(
+            {
+                "protocolVersion": "1.1.0",
+                "proposalId": str(uuid.uuid4()),
+                "targetAdapterId": "blender",
+                "plan": deepcopy(FULL_PLAN),
+                "planDiff": None,
+                "proposedAt": "2026-08-05T12:00:00Z",
+            }
+        ) is True
+        bpy.context.window_manager.operating_line_revision_message = (
+            "Keep all eight references if another node is rejected"
+        )
+        for node_id in maximum_reference_ids:
+            limit_controller.add_revision_reference("proposal", node_id)
+        try:
+            limit_controller.add_revision_reference(
+                "proposal",
+                "snowman.details.face",
+            )
+        except ValueError as error:
+            assert "at most 8 nodes" in str(error)
+        else:
+            raise AssertionError("A ninth revision reference must be rejected")
+        assert tuple(
+            node.id for node in limit_controller.revision_reference_nodes()
+        ) == maximum_reference_ids
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Keep all eight references if another node is rejected"
+        )
+        limit_controller.clear_revision_draft()
+
+        # Hiding the visual guidance does not discard a new workspace draft or
+        # the loaded immutable thread. Collapsing the workspace and toggling
+        # guidance both leave the host state alone.
+        history_before_hide = companion.revision_thread_history
+        bpy.context.window_manager.operating_line_revision_message = (
+            "Preserve this draft while guidance is hidden"
+        )
+        assert bpy.ops.operating_line.reference_node(
+            scope="active",
+            node_id="snowman.model.head",
+        ) == {"FINISHED"}
+        bpy.context.window_manager.operating_line_revision_workspace_expanded = False
+        assert companion.revision_thread_history is history_before_hide
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.head",)
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Preserve this draft while guidance is hidden"
+        )
+        bpy.context.window_manager.operating_line_revision_workspace_expanded = True
+        assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+        assert companion.revision_thread_history is history_before_hide
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.head",)
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Preserve this draft while guidance is hidden"
+        )
+        assert operating_line.get_session() is session_before_request
+        assert {item.as_pointer() for item in bpy.data.objects} == (
+            scene_objects_before_request
+        )
+        assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+        assert overlay_enabled() is False
+        assert companion.revision_thread_history is history_before_hide
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.head",)
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Preserve this draft while guidance is hidden"
+        )
+        assert operating_line.get_session() is session_before_request
+        assert {item.as_pointer() for item in bpy.data.objects} == (
+            scene_objects_before_request
+        )
+
         # Disconnect may flush queued state, but it must retain and expose any
         # worker that is still stopping instead of claiming to be offline.
         expected_sequence = companion.last_report["sequence"]
@@ -417,6 +550,9 @@ def assert_companion_and_plan_semantics() -> None:
         companion.disconnect()
         assert time.monotonic() - disconnect_started < 0.25
         assert companion.status in {"Disconnecting", "Offline"}
+        assert companion.revision_reference_nodes() == ()
+        assert companion.revision_base_session is None
+        assert bpy.context.window_manager.operating_line_revision_message == ""
         if active_transport.running:
             assert companion.status == "Disconnecting"
             assert active_transport in companion._stopping_transports
@@ -728,6 +864,40 @@ def assert_companion_and_plan_semantics() -> None:
     assert operating_line.get_session() is accepted_before_review
     assert companion.proposal_session is not None
     assert companion.proposal_session.plan_id == "reviewed-proposal-plan"
+
+    # A draft cannot silently jump from the active plan to a proposal. The
+    # failed cross-base reference preserves both the structured selection and
+    # the independently authored request body.
+    bpy.context.window_manager.operating_line_revision_message = (
+        "Keep this active-plan draft intact"
+    )
+    assert bpy.ops.operating_line.reference_node(
+        scope="active",
+        node_id="snowman.model.body_upper",
+    ) == {"FINISHED"}
+    try:
+        bpy.ops.operating_line.reference_node(
+            scope="proposal",
+            node_id="snowman.model.head",
+        )
+    except RuntimeError as error:
+        assert "Clear the draft before switching bases" in str(error)
+    else:
+        raise AssertionError("A cross-base reference must fail visibly")
+    assert companion.revision_reference_scope == "active"
+    assert tuple(
+        node.id for node in companion.revision_reference_nodes()
+    ) == ("snowman.model.body_upper",)
+    assert bpy.context.window_manager.operating_line_revision_message == (
+        "Keep this active-plan draft intact"
+    )
+    assert "clear the draft" in companion.revision_request_status.lower()
+    assert accepted_before_review.plan_id in companion.revision_request_status
+    assert reviewed_proposal["plan"]["id"] in companion.revision_request_status
+    assert operating_line.get_session() is accepted_before_review
+    assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
+    assert bpy.ops.operating_line.clear_revision_request() == {"FINISHED"}
+
     assert bpy.ops.operating_line.reference_node(
         scope="proposal",
         node_id="snowman.model.head",
@@ -736,14 +906,33 @@ def assert_companion_and_plan_semantics() -> None:
     assert tuple(
         node.id for node in companion.revision_reference_nodes()
     ) == ("snowman.model.head",)
-    assert bpy.ops.operating_line.clear_revision_request() == {"FINISHED"}
+    bpy.context.window_manager.operating_line_revision_message = (
+        "Replace this proposal-bound draft safely"
+    )
+    replacement_proposal = deepcopy(reviewed_proposal)
+    replacement_proposal["proposalId"] = str(uuid.uuid4())
+    replacement_proposal["plan"]["revision"] += 1
+    replacement_proposal["plan"]["title"] = "Replacement reviewed proposal"
+    assert companion.stage_proposal(replacement_proposal) is True
     assert companion.revision_reference_nodes() == ()
+    assert companion.revision_base_session is None
+    assert bpy.context.window_manager.operating_line_revision_message == ""
     assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
+    assert bpy.ops.operating_line.reference_node(
+        scope="proposal",
+        node_id="snowman.model.head",
+    ) == {"FINISHED"}
+    bpy.context.window_manager.operating_line_revision_message = (
+        "Discard this proposal-bound draft on reject"
+    )
     assert bpy.ops.operating_line.start() == {"CANCELLED"}
     assert bpy.ops.operating_line.next() == {"CANCELLED"}
     assert operating_line.get_session() is accepted_before_review
     assert bpy.ops.operating_line.reject_proposal() == {"FINISHED"}
     assert companion.proposed_plan is None and companion.proposal_session is None
+    assert companion.revision_reference_nodes() == ()
+    assert companion.revision_base_session is None
+    assert bpy.context.window_manager.operating_line_revision_message == ""
     assert operating_line.get_session() is accepted_before_review
     assert {item.as_pointer() for item in bpy.data.objects} == objects_before_review
 
@@ -752,7 +941,7 @@ def assert_companion_and_plan_semantics() -> None:
         scope="proposal",
         node_id="snowman.model.head",
     ) == {"FINISHED"}
-    bpy.context.window_manager.operating_line_revision_message += "Refine after accept"
+    bpy.context.window_manager.operating_line_revision_message = "Refine after accept"
     assert companion.accept_proposal() is True
     reviewed_session = operating_line.get_session()
     assert reviewed_session is not accepted_before_review
@@ -1039,6 +1228,11 @@ def main() -> None:
     registered_companion = operating_line.get_companion()
     assert registered_companion.timer_registered
     assert bpy.app.timers.is_registered(registered_companion.timer_callback)
+    assert hasattr(
+        bpy.types.WindowManager,
+        "operating_line_revision_workspace_expanded",
+    )
+    assert bpy.context.window_manager.operating_line_revision_workspace_expanded is True
     assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
     assert_companion_and_plan_semantics()
     assert all(
@@ -1316,6 +1510,16 @@ def main() -> None:
     assert not hasattr(bpy.types.WindowManager, "operating_line_runtime_url")
     assert not hasattr(bpy.types.WindowManager, "operating_line_bearer_token")
     assert not hasattr(bpy.types.WindowManager, "operating_line_revision_message")
+    assert not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_revision_history_expanded",
+    )
+    assert not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_revision_workspace_expanded",
+    )
+    assert not hasattr(bpy.types, "OPERATINGLINE_OT_remove_revision_reference")
+    assert not hasattr(bpy.types, "OPERATINGLINE_PT_sidebar")
     assert not registered_companion.timer_registered
     assert not bpy.app.timers.is_registered(registered_companion.timer_callback)
     print("OperatingLine Blender integration test passed")

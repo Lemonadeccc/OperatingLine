@@ -109,6 +109,20 @@ def register() -> None:
                 options={"SKIP_SAVE"},
             )
         )
+    if not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_revision_workspace_expanded",
+    ):
+        bpy.types.WindowManager.operating_line_revision_workspace_expanded = (
+            bpy.props.BoolProperty(
+                name="Revision Workspace expanded",
+                description=(
+                    "Show revision references, immutable thread history, and plan review"
+                ),
+                default=True,
+                options={"SKIP_SAVE"},
+            )
+        )
     if _session is None:
         _session = DemoSession(
             SNOWMAN_TASK_TREE,
@@ -145,6 +159,7 @@ def unregister() -> None:
         "operating_line_bearer_token",
         "operating_line_revision_message",
         "operating_line_revision_history_expanded",
+        "operating_line_revision_workspace_expanded",
     ):
         if hasattr(bpy.types.WindowManager, property_name):
             delattr(bpy.types.WindowManager, property_name)

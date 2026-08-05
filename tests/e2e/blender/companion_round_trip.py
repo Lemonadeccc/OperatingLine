@@ -147,15 +147,16 @@ def main() -> None:
             scope="active",
             node_id="snowman.model.head",
         ) == {"FINISHED"}
-        assert window_manager.operating_line_revision_message == "@1.2.3 "
-        window_manager.operating_line_revision_message += (
+        assert window_manager.operating_line_revision_message == ""
+        window_manager.operating_line_revision_message = (
             "Make the head slightly larger and keep the silhouette readable"
         )
         assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
         revision_request_id = controller.last_revision_request_id
         assert revision_request_id is not None
         wait_until(
-            lambda: "stored for MCP planner" in controller.revision_request_status,
+            lambda: "stored in runtime for MCP planner"
+            in controller.revision_request_status,
             "revision request acknowledgement",
         )
         wait_until(
@@ -226,7 +227,8 @@ def main() -> None:
             scope="active",
             node_id="snowman.model.head",
         ) == {"FINISHED"}
-        window_manager.operating_line_revision_message += (
+        assert window_manager.operating_line_revision_message == ""
+        window_manager.operating_line_revision_message = (
             "Keep that change and make the review title more explicit"
         )
         assert bpy.ops.operating_line.submit_revision_request() == {"FINISHED"}
@@ -234,7 +236,8 @@ def main() -> None:
         assert second_revision_request_id is not None
         assert second_revision_request_id != revision_request_id
         wait_until(
-            lambda: "stored for MCP planner" in controller.revision_request_status,
+            lambda: "stored in runtime for MCP planner"
+            in controller.revision_request_status,
             "second revision request acknowledgement",
         )
         wait_until(

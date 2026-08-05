@@ -48,15 +48,19 @@
       `generate` 固定不建 Proposal，只有携带 canonical `generationRequestId` 的显式 `replan.propose` 才在
       同一事务记录 Proposal、请求关联与 provenance。相关事件已进入 Eval 路由；OpenAI opt-in provider
       同时支持初始规划和局部重规划，默认 standalone 仍 provider-free。
+- [x] Blender 原生 Revision Workspace：在一个可折叠操作日志中组合当前基线、最多 8 个
+      结构化节点引用、逐条移除、独立修订正文、线性历史、Plan diff 和 Accept/Reject。引用去重，
+      跨基线引用会显式失败而不丢失草稿；折叠或 `Hide Guidance` 不丢失状态。发送只排队，
+      不会自动调用 provider 或修改场景。
 
 ## 后续里程碑
 
 - [ ] 更大的人工 Eval：扩展当前雪人和机器人基线，建立人工标注的跨目标数据集、语义验收 rubric 与
       真实 provider 对照评测。确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
       “模型已经理解任意目标”；同进程插件也不是强安全隔离。
-- [ ] 节点聊天引用 UI、自然语言聊天与自动语义重规划：当前已完成原生 `Ref` + Revision request、
-      类型化 provider local replan 和完整 Proposal 审批，但仍是显式异步工具链；尚无新的对话式引用 UI、
-      流式聊天、provider 自动选择/调用或基于语义置信度的自动重规划。
+- [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化
+      provider local replan 和完整 Proposal 审批，但仍是显式异步工具链；尚无流式助手回复、provider 自动
+      选择/调用、费用与数据发送授权 UI，或基于语义置信度的自动重规划。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
 - [ ] 骨骼与动画深化：在当前四骨骼刚性绑定和三段姿态关键帧之外，扩展可审查 rig、蒙皮/权重、动画

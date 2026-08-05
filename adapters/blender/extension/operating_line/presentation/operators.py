@@ -173,32 +173,36 @@ class OPERATINGLINE_OT_reference_node(bpy.types.Operator):
     node_id: bpy.props.StringProperty()
     scope: bpy.props.StringProperty()
 
-    def execute(self, context):
+    def execute(self, _context):
         companion = _companion()
         try:
-            node, base_changed = companion.add_revision_reference(
+            node = companion.add_revision_reference(
                 self.scope,
                 self.node_id,
             )
         except ValueError as error:
+            companion.revision_request_status = str(error)
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-
-        window_manager = context.window_manager
-        token = f"@{node.number}"
-        current_message = window_manager.operating_line_revision_message.strip()
-        if base_changed:
-            next_message = token
-        elif token not in current_message.split():
-            next_message = f"{current_message} {token}".strip()
-        else:
-            next_message = current_message
-        window_manager.operating_line_revision_message = (
-            f"{next_message} " if next_message else ""
-        )
         companion.revision_request_status = (
-            f"{token} referenced; describe the change"
+            f"@{node.number} referenced; describe the change"
         )
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_remove_revision_reference(bpy.types.Operator):
+    bl_idname = "operating_line.remove_revision_reference"
+    bl_label = "Remove Reference"
+    bl_description = "Remove this node from the local revision-request draft"
+
+    node_id: bpy.props.StringProperty()
+
+    def execute(self, _context):
+        companion = _companion()
+        if not companion.remove_revision_reference(self.node_id):
+            self.report({"WARNING"}, "Revision reference is no longer selected")
+            return {"CANCELLED"}
+        companion.revision_request_status = "Reference removed; draft preserved"
         return {"FINISHED"}
 
 
@@ -284,6 +288,7 @@ CLASSES = (
     OPERATINGLINE_OT_accept_proposal,
     OPERATINGLINE_OT_reject_proposal,
     OPERATINGLINE_OT_reference_node,
+    OPERATINGLINE_OT_remove_revision_reference,
     OPERATINGLINE_OT_clear_revision_request,
     OPERATINGLINE_OT_submit_revision_request,
     OPERATINGLINE_OT_load_older_revision_history,

@@ -17,7 +17,8 @@
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
 > `ReplanningPromptPacket 1.0.0`、引用子树 locality 门禁和可选 provider `replan()`，但生成与创建
 > Proposal 仍是两个显式步骤。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
-> 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。节点聊天 UI、任意目标语义
+> 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。Blender 内已有可折叠的
+> Revision Workspace，用于结构化节点引用、修订正文、历史、diff 和提案审批；流式模型对话、任意目标语义
 > 数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
@@ -72,6 +73,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
   更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
   携带精确的 Plan/节点/字段/参数差异，结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
+- **Blender Revision Workspace**：原生 Sidebar 中的可折叠工作区把当前基线、最多 8 个结构化
+  节点引用、独立修订正文、线性历史、Plan diff 和 Accept/Reject 放在同一个操作日志中。
+  引用可逐条移除，重复引用会去重，切换到不同基线前必须显式清空草稿；`Hide Guidance`
+  只隐藏视口线、数字、状态和任务树，不删除工作区、草稿、历史或场景。它不会自动选择或调用 provider。
 - **类型化 Provider 局部重规划**：`ReplanningPromptPacket 1.0.0` 绑定 pending immutable request、
   精确目录、实例状态、完整 base Plan 和 `referenced_subtrees_v1` scope。MCP/HTTP 提供独立的
   replan provider list、prompt、generate 与 propose 入口；初始/局部生成共享并发、超时、取消和持久
@@ -111,8 +116,8 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 阶段选择仍由外部模型或显式注入的 provider 根据目标声明，因此这不等于已经内置“任意任务自动
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
-> 隔离。当前修订输入不是流式聊天；已经支持可追溯的多轮线性 thread、Plan diff、结构化历史，以及
-> 显式 provider-backed local replan，但尚未提供新的节点聊天 UI、provider 自动选择/调用、自动语义
+> 隔离。当前修订输入不是流式聊天；已经支持 Blender 原生 Revision Workspace、可追溯的多轮线性
+> thread、Plan diff、结构化历史，以及显式 provider-backed local replan，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
 > 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality 与结构质量门只证明机器约束，
 > 不证明模型理解了任意修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
@@ -345,16 +350,21 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    Camera，最后生成帧 20 的 320 × 320 Eevee PNG。
 4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 15 步，不删除用户对象。
 5. `Hide Guidance` 会一起隐藏视口卡片、彩色数字、引导线、状态详情和任务树，但保留
-   Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失当前步骤。
+   Revision Workspace、Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失草稿、历史、
+   当前步骤或场景状态。
 6. 任务树分支可以独立展开或折叠。蓝色 `OK` 表示已完成，红色 `BACK` 表示当前可补偿步骤，
    绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`15`。
-7. 树中每个节点的 `Ref` 会把 `@1.2.3` 一类引用加入 Revision request。一次请求可以引用同一
-   活动计划或同一待审计划中的最多 8 个节点；发送只入队，不修改模型，返回的新计划仍需审批。
-   若基线来自已接受的请求关联 Proposal，输入区会显示将继续的 thread 与下一 turn。
-8. `Revision history` 显示每轮请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
+7. 顶部可折叠的 `Revision Workspace` 将引用、正文、历史、diff 和提案审批放在同一区域。
+   树中每个节点的 `Ref` 会加入一条结构化 `@1.2.3  标题` 引用，不会篡改独立的正文；
+   可逐条移除，且一次只能引用同一活动计划或同一待审计划中的最多 8 个节点。尝试混用
+   两个基线会保留已有草稿并要求先显式 `Clear Draft`。
+8. `Send Request` 只把不可变请求排入本地运行时，不调用 Blender action，也不自动选择
+   provider。MCP/provider 返回的新计划仍须在同一工作区审批；若基线来自已接受的请求关联
+   Proposal，输入区会显示将继续的 thread 与下一 turn。
+9. `Revision history` 显示每轮请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
    `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
-9. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划更新
-   和本地待审提案。
+10. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划更新
+    和本地待审提案。
 
 Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形。当前对象和世界坐标锚点会
 绘制真实目标线；`operator` 锚点只显示操作 ID 或 `menuPath` 语义路径，并明确标记
@@ -455,12 +465,12 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 会启动真实 Orchestrator 进程和 Blender，经过 MCP 提交初版提案、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会为七个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+`pnpm test:blender:visual` 会为八个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-revision-request.png`、
-`guidance-proposal-review.png`、`guidance-mid-forward.png`、
+`guidance-revision-collapsed.png`、`guidance-proposal-review.png`、`guidance-mid-forward.png`、
 `guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
-节点引用与 Revision request、待审提案的 thread/diff/参数变化、修订历史与接受/拒绝控件、红色 Back/绿色
+节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、修订历史与接受/拒绝控件、红色 Back/绿色
 Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
 
 产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、
@@ -505,9 +515,9 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 现有 MCP Bridge。当前仍未完成：
 
 1. 把当前两目标的结构质量基线扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
-   插件及类型化局部重规划后端已经完成，但它们不证明任意目标语义规划可靠；Blender 仍未接入新的
-   节点聊天 UI、流式对话或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据
-   和人工审批。
+   插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标语义规划
+   可靠；Blender 仍未接入流式模型对话、provider 自动选择/调用或自动语义重规划。OperatingLine 核心
+   仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。
 3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender

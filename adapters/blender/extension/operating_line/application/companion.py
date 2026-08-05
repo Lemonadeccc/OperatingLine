@@ -234,17 +234,30 @@ class CompanionController:
             if node is not None
         )
 
-    def add_revision_reference(self, scope: str, node_id: str) -> tuple[Any, bool]:
+    def has_revision_reference(self, scope: str, node_id: str) -> bool:
+        """Return whether the current draft references this node on this base."""
+        if self._revision_reference_scope != scope:
+            return False
+        return node_id in self._revision_reference_ids
+
+    def add_revision_reference(self, scope: str, node_id: str) -> Any:
         base = self._session_for_reference_scope(scope)
         node = base.find_node(node_id)
         if node is None:
             raise ValueError(f"Unknown task node: {node_id}")
         if base.source_plan_copy() is None:
             raise ValueError("The selected plan has no immutable source payload")
-        base_changed = self._revision_base_session is not None and self._revision_base_session is not base
-        if base_changed:
-            self.clear_revision_draft()
-            self.revision_request_status = "Revision draft moved to a different base plan"
+        if (
+            self._revision_base_session is not None
+            and self._revision_base_session is not base
+        ):
+            draft_scope = self._revision_reference_scope or "unknown"
+            draft_base = self._revision_base_session
+            raise ValueError(
+                f"Draft base is {draft_scope} {draft_base.plan_id} "
+                f"r{draft_base.revision}; cannot reference {scope} {base.plan_id} "
+                f"r{base.revision}. Clear the draft before switching bases"
+            )
         if self._revision_base_session is None:
             self._revision_base_session = base
             self._revision_reference_scope = scope
@@ -252,7 +265,17 @@ class CompanionController:
             if len(self._revision_reference_ids) >= 8:
                 raise ValueError("A revision request can reference at most 8 nodes")
             self._revision_reference_ids.append(node_id)
-        return node, base_changed
+        return node
+
+    def remove_revision_reference(self, node_id: str) -> bool:
+        """Remove one reference while preserving the remaining draft and message."""
+        if node_id not in self._revision_reference_ids:
+            return False
+        self._revision_reference_ids.remove(node_id)
+        if not self._revision_reference_ids:
+            self._revision_base_session = None
+            self._revision_reference_scope = None
+        return True
 
     def clear_revision_draft(self) -> None:
         self._revision_base_session = None
@@ -352,7 +375,7 @@ class CompanionController:
         self._pending_revision_request_ids.add(request_id)
         self.last_revision_request_id = request_id
         self.revision_request_status = (
-            f"Request {request_id[:8]} queued; scene unchanged"
+            f"Request {request_id[:8]} queued locally; scene unchanged"
         )
         self.clear_revision_draft()
         return request
@@ -695,7 +718,7 @@ class CompanionController:
                         self._pending_revision_request_ids.discard(request_id)
                         self.last_revision_request_id = request_id
                         self.revision_request_status = (
-                            f"Request {request_id[:8]} stored for MCP planner"
+                            f"Request {request_id[:8]} stored in runtime for MCP planner"
                         )
                 elif message.get("kind") == "revision_thread_history":
                     try:
@@ -722,7 +745,7 @@ class CompanionController:
                     self.status = "Connection error"
                     if self._pending_revision_request_ids:
                         self.revision_request_status = (
-                            "Request delivery will retry after reconnect"
+                            "Request queued locally; delivery will retry after reconnect"
                         )
                 elif message.get("kind") == "recovered":
                     self.error = ""
