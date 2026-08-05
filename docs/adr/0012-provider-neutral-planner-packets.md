@@ -78,4 +78,6 @@ ActionCatalog 允许列表、确定性质量门、Proposal 校验和宿主内人
 - 结构质量仍由 `planning.evaluate` 和 Proposal 门禁证明；自然语言语义完整性与审美质量仍需模型、
   人工审核和更大的标注数据集。
 - ADR 0013 已在独立 `planner-provider-sdk` 中定义显式进程内插件边界；它复用本 ADR 的精确 packet，
-  但不把供应商凭据或数据发送策略塞进通用协议层，也不自动提交 Proposal。具体厂商插件仍未提供。
+  但不把供应商凭据或数据发送策略塞进通用协议层，也不自动提交 Proposal。首个可选 OpenAI
+  Responses 插件已按该边界独立实现；它不改变 provider-neutral packet，也不证明任意目标语义规划
+  可靠。具体厂商调用与数据边界见 [ADR 0014](0014-openai-responses-planner-provider.md)。

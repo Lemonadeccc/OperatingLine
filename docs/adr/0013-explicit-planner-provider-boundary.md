@@ -130,5 +130,8 @@ Runtime 启动时通过 `(event_type, sequence)` 索引只读取上述三类 gen
   错误和证据语义。
 - 严格验证只能证明草案符合当前机器可表达的结构、目录与 identity 约束，不能证明自然语言语义完整、
   结果美观或 provider 本身可信。
-- 仓库当前没有任何具体厂商插件；provider 配置、秘密存储、外部 SDK 选择和发布仍需独立实现与审查。
+- 首个具体实现 `@operatingline/openai-planner-provider` 和独立 opt-in composition root 已按本边界完成；
+  它不改变默认 standalone、通用 wire contract 或核心验证权威。OpenAI SDK、显式模型/凭据、请求格式与
+  数据处理决策见 [ADR 0014](0014-openai-responses-planner-provider.md)。其他厂商仍须作为独立插件实现与
+  审查。
 - 节点聊天引用接入 provider、局部重规划、人工语义数据集/评分治理和第二软件宿主仍是后续里程碑。

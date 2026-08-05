@@ -36,12 +36,18 @@
       provider；核心只发送严格 Planner Packet，验证返回草案、identity、嵌套 ActionCatalog 参数和
       结构质量，固定返回 `proposalCreated: false`，并记录可重放 requested/completed/failed 证据。
       默认 standalone 保持 provider-free，核心不读取凭据或自动选择模型。
+- [x] 首个具体厂商插件：可选 `@operatingline/openai-planner-provider` 通过官方 OpenAI SDK 调用
+      Responses API，要求明确模型与凭据，固定 `store: false`、32,768 输出 token 上限、
+      `maxRetries: 0` 并传递
+      `AbortSignal`。当前动态 action/observation records 使用 JSON Object mode，核心继续执行权威
+      严格验证。独立 `services/openai-runtime` 与 `pnpm dev:openai` 显式装配该远端、provider-managed
+      插件，不改变默认 standalone。
 
 ## 后续里程碑
 
-- [ ] 具体厂商插件与任意目标语义规划：基于已完成的 provider SDK 独立实现、配置和发布具体模型
-      插件，并扩展人工标注的跨目标数据集。当前仓库没有 OpenAI、Claude 或其他厂商实现；确定性
-      packet、Schema 和质量门不能写成“模型已经理解任意目标”。同进程插件也不是强安全隔离。
+- [ ] 任意目标语义规划数据集：扩展当前雪人和机器人基线，建立更大的人工标注跨目标数据集与验收
+      rubric。首个 OpenAI 插件只完成厂商调用边界；确定性 packet、JSON 输出、严格 Schema 和质量门
+      都不能写成“模型已经理解任意目标”。同进程插件也不是强安全隔离。
 - [ ] 节点聊天引用与局部重规划：把现有不可变节点引用、线性 revision thread 和完整 Proposal
       审批流接到具体规划器，但不允许 provider 直接 patch 活动计划或绕过 `guide.propose`。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单

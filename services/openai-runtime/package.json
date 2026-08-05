@@ -1,0 +1,20 @@
+{
+  "name": "@operatingline/openai-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@operatingline/blender-action-catalog": "workspace:*",
+    "@operatingline/openai-planner-provider": "workspace:*",
+    "@operatingline/orchestrator": "workspace:*",
+    "pino": "10.3.1"
+  },
+  "devDependencies": {
+    "tsx": "4.23.5"
+  }
+}

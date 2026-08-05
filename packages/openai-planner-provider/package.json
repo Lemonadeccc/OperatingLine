@@ -1,0 +1,16 @@
+{
+  "name": "@operatingline/openai-planner-provider",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@operatingline/planner-provider-sdk": "workspace:*",
+    "@operatingline/protocol": "workspace:*",
+    "openai": "7.4.0"
+  }
+}

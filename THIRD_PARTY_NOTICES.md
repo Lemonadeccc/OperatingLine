@@ -29,3 +29,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 `CODE_OF_CONDUCT.md` 改编自 Contributor Covenant 2.1，并在文件内保留原始来源与
 Creative Commons Attribution 4.0 International 许可链接。
+
+## OpenAI Node SDK
+
+可选的 `@operatingline/openai-planner-provider` 使用 `openai@7.4.0`。项目来源：
+<https://github.com/openai/openai-node>。该依赖采用 Apache License 2.0；安装包中的原始
+`LICENSE` 条款继续适用。

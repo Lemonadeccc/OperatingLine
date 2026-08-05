@@ -14,6 +14,7 @@
   },
   "scripts": {
     "dev": "pnpm --dir services/orchestrator dev",
+    "dev:openai": "pnpm --dir services/openai-runtime dev",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -45,6 +46,7 @@
     "@operatingline/blender-mcp-bridge": "workspace:*",
     "@operatingline/blender-action-catalog": "workspace:*",
     "@operatingline/domain": "workspace:*",
+    "@operatingline/openai-planner-provider": "workspace:*",
     "@operatingline/orchestrator": "workspace:*",
     "@operatingline/persistence": "workspace:*",
     "@operatingline/protocol": "workspace:*",

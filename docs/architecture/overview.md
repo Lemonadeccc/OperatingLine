@@ -142,8 +142,9 @@ intent 重跑质量门，有 error 时不会持久化 Proposal。每次检查会
 Planner Packet `1.0.0` 把完整上下文、严格 Proposal 草案 JSON Schema 和相同工作流规则作为一个
 确定性协议对象；同一构建器为 MCP Prompt 提供渲染文本，并让 MCP Tool/HTTP 返回完整 packet。
 `planning.prompt.generated` 进入同一证据链。Prompt 是用户控制入口，Tool 是模型控制入口，两者都由
-客户端选择模型和发送授权。
-Orchestrator 不调用模型、不读取供应商密钥，也不依赖从 2026-07-28 起已弃用的 MCP Sampling。
+客户端选择模型和发送授权。这三条 provider-neutral packet 入口和默认 standalone 不调用模型、不读取
+供应商密钥，也不依赖从 2026-07-28 起已弃用的 MCP Sampling；只有独立 opt-in composition root 会把
+显式配置的 provider 注入同一核心 runtime。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段由调用方显式声明。质量报告
 没有总分，只证明候选 Plan 满足当前目录可表达的结构与资源流约束。它不判断结果是否好看、目标
@@ -180,6 +181,36 @@ canonical packet copy + strict schema + immutable identity + nested ActionCatalo
                                                ▼
                                       in-host human approval
 ```
+
+首个具体实现 `@operatingline/openai-planner-provider` 使用官方 OpenAI JavaScript/TypeScript SDK 的
+Responses API。构造 provider 时必须给出明确模型；独立 `services/openai-runtime` 还要求
+`OPENAI_API_KEY`，并通过 `pnpm dev:openai` 显式启动。它与默认 `pnpm dev` 是两个 composition root：
+前者安装一个 OpenAI provider，后者继续以空 provider registry 启动，不导入厂商 SDK 或读取模型凭据。
+
+```text
+pnpm dev                                  pnpm dev:openai
+    │                                         │ explicit model + API key
+    ▼                                         ▼
+provider-free standalone                 services/openai-runtime
+                                              │ inject one remote provider
+                                              ▼
+                                      official OpenAI Responses SDK
+```
+
+OpenAI 请求固定 `store: false`、`stream: false` 与 32,768 个输出 token 上限，SDK client 固定
+`maxRetries: 0`，并接收协调器的 `AbortSignal`。这使核心的显式重试和 at-most-once request ID 语义
+不被 SDK 隐式重试绕过，但取消仍是协作式的。当前 Proposal Schema 的 action arguments 与
+observation parameters 是由版本化
+ActionCatalog 约束的动态 records，不符合厂商严格 Structured Outputs 支持的 JSON Schema 子集；插件
+因此使用 JSON Object mode，只要求厂商返回可解析 JSON。JSON Object mode 不是 OperatingLine 信任
+边界：核心仍对未知返回执行权威的严格 draft Schema、packet identity、递归 ActionCatalog 和确定性
+质量校验。
+
+该 provider 的公开 descriptor 声明 `executionLocation: remote`、
+`dataTransmission: provider_managed` 与 `credentialManagement: provider_managed`。它不公开模型凭据；
+模型只存在于 provider 配置和描述文本，不进入通用 generate wire request。生成不会自动连接 Blender
+节点修订、不创建 Proposal，也不证明任意目标的语义规划质量。具体决策见
+[ADR 0014](../adr/0014-openai-responses-planner-provider.md)。
 
 Generate 可能把用户目标、Companion 状态和完整 ActionCatalog 传给远端服务并产生费用；公开 descriptor
 只做披露，不替调用方作授权决定。核心不把 API Key、endpoint 或模型参数放进 wire schema，也不持久化
@@ -240,6 +271,8 @@ compare-and-restore：只有当前值仍等于该动作写入的值时才恢复�
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。
 显式 Planner Provider 边界见
 [ADR 0013](../adr/0013-explicit-planner-provider-boundary.md)。
+OpenAI Responses Provider 与 opt-in composition root 见
+[ADR 0014](../adr/0014-openai-responses-planner-provider.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见
