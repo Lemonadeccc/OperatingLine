@@ -48,7 +48,138 @@ function revisionRequest(requestId = randomUUID()) {
   };
 }
 
+function companionReplanRun(overrides: Record<string, unknown> = {}) {
+  const generationRequestId = randomUUID();
+  const revisionRequestId = randomUUID();
+  const targetInstanceId = randomUUID();
+  return {
+    contractVersion: '1.0.0',
+    generationRequestId,
+    revisionRequestId,
+    targetAdapterId: 'blender',
+    targetInstanceId,
+    provider: { id: 'fake-planner', version: '0.1.0', displayName: 'Fake Planner' },
+    status: 'queued',
+    terminal: false,
+    sceneChanged: false,
+    proposalId: null,
+    error: null,
+    updatedAt: '2026-08-05T12:00:00.000Z',
+    request: {
+      generationRequestId,
+      revisionRequestId,
+      providerId: 'fake-planner',
+      providerVersion: '0.1.0',
+      targetAdapterId: 'blender',
+      targetInstanceId,
+      authorization: {
+        disclosureVersion: '1.0.0',
+        dataHandlingAcknowledged: true,
+        possibleChargesAcknowledged: true,
+        proposalCreationAcknowledged: true,
+        authorizedAt: '2026-08-05T12:00:00.000Z',
+      },
+    },
+    authorizedProvider: {
+      contractVersion: '1.0.0',
+      id: 'fake-planner',
+      version: '0.1.0',
+      displayName: 'Fake Planner',
+      description: 'Persistence fixture provider.',
+      availability: { available: true },
+      limits: { maxConcurrency: 1 },
+      dataHandling: {
+        executionLocation: 'local',
+        dataTransmission: 'none',
+        credentialManagement: 'provider_managed',
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('OperatingLine persistence', () => {
+  it('stores one active companion replan run per host and transitions it with compare-and-set', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const queued = companionReplanRun();
+    expect(
+      database.recordGuideRevisionRequest({
+        ...revisionRequest(queued.revisionRequestId),
+        instanceId: queued.targetInstanceId,
+      }),
+    ).toBe('accepted');
+
+    expect(database.recordCompanionReplanRun(queued)).toBe('accepted');
+    expect(database.recordCompanionReplanRun(queued)).toBe('duplicate');
+    expect(
+      database.recordCompanionReplanRun({
+        ...queued,
+        provider: { ...queued.provider, version: '9.9.9' },
+      }),
+    ).toBe('conflict');
+    expect(
+      database.recordCompanionReplanRun(
+        companionReplanRun({
+          targetInstanceId: queued.targetInstanceId,
+        }),
+      ),
+    ).toBe('conflict');
+    expect(database.listNonterminalCompanionReplanRuns()).toEqual([queued]);
+
+    const generating = {
+      ...queued,
+      status: 'generating',
+      updatedAt: '2026-08-05T12:00:01.000Z',
+    };
+    expect(database.transitionCompanionReplanRun(generating, ['queued'])).toBe(true);
+    expect(database.transitionCompanionReplanRun(generating, ['queued'])).toBe(false);
+    const completed = {
+      ...generating,
+      status: 'proposal_created',
+      terminal: true,
+      proposalId: randomUUID(),
+      updatedAt: '2026-08-05T12:00:02.000Z',
+    };
+    expect(database.transitionCompanionReplanRun(completed, ['generating'])).toBe(true);
+    expect(database.getCompanionReplanRun(queued.generationRequestId)).toEqual(completed);
+    expect(database.listNonterminalCompanionReplanRuns()).toEqual([]);
+    expect(
+      database.listExecutionEventsByTypes([
+        'companion.replan-run.authorized',
+        'companion.replan-run.transitioned',
+      ]),
+    ).toMatchObject([
+      { eventType: 'companion.replan-run.authorized' },
+      { eventType: 'companion.replan-run.transitioned' },
+      { eventType: 'companion.replan-run.transitioned' },
+    ]);
+    database.close();
+  });
+
+  it('restores nonterminal companion replan runs with their exact authorization', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-replan-run-store-'));
+    const databasePath = join(directory, 'state.db');
+    const queued = companionReplanRun();
+    try {
+      const first = openOperatingLineDatabase(databasePath);
+      expect(
+        first.recordGuideRevisionRequest({
+          ...revisionRequest(queued.revisionRequestId),
+          instanceId: queued.targetInstanceId,
+        }),
+      ).toBe('accepted');
+      expect(first.recordCompanionReplanRun(queued)).toBe('accepted');
+      first.close();
+
+      const restarted = openOperatingLineDatabase(databasePath);
+      expect(restarted.getCompanionReplanRun(queued.generationRequestId)).toEqual(queued);
+      expect(restarted.listNonterminalCompanionReplanRuns()).toEqual([queued]);
+      restarted.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('stores append-only execution events', () => {
     const database = openOperatingLineDatabase(':memory:');
     const firstId = randomUUID();
@@ -139,7 +270,7 @@ describe('OperatingLine persistence', () => {
     const accepted = proposalDecision(latest.proposalId, firstInstance);
     expect(database.recordGuideProposalDecision(accepted)).toBe('accepted');
     expect(database.recordGuideProposalDecision(accepted)).toBe('duplicate');
-    expect(database.getPendingGuideProposal('blender', firstInstance)).toBeNull();
+    expect(database.getPendingGuideProposal('blender', firstInstance)).toEqual(first);
     expect(database.getPendingGuideProposal('blender', secondInstance)).toEqual(latest);
 
     expect(
@@ -155,6 +286,41 @@ describe('OperatingLine persistence', () => {
       ),
     ).toBe('unknown');
     expect(database.countEvents()).toBe(3);
+    database.close();
+  });
+
+  it('atomically prevents a second unresolved proposal for the same companion target', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const instanceId = randomUUID();
+    const otherInstanceId = randomUUID();
+    const first = { ...guideProposal('snowman', 1), targetInstanceId: instanceId };
+
+    database.recordGuideProposal(first);
+    expect(() =>
+      database.recordGuideProposal({
+        ...guideProposal('snowman', 2),
+        targetInstanceId: instanceId,
+      }),
+    ).toThrow('already has an unresolved proposal');
+    expect(() => database.recordGuideProposal(guideProposal('snowman', 3))).toThrow(
+      'already has an unresolved proposal',
+    );
+    expect(() =>
+      database.recordGuideProposal({
+        ...guideProposal('snowman', 4),
+        targetInstanceId: otherInstanceId,
+      }),
+    ).not.toThrow();
+
+    expect(
+      database.recordGuideProposalDecision(proposalDecision(first.proposalId, instanceId)),
+    ).toBe('accepted');
+    expect(() =>
+      database.recordGuideProposal({
+        ...guideProposal('snowman', 5),
+        targetInstanceId: instanceId,
+      }),
+    ).not.toThrow();
     database.close();
   });
 
@@ -466,7 +632,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 7,
+        count: 8,
       });
       expect(
         inspected

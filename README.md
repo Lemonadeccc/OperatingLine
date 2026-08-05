@@ -15,10 +15,12 @@
 > Blender 4.5/5.1 中真实执行的机器人基准。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
-> `ReplanningPromptPacket 1.0.0`、引用子树 locality 门禁和可选 provider `replan()`，但生成与创建
-> Proposal 仍是两个显式步骤。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
+> `ReplanningPromptPacket 1.0.0`、引用子树 locality 门禁和可选 provider `replan()`；MCP 客户端仍以
+> 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认请求后，明确选择一个
+> 已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Replan Run；Runtime 只在 canonical
+> 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
 > 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。Blender 内已有可折叠的
-> Revision Workspace，用于结构化节点引用、修订正文、历史、diff 和提案审批；流式模型对话、任意目标语义
+> Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、任意目标语义
 > 数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
@@ -74,9 +76,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
   携带精确的 Plan/节点/字段/参数差异，结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
 - **Blender Revision Workspace**：原生 Sidebar 中的可折叠工作区把当前基线、最多 8 个结构化
-  节点引用、独立修订正文、线性历史、Plan diff 和 Accept/Reject 放在同一个操作日志中。
+  节点引用、独立修订正文、Provider handoff、异步 Run 状态、线性历史、Plan diff 和 Accept/Reject
+  放在同一个操作日志中。
   引用可逐条移除，重复引用会去重，切换到不同基线前必须显式清空草稿；`Hide Guidance`
-  只隐藏视口线、数字、状态和任务树，不删除工作区、草稿、历史或场景。它不会自动选择或调用 provider。
+  只隐藏视口线、数字、状态和任务树，不删除工作区、草稿、Run、历史或场景。Provider 默认不选择，
+  也不会自动调用。
 - **类型化 Provider 局部重规划**：`ReplanningPromptPacket 1.0.0` 绑定 pending immutable request、
   精确目录、实例状态、完整 base Plan 和 `referenced_subtrees_v1` scope。MCP/HTTP 提供独立的
   replan provider list、prompt、generate 与 propose 入口；初始/局部生成共享并发、超时、取消和持久
@@ -84,6 +88,22 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `proposalCreated: false`。要把 provider 草案送审，`replan.propose` 必须携带 canonical
   `generationRequestId` 且逐字段匹配草案，才会原子记录 Proposal/request/provenance；随后仍须宿主用户
   接受。既有 provider-free 完整 Plan 提交路径继续兼容。
+- **宿主授权的异步 Replan Run**：Blender 只在 revision request 已由 Runtime acknowledgement 后开放
+  可选 Provider handoff。公开 descriptor 不含凭据，界面不自动选择 Provider；远端调用前明确说明会
+  发送修订消息、完整 base Plan/引用、ActionCatalog 和最新 Companion 状态，并提示可能产生费用。
+  每次 `Confirm Provider Run` 或 Retry 的 `Confirm New Provider Run` 都通过 Blender 原生确认 dialog 取得一次性授权和新的 generation
+  UUID。`POST /api/v1/companion/replan-run` 快速返回 `202`，Orchestrator 后台复用现有严格 generate 与
+  canonical propose，Blender 继续用短请求轮询 `queued`、`generating`、`needs_revision`、
+  `proposal_created`、`failed` 或 `interrupted`。同一宿主实例只允许一个非终态 Run。所有 Proposal
+  writer 还会原子争用一个待决槽；并发外部 Proposal 最多使 Run 安全失败，不会隐藏旧提案。
+  Runtime 重启会从可信 completed/proposed
+  证据恢复状态或只补完 canonical propose，不会静默重做可能已计费的 Provider 调用。Run 和 Proposal
+  preview 均不改场景或 active Session。Accept 只替换空闲 Session，`Next` 才执行第一次场景修改。
+  Run 活动期间可继续查看和执行已接受计划，但新的修订提交、Provider 刷新和并发 Proposal 决策会暂时
+  禁用；精确 Run ID 不会被普通 Plan/Proposal 投递或晚到 ACK 清除。Proposal 与 terminal status 即使
+  乱序到达，也只按 `(revisionRequestId, proposalId)` 绑定；Accept 前还会核对当前 Plan 仍等于 diff base。
+  旧版 request-linked Proposal 若没有可验证的 diff base，只能只读查看或 Reject，不能直接 Accept。
+  默认 standalone 的 Provider 列表为空，外部 MCP 路径仍可用。
 - **修订消息历史**：`operatingline.replan.thread.get` 与对应 HTTP 接口从规范化持久化记录还原每轮
   用户请求、完整 Proposal、Plan diff 和同实例人工决策。默认读取最新页，使用 `beforeTurn` 向前
   分页；Blender Sidebar 可查看最近三轮、展开已加载轮次并继续加载更早内容。
@@ -117,7 +137,8 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
 > 隔离。当前修订输入不是流式聊天；已经支持 Blender 原生 Revision Workspace、可追溯的多轮线性
-> thread、Plan diff、结构化历史，以及显式 provider-backed local replan，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
+> thread、Plan diff、结构化历史、显式 provider-backed local replan，以及宿主内逐次授权的异步
+> Replan Run，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
 > 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality 与结构质量门只证明机器约束，
 > 不证明模型理解了任意修改意图。更大的人工 Eval、自动评分/训练治理、骨骼动画深化和第二宿主也尚未完成。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
@@ -133,7 +154,7 @@ Codex / Claude / another MCP client
                  │ MCP
                  ▼
 services/orchestrator
-目录/规划上下文 · 计划验证 · 修订请求 · Proposal 审批 · Companion 投递 · 状态/事件 · Eval 导出
+目录/规划上下文 · 计划验证 · 修订请求 · 异步 Replan Run · Proposal 审批 · Companion 投递 · 状态/事件 · Eval 导出
                  │ authenticated loopback HTTP
                  │ plan/proposal pull · decision/state report
         ┌────────┴─────────┐
@@ -178,6 +199,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0014](docs/adr/0014-openai-responses-planner-provider.md)。
 类型化 Provider 节点局部重规划、canonical propose 与 provenance 见
 [ADR 0015](docs/adr/0015-typed-provider-local-replanning.md)。
+宿主逐次授权、异步 Run、重启/重试与场景不变量见
+[ADR 0016](docs/adr/0016-host-mediated-asynchronous-replan-runs.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -278,6 +301,11 @@ pnpm dev
    thread 的下一轮。调用
    `operatingline.replan.thread.get` 并传入 `{ threadId, targetAdapterId, instanceId, beforeTurn?, limit? }`
    可分页读取完整结构化历史。
+   也可以完全留在 Blender Revision Workspace：请求显示为 Runtime acknowledged 后，选择一个明确的
+   Provider，阅读 local/remote 数据处理、发送范围和可能费用提示，再点 `Confirm Provider Run` 并在
+   原生 dialog 确认。该确认只授权本次异步 Run；Retry 会换新 generation UUID 并再次确认。界面只轮询
+   短状态请求，最终 Proposal 仍走相同的 diff 与 Accept/Reject 审批。默认 `pnpm dev` 无 Provider 时，
+   该区域显示空列表，前述 MCP 路径继续可用。
 7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，传入
    `{ targetAdapterId, planId, instanceId?, afterSequence?, limit? }`；也可请求
    `GET /api/v1/eval/export`。继续分页时把上一页 `nextAfterSequence` 作为新游标。导出未自动脱敏，
@@ -290,6 +318,7 @@ pnpm dev
 | `replan.prompt.get`      | 否                     | 否            | 否             |
 | `replan.generate`        | 是                     | 否            | 否             |
 | `replan.propose`         | 否                     | 是            | 否             |
+| Blender Replan Run       | 是（每次确认）         | ready 时是    | 否             |
 | Blender `Accept Plan`    | 否                     | 审批既有提案  | 只安装         |
 | Blender `Start` / `Next` | 否                     | 否            | 用户显式执行   |
 
@@ -306,13 +335,15 @@ export OPERATINGLINE_OPENAI_MODEL='replace-with-an-explicit-model-id'
 pnpm dev:openai
 ```
 
-该入口只注册 OpenAI provider，不会自动调用模型。调用方仍须先读取
+该入口只注册 OpenAI provider，不会自动调用模型。外部调用方仍须先读取
 `operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
-提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`。Packet 中的目标或修订
+提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`；Blender 路径则要求用户
+在 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Packet 中的目标或修订
 消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、质量/locality 报告和 provenance
-会进入 OperatingLine 的未脱敏 Eval 证据。生成不会创建 Proposal、修改 Blender 或执行节点；初始规划
-仍须单独调用 `guide.propose`，局部规划须用 canonical `generationRequestId` 调用 `replan.propose`，两者
-都必须由宿主用户接受。
+会进入 OperatingLine 的未脱敏 Eval 证据。底层 generation 不会创建 Proposal、修改 Blender 或执行
+节点；初始规划仍须单独调用 `guide.propose`。局部规划可以由外部调用方用 canonical
+`generationRequestId` 调用 `replan.propose`，或由已逐次确认的 Blender Replan Run 在 ready 时组合该
+调用；两者产生的 Proposal 都必须由宿主用户接受。
 
 例如，MCP 客户端在规划前使用：
 
@@ -465,12 +496,13 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 会启动真实 Orchestrator 进程和 Blender，经过 MCP 提交初版提案、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会为八个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+`pnpm test:blender:visual` 会为十个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-revision-request.png`、
-`guidance-revision-collapsed.png`、`guidance-proposal-review.png`、`guidance-mid-forward.png`、
+`guidance-revision-collapsed.png`、`guidance-proposal-review.png`、
+`guidance-provider-disclosure.png`、`guidance-provider-generating.png`、`guidance-mid-forward.png`、
 `guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
-节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、修订历史与接受/拒绝控件、红色 Back/绿色
+节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、远端 Provider 数据/费用披露、异步 generating 状态与 Run ID、修订历史与接受/拒绝控件、红色 Back/绿色
 Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
 
 产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、
@@ -516,7 +548,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 1. 把当前两目标的结构质量基线扩展为更大、带人工语义判定的数据集；首个可选 OpenAI Responses
    插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标语义规划
-   可靠；Blender 仍未接入流式模型对话、provider 自动选择/调用或自动语义重规划。OperatingLine 核心
+   可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动选择/调用或
+   自动语义重规划。OperatingLine 核心
    仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。

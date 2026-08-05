@@ -191,12 +191,31 @@ def draw_proposal_review(layout, companion, active_session) -> None:
     _draw_plan_diff(review, proposal.get("planDiff"))
 
     decisions = review.row(align=True)
+    decisions.enabled = not companion.provider_handoff.active
     accept = decisions.row(align=True)
-    accept.enabled = not bool(active_session.receipts)
+    missing_verifiable_base = _proposal_accept_requires_verifiable_base(proposal)
+    accept.enabled = not bool(active_session.receipts) and not missing_verifiable_base
     accept.operator("operating_line.accept_proposal", icon="CHECKMARK")
     decisions.operator("operating_line.reject_proposal", icon="CANCEL")
-    if active_session.receipts:
+    if missing_verifiable_base:
+        review.label(
+            text="Accept requires a protocol 1.1 proposal with a verifiable base",
+            icon="ERROR",
+        )
+    elif active_session.receipts:
         review.label(text="Use Back to reach the start before accepting", icon="ERROR")
+    elif companion.provider_handoff.active:
+        review.label(
+            text="Wait for the active provider run before deciding",
+            icon="TIME",
+        )
+
+
+def _proposal_accept_requires_verifiable_base(proposal) -> bool:
+    return (
+        proposal.get("revisionRequestId") is not None
+        and not isinstance(proposal.get("planDiff"), dict)
+    )
 
 
 def _draw_revision_request(layout, context, companion) -> None:
@@ -254,6 +273,7 @@ def _draw_revision_request(layout, context, companion) -> None:
     send = composer.row()
     send.enabled = (
         companion.connected
+        and not companion.provider_handoff.active
         and bool(references)
         and bool(context.window_manager.operating_line_revision_message.strip())
     )
@@ -267,7 +287,16 @@ def _draw_revision_request(layout, context, companion) -> None:
         "Request only; scene unchanged.",
         icon="INFO",
     )
-    _draw_wrapped_text(composer, "External MCP planner required.")
+    if companion.provider_handoff.active:
+        _draw_wrapped_text(
+            composer,
+            "Wait for the active provider run before sending another request.",
+            icon="TIME",
+        )
+    _draw_wrapped_text(
+        composer,
+        "Use an external MCP planner or the optional provider below.",
+    )
 
     if companion.revision_request_status:
         _draw_wrapped_text(
@@ -277,6 +306,143 @@ def _draw_revision_request(layout, context, companion) -> None:
         )
     elif not companion.connected:
         composer.label(text="Connect the runtime to send", icon="UNLINKED")
+
+
+def _draw_provider_handoff(layout, companion) -> None:
+    """Draw the optional, explicitly authorized provider-run gate."""
+    handoff = companion.provider_handoff
+    provider_box = layout.box()
+    header = provider_box.row(align=True)
+    header.label(text="Optional AI provider", icon="NETWORK_DRIVE")
+    refresh = header.row(align=True)
+    refresh.enabled = companion.connected and not handoff.active
+    refresh.operator(
+        "operating_line.refresh_replan_providers",
+        text="",
+        icon="FILE_REFRESH",
+    )
+    _draw_wrapped_text(
+        provider_box,
+        "Never automatic. Select a provider, then confirm each individual run.",
+        icon="INFO",
+    )
+
+    if not companion.connected:
+        provider_box.label(text="Connect the runtime to list providers", icon="UNLINKED")
+        return
+    if handoff.loading_providers:
+        provider_box.label(text="Refreshing providers...", icon="TIME")
+    elif not handoff.providers:
+        provider_box.label(text="No replan provider configured", icon="INFO")
+
+    for provider in handoff.providers:
+        availability = provider["availability"]
+        available = availability["available"]
+        selected = provider["id"] == handoff.selected_provider_id
+        item = provider_box.box()
+        row = item.row(align=True)
+        row.enabled = available and not handoff.active
+        select = row.operator(
+            "operating_line.select_replan_provider",
+            text=provider["displayName"],
+            icon="RADIOBUT_ON" if selected else "RADIOBUT_OFF",
+            depress=selected,
+        )
+        select.provider_id = provider["id"]
+        row.label(text=f"v{provider['version']}")
+        _draw_wrapped_text(item, provider["description"])
+        location = provider["dataHandling"]["executionLocation"]
+        if location == "remote":
+            _draw_wrapped_text(
+                item,
+                "Remote: provider-managed transmission and credentials.",
+                icon="URL",
+            )
+        else:
+            item.label(text="Local: no provider data transmission", icon="HOME")
+        if not available:
+            _draw_wrapped_text(
+                item,
+                str(availability.get("message", "Provider unavailable")),
+                icon="ERROR",
+            )
+
+    selected = handoff.selected_provider
+    if selected is not None:
+        disclosure = provider_box.box()
+        disclosure.label(text=f"Selected: {selected['displayName']}", icon="CHECKMARK")
+        if selected["dataHandling"]["executionLocation"] == "remote":
+            _draw_wrapped_text(
+                disclosure,
+                "A confirmed run sends the revision message, full base Plan, node "
+                "references, ActionCatalog, and latest companion state.",
+                icon="URL",
+            )
+            _draw_wrapped_text(
+                disclosure,
+                "The provider may charge. OperatingLine does not estimate provider fees.",
+                icon="ERROR",
+            )
+        else:
+            _draw_wrapped_text(
+                disclosure,
+                "The provider runs locally with no provider data transmission.",
+                icon="HOME",
+            )
+            _draw_wrapped_text(
+                disclosure,
+                "Its description may define costs. OperatingLine cannot estimate fees.",
+                icon="ERROR",
+            )
+        _draw_wrapped_text(
+            disclosure,
+            "No API key, model, or provider endpoint is stored by this Blender add-on.",
+        )
+
+    run = provider_box.row()
+    run.enabled = handoff.can_run
+    label = (
+        "Confirm New Provider Run"
+        if handoff.phase in {"needs_revision", "failed", "interrupted"}
+        else "Confirm Provider Run"
+    )
+    run.operator("operating_line.run_replan_provider", text=label, icon="PLAY")
+    if handoff.acknowledged_revision_request_id is None:
+        _draw_wrapped_text(
+            provider_box,
+            "Send a revision request and wait for the runtime acknowledgement first.",
+            icon="TIME",
+        )
+    if handoff.message:
+        status_icon = (
+            "ERROR"
+            if handoff.phase in {"needs_revision", "failed", "interrupted"}
+            else "INFO"
+        )
+        _draw_wrapped_text(provider_box, handoff.message, icon=status_icon)
+    if handoff.needs_revision_summary:
+        _draw_wrapped_text(
+            provider_box,
+            f"Validation: {handoff.needs_revision_summary}",
+            icon="ERROR",
+        )
+        for finding in handoff.needs_revision_findings:
+            _draw_wrapped_text(provider_box, f"- {finding}")
+    if handoff.retry_mode == "never":
+        _draw_wrapped_text(
+            provider_box,
+            "This run cannot be retried. Refresh the provider or create a new request.",
+            icon="CANCEL",
+        )
+    if handoff.generation_request_id is not None:
+        provider_box.label(
+            text=f"Run {handoff.generation_request_id[:8]}  {handoff.phase}",
+            icon="TIME" if handoff.active else "INFO",
+        )
+    _draw_wrapped_text(
+        provider_box,
+        "A proposal remains read-only until you choose Accept; no run executes it.",
+    )
 
 
 def _compact_history_message(value, limit: int = 76) -> str:
@@ -330,17 +496,21 @@ def _draw_revision_history(layout, context, companion) -> None:
             turn_box.label(text=line)
         proposal = record["proposal"]
         if proposal is not None:
-            summary = proposal["planDiff"]["summary"]
             turn_box.label(
                 text=f"Planner revision {proposal['plan']['revision']}",
                 icon="FILE_REFRESH",
             )
-            turn_box.label(
-                text=(
-                    f"Diff +{summary['addedSteps']} -{summary['removedSteps']} "
-                    f"~{summary['updatedSteps']} moved {summary['movedSteps']}"
+            plan_diff = proposal.get("planDiff")
+            if isinstance(plan_diff, dict):
+                summary = plan_diff["summary"]
+                turn_box.label(
+                    text=(
+                        f"Diff +{summary['addedSteps']} -{summary['removedSteps']} "
+                        f"~{summary['updatedSteps']} moved {summary['movedSteps']}"
+                    )
                 )
-            )
+            else:
+                turn_box.label(text="No verifiable plan diff", icon="INFO")
 
     page = history["page"]
     if page["hasMore"]:
@@ -387,6 +557,7 @@ def draw_revision_workspace(layout, context, companion, active_session) -> None:
 
     draw_proposal_review(workspace, companion, active_session)
     _draw_revision_request(workspace, context, companion)
+    _draw_provider_handoff(workspace, companion)
     _draw_revision_history(workspace, context, companion)
     if companion.proposal_session is not None:
         proposal_tree = workspace.box()

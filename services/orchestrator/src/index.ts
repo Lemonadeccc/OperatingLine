@@ -13,6 +13,8 @@ import {
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
+  companionReplanRunCreateRequestSchema,
+  companionReplanRunStatusRequestSchema,
   companionStateReportSchema,
   evalExportRequestSchema,
   guidePlanSchema,
@@ -48,6 +50,11 @@ import {
 import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
+import {
+  CompanionReplanRunRequestError,
+  createCompanionReplanRunCoordinator,
+  type CompanionReplanRunCoordinator,
+} from './companion-replan-run.js';
 import { createEvalExport, readExecutionEventLedger } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
@@ -136,11 +143,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
+  let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
-    () =>
-      plannerGenerationCoordinator?.close() ??
-      plannerReplanGenerationCoordinator?.close() ??
-      plannerProviderRegistry.close(),
+    () => companionReplanRunCoordinator?.beginClose(),
+    async () => {
+      if (plannerGenerationCoordinator !== undefined) {
+        await plannerGenerationCoordinator.close();
+      } else {
+        await plannerReplanGenerationCoordinator?.close();
+      }
+    },
+    () => companionReplanRunCoordinator?.close(),
+    () => plannerProviderRegistry.close(),
     () => app?.close(),
     () => mcpHandler?.close(),
     () => database.close(),
@@ -487,6 +501,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           packet.context.catalog,
         ),
       appendEvent: (event) => database.appendEvent(event),
+    });
+    companionReplanRunCoordinator = createCompanionReplanRunCoordinator({
+      database,
+      providerRegistry: plannerProviderRegistry,
+      generationCoordinator: plannerReplanGenerationCoordinator,
+      replanningService,
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
@@ -1117,6 +1137,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               parsedSubmission.data.generationRequestId ?? null,
             ),
           );
+      }
+    });
+    runtimeApp.post('/api/v1/companion/replan-run', async (request, reply) => {
+      const parsedRequest = companionReplanRunCreateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion replan run authorization violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionReplanRunCoordinator!.create(parsedRequest.data);
+        return reply.code(202).send(run);
+      } catch (error) {
+        if (error instanceof CompanionReplanRunRequestError) {
+          return reply.code(error.statusCode).send({
+            error: error.code,
+            message: error.message,
+          });
+        }
+        return reply.code(500).send({
+          error: 'replan_run_failed',
+          message: 'The replan run could not be safely authorized',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/companion/replan-run', async (request, reply) => {
+      const parsedRequest = companionReplanRunStatusRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion replan run status request violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionReplanRunCoordinator!.get(parsedRequest.data.generationRequestId);
+        return run === null
+          ? reply.code(404).send({
+              error: 'replan_run_not_found',
+              message: 'The requested companion replan run was not found',
+            })
+          : run;
+      } catch {
+        return reply.code(500).send({
+          error: 'replan_run_unavailable',
+          message: 'The replan run status could not be read safely',
+        });
       }
     });
     runtimeApp.get('/api/v1/companion/guide', async (request, reply) => {

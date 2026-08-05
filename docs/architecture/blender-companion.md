@@ -7,7 +7,8 @@
 - `Panel` / `UILayout`：Sidebar 任务树和 Start、Next、Back。
 - `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
 - `Panel` / `UILayout`：可折叠 Revision Workspace，包含活动树/待审树节点 `Ref`、逐条移除、
-  独立修订正文、历史、Plan diff 与 Accept/Reject。
+  独立修订正文、Provider 选择/披露、异步 Run 状态、历史、Plan diff 与 Accept/Reject。
+- `Operator` / 原生 dialog：每次 Provider Run 的明确确认；不保存长期 consent、模型或 Provider 凭据。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
@@ -53,7 +54,8 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 ## 主线程规则
 
 当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权从回环 Orchestrator
-短轮询 GuidePlan/GuideProposal，并把 JSON 放入队列。`bpy.app.timers` 在 Blender 主线程校验
+短轮询 GuidePlan/GuideProposal、Provider descriptor 和异步 Replan Run 状态，并把 JSON 放入队列。
+长达 120 秒的 Provider 调用运行在 Orchestrator 后台，不占用 Blender 的短请求线程。`bpy.app.timers` 在 Blender 主线程校验
 提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
 不修改场景，只从当前会话派生最多四个相邻步骤，并为
 Back/Next 解析已记录资源的屏幕锚点。
@@ -88,11 +90,38 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 只读预览。Protocol `1.1.0` 的 Proposal 还必须带线性 thread 元数据和 Plan diff；Panel 在 Accept 前
 显示 `+ / - / ~ / moved`、变化节点、字段和可紧凑表示的 action 参数前后值。接受请求关联 Proposal
 后，新的 active-plan 引用会继承 `threadId`、递增 turn 并把上一 request 作为 parent。Revision Workspace
-明确称为修订操作日志，而不是 Chat，因为当前没有内置模型、自动 provider 选择/调用或流式回复。点击
-`Send Request` 只进入认证的后台队列，不执行 Blender action。后台 transport 还会读取当前 thread 的
+明确称为修订操作日志，而不是 Chat，因为当前没有自动 provider 选择/调用或流式回复。点击
+`Send Request` 只进入认证的后台队列，不执行 Blender action。Runtime acknowledgement 后，工作区可列出
+严格公开的 replan Provider descriptor，但默认保持未选择；不可用项只显示原因。选择远端 Provider 后，
+界面明确说明将发送修订消息、完整 base Plan/引用、ActionCatalog 与最新 Companion 状态，且调用可能
+产生费用、OperatingLine 无法估价。`Confirm Provider Run` 使用 Blender 原生 dialog 逐次确认；重试显示
+`Confirm New Provider Run`。Provider、
+request 改变、断开、终态或 Retry 都不会沿用先前确认。
+
+确认后 transport 只发送一个短 POST，并轮询版本化 Run 状态。Run 的 queued/generating/needs_revision/
+failed/interrupted 状态只更新应用/UI 状态；`proposal_created` 仍通过既有 Companion delivery 建立只读
+preview。同一实例已有活动 Run 或未决 Proposal 时 Runtime 拒绝新 Run；失败/重启后的 Retry 使用新 UUID
+并再次确认，不自动重复可能已计费的调用。Blender 不保存 Provider API Key、模型或 endpoint。Run、
+Proposal preview 和 Reject 不修改活动 Session 或场景；Accept 只替换空闲 Session，`Next` 才执行第一个
+action。默认 provider-free Runtime 显示空列表，外部 MCP planner 路径不受影响。
+
+`queued/generating` 期间，Sidebar 禁用第二次 Send Request、Provider refresh 和并发 Proposal decision，
+但保留草稿编辑、历史、既有计划与 walkthrough 控件。Controller 和 handoff state 都执行相同门禁；活动
+Run 的 revision/generation identity 不会被普通 Plan/Proposal 投递或重复 ACK 清除。只有精确 pending ACK
+能首次绑定，精确重复是 no-op；非活动状态安装新 Plan 会使旧 request context 失效，因此晚到 ACK 不能
+把过期请求重新变成可运行状态。
+
+Proposal delivery 可能早于或晚于 terminal status。Companion 使用有界的复合键候选集隔离这些消息，
+只显示 status 指定的 `(revisionRequestId, proposalId)`；错误 request、同 ID poisoning 或后到的无关
+Proposal 不得覆盖 Provider Proposal。队列满只显示本地错误，不自动发送 Reject。Request-linked Proposal
+的 Accept 还会把 diff base 与当前 active Session 精确比较，漂移时保持 Proposal、场景、Session 和证据
+不变。没有可验证 `planDiff.basePlan` 的旧版 request-linked Proposal 仍能查看和 Reject，但 Accept 在 UI
+与 Controller 两层 fail closed。
+
+后台 transport 还会读取当前 thread 的
 最新历史页；主线程验证 request/proposal/diff/decision 关系并在 Sidebar 显示最近三轮。用户可展开
 全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
-不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、历史、执行进度或场景状态。
+不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、Run、历史、执行进度或场景状态。
 
 ## revision 4 雪人执行切片
 

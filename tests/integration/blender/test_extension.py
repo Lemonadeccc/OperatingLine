@@ -5,6 +5,7 @@ from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
+from queue import Queue
 import sys
 import threading
 import time
@@ -46,6 +47,9 @@ from operating_line_extension.operating_line.application import (  # noqa: E402
 from operating_line_extension.operating_line.application.companion import (  # noqa: E402
     CompanionController,
 )
+from operating_line_extension.operating_line import (  # noqa: E402
+    replace_session as replace_operating_line_session,
+)
 from operating_line_extension.operating_line.presentation.operators import (  # noqa: E402
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_next,
@@ -53,6 +57,7 @@ from operating_line_extension.operating_line.presentation.operators import (  # 
 )
 from operating_line_extension.operating_line.presentation.revision_workspace import (  # noqa: E402
     _display_columns,
+    _proposal_accept_requires_verifiable_base,
     _wrap_history_message,
 )
 from operating_line_extension.operating_line.domain import (  # noqa: E402
@@ -195,18 +200,68 @@ def assert_companion_and_plan_semantics() -> None:
     requests: list[dict] = []
     reports: list[dict] = []
     revision_requests: list[dict] = []
+    proposal_decisions: list[dict] = []
+    replan_runs: list[dict] = []
+    replan_post_attempts: list[dict] = []
+    invoked_generation_ids: set[str] = set()
+    replan_run_polls = [0]
+    reject_replan_runs = [False]
+    drop_first_replan_response = [True]
+    slow_provider_discovery_once = [False]
+    provider_proposal_id = str(uuid.uuid4())
+    provider_payload = {
+        "contractVersion": "1.0.0",
+        "generationAvailable": True,
+        "providers": [
+            {
+                "contractVersion": "1.0.0",
+                "id": "available-planner",
+                "version": "0.1.0",
+                "displayName": "Available Planner",
+                "description": "Local deterministic Blender replan provider.",
+                "availability": {"available": True},
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "local",
+                    "dataTransmission": "none",
+                    "credentialManagement": "provider_managed",
+                },
+            },
+            {
+                "contractVersion": "1.0.0",
+                "id": "unavailable-planner",
+                "version": "0.1.0",
+                "displayName": "Unavailable Planner",
+                "description": "Provider requiring runtime configuration.",
+                "availability": {
+                    "available": False,
+                    "reason": "not_configured",
+                    "message": "Provider credential is not configured",
+                },
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "remote",
+                    "dataTransmission": "provider_managed",
+                    "credentialManagement": "provider_managed",
+                },
+            },
+        ],
+    }
     post_result = ["accepted"]
     slow_guide = [False]
     slow_guide_started = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
-        def _reply(self, payload: dict) -> None:
+        def _reply(self, payload: dict, status: int = 200) -> None:
             encoded = json.dumps(payload).encode("utf-8")
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
-            self.wfile.write(encoded)
+            try:
+                self.wfile.write(encoded)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def do_GET(self):
             assert self.headers.get("Authorization") == f"Bearer {token}"
@@ -215,6 +270,43 @@ def assert_companion_and_plan_semantics() -> None:
                 self.send_response(302)
                 self.send_header("Location", "http://192.0.2.1/credential-leak")
                 self.end_headers()
+                return
+            if parsed_path.path == "/api/v1/replan/providers":
+                if slow_provider_discovery_once[0]:
+                    slow_provider_discovery_once[0] = False
+                    time.sleep(0.25)
+                self._reply(provider_payload)
+                return
+            if parsed_path.path == "/api/v1/companion/replan-run":
+                query = parse_qs(parsed_path.query)
+                assert replan_runs
+                run = replan_runs[-1]
+                assert query == {
+                    "generationRequestId": [run["generationRequestId"]]
+                }
+                replan_run_polls[0] += 1
+                terminal = replan_run_polls[0] >= 2
+                self._reply(
+                    {
+                        "contractVersion": "1.0.0",
+                        "generationRequestId": run["generationRequestId"],
+                        "revisionRequestId": run["revisionRequestId"],
+                        "targetAdapterId": "blender",
+                        "targetInstanceId": companion.instance_id,
+                        "provider": {
+                            "id": "available-planner",
+                            "version": "0.1.0",
+                            "displayName": "Available Planner",
+                        },
+                        "status": "proposal_created" if terminal else "generating",
+                        "terminal": terminal,
+                        "sceneChanged": False,
+                        "proposalId": provider_proposal_id if terminal else None,
+                        "error": None,
+                        "needsRevision": None,
+                        "updatedAt": "2026-08-05T12:00:02.000Z",
+                    }
+                )
                 return
             if parsed_path.path == "/api/v1/replan/thread":
                 query = parse_qs(parsed_path.query)
@@ -290,6 +382,55 @@ def assert_companion_and_plan_semantics() -> None:
                     }
                 )
                 return
+            if urlsplit(self.path).path == "/api/v1/companion/replan-run":
+                replan_post_attempts.append(payload)
+                if reject_replan_runs[0]:
+                    self._reply(
+                        {
+                            "error": "provider_binding_mismatch",
+                            "message": "Selected provider version is stale",
+                        },
+                        status=409,
+                    )
+                    return
+                generation_request_id = payload["generationRequestId"]
+                if generation_request_id not in invoked_generation_ids:
+                    invoked_generation_ids.add(generation_request_id)
+                    replan_runs.append(payload)
+                if drop_first_replan_response[0]:
+                    drop_first_replan_response[0] = False
+                    try:
+                        self.connection.shutdown(2)
+                    except OSError:
+                        pass
+                    self.connection.close()
+                    return
+                self._reply(
+                    {
+                        "contractVersion": "1.0.0",
+                        "generationRequestId": payload["generationRequestId"],
+                        "revisionRequestId": payload["revisionRequestId"],
+                        "targetAdapterId": "blender",
+                        "targetInstanceId": companion.instance_id,
+                        "provider": {
+                            "id": "available-planner",
+                            "version": "0.1.0",
+                            "displayName": "Available Planner",
+                        },
+                        "status": "proposal_created",
+                        "terminal": True,
+                        "sceneChanged": False,
+                        "proposalId": provider_proposal_id,
+                        "error": None,
+                        "needsRevision": None,
+                        "updatedAt": "2026-08-05T12:00:01.000Z",
+                    }
+                )
+                return
+            if urlsplit(self.path).path == "/api/v1/companion/proposal-decision":
+                proposal_decisions.append(payload)
+                self._reply({"result": "accepted"})
+                return
             reports.append(payload)
             self._reply({"result": post_result[0]})
 
@@ -353,6 +494,33 @@ def assert_companion_and_plan_semantics() -> None:
         assert all(query["adapterId"] == ["blender"] for query in requests)
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert server_thread.ident != main_thread_id
+
+        # Provider discovery never makes a default choice. Unavailable choices
+        # remain visible but cannot cross the explicit selection/ACK/run gates.
+        provider_deadline = time.monotonic() + 2.0
+        while time.monotonic() < provider_deadline:
+            companion.pump()
+            if len(companion.provider_descriptors) == 2:
+                break
+            time.sleep(0.02)
+        assert len(companion.provider_descriptors) == 2
+        assert companion.selected_provider_id is None
+        try:
+            companion.select_replan_provider("unavailable-planner")
+        except ValueError as error:
+            assert "credential is not configured" in str(error)
+        else:
+            raise AssertionError("Unavailable provider selection must fail")
+        assert companion.selected_provider_id is None
+        assert companion.select_replan_provider("available-planner")["id"] == (
+            "available-planner"
+        )
+        try:
+            companion.begin_replan_run()
+        except ValueError as error:
+            assert "runtime acknowledges" in str(error)
+        else:
+            raise AssertionError("Provider run must remain gated before request ACK")
 
         # The revision workspace keeps structured references separate from the
         # user-authored request body. References are ordered, de-duplicated,
@@ -436,6 +604,261 @@ def assert_companion_and_plan_semantics() -> None:
             "parentRequestId": None,
         }
         assert companion.last_revision_request_id == revision_request["requestId"]
+
+        # One explicit authorization queues on the worker and is polled without
+        # blocking Blender's main thread. A terminal proposal-created status is
+        # still only a review handoff: scene and accepted Session stay unchanged.
+        assert companion.provider_handoff.acknowledged_revision_request_id == (
+            revision_request["requestId"]
+        )
+        session_before_provider = operating_line.get_session()
+        scene_before_provider = {item.as_pointer() for item in bpy.data.objects}
+        try:
+            bpy.ops.operating_line.run_replan_provider()
+        except RuntimeError as error:
+            assert "authorization dialog" in str(error)
+        else:
+            raise AssertionError("Direct execute must not bypass provider confirmation")
+        assert replan_runs == []
+        assert companion.provider_handoff.generation_request_id is None
+        run_request = companion.begin_replan_run()
+        assert run_request["revisionRequestId"] == revision_request["requestId"]
+        assert run_request["providerId"] == "available-planner"
+        assert run_request["authorization"] == {
+            "disclosureVersion": "1.0.0",
+            "dataHandlingAcknowledged": True,
+            "possibleChargesAcknowledged": True,
+            "proposalCreationAcknowledged": True,
+            "authorizedAt": run_request["authorization"]["authorizedAt"],
+        }
+        active_run_identity = (
+            companion.provider_handoff.acknowledged_revision_request_id,
+            companion.provider_handoff.generation_request_id,
+            companion.provider_handoff.phase,
+        )
+        try:
+            companion.refresh_replan_providers()
+        except ValueError as error:
+            assert "active provider run" in str(error)
+        else:
+            raise AssertionError("Active provider run must block provider refresh")
+        assert (
+            companion.provider_handoff.acknowledged_revision_request_id,
+            companion.provider_handoff.generation_request_id,
+            companion.provider_handoff.phase,
+        ) == active_run_identity
+        unrelated_plan = deepcopy(dynamic_plan)
+        unrelated_plan["revision"] = DYNAMIC_REVISION + 1
+        unrelated_plan["title"] = "Unrelated guide update during provider run"
+        assert companion.install_plan(unrelated_plan)
+        assert (
+            companion.provider_handoff.acknowledged_revision_request_id,
+            companion.provider_handoff.generation_request_id,
+            companion.provider_handoff.phase,
+        ) == active_run_identity
+        replace_operating_line_session(session_before_provider)
+        transport.accept_plan("live-snowman", DYNAMIC_REVISION)
+        transport.follow_revision_thread(revision_request["revisionThread"]["threadId"])
+
+        unrelated_preview_plan = deepcopy(dynamic_plan)
+        unrelated_preview_plan["id"] = "unrelated-provider-preview"
+        unrelated_preview_plan["revision"] = DYNAMIC_REVISION + 2
+        unrelated_proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": str(uuid.uuid4()),
+            "targetAdapterId": "blender",
+            "targetInstanceId": companion.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "plan": unrelated_preview_plan,
+            "planDiff": None,
+            "proposedAt": "2026-08-05T12:00:00Z",
+        }
+        assert companion.stage_proposal(unrelated_proposal)
+        assert companion.provider_handoff.phase == "queued"
+        assert companion.accept_proposal() is False
+        assert companion.reject_proposal() is False
+        assert companion.proposed_plan is unrelated_proposal
+        assert companion.provider_handoff.generation_request_id == (
+            run_request["generationRequestId"]
+        )
+        companion.add_revision_reference("active", "snowman.model.body_lower")
+        blocked_message = "Queue this only after the active provider run"
+        bpy.context.window_manager.operating_line_revision_message = blocked_message
+        handoff_identity = (
+            companion.provider_handoff.acknowledged_revision_request_id,
+            companion.provider_handoff.generation_request_id,
+            companion.provider_handoff.phase,
+        )
+        for active_phase in ("queued", "generating"):
+            companion.provider_handoff.phase = active_phase
+            try:
+                companion.submit_revision_request(blocked_message)
+            except ValueError as error:
+                assert "active provider run" in str(error)
+            else:
+                raise AssertionError(
+                    f"A {active_phase} provider run must block a second request"
+                )
+            assert companion.provider_handoff.acknowledged_revision_request_id == (
+                handoff_identity[0]
+            )
+            assert companion.provider_handoff.generation_request_id == handoff_identity[1]
+            assert companion.provider_handoff.phase == active_phase
+            assert tuple(
+                node.id for node in companion.revision_reference_nodes()
+            ) == ("snowman.model.body_lower",)
+            assert bpy.context.window_manager.operating_line_revision_message == (
+                blocked_message
+            )
+        assert len(revision_requests) == 1
+        provider_deadline = time.monotonic() + 3.5
+        while time.monotonic() < provider_deadline:
+            companion.pump()
+            if companion.provider_handoff.phase == "proposal_created":
+                break
+            time.sleep(0.02)
+        assert len(replan_runs) == 1
+        assert len(replan_post_attempts) == 2
+        assert {
+            attempt["generationRequestId"] for attempt in replan_post_attempts
+        } == {run_request["generationRequestId"]}
+        assert invoked_generation_ids == {run_request["generationRequestId"]}
+        assert replan_run_polls[0] == 0
+        assert companion.provider_handoff.phase == "proposal_created"
+        assert companion.provider_handoff.generation_request_id == (
+            run_request["generationRequestId"]
+        )
+        assert companion.proposed_plan is None
+        assert operating_line.get_session() is session_before_provider
+        assert {item.as_pointer() for item in bpy.data.objects} == scene_before_provider
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.body_lower",)
+        assert bpy.context.window_manager.operating_line_revision_message == blocked_message
+        provider_plan = deepcopy(dynamic_plan)
+        provider_plan["revision"] = DYNAMIC_REVISION + 1
+        provider_proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": provider_proposal_id,
+            "targetAdapterId": "blender",
+            "targetInstanceId": companion.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "revisionRequestId": revision_request["requestId"],
+            "revisionThread": revision_request["revisionThread"],
+            "plan": provider_plan,
+            "planDiff": {
+                "basePlan": {
+                    "id": dynamic_plan["id"],
+                    "revision": dynamic_plan["revision"],
+                },
+                "targetPlan": {
+                    "id": provider_plan["id"],
+                    "revision": provider_plan["revision"],
+                },
+                "summary": {
+                    "planFields": 0,
+                    "addedSteps": 0,
+                    "removedSteps": 0,
+                    "updatedSteps": 0,
+                    "movedSteps": 0,
+                },
+                "planChanges": [],
+                "stepChanges": [],
+            },
+            "proposedAt": "2026-08-05T12:00:03Z",
+        }
+        assert companion.stage_proposal(provider_proposal)
+        assert companion.proposed_plan is provider_proposal
+        assert companion.stage_proposal(unrelated_proposal)
+        assert companion.proposed_plan is provider_proposal
+        assert companion.provider_handoff.complete_proposal_review(
+            revision_request["requestId"], unrelated_proposal["proposalId"]
+        ) is False
+        assert companion.reject_proposal()
+        decision_deadline = time.monotonic() + 2.0
+        while time.monotonic() < decision_deadline and not proposal_decisions:
+            time.sleep(0.01)
+        assert proposal_decisions
+        assert proposal_decisions[-1]["proposalId"] == provider_proposal_id
+        assert companion.provider_handoff.generation_request_id is None
+        assert companion.provider_handoff.phase == "idle"
+        assert companion.proposed_plan is unrelated_proposal
+        assert companion.reject_proposal()
+        companion.clear_revision_draft()
+
+        # A deterministic 4xx authorization rejection is terminal on the
+        # transport queue: surface it once and never retry it in the background.
+        companion.provider_handoff.revision_submitted(
+            revision_request["requestId"]
+        )
+        companion.provider_handoff.revision_acknowledged(
+            revision_request["requestId"]
+        )
+        reject_replan_runs[0] = True
+        rejected_request = companion.begin_replan_run()
+        rejected_deadline = time.monotonic() + 2.0
+        while time.monotonic() < rejected_deadline:
+            companion.pump()
+            if companion.provider_handoff.retry_mode == "never":
+                break
+            time.sleep(0.02)
+        assert len(replan_post_attempts) == 3
+        assert replan_post_attempts[-1]["generationRequestId"] == (
+            rejected_request["generationRequestId"]
+        )
+        assert len(replan_runs) == 1
+        assert companion.provider_handoff.phase == "failed"
+        assert companion.provider_handoff.retry_mode == "never"
+        assert "provider version is stale" in companion.provider_handoff.message
+        time.sleep(0.25)
+        companion.pump()
+        assert len(replan_post_attempts) == 3
+        reject_replan_runs[0] = False
+
+        # Optional provider discovery may time out once, but must not stay at
+        # the head of the worker queue and starve reports or guide polling.
+        core_requests_before = len(requests)
+        slow_provider_discovery_once[0] = True
+        starvation_transport = CompanionTransport(
+            runtime_url,
+            token,
+            companion.instance_id,
+            known_plan_id="live-snowman",
+            known_revision=DYNAMIC_REVISION,
+            timeout=0.1,
+            poll_interval=0.05,
+        )
+        starvation_report = deepcopy(companion.last_report)
+        starvation_report["reportId"] = str(uuid.uuid4())
+        starvation_report["sequence"] = 10_001
+        starvation_report["transition"] = "provider_discovery_probe"
+        starvation_report["plan"] = {
+            "id": "live-snowman",
+            "revision": DYNAMIC_REVISION,
+        }
+        starvation_transport.send_report(starvation_report)
+        starvation_transport.start()
+        starvation_deadline = time.monotonic() + 2.0
+        saw_provider_unavailable = False
+        while time.monotonic() < starvation_deadline:
+            while not starvation_transport.incoming.empty():
+                saw_provider_unavailable |= (
+                    starvation_transport.incoming.get_nowait().get("kind")
+                    == "replan_provider_list_unavailable"
+                )
+            if (
+                saw_provider_unavailable
+                and starvation_transport.last_delivered_sequence == 10_001
+                and len(requests) > core_requests_before
+            ):
+                break
+            time.sleep(0.01)
+        assert saw_provider_unavailable
+        assert starvation_transport.last_delivered_sequence == 10_001
+        assert len(requests) > core_requests_before
+        starvation_transport.stop(flush_timeout=0.0)
+        assert starvation_transport.wait_stopped(2.0)
+
         history_deadline = time.monotonic() + 2.0
         while time.monotonic() < history_deadline:
             companion.pump()
@@ -495,6 +918,476 @@ def assert_companion_and_plan_semantics() -> None:
             "Keep all eight references if another node is rejected"
         )
         limit_controller.clear_revision_draft()
+
+        # Installing a plan while a revision request is awaiting its runtime
+        # ACK invalidates that authorization. A late ACK for the old request
+        # must not resurrect the handoff or make a provider runnable.
+        late_ack_controller = CompanionController()
+        late_request_id = str(uuid.uuid4())
+        late_ack_controller.provider_handoff.revision_submitted(late_request_id)
+        late_ack_controller.last_revision_request_id = late_request_id
+        late_ack_controller._pending_revision_request_ids.add(late_request_id)
+        late_ack_controller._invalidate_handoff_for_plan_install()
+        assert late_ack_controller.last_revision_request_id is None
+        assert late_ack_controller.provider_handoff.pending_revision_request_id is None
+        late_ack_controller._acknowledge_revision_request(late_request_id)
+        assert (
+            late_ack_controller.provider_handoff.acknowledged_revision_request_id
+            is None
+        )
+        assert late_ack_controller.provider_handoff.can_run is False
+
+        # Proposal delivery and terminal status are independent streams. The
+        # provider-authored proposal must win by exact proposal/request identity
+        # in every meaningful ordering, while unrelated work remains bounded
+        # and is promoted only after the provider proposal is reviewed.
+        for order in (
+            ("P", "U", "S"),
+            ("U", "P", "S"),
+            ("S", "P"),
+            ("P", "S", "U"),
+            ("S", "U", "P"),
+            ("X", "S", "P"),
+            ("S", "X", "P"),
+        ):
+            ordering_controller = CompanionController()
+            ordering_controller.provider_handoff.set_providers(provider_payload)
+            ordering_controller.select_replan_provider("available-planner")
+            ordering_request_id = str(uuid.uuid4())
+            ordering_controller.provider_handoff.revision_submitted(
+                ordering_request_id
+            )
+            ordering_controller.provider_handoff.revision_acknowledged(
+                ordering_request_id
+            )
+            ordering_run = ordering_controller.provider_handoff.begin(
+                target_instance_id=ordering_controller.instance_id
+            )
+            ordering_plan = deepcopy(dynamic_plan)
+            ordering_plan["revision"] = DYNAMIC_REVISION + 20
+            ordering_proposal_id = str(uuid.uuid4())
+            ordering_provider_proposal = {
+                "protocolVersion": "1.1.0",
+                "proposalId": ordering_proposal_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": ordering_controller.instance_id,
+                "catalogVersion": ACTION_CATALOG["catalogVersion"],
+                "revisionRequestId": ordering_request_id,
+                "revisionThread": {
+                    "threadId": ordering_request_id,
+                    "turn": 1,
+                    "parentRequestId": None,
+                },
+                "plan": ordering_plan,
+                "planDiff": {
+                    "basePlan": {
+                        "id": dynamic_plan["id"],
+                        "revision": dynamic_plan["revision"],
+                    },
+                    "targetPlan": {
+                        "id": ordering_plan["id"],
+                        "revision": ordering_plan["revision"],
+                    },
+                    "summary": {
+                        "planFields": 0,
+                        "addedSteps": 0,
+                        "removedSteps": 0,
+                        "updatedSteps": 0,
+                        "movedSteps": 0,
+                    },
+                    "planChanges": [],
+                    "stepChanges": [],
+                },
+                "proposedAt": "2026-08-05T12:00:04Z",
+            }
+            ordering_unrelated_plan = deepcopy(dynamic_plan)
+            ordering_unrelated_plan["id"] = f"ordering-unrelated-{''.join(order)}"
+            ordering_unrelated_plan["revision"] = DYNAMIC_REVISION + 21
+            ordering_unrelated = {
+                "protocolVersion": "1.1.0",
+                "proposalId": str(uuid.uuid4()),
+                "targetAdapterId": "blender",
+                "targetInstanceId": ordering_controller.instance_id,
+                "catalogVersion": ACTION_CATALOG["catalogVersion"],
+                "plan": ordering_unrelated_plan,
+                "planDiff": None,
+                "proposedAt": "2026-08-05T12:00:05Z",
+            }
+            poisoning_request_id = str(uuid.uuid4())
+            poisoning_proposal = {
+                **ordering_provider_proposal,
+                "revisionRequestId": poisoning_request_id,
+                "revisionThread": {
+                    "threadId": poisoning_request_id,
+                    "turn": 1,
+                    "parentRequestId": None,
+                },
+            }
+            ordering_status = {
+                "contractVersion": "1.0.0",
+                "generationRequestId": ordering_run["generationRequestId"],
+                "revisionRequestId": ordering_request_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": ordering_controller.instance_id,
+                "provider": {
+                    "id": "available-planner",
+                    "version": "0.1.0",
+                    "displayName": "Available Planner",
+                },
+                "status": "proposal_created",
+                "terminal": True,
+                "sceneChanged": False,
+                "proposalId": ordering_proposal_id,
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-05T12:00:06Z",
+            }
+            for event in order:
+                if event == "P":
+                    assert ordering_controller.stage_proposal(
+                        ordering_provider_proposal
+                    )
+                elif event == "U":
+                    assert ordering_controller.stage_proposal(ordering_unrelated)
+                    if ordering_controller.provider_handoff.phase == "proposal_created":
+                        if ordering_controller.proposed_plan is None:
+                            assert ordering_controller.accept_proposal() is False
+                            assert ordering_controller.reject_proposal() is False
+                        else:
+                            assert (
+                                ordering_controller.proposed_plan
+                                is ordering_provider_proposal
+                            )
+                elif event == "X":
+                    assert ordering_controller.stage_proposal(poisoning_proposal)
+                    if ordering_controller.provider_handoff.phase == "proposal_created":
+                        assert ordering_controller.proposed_plan is None
+                        assert ordering_controller.accept_proposal() is False
+                        assert ordering_controller.reject_proposal() is False
+                        assert (
+                            ordering_controller.provider_handoff.proposal_id
+                            == ordering_proposal_id
+                        )
+                else:
+                    ordering_controller.provider_handoff.apply_status(ordering_status)
+                    ordering_controller._bind_provider_proposal()
+            assert ordering_controller.proposed_plan is ordering_provider_proposal
+            assert ordering_controller.reject_proposal()
+            if "U" in order:
+                assert ordering_controller.proposed_plan is ordering_unrelated
+                assert ordering_controller.reject_proposal()
+            else:
+                assert ordering_controller.proposed_plan is None, order
+
+        bounded_controller = CompanionController()
+        bounded_controller.provider_handoff.set_providers(provider_payload)
+        bounded_controller.select_replan_provider("available-planner")
+        bounded_request_id = str(uuid.uuid4())
+        bounded_controller.provider_handoff.revision_submitted(bounded_request_id)
+        bounded_controller.provider_handoff.revision_acknowledged(bounded_request_id)
+        bounded_run = bounded_controller.provider_handoff.begin(
+            target_instance_id=bounded_controller.instance_id
+        )
+        bounded_proposal_id = str(uuid.uuid4())
+        bounded_plan = deepcopy(dynamic_plan)
+        bounded_plan["revision"] = DYNAMIC_REVISION + 30
+
+        def bounded_candidate(request_id):
+            return {
+                "protocolVersion": "1.1.0",
+                "proposalId": bounded_proposal_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": bounded_controller.instance_id,
+                "catalogVersion": ACTION_CATALOG["catalogVersion"],
+                "revisionRequestId": request_id,
+                "revisionThread": {
+                    "threadId": request_id,
+                    "turn": 1,
+                    "parentRequestId": None,
+                },
+                "plan": bounded_plan,
+                "planDiff": {
+                    "basePlan": {
+                        "id": dynamic_plan["id"],
+                        "revision": dynamic_plan["revision"],
+                    },
+                    "targetPlan": {
+                        "id": bounded_plan["id"],
+                        "revision": bounded_plan["revision"],
+                    },
+                    "summary": {
+                        "planFields": 0,
+                        "addedSteps": 0,
+                        "removedSteps": 0,
+                        "updatedSteps": 0,
+                        "movedSteps": 0,
+                    },
+                    "planChanges": [],
+                    "stepChanges": [],
+                },
+                "proposedAt": "2026-08-05T12:00:06Z",
+            }
+
+        for _index in range(7):
+            assert bounded_controller.stage_proposal(
+                bounded_candidate(str(uuid.uuid4()))
+            )
+        assert len(bounded_controller._proposal_candidates) == 7
+        bounded_decisions = []
+
+        class BoundedTransport:
+            running = True
+
+            def __init__(self, proposal):
+                self.incoming = Queue()
+                self.incoming.put({"kind": "proposal", "proposal": proposal})
+
+            def decide_proposal(self, proposal_id, decision):
+                bounded_decisions.append((proposal_id, decision))
+
+            def send_report(self, _report):
+                pass
+
+        bounded_controller._transport = BoundedTransport(
+            bounded_candidate(str(uuid.uuid4()))
+        )
+        bounded_controller.pump()
+        assert len(bounded_controller._proposal_candidates) == 7
+        assert bounded_controller.status == "Proposal review queue full"
+        assert "queue is full" in bounded_controller.error
+        assert bounded_decisions == []
+        bounded_controller._transport = None
+        bounded_controller.provider_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "generationRequestId": bounded_run["generationRequestId"],
+                "revisionRequestId": bounded_request_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": bounded_controller.instance_id,
+                "provider": {
+                    "id": "available-planner",
+                    "version": "0.1.0",
+                    "displayName": "Available Planner",
+                },
+                "status": "proposal_created",
+                "terminal": True,
+                "sceneChanged": False,
+                "proposalId": bounded_proposal_id,
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-05T12:00:07Z",
+            }
+        )
+        exact_bounded_proposal = bounded_candidate(bounded_request_id)
+        assert bounded_controller.stage_proposal(exact_bounded_proposal)
+        assert bounded_controller.proposed_plan is exact_bounded_proposal
+        assert len(bounded_controller._proposal_candidates) == 1
+
+        # A request-linked proposal is bound to the plan snapshot it revised.
+        # If an ordinary plan update moves the active session first, Accept is
+        # rejected without changing the scene/session/proposal; Reject remains
+        # available so the stale review can be closed explicitly.
+        drift_controller = CompanionController()
+        drift_base_session = operating_line.get_session()
+        drift_base_plan = drift_base_session.source_plan_copy()
+        drift_target_plan = deepcopy(drift_base_plan)
+        drift_target_plan["revision"] = drift_base_session.revision + 2
+        drift_request_id = str(uuid.uuid4())
+        drift_controller.provider_handoff.set_providers(provider_payload)
+        drift_controller.select_replan_provider("available-planner")
+        drift_controller.provider_handoff.revision_submitted(drift_request_id)
+        drift_controller.provider_handoff.revision_acknowledged(drift_request_id)
+        drift_run = drift_controller.provider_handoff.begin(
+            target_instance_id=drift_controller.instance_id
+        )
+        drift_proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": str(uuid.uuid4()),
+            "targetAdapterId": "blender",
+            "targetInstanceId": drift_controller.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "revisionRequestId": drift_request_id,
+            "revisionThread": {
+                "threadId": drift_request_id,
+                "turn": 1,
+                "parentRequestId": None,
+            },
+            "plan": drift_target_plan,
+            "planDiff": {
+                "basePlan": {
+                    "id": drift_base_session.plan_id,
+                    "revision": drift_base_session.revision,
+                },
+                "targetPlan": {
+                    "id": drift_target_plan["id"],
+                    "revision": drift_target_plan["revision"],
+                },
+                "summary": {
+                    "planFields": 0,
+                    "addedSteps": 0,
+                    "removedSteps": 0,
+                    "updatedSteps": 0,
+                    "movedSteps": 0,
+                },
+                "planChanges": [],
+                "stepChanges": [],
+            },
+            "proposedAt": "2026-08-05T12:00:07Z",
+        }
+        assert drift_controller.stage_proposal(drift_proposal)
+        drifted_plan = deepcopy(drift_base_plan)
+        drifted_plan["revision"] = drift_base_session.revision + 1
+        assert drift_controller.install_plan(drifted_plan)
+        drift_controller.provider_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "generationRequestId": drift_run["generationRequestId"],
+                "revisionRequestId": drift_request_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": drift_controller.instance_id,
+                "provider": {
+                    "id": "available-planner",
+                    "version": "0.1.0",
+                    "displayName": "Available Planner",
+                },
+                "status": "proposal_created",
+                "terminal": True,
+                "sceneChanged": False,
+                "proposalId": drift_proposal["proposalId"],
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-05T12:00:08Z",
+            }
+        )
+        assert drift_controller._bind_provider_proposal()
+        drifted_session = operating_line.get_session()
+        drift_scene = {item.as_pointer() for item in bpy.data.objects}
+        drift_proposal_session = drift_controller.proposal_session
+        drift_candidates = dict(drift_controller._proposal_candidates)
+        drift_handoff_identity = (
+            drift_controller.provider_handoff.acknowledged_revision_request_id,
+            drift_controller.provider_handoff.generation_request_id,
+            drift_controller.provider_handoff.proposal_id,
+            drift_controller.provider_handoff.phase,
+        )
+        drift_decisions = []
+
+        class DriftTransport:
+            running = True
+
+            def send_report(self, _report):
+                pass
+
+            def decide_proposal(self, proposal_id, decision):
+                drift_decisions.append((proposal_id, decision))
+
+            def follow_revision_thread(self, _thread_id):
+                pass
+
+        drift_controller._transport = DriftTransport()
+        assert drift_controller.accept_proposal() is False
+        assert drift_controller.proposed_plan is drift_proposal
+        assert drift_controller.proposal_session is drift_proposal_session
+        assert drift_controller._proposal_candidates == drift_candidates
+        assert (
+            drift_controller.provider_handoff.acknowledged_revision_request_id,
+            drift_controller.provider_handoff.generation_request_id,
+            drift_controller.provider_handoff.proposal_id,
+            drift_controller.provider_handoff.phase,
+        ) == drift_handoff_identity
+        assert operating_line.get_session() is drifted_session
+        assert {item.as_pointer() for item in bpy.data.objects} == drift_scene
+        assert drift_decisions == []
+        assert "current" in drift_controller.error
+        assert "base" in drift_controller.error
+        assert drift_controller.reject_proposal()
+        assert drift_decisions == [(drift_proposal["proposalId"], "rejected")]
+        drift_controller._transport = None
+        replace_operating_line_session(drift_base_session)
+
+        # Protocol 1.0 legally permits a request-linked proposal without a
+        # planDiff. It remains reviewable and rejectable, but Accept fails
+        # closed because Blender cannot verify which active base it revised.
+        legacy_controller = CompanionController()
+        legacy_controller.provider_handoff.set_providers(provider_payload)
+        legacy_controller.select_replan_provider("available-planner")
+        legacy_request_id = str(uuid.uuid4())
+        legacy_controller.provider_handoff.revision_submitted(legacy_request_id)
+        legacy_controller.provider_handoff.revision_acknowledged(legacy_request_id)
+        legacy_run = legacy_controller.provider_handoff.begin(
+            target_instance_id=legacy_controller.instance_id
+        )
+        legacy_plan = deepcopy(dynamic_plan)
+        legacy_plan["revision"] = DYNAMIC_REVISION + 40
+        legacy_proposal = {
+            "protocolVersion": "1.0.0",
+            "proposalId": str(uuid.uuid4()),
+            "targetAdapterId": "blender",
+            "targetInstanceId": legacy_controller.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "revisionRequestId": legacy_request_id,
+            "revisionThread": {
+                "threadId": legacy_request_id,
+                "turn": 1,
+                "parentRequestId": None,
+            },
+            "plan": legacy_plan,
+            "proposedAt": "2026-08-05T12:00:09Z",
+        }
+        assert legacy_controller.stage_proposal(legacy_proposal)
+        legacy_controller.provider_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "generationRequestId": legacy_run["generationRequestId"],
+                "revisionRequestId": legacy_request_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": legacy_controller.instance_id,
+                "provider": {
+                    "id": "available-planner",
+                    "version": "0.1.0",
+                    "displayName": "Available Planner",
+                },
+                "status": "proposal_created",
+                "terminal": True,
+                "sceneChanged": False,
+                "proposalId": legacy_proposal["proposalId"],
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-05T12:00:10Z",
+            }
+        )
+        assert legacy_controller._bind_provider_proposal()
+        assert _proposal_accept_requires_verifiable_base(legacy_proposal)
+        legacy_session = operating_line.get_session()
+        legacy_scene = {item.as_pointer() for item in bpy.data.objects}
+        legacy_proposal_session = legacy_controller.proposal_session
+        legacy_candidates = dict(legacy_controller._proposal_candidates)
+        legacy_handoff = deepcopy(legacy_controller.provider_handoff.__dict__)
+        legacy_decisions = []
+
+        class LegacyTransport:
+            running = True
+
+            def decide_proposal(self, proposal_id, decision):
+                legacy_decisions.append((proposal_id, decision))
+
+            def follow_revision_thread(self, _thread_id):
+                pass
+
+        legacy_controller._transport = LegacyTransport()
+        assert legacy_controller.accept_proposal() is False
+        assert "protocol 1.1" in legacy_controller.error
+        assert legacy_controller.status == "Proposal base cannot be verified"
+        assert legacy_controller.proposed_plan is legacy_proposal
+        assert legacy_controller.proposal_session is legacy_proposal_session
+        assert legacy_controller._proposal_candidates == legacy_candidates
+        assert legacy_controller.provider_handoff.__dict__ == legacy_handoff
+        assert operating_line.get_session() is legacy_session
+        assert {item.as_pointer() for item in bpy.data.objects} == legacy_scene
+        assert legacy_decisions == []
+        assert legacy_controller.reject_proposal()
+        assert legacy_decisions == [(legacy_proposal["proposalId"], "rejected")]
+        legacy_controller._transport = None
 
         # Hiding the visual guidance does not discard a new workspace draft or
         # the loaded immutable thread. Collapsing the workspace and toggling
@@ -928,6 +1821,8 @@ def assert_companion_and_plan_semantics() -> None:
     assert bpy.ops.operating_line.start() == {"CANCELLED"}
     assert bpy.ops.operating_line.next() == {"CANCELLED"}
     assert operating_line.get_session() is accepted_before_review
+    assert bpy.ops.operating_line.reject_proposal() == {"FINISHED"}
+    assert companion.proposed_plan is reviewed_proposal
     assert bpy.ops.operating_line.reject_proposal() == {"FINISHED"}
     assert companion.proposed_plan is None and companion.proposal_session is None
     assert companion.revision_reference_nodes() == ()

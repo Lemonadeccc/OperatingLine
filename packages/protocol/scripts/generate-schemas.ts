@@ -8,6 +8,9 @@ import {
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
+  companionReplanRunCreateRequestSchema,
+  companionReplanRunSchema,
+  companionReplanRunStatusRequestSchema,
   companionStateReportSchema,
   evalExportBundleSchema,
   evalExportRequestSchema,
@@ -46,6 +49,21 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'companion-replan-run-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-replan-run-create-request.json',
+    companionReplanRunCreateRequestSchema,
+  ],
+  [
+    'companion-replan-run-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-replan-run-status-request.json',
+    companionReplanRunStatusRequestSchema,
+  ],
+  [
+    'companion-replan-run.schema.json',
+    'https://operatingline.dev/schema/v1/companion-replan-run.json',
+    companionReplanRunSchema,
+  ],
   [
     'planner-provider-descriptor.schema.json',
     'https://operatingline.dev/schema/v1/planner-provider-descriptor.json',

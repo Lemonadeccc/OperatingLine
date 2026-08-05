@@ -22,6 +22,17 @@ import uuid
 from ..domain import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+REPLAN_RUN_STATUSES = frozenset(
+    {
+        "queued",
+        "generating",
+        "needs_revision",
+        "proposal_created",
+        "failed",
+        "interrupted",
+    }
+)
+TERMINAL_REPLAN_RUN_STATUSES = REPLAN_RUN_STATUSES - {"queued", "generating"}
 
 
 def validate_companion_url(value: str) -> str:
@@ -92,6 +103,7 @@ class CompanionTransport:
         self.outgoing: Queue[dict[str, Any]] = Queue()
         self.decisions: Queue[dict[str, Any]] = Queue()
         self.revision_requests: Queue[dict[str, Any]] = Queue()
+        self.replan_runs: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -193,6 +205,18 @@ class CompanionTransport:
             raise ValueError("Revision request must contain a requestId")
         self.revision_requests.put(request)
 
+    def refresh_replan_providers(self) -> None:
+        """Queue a short provider-descriptor request on the existing worker."""
+        self.control.put({"kind": "refresh_replan_providers"})
+
+    def start_replan_run(self, request: dict[str, Any]) -> None:
+        generation_request_id = request.get("generationRequestId")
+        self._validated_optional_uuid(
+            generation_request_id,
+            "Replan generation request id",
+        )
+        self.replan_runs.put(request)
+
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
         if decision not in {"accepted", "rejected"}:
             raise ValueError("Proposal decision must be accepted or rejected")
@@ -250,18 +274,27 @@ class CompanionTransport:
             if abort_on_stop and self._stop.is_set():
                 self._abort_connection(connection)
             response = connection.getresponse()
+            body = self._read_response_body(
+                response,
+                abort_on_stop=abort_on_stop,
+            )
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise ValueError("Runtime response exceeds 4 MiB limit")
             if not 200 <= response.status < 300:
-                raise HTTPError(
+                http_error = HTTPError(
                     f"{self.base_url}{path}",
                     response.status,
                     response.reason,
                     response.headers,
                     None,
                 )
-            body = self._read_response_body(
-                response,
-                abort_on_stop=abort_on_stop,
-            )
+                try:
+                    error_payload = json.loads(body.decode("utf-8")) if body else {}
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    error_payload = {}
+                if isinstance(error_payload, dict):
+                    http_error.runtime_payload = error_payload
+                raise http_error
         finally:
             deadline.cancel()
             connection.close()
@@ -269,8 +302,6 @@ class CompanionTransport:
                 if self._active_connection is connection:
                     self._active_connection = None
                     self._active_socket = None
-        if len(body) > MAX_RESPONSE_BYTES:
-            raise ValueError("Runtime response exceeds 4 MiB limit")
         decoded = json.loads(body.decode("utf-8")) if body else {}
         if not isinstance(decoded, dict):
             raise ValueError("Runtime response must be a JSON object")
@@ -403,11 +434,39 @@ class CompanionTransport:
             self._revision_history_before_turn = None
             self._revision_history_signature = None
 
+    def _poll_replan_run(self, generation_request_id: str) -> dict[str, Any]:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/replan-run?"
+            + urlencode({"generationRequestId": generation_request_id}),
+            abort_on_stop=True,
+        )
+        if response.get("generationRequestId") != generation_request_id:
+            raise ValueError("Runtime returned the wrong replan run")
+        return response
+
+    @staticmethod
+    def _validate_replan_run_response(
+        response: dict[str, Any], generation_request_id: Any
+    ) -> str:
+        if response.get("generationRequestId") != generation_request_id:
+            raise ValueError("Runtime returned the wrong replan run")
+        status = response.get("status")
+        if status not in REPLAN_RUN_STATUSES:
+            raise ValueError("Runtime returned an unsupported replan run status")
+        if response.get("terminal") is not (status in TERMINAL_REPLAN_RUN_STATUSES):
+            raise ValueError("Runtime returned an inconsistent replan run status")
+        return status
+
     def _run(self) -> None:
         next_poll = 0.0
         pending_report: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
+        pending_replan_run: dict[str, Any] | None = None
+        active_replan_run_id: str | None = None
+        replan_run_signature: str | None = None
+        refresh_replan_providers = True
         last_error = ""
         while (
             not self._stop.is_set()
@@ -439,6 +498,39 @@ class CompanionTransport:
                     elif control.get("kind") == "load_revision_history_before":
                         self._revision_history_before_turn = int(control["beforeTurn"])
                         self._revision_history_signature = None
+                    elif control.get("kind") == "refresh_replan_providers":
+                        refresh_replan_providers = True
+                if refresh_replan_providers and not self._stop.is_set():
+                    try:
+                        providers = self._request_json(
+                            "GET", "/api/v1/replan/providers"
+                        )
+                    except (
+                        HTTPError,
+                        HTTPException,
+                        OSError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        status_code = getattr(error, "code", None)
+                        suffix = (
+                            f" (HTTP {status_code})"
+                            if isinstance(status_code, int)
+                            else ""
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "replan_provider_list_unavailable",
+                                "message": "Runtime provider discovery is unavailable"
+                                + suffix,
+                            }
+                        )
+                    else:
+                        self.incoming.put(
+                            {"kind": "replan_provider_list", "providers": providers}
+                        )
+                    refresh_replan_providers = False
+                    request_succeeded = True
                 if pending_decision is None:
                     try:
                         pending_decision = self.decisions.get_nowait()
@@ -491,6 +583,60 @@ class CompanionTransport:
                     )
                     request_succeeded = True
                     pending_revision_request = None
+                if not self._stop.is_set() and pending_replan_run is None:
+                    try:
+                        pending_replan_run = self.replan_runs.get_nowait()
+                    except Empty:
+                        pass
+                if not self._stop.is_set() and pending_replan_run is not None:
+                    generation_request_id = pending_replan_run.get(
+                        "generationRequestId"
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/replan-run",
+                            pending_replan_run,
+                        )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        error_payload = getattr(error, "runtime_payload", {})
+                        message = (
+                            error_payload.get("message")
+                            if isinstance(error_payload, dict)
+                            else None
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "replan_run_rejected",
+                                "generationRequestId": generation_request_id,
+                                "message": (
+                                    message
+                                    if isinstance(message, str) and message.strip()
+                                    else "Runtime rejected this provider authorization"
+                                ),
+                            }
+                        )
+                        pending_replan_run = None
+                        request_succeeded = True
+                        continue
+                    status = self._validate_replan_run_response(
+                        response, generation_request_id
+                    )
+                    self.incoming.put(
+                        {"kind": "replan_run_status", "run": response}
+                    )
+                    if status in TERMINAL_REPLAN_RUN_STATUSES:
+                        active_replan_run_id = None
+                        replan_run_signature = None
+                    else:
+                        active_replan_run_id = str(generation_request_id)
+                        replan_run_signature = json.dumps(
+                            response, sort_keys=True, separators=(",", ":")
+                        )
+                    pending_replan_run = None
+                    request_succeeded = True
                 if pending_report is None:
                     try:
                         pending_report = self.outgoing.get_nowait()
@@ -512,6 +658,22 @@ class CompanionTransport:
                 now = time.monotonic()
                 if not self._stop.is_set() and now >= next_poll:
                     self._poll()
+                    if active_replan_run_id is not None:
+                        run = self._poll_replan_run(active_replan_run_id)
+                        status = self._validate_replan_run_response(
+                            run, active_replan_run_id
+                        )
+                        signature = json.dumps(
+                            run, sort_keys=True, separators=(",", ":")
+                        )
+                        if signature != replan_run_signature:
+                            replan_run_signature = signature
+                            self.incoming.put(
+                                {"kind": "replan_run_status", "run": run}
+                            )
+                        if status in TERMINAL_REPLAN_RUN_STATUSES:
+                            active_replan_run_id = None
+                            replan_run_signature = None
                     request_succeeded = True
                     next_poll = now + self._poll_interval
                 if request_succeeded and last_error:

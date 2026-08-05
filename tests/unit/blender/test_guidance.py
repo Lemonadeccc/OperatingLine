@@ -22,17 +22,83 @@ visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
 DemoSession = application.DemoSession
 RevisionLineage = application.RevisionLineage
+ReplanRunState = application.ReplanRunState
 lineage_from_proposal = application.lineage_from_proposal
 new_revision_thread = application.new_revision_thread
 node_state = application.node_state
 relevant_steps = application.relevant_steps
 step_state = application.step_state
 validate_plan_diff = application.validate_plan_diff
+validate_provider_list = application.validate_provider_list
 validate_revision_thread_history = application.validate_revision_thread_history
 ActionSpec = domain.ActionSpec
 TaskNode = domain.TaskNode
 STATE_COLORS = visual_theme.STATE_COLORS
 STATE_SYMBOLS = visual_theme.STATE_SYMBOLS
+
+
+def provider_list(*, available: bool = True) -> dict:
+    return {
+        "contractVersion": "1.0.0",
+        "generationAvailable": available,
+        "providers": [
+            {
+                "contractVersion": "1.0.0",
+                "id": "fake-planner",
+                "version": "0.1.0",
+                "displayName": "Fake Planner",
+                "description": "Deterministic provider used by host handoff tests.",
+                "availability": {
+                    "available": available,
+                    **(
+                        {}
+                        if available
+                        else {
+                            "reason": "not_configured",
+                            "message": "Missing provider credential",
+                        }
+                    ),
+                },
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "remote",
+                    "dataTransmission": "provider_managed",
+                    "credentialManagement": "provider_managed",
+                },
+            }
+        ],
+    }
+
+
+def replan_run_status(
+    state: ReplanRunState,
+    status: str,
+    *,
+    proposal_id: str | None = None,
+    error: dict | None = None,
+    needs_revision: dict | None = None,
+) -> dict:
+    provider = state.selected_provider
+    assert provider is not None
+    return {
+        "contractVersion": "1.0.0",
+        "generationRequestId": state.generation_request_id,
+        "revisionRequestId": state.acknowledged_revision_request_id,
+        "targetAdapterId": "blender",
+        "targetInstanceId": state.target_instance_id,
+        "provider": {
+            "id": provider["id"],
+            "version": provider["version"],
+            "displayName": provider["displayName"],
+        },
+        "status": status,
+        "terminal": status not in {"queued", "generating"},
+        "sceneChanged": False,
+        "proposalId": proposal_id,
+        "error": error,
+        "needsRevision": needs_revision,
+        "updatedAt": "2026-08-05T12:00:01.000Z",
+    }
 
 
 def action_node(node_id: str, number: str, order: int) -> TaskNode:
@@ -43,6 +109,15 @@ def action_node(node_id: str, number: str, order: int) -> TaskNode:
         order=order,
         action=ActionSpec("test", f"run_{node_id}", {}),
     )
+
+
+def acknowledge_revision(
+    state: ReplanRunState, request_id: str | None = None
+) -> str:
+    acknowledged_id = request_id or str(uuid.uuid4())
+    state.revision_submitted(acknowledged_id)
+    state.revision_acknowledged(acknowledged_id)
+    return acknowledged_id
 
 
 class GuidanceStateTests(unittest.TestCase):
@@ -144,6 +219,492 @@ class GuidanceStateTests(unittest.TestCase):
         self.assertEqual(len(set(STATE_SYMBOLS.values())), len(GuidanceState))
         self.assertEqual(STATE_SYMBOLS[GuidanceState.BACK], "BACK")
         self.assertEqual(STATE_SYMBOLS[GuidanceState.NEXT], "NEXT")
+
+
+class ProviderHandoffTests(unittest.TestCase):
+
+    def test_provider_refresh_never_selects_a_default(self) -> None:
+        state = ReplanRunState()
+
+        state.set_providers(provider_list())
+
+        self.assertEqual(state.selected_provider_id, None)
+        self.assertFalse(state.can_run)
+        self.assertEqual(len(state.providers), 1)
+
+    def test_unavailable_provider_cannot_be_selected(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list(available=False))
+
+        with self.assertRaisesRegex(ValueError, "Missing provider credential"):
+            state.select("fake-planner")
+
+        self.assertEqual(state.selected_provider_id, None)
+        self.assertFalse(state.can_run)
+
+    def test_new_revision_request_resets_the_acknowledgement_gate(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        request_id = str(uuid.uuid4())
+        acknowledge_revision(state, request_id)
+        self.assertTrue(state.can_run)
+
+        state.revision_submitted()
+
+        self.assertEqual(state.acknowledged_revision_request_id, None)
+        self.assertFalse(state.can_run)
+        self.assertIn("Waiting for runtime", state.message)
+
+    def test_each_retry_creates_a_new_explicit_authorization(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+
+        first = state.begin(target_instance_id=str(uuid.uuid4()))
+        state.apply_status(
+            replan_run_status(
+                state,
+                "failed",
+                error={
+                    "code": "planner_provider_failed",
+                    "retryMode": "new_request_id",
+                    "message": "Planner provider failed before a proposal was created",
+                },
+            )
+        )
+        second = state.begin(target_instance_id=str(uuid.uuid4()))
+
+        self.assertNotEqual(first["generationRequestId"], second["generationRequestId"])
+        self.assertEqual(first["revisionRequestId"], second["revisionRequestId"])
+        for request in (first, second):
+            self.assertEqual(
+                request["authorization"],
+                {
+                    "disclosureVersion": "1.0.0",
+                    "dataHandlingAcknowledged": True,
+                    "possibleChargesAcknowledged": True,
+                    "proposalCreationAcknowledged": True,
+                    "authorizedAt": request["authorization"]["authorizedAt"],
+                },
+            )
+
+    def test_proposal_created_status_opens_the_host_review_gate(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        proposal_id = str(uuid.uuid4())
+
+        state.apply_status(
+            replan_run_status(
+                state,
+                "proposal_created",
+                proposal_id=proposal_id,
+            )
+        )
+
+        self.assertEqual(state.phase, "proposal_created")
+        self.assertFalse(state.active)
+        self.assertFalse(state.can_run)
+        self.assertIn("waiting for review", state.message)
+
+    def test_never_retry_errors_keep_the_run_gate_closed(self) -> None:
+        for phase in ("failed", "interrupted"):
+            state = ReplanRunState()
+            state.set_providers(provider_list())
+            state.select("fake-planner")
+            acknowledge_revision(state)
+            state.begin(target_instance_id=str(uuid.uuid4()))
+
+            state.apply_status(
+                replan_run_status(
+                    state,
+                    phase,
+                    error={
+                        "code": "planner_generation_conflict",
+                        "retryMode": "never",
+                        "message": "This authorization cannot be retried",
+                    },
+                )
+            )
+
+            self.assertEqual(state.retry_mode, "never")
+            self.assertFalse(state.can_run)
+
+    def test_newer_pending_request_rejects_an_older_acknowledgement(self) -> None:
+        state = ReplanRunState()
+        older_request_id = str(uuid.uuid4())
+        newer_request_id = str(uuid.uuid4())
+        state.revision_submitted(older_request_id)
+        state.revision_submitted(newer_request_id)
+
+        with self.assertRaisesRegex(ValueError, "older revision request"):
+            state.revision_acknowledged(older_request_id)
+
+        self.assertEqual(state.pending_revision_request_id, newer_request_id)
+        self.assertEqual(state.acknowledged_revision_request_id, None)
+
+    def test_needs_revision_keeps_only_three_safe_findings(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        planning_findings = [
+            {
+                "code": "missing_required_phase",
+                "severity": "error" if index < 2 else "warning",
+                "message": f"Safe finding {index}",
+                "stepIds": [],
+                "phaseIds": [],
+            }
+            for index in range(3)
+        ]
+        locality_findings = [
+            {
+                "code": "step_changed_outside_scope",
+                "message": f"Safe finding {index}",
+                "stepIds": [],
+            }
+            for index in range(3, 5)
+        ]
+
+        state.apply_status(
+            replan_run_status(
+                state,
+                "needs_revision",
+                needs_revision={
+                    "planning": {
+                        "errorCount": 2,
+                        "warningCount": 1,
+                        "findings": planning_findings,
+                    },
+                    "locality": {
+                        "valid": False,
+                        "findings": locality_findings,
+                    },
+                    "planDiffAvailable": False,
+                },
+            )
+        )
+
+        self.assertEqual(
+            state.needs_revision_summary,
+            "2 planning errors, 1 warnings, 2 locality findings",
+        )
+        self.assertEqual(
+            state.needs_revision_findings,
+            ("Safe finding 0", "Safe finding 1", "Safe finding 2"),
+        )
+
+    def test_status_for_another_run_is_rejected_without_changing_local_state(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        before = state.phase
+        payload = replan_run_status(state, "generating")
+        payload["generationRequestId"] = str(uuid.uuid4())
+
+        with self.assertRaisesRegex(ValueError, "different provider run"):
+            state.apply_status(payload)
+
+        self.assertEqual(state.phase, before)
+
+    def test_provider_list_contract_is_strict_about_availability_and_transmission(self) -> None:
+        mismatched_summary = provider_list()
+        mismatched_summary["generationAvailable"] = False
+        with self.assertRaisesRegex(ValueError, "summary"):
+            validate_provider_list(mismatched_summary)
+
+        unsafe_transmission = provider_list()
+        unsafe_transmission["providers"][0]["dataHandling"]["dataTransmission"] = "none"
+        with self.assertRaisesRegex(ValueError, "transmission"):
+            validate_provider_list(unsafe_transmission)
+
+    def test_provider_wire_rejects_invalid_ids_versions_lengths_and_errors(self) -> None:
+        invalid_id = provider_list()
+        invalid_id["providers"][0]["id"] = "invalid provider"
+        with self.assertRaisesRegex(ValueError, "A-Za-z0-9"):
+            validate_provider_list(invalid_id)
+
+        invalid_version = provider_list()
+        invalid_version["providers"][0]["version"] = "01.0.0"
+        with self.assertRaisesRegex(ValueError, "x.y.z"):
+            validate_provider_list(invalid_version)
+
+        padded_version = provider_list()
+        padded_version["providers"][0]["version"] = " 1.0.0 "
+        with self.assertRaisesRegex(ValueError, "x.y.z"):
+            validate_provider_list(padded_version)
+
+        oversized_name = provider_list()
+        oversized_name["providers"][0]["displayName"] = "x" * 181
+        with self.assertRaisesRegex(ValueError, "180"):
+            validate_provider_list(oversized_name)
+
+        oversized_description = provider_list()
+        oversized_description["providers"][0]["description"] = "x" * 1_001
+        with self.assertRaisesRegex(ValueError, "1000"):
+            validate_provider_list(oversized_description)
+
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        invalid_error = replan_run_status(
+            state,
+            "failed",
+            error={
+                "code": "not_a_public_error",
+                "retryMode": "never",
+                "message": "Safe but unknown error",
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "error code"):
+            state.apply_status(invalid_error)
+
+        invalid_provider_name = replan_run_status(state, "generating")
+        invalid_provider_name["provider"]["displayName"] = 42
+        with self.assertRaisesRegex(ValueError, "display name"):
+            state.apply_status(invalid_provider_name)
+
+    def test_needs_revision_rejects_inconsistent_planning_counts(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        payload = replan_run_status(
+            state,
+            "needs_revision",
+            needs_revision={
+                "planning": {
+                    "errorCount": 0,
+                    "warningCount": 0,
+                    "findings": [
+                        {
+                            "code": "missing_required_phase",
+                            "severity": "error",
+                            "message": "Required phase missing",
+                            "stepIds": [],
+                            "phaseIds": [],
+                        }
+                    ],
+                },
+                "locality": {"valid": True, "findings": []},
+                "planDiffAvailable": False,
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "counts are inconsistent"):
+            state.apply_status(payload)
+
+    def test_needs_revision_rejects_invalid_locality_and_no_blocker(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        locality_finding = {
+            "code": "not_a_locality_code",
+            "message": "Invalid public code",
+            "stepIds": [],
+        }
+        invalid_code = replan_run_status(
+            state,
+            "needs_revision",
+            needs_revision={
+                "planning": {"errorCount": 0, "warningCount": 0, "findings": []},
+                "locality": {"valid": False, "findings": [locality_finding]},
+                "planDiffAvailable": False,
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "Locality finding code"):
+            state.apply_status(invalid_code)
+
+        inconsistent_locality = deepcopy(invalid_code)
+        inconsistent_locality["needsRevision"]["locality"] = {
+            "valid": False,
+            "findings": [],
+        }
+        with self.assertRaisesRegex(ValueError, "locality validity"):
+            state.apply_status(inconsistent_locality)
+
+        no_blocker = deepcopy(inconsistent_locality)
+        no_blocker["needsRevision"]["locality"]["valid"] = True
+        no_blocker["needsRevision"]["planDiffAvailable"] = True
+        with self.assertRaisesRegex(ValueError, "no deterministic blocking"):
+            state.apply_status(no_blocker)
+
+    def test_run_wire_rejects_noncanonical_uuid_and_datetime_forms(self) -> None:
+        state = ReplanRunState()
+        canonical_request_id = str(uuid.uuid4())
+        for invalid_uuid in (
+            canonical_request_id.replace("-", ""),
+            "{" + canonical_request_id + "}",
+        ):
+            with self.assertRaisesRegex(ValueError, "must be a UUID"):
+                state.revision_acknowledged(invalid_uuid)
+
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state, canonical_request_id)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        for invalid_datetime in (
+            "2026-08-05 12:00:01+00:00",
+            "2026-02-30T12:00:01Z",
+        ):
+            payload = replan_run_status(state, "generating")
+            payload["updatedAt"] = invalid_datetime
+            with self.assertRaisesRegex(ValueError, "RFC 3339"):
+                state.apply_status(payload)
+
+        invalid_generation_id = replan_run_status(state, "generating")
+        invalid_generation_id["generationRequestId"] = state.generation_request_id.replace(
+            "-", ""
+        )
+        with self.assertRaisesRegex(ValueError, "must be a UUID"):
+            state.apply_status(invalid_generation_id)
+
+    def test_terminal_run_rejects_same_generation_id_retry_mode(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        payload = replan_run_status(
+            state,
+            "failed",
+            error={
+                "code": "planner_generation_timeout",
+                "retryMode": "same_request_id",
+                "message": "Timed out",
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "new request id or never"):
+            state.apply_status(payload)
+
+    def test_active_run_blocks_revision_submission_without_losing_run_identity(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        for phase in ("queued", "generating"):
+            state.phase = phase
+            before = deepcopy(state.__dict__)
+            with self.assertRaisesRegex(ValueError, "active provider run"):
+                state.ensure_revision_submission_allowed()
+            self.assertEqual(state.__dict__, before)
+            with self.assertRaisesRegex(ValueError, "active provider run"):
+                state.revision_submitted(str(uuid.uuid4()))
+            self.assertEqual(state.__dict__, before)
+            self.assertFalse(state.invalidate_for_plan_install())
+            self.assertEqual(state.__dict__, before)
+            with self.assertRaisesRegex(ValueError, "refreshing providers"):
+                state.ensure_provider_refresh_allowed()
+            self.assertEqual(state.__dict__, before)
+            state.revision_acknowledged(state.acknowledged_revision_request_id)
+            self.assertEqual(state.__dict__, before)
+            changed_providers = provider_list()
+            changed_providers["providers"][0]["version"] = "0.2.0"
+            with self.assertRaisesRegex(ValueError, "locked while a run"):
+                state.set_providers(changed_providers)
+            self.assertEqual(state.__dict__, before)
+            self.assertFalse(
+                state.complete_proposal_review(
+                    state.acknowledged_revision_request_id,
+                    str(uuid.uuid4()),
+                )
+            )
+            self.assertEqual(state.__dict__, before)
+
+        proposal_id = str(uuid.uuid4())
+        state.apply_status(
+            replan_run_status(
+                state,
+                "proposal_created",
+                proposal_id=proposal_id,
+            )
+        )
+        self.assertEqual(state.phase, "proposal_created")
+        self.assertFalse(
+            state.complete_proposal_review(
+                state.acknowledged_revision_request_id,
+                str(uuid.uuid4()),
+            )
+        )
+        self.assertEqual(state.proposal_id, proposal_id)
+        self.assertTrue(
+            state.complete_proposal_review(
+                state.acknowledged_revision_request_id,
+                proposal_id,
+            )
+        )
+        self.assertIsNone(state.proposal_id)
+        state.ensure_revision_submission_allowed()
+
+    def test_nonactive_plan_install_and_matching_external_review_clear_stale_request(self) -> None:
+        state = ReplanRunState()
+        self.assertFalse(state.invalidate_for_plan_install())
+        self.assertEqual(state.phase, "idle")
+        self.assertEqual(state.message, "")
+
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        request_id = str(uuid.uuid4())
+        state.revision_submitted(request_id)
+        self.assertTrue(state.invalidate_for_plan_install())
+        self.assertIsNone(state.pending_revision_request_id)
+        self.assertFalse(state.can_run)
+
+        state.revision_submitted(request_id)
+        state.revision_acknowledged(request_id)
+        acknowledged = deepcopy(state.__dict__)
+        state.revision_acknowledged(request_id)
+        self.assertEqual(state.__dict__, acknowledged)
+        self.assertTrue(state.invalidate_for_plan_install())
+        self.assertIsNone(state.acknowledged_revision_request_id)
+        self.assertFalse(state.can_run)
+
+        invalidated = deepcopy(state.__dict__)
+        with self.assertRaisesRegex(ValueError, "unknown/stale request"):
+            state.revision_acknowledged(request_id)
+        self.assertEqual(state.__dict__, invalidated)
+
+        acknowledge_revision(state, request_id)
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        state.apply_status(
+            replan_run_status(
+                state,
+                "failed",
+                error={
+                    "code": "planner_generation_conflict",
+                    "retryMode": "new_request_id",
+                    "message": "External proposal won the request race",
+                },
+            )
+        )
+        self.assertTrue(state.can_run)
+        self.assertTrue(
+            state.complete_proposal_review(request_id, str(uuid.uuid4()))
+        )
+        self.assertIsNone(state.acknowledged_revision_request_id)
+        self.assertIsNone(state.generation_request_id)
+        self.assertFalse(state.can_run)
+
+
+class RevisionContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.steps = tuple(
+            action_node(f"step-{index}", f"1.{index + 1}", index)
+            for index in range(6)
+        )
 
     def test_session_indexes_stable_nodes_and_isolates_source_plan_copies(self) -> None:
         root = TaskNode(

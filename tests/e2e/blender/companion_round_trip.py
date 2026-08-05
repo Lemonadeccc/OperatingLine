@@ -53,10 +53,10 @@ def main() -> None:
     proposal_stage_threads: list[int] = []
     maximum_pump_seconds = 0.0
 
-    def install_plan_on_main_thread(plan):
+    def install_plan_on_main_thread(plan, **options):
         assert threading.current_thread() is threading.main_thread()
         plan_install_threads.append(threading.get_ident())
-        return original_install_plan(plan)
+        return original_install_plan(plan, **options)
 
     controller.install_plan = install_plan_on_main_thread
 

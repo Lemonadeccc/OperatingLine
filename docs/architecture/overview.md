@@ -239,6 +239,42 @@ request 关联、revision-proposed 事件与 provider-generation provenance 在�
 `generate` 的数据传输/费用授权、创建可审批 Proposal 和宿主内接受是三个独立状态转换。没有
 `generationRequestId` 的 provider-free 外部客户端路径继续兼容，但不会声称来自某次 provider generation。
 
+能够等待长 Promise 的 MCP/HTTP 客户端继续使用上述分离路径。宿主 Companion 另有版本化异步
+`CompanionReplanRun 1.0.0`：它在用户查看 Provider descriptor 并逐次确认后，先持久化授权并立即返回
+`202 queued`，再由 Orchestrator 后台复用相同 generate 和 canonical propose 权威。
+
+```text
+host acknowledgement + explicit provider + per-call disclosure confirmation
+                                │
+                                ▼
+POST companion/replan-run ── 202 queued
+                                │ background, same validated authorities
+                                ├─ needs_revision ── no Proposal
+                                └─ ready ── canonical replan.propose
+                                                    │
+short GET status ◄──────────────────────────────────┘
+        │ proposal_created
+        ▼
+existing Companion delivery → in-host Accept/Reject → Next may mutate scene
+```
+
+Run request 不携带凭据、endpoint、模型或 reasoning；它绑定 generation/revision UUID、Provider ID/version、
+adapter/instance，以及数据处理、可能费用和 Proposal creation 三项确认。同一宿主实例只允许一个非终态
+Run，且已有待决 Proposal 时拒绝新 Run；所有 Proposal 写入还会在事务中原子取得一个 unresolved slot，
+所以 Provider 等待期间的并发外部 Proposal 最多让 Run 安全失败，不会留下两个待审项。状态仅为 `queued | generating | needs_revision |
+proposal_created | failed | interrupted`，携带 `sceneChanged: false`、安全错误或确定性 quality/locality
+findings，不返回 raw draft/错误/推理。Runtime 重启/关闭会从 durable completed/proposed evidence 恢复
+needs-revision 或 Proposal，必要时只用持久化 canonical result 补完 propose，绝不再次调用 Provider；
+只有不确定的非终态 Run 标记 `interrupted`。Retry 必须重新确认并使用新 generation UUID，不能静默重复可能已计费的调用。此组合授权允许 ready 结果进入
+既有 Proposal 审查面，不包含 Accept 或执行授权。详细决策见
+[ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
+
+宿主在非终态期间保留精确 Run identity，并阻止第二次 request、Provider refresh 与并发 Proposal decision；
+普通 Plan/Proposal delivery 不得清除该 identity。首次 ACK 只接受当前 pending request，精确重复为 no-op；
+非活动的新 Plan 安装会使旧 request context 失效，晚到 ACK 不能恢复授权。
+独立到达的 Proposal/status 以 `(revisionRequestId, proposalId)` 复合键在宿主内有界对账，且 request-linked
+Accept 必须再次匹配当前 active Plan 与 diff base；容量压力不会自动替用户 Reject。
+
 首个具体实现 `@operatingline/openai-planner-provider` 使用官方 OpenAI JavaScript/TypeScript SDK 的
 Responses API。构造 provider 时必须给出明确模型；独立 `services/openai-runtime` 还要求
 `OPENAI_API_KEY`，并通过 `pnpm dev:openai` 显式启动。它与默认 `pnpm dev` 是两个 composition root：
@@ -335,6 +371,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0014](../adr/0014-openai-responses-planner-provider.md)。
 类型化 Provider 节点局部重规划见
 [ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
+宿主授权的异步 Replan Run 见
+[ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

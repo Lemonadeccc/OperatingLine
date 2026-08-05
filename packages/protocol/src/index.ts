@@ -2,6 +2,7 @@ export * from './adapter.js';
 export * from './action-arguments.js';
 export * from './catalog.js';
 export * from './companion.js';
+export * from './companion-replan-run.js';
 export * from './diff.js';
 export * from './eval.js';
 export * from './guide.js';

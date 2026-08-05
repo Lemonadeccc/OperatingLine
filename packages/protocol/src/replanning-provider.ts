@@ -145,6 +145,13 @@ export const localReplanFindingCodeSchema = z.enum([
 ]);
 export type LocalReplanFindingCode = z.infer<typeof localReplanFindingCodeSchema>;
 
+export const localReplanFindingSchema = z.strictObject({
+  code: localReplanFindingCodeSchema,
+  message: z.string().min(1),
+  stepIds: uniqueStepIdsSchema,
+});
+export type LocalReplanFinding = z.infer<typeof localReplanFindingSchema>;
+
 export const localReplanLocalityReportSchema = z
   .strictObject({
     policyVersion: z.literal(localReplanScopePolicyVersion),
@@ -158,13 +165,7 @@ export const localReplanLocalityReportSchema = z
     }),
     scopeRootIds: uniqueStepIdsSchema.min(1).max(8),
     valid: z.boolean(),
-    findings: z.array(
-      z.strictObject({
-        code: localReplanFindingCodeSchema,
-        message: z.string().min(1),
-        stepIds: uniqueStepIdsSchema,
-      }),
-    ),
+    findings: z.array(localReplanFindingSchema),
   })
   .superRefine((report, context) => {
     if (report.valid !== (report.findings.length === 0)) {

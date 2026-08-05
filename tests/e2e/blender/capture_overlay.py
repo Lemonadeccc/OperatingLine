@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from queue import Queue
 import uuid
 
 import bpy
@@ -28,6 +29,8 @@ OUTPUT_NAMES = {
     "revision": "guidance-revision-request.png",
     "revision-collapsed": "guidance-revision-collapsed.png",
     "proposal": "guidance-proposal-review.png",
+    "provider-disclosure": "guidance-provider-disclosure.png",
+    "provider-generating": "guidance-provider-generating.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
     "hidden": "guidance-hidden.png",
@@ -67,12 +70,105 @@ factory_pointers = {name: obj.as_pointer() for name, obj in factory_objects.item
 assert bpy.ops.operating_line.start() == {"FINISHED"}
 session = extension.get_session()
 assert session.active_index == -1
+initial_receipts = tuple(session.receipts)
+
+
+class StrictFakeTransport:
+    """Keep visual provider states connected without making network requests."""
+
+    def __init__(self):
+        self.incoming = Queue()
+        self.running = True
+        self.last_delivered_sequence = 0
+        self.replan_run_requests = []
+
+    def start_replan_run(self, request):
+        self.replan_run_requests.append(json.loads(json.dumps(request)))
+
+    def stop(self, *, flush_timeout=0.0):
+        del flush_timeout
+        self.running = False
+
+    def wait_stopped(self, _timeout):
+        return not self.running
 
 
 def assert_factory_objects_preserved():
     for name, obj in factory_objects.items():
         assert bpy.data.objects.get(name) is obj
         assert obj.as_pointer() == factory_pointers[name]
+
+
+def assert_active_session_preserved():
+    assert extension.get_session() is session
+    assert session.active_index == -1
+    assert tuple(session.receipts) == initial_receipts == ()
+
+
+def configure_provider_handoff(*, generating):
+    companion = extension.get_companion()
+    fake_transport = StrictFakeTransport()
+    companion._transport = fake_transport
+    companion.status = "Connected"
+    provider_list = {
+        "contractVersion": "1.0.0",
+        "generationAvailable": True,
+        "providers": [
+            {
+                "contractVersion": "1.0.0",
+                "id": "visual.remote-planner",
+                "version": "1.0.0",
+                "displayName": "Remote Snowman Planner",
+                "description": "Creates one review-only Blender plan proposal.",
+                "availability": {"available": True},
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "remote",
+                    "dataTransmission": "provider_managed",
+                    "credentialManagement": "provider_managed",
+                },
+            }
+        ],
+    }
+    companion.provider_handoff.set_providers(provider_list)
+    companion.select_replan_provider("visual.remote-planner")
+    revision_request_id = str(uuid.uuid4())
+    companion.provider_handoff.revision_submitted(revision_request_id)
+    companion.provider_handoff.revision_acknowledged(revision_request_id)
+    companion.last_revision_request_id = revision_request_id
+    companion.revision_request_status = (
+        f"Request {revision_request_id[:8]} stored in runtime for MCP planner"
+    )
+    if generating:
+        run = companion.begin_replan_run()
+        companion.provider_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "generationRequestId": run["generationRequestId"],
+                "revisionRequestId": revision_request_id,
+                "targetAdapterId": "blender",
+                "targetInstanceId": companion.instance_id,
+                "provider": {
+                    "id": "visual.remote-planner",
+                    "version": "1.0.0",
+                    "displayName": "Remote Snowman Planner",
+                },
+                "status": "generating",
+                "terminal": False,
+                "sceneChanged": False,
+                "proposalId": None,
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-05T12:00:00Z",
+            }
+        )
+        assert len(fake_transport.replan_run_requests) == 1
+        assert companion.provider_handoff.generation_request_id is not None
+        assert companion.provider_handoff.phase == "generating"
+    else:
+        assert companion.provider_handoff.can_run
+        assert not fake_transport.replan_run_requests
+    assert_active_session_preserved()
 
 
 def view3d_context():
@@ -251,6 +347,8 @@ def configure_state():
         assert extension.get_session() is accepted_session
         assert extension.get_companion().proposal_session is not None
         assert not session.receipts
+    elif STATE in {"provider-disclosure", "provider-generating"}:
+        configure_provider_handoff(generating=STATE == "provider-generating")
     elif STATE == "forward":
         for _ in range(9):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
@@ -280,6 +378,8 @@ def configure_state():
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
     assert_factory_objects_preserved()
+    if STATE in {"provider-disclosure", "provider-generating"}:
+        assert_active_session_preserved()
 
 
 def prepare_view():
@@ -312,6 +412,20 @@ def prepare_view():
     print(f"OperatingLine panel invocation result: {sorted(result)}", flush=True)
     assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
     bpy.context.window.cursor_warp(1100, 500)
+    if STATE in {"provider-disclosure", "provider-generating"}:
+        bpy.app.timers.register(scroll_provider_panel, first_interval=0.35)
+    else:
+        bpy.app.timers.register(capture_and_quit, first_interval=0.75)
+    return None
+
+
+def scroll_provider_panel():
+    """Reveal the selected provider disclosure and run state in the real popover."""
+
+    for _ in range(32):
+        bpy.context.window.event_simulate(
+            type="WHEELDOWNMOUSE", value="PRESS", x=1100, y=500
+        )
     bpy.app.timers.register(capture_and_quit, first_interval=0.75)
     return None
 
@@ -321,6 +435,9 @@ def capture_and_quit():
     bpy.ops.screen.screenshot(filepath=str(OUTPUT))
     assert OUTPUT.is_file() and OUTPUT.stat().st_size > 10_000
     assert_guidance_pixels()
+    if STATE in {"provider-disclosure", "provider-generating"}:
+        assert_factory_objects_preserved()
+        assert_active_session_preserved()
     if STATE == "forward":
         shutil.copyfile(OUTPUT, SMOKE_OUTPUT)
     print(f"OperatingLine visual state captured: {OUTPUT.name}", flush=True)
@@ -365,7 +482,14 @@ def assert_guidance_pixels():
         flush=True,
     )
 
-    if STATE in {"initial", "revision", "revision-collapsed", "proposal"}:
+    if STATE in {
+        "initial",
+        "revision",
+        "revision-collapsed",
+        "proposal",
+        "provider-disclosure",
+        "provider-generating",
+    }:
         assert next_step > 0.0003
         assert locked > 0.0001
         assert completed < 0.00003 and back < 0.00003

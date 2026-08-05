@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "generationRequestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "revisionRequestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "targetAdapterId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "targetInstanceId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "provider": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "displayName"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "generating",
+        "needs_revision",
+        "proposal_created",
+        "failed",
+        "interrupted"
+      ]
+    },
+    "terminal": {
+      "type": "boolean"
+    },
+    "sceneChanged": {
+      "type": "boolean",
+      "const": false
+    },
+    "proposalId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "planner_invalid_request",
+                "planner_provider_not_found",
+                "planner_provider_unavailable",
+                "planner_replan_not_supported",
+                "planner_revision_request_not_found",
+                "planner_revision_request_not_pending",
+                "planner_revision_thread_stale",
+                "planner_replan_generation_stale",
+                "planner_replan_submission_invalid",
+                "planner_generation_busy",
+                "planner_generation_conflict",
+                "planner_generation_already_attempted",
+                "planner_generation_timeout",
+                "planner_runtime_stopping",
+                "planner_provider_failed",
+                "planner_output_invalid",
+                "planner_identity_mismatch",
+                "planner_catalog_invalid",
+                "planner_persistence_failed",
+                "planner_internal_failed"
+              ]
+            },
+            "retryMode": {
+              "type": "string",
+              "enum": [
+                "same_request_id",
+                "new_request_id",
+                "never"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "code",
+            "retryMode",
+            "message"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "needsRevision": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "planning": {
+              "type": "object",
+              "properties": {
+                "errorCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "warningCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "severity": {
+                        "type": "string",
+                        "enum": [
+                          "error",
+                          "warning"
+                        ]
+                      },
+                      "message": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "stepIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      },
+                      "phaseIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "severity",
+                      "message",
+                      "stepIds",
+                      "phaseIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "errorCount",
+                "warningCount",
+                "findings"
+              ],
+              "additionalProperties": false
+            },
+            "locality": {
+              "type": "object",
+              "properties": {
+                "valid": {
+                  "type": "boolean"
+                },
+                "findings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "enum": [
+                          "plan_structure_invalid",
+                          "plan_title_changed",
+                          "root_step_changed",
+                          "scope_root_missing",
+                          "scope_root_attachment_changed",
+                          "step_changed_outside_scope",
+                          "step_added_outside_scope",
+                          "step_moved_across_scope",
+                          "no_local_change"
+                        ]
+                      },
+                      "message": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "stepIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "message",
+                      "stepIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "valid",
+                "findings"
+              ],
+              "additionalProperties": false
+            },
+            "planDiffAvailable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "planning",
+            "locality",
+            "planDiffAvailable"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "contractVersion",
+    "generationRequestId",
+    "revisionRequestId",
+    "targetAdapterId",
+    "targetInstanceId",
+    "provider",
+    "status",
+    "terminal",
+    "sceneChanged",
+    "proposalId",
+    "error",
+    "needsRevision",
+    "updatedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/companion-replan-run.json"
+}

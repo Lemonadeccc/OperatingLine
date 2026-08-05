@@ -256,6 +256,110 @@ class OPERATINGLINE_OT_load_older_revision_history(bpy.types.Operator):
         return {"CANCELLED"}
 
 
+class OPERATINGLINE_OT_refresh_replan_providers(bpy.types.Operator):
+    bl_idname = "operating_line.refresh_replan_providers"
+    bl_label = "Refresh Providers"
+    bl_description = "Refresh public provider descriptors from the loopback runtime"
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.refresh_replan_providers()
+        except ValueError as error:
+            companion.provider_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_select_replan_provider(bpy.types.Operator):
+    bl_idname = "operating_line.select_replan_provider"
+    bl_label = "Select Provider"
+    bl_description = "Explicitly select this provider for a future confirmed run"
+
+    provider_id: bpy.props.StringProperty()
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            provider = companion.select_replan_provider(self.provider_id)
+        except ValueError as error:
+            companion.provider_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Selected {provider['displayName']}")
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_run_replan_provider(bpy.types.Operator):
+    bl_idname = "operating_line.run_replan_provider"
+    bl_label = "Confirm Provider Run"
+    bl_description = (
+        "Authorize one provider run; a created proposal still requires Accept or Reject"
+    )
+
+    def invoke(self, context, _event):
+        handoff = _companion().provider_handoff
+        if not handoff.can_run:
+            message = (
+                "Select an available provider after the runtime acknowledges the request"
+            )
+            handoff.message = message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self._confirmation_opened = True
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def draw(self, _context):
+        handoff = _companion().provider_handoff
+        provider = handoff.selected_provider
+        layout = self.layout
+        if provider is None:
+            layout.label(text="No provider selected", icon="ERROR")
+            return
+        layout.label(
+            text=f"Authorize one run with {provider['displayName']}?",
+            icon="QUESTION",
+        )
+        location = provider["dataHandling"]["executionLocation"]
+        if location == "remote":
+            layout.label(
+                text="Data is sent to the selected remote provider", icon="URL"
+            )
+            layout.label(text="Sends your message, base Plan, and node references")
+            layout.label(text="Also sends ActionCatalog and latest companion state")
+            layout.label(text="The provider may charge for this call")
+            layout.label(text="OperatingLine cannot estimate provider charges")
+        else:
+            layout.label(text="Local provider: no provider data transmission", icon="HOME")
+            layout.label(text="The provider description may define local execution costs")
+            layout.label(text="OperatingLine cannot estimate provider charges")
+        layout.separator()
+        layout.label(text="The runtime may create one review proposal")
+        layout.label(text="It will not Accept, execute, or change the scene")
+        layout.label(text="Retrying opens a new confirmation and uses a new run ID")
+
+    def execute(self, _context):
+        companion = _companion()
+        if not getattr(self, "_confirmation_opened", False):
+            message = "Open and confirm the provider authorization dialog first"
+            companion.provider_handoff.message = message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self._confirmation_opened = False
+        try:
+            request = companion.begin_replan_run()
+        except ValueError as error:
+            companion.provider_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Provider run {request['generationRequestId'][:8]} queued; scene unchanged",
+        )
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
     bl_idname = "operating_line.toggle_overlay"
     bl_label = "Show or Hide Guidance"
@@ -292,6 +396,9 @@ CLASSES = (
     OPERATINGLINE_OT_clear_revision_request,
     OPERATINGLINE_OT_submit_revision_request,
     OPERATINGLINE_OT_load_older_revision_history,
+    OPERATINGLINE_OT_refresh_replan_providers,
+    OPERATINGLINE_OT_select_replan_provider,
+    OPERATINGLINE_OT_run_replan_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_back,

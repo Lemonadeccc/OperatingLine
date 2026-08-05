@@ -52,15 +52,21 @@
       结构化节点引用、逐条移除、独立修订正文、线性历史、Plan diff 和 Accept/Reject。引用去重，
       跨基线引用会显式失败而不丢失草稿；折叠或 `Hide Guidance` 不丢失状态。发送只排队，
       不会自动调用 provider 或修改场景。
+- [x] 宿主授权的异步 Replan Run：Blender 在 Runtime acknowledgement 后列出无凭据 Provider
+      descriptor，保持默认不选择，并在每次调用或重试前显示数据传输/可能费用披露和原生确认 dialog。
+      Orchestrator 持久化授权后立即返回 `202`，后台复用严格 provider generation 与 canonical propose；
+      Blender 只做短状态轮询。单实例 Run/待决 Proposal 互斥，失败或重启不自动重试；所有生成状态和
+      Proposal preview 都不改场景或 active Session，仍需 Accept/Reject，`Next` 才执行动作。
 
 ## 后续里程碑
 
 - [ ] 更大的人工 Eval：扩展当前雪人和机器人基线，建立人工标注的跨目标数据集、语义验收 rubric 与
       真实 provider 对照评测。确定性 packet、JSON 输出、严格 Schema、locality 和质量门都不能写成
       “模型已经理解任意目标”；同进程插件也不是强安全隔离。
-- [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化
-      provider local replan 和完整 Proposal 审批，但仍是显式异步工具链；尚无流式助手回复、provider 自动
-      选择/调用、费用与数据发送授权 UI，或基于语义置信度的自动重规划。
+- [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化 provider
+      local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
+      provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、
+      Proposal 审批和场景执行门禁。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
 - [ ] 骨骼与动画深化：在当前四骨骼刚性绑定和三段姿态关键帧之外，扩展可审查 rig、蒙皮/权重、动画

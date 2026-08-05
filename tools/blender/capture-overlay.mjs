@@ -34,6 +34,8 @@ try {
     'revision',
     'revision-collapsed',
     'proposal',
+    'provider-disclosure',
+    'provider-generating',
     'forward',
     'back',
     'hidden',
@@ -44,6 +46,7 @@ try {
       blender,
       [
         baseFile,
+        '--enable-event-simulate',
         '--window-geometry',
         '80',
         '80',

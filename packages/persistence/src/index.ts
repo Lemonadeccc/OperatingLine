@@ -72,6 +72,17 @@ export interface StoredGuideRevisionThreadTurn {
   decision: unknown | null;
 }
 
+export interface CompanionReplanRunInput {
+  generationRequestId: string;
+  revisionRequestId: string;
+  targetAdapterId: string;
+  targetInstanceId: string;
+  status: string;
+  updatedAt: string;
+}
+
+export type RecordCompanionReplanRunResult = 'accepted' | 'duplicate' | 'conflict';
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -125,6 +136,15 @@ export interface OperatingLineDatabase {
     limit: number,
   ): StoredGuideRevisionThreadTurn[];
   listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
+  recordCompanionReplanRun<T extends CompanionReplanRunInput>(
+    run: T,
+  ): RecordCompanionReplanRunResult;
+  getCompanionReplanRun(generationRequestId: string): unknown | null;
+  transitionCompanionReplanRun<T extends CompanionReplanRunInput>(
+    run: T,
+    expectedStatuses: readonly string[],
+  ): boolean;
+  listNonterminalCompanionReplanRuns(): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -289,6 +309,33 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (7, datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS companion_replan_runs (
+      generation_request_id TEXT PRIMARY KEY,
+      revision_request_id TEXT NOT NULL,
+      target_adapter_id TEXT NOT NULL,
+      target_instance_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'queued',
+          'generating',
+          'needs_revision',
+          'proposal_created',
+          'failed',
+          'interrupted'
+        )
+      ),
+      updated_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      FOREIGN KEY (revision_request_id) REFERENCES guide_revision_requests(request_id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS companion_replan_runs_active_target
+    ON companion_replan_runs (target_adapter_id, target_instance_id)
+    WHERE status IN ('queued', 'generating');
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (8, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -319,26 +366,36 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     ) VALUES (?, ?, ?, ?, ?, ?)
   `);
   const findPendingGuideProposal = sqlite.prepare(`
-    WITH latest AS (
-      SELECT proposal_id, payload
-      FROM guide_proposals
-      WHERE target_adapter_id = ?
-        AND (
-          json_extract(payload, '$.targetInstanceId') IS NULL
-          OR json_extract(payload, '$.targetInstanceId') = ?
-        )
-      ORDER BY rowid DESC
-      LIMIT 1
-    )
-    SELECT latest.payload
-    FROM latest
-    WHERE NOT EXISTS (
+    SELECT proposal.payload
+    FROM guide_proposals AS proposal
+    WHERE proposal.target_adapter_id = ?
+      AND (
+        json_extract(proposal.payload, '$.targetInstanceId') IS NULL
+        OR json_extract(proposal.payload, '$.targetInstanceId') = ?
+      )
+      AND NOT EXISTS (
       SELECT 1
       FROM guide_proposal_decisions AS decision
-      WHERE decision.proposal_id = latest.proposal_id
+      WHERE decision.proposal_id = proposal.proposal_id
         AND decision.adapter_id = ?
         AND decision.instance_id = ?
-    )
+      )
+    ORDER BY proposal.rowid DESC
+    LIMIT 1
+  `);
+  const findAnyUnresolvedTargetedGuideProposalForAdapter = sqlite.prepare(`
+    SELECT proposal.proposal_id
+    FROM guide_proposals AS proposal
+    WHERE proposal.target_adapter_id = ?
+      AND json_extract(proposal.payload, '$.targetInstanceId') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM guide_proposal_decisions AS decision
+        WHERE decision.proposal_id = proposal.proposal_id
+          AND decision.adapter_id = proposal.target_adapter_id
+          AND decision.instance_id = json_extract(proposal.payload, '$.targetInstanceId')
+      )
+    LIMIT 1
   `);
   const findRevisionRequest = sqlite.prepare(`
     SELECT adapter_id, instance_id, base_plan_id, base_revision, payload
@@ -468,6 +525,41 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
   const listLatestStates = sqlite.prepare(`
     SELECT payload FROM companion_latest_states ORDER BY adapter_id, instance_id
   `);
+  const findCompanionReplanRun = sqlite.prepare(`
+    SELECT status, payload
+    FROM companion_replan_runs
+    WHERE generation_request_id = ?
+  `);
+  const findActiveCompanionReplanRun = sqlite.prepare(`
+    SELECT generation_request_id
+    FROM companion_replan_runs
+    WHERE target_adapter_id = ?
+      AND target_instance_id = ?
+      AND status IN ('queued', 'generating')
+    LIMIT 1
+  `);
+  const insertCompanionReplanRun = sqlite.prepare(`
+    INSERT INTO companion_replan_runs (
+      generation_request_id,
+      revision_request_id,
+      target_adapter_id,
+      target_instance_id,
+      status,
+      updated_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateCompanionReplanRun = sqlite.prepare(`
+    UPDATE companion_replan_runs
+    SET status = ?, updated_at = ?, payload = ?
+    WHERE generation_request_id = ? AND status = ?
+  `);
+  const listNonterminalCompanionReplanRunRows = sqlite.prepare(`
+    SELECT payload
+    FROM companion_replan_runs
+    WHERE status IN ('queued', 'generating')
+    ORDER BY rowid
+  `);
 
   const parseExecutionEventRow = (row: unknown): StoredExecutionEvent => {
     const candidate = row as {
@@ -552,6 +644,20 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
+        const unresolvedProposal =
+          proposal.targetInstanceId === undefined
+            ? findAnyUnresolvedTargetedGuideProposalForAdapter.get(proposal.targetAdapterId)
+            : findPendingGuideProposal.get(
+                proposal.targetAdapterId,
+                proposal.targetInstanceId,
+                proposal.targetAdapterId,
+                proposal.targetInstanceId,
+              );
+        if (unresolvedProposal !== undefined) {
+          throw new Error(
+            `Guide target already has an unresolved proposal: ${proposal.targetAdapterId}/${proposal.targetInstanceId ?? '*'}`,
+          );
+        }
         insertGuideProposal.run(
           proposal.proposalId,
           proposal.targetAdapterId,
@@ -576,12 +682,26 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
-        const request = findRevisionRequest.get(revisionRequestId);
+        const request = findRevisionRequest.get(revisionRequestId) as
+          { adapter_id: string; instance_id: string } | undefined;
         if (request === undefined) {
           throw new Error(`Unknown guide revision request: ${revisionRequestId}`);
         }
         if (findRevisionRequestProposal.get(revisionRequestId) !== undefined) {
           throw new Error(`Guide revision request already has a proposal: ${revisionRequestId}`);
+        }
+        const targetInstanceId = proposal.targetInstanceId ?? request.instance_id;
+        if (
+          findPendingGuideProposal.get(
+            proposal.targetAdapterId,
+            targetInstanceId,
+            proposal.targetAdapterId,
+            targetInstanceId,
+          ) !== undefined
+        ) {
+          throw new Error(
+            `Guide target already has an unresolved proposal: ${proposal.targetAdapterId}/${targetInstanceId}`,
+          );
         }
         insertGuideProposal.run(
           proposal.proposalId,
@@ -853,6 +973,99 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           }
           return JSON.parse(payload) as unknown;
         });
+    },
+    recordCompanionReplanRun(run) {
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionReplanRun.get(run.generationRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.payload === payload ? 'duplicate' : 'conflict';
+        }
+        const active = findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId);
+        if (active !== undefined) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+        insertCompanionReplanRun.run(
+          run.generationRequestId,
+          run.revisionRequestId,
+          run.targetAdapterId,
+          run.targetInstanceId,
+          run.status,
+          run.updatedAt,
+          payload,
+        );
+        insertEvent.run(
+          `companion-replan-run:${run.generationRequestId}:authorized`,
+          'companion.replan-run.authorized',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getCompanionReplanRun(generationRequestId) {
+      const row = findCompanionReplanRun.get(generationRequestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid companion replan run payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    transitionCompanionReplanRun(run, expectedStatuses) {
+      if (expectedStatuses.length === 0) {
+        throw new Error('Companion replan run transition requires an expected status');
+      }
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionReplanRun.get(run.generationRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing === undefined || !expectedStatuses.includes(existing.status)) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const updated = updateCompanionReplanRun.run(
+          run.status,
+          run.updatedAt,
+          payload,
+          run.generationRequestId,
+          existing.status,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Companion replan run transition lost its expected state');
+        }
+        insertEvent.run(
+          `companion-replan-run:${run.generationRequestId}:${run.status}`,
+          'companion.replan-run.transitioned',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return true;
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    listNonterminalCompanionReplanRuns() {
+      return listNonterminalCompanionReplanRunRows.all().map((row) => {
+        const payload = (row as { payload?: unknown }).payload;
+        if (typeof payload !== 'string') {
+          throw new Error('SQLite returned an invalid companion replan run payload');
+        }
+        return JSON.parse(payload) as unknown;
+      });
     },
     recordCompanionState(report) {
       const payload = canonicalJson(report);
