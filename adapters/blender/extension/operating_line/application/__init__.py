@@ -8,6 +8,7 @@ from .guidance import (
     step_state,
 )
 from .session import ActionReceipt, DemoSession
+from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import ReplanRunState, validate_provider_list
 from .revision_review import (
     RevisionLineage,
@@ -23,6 +24,8 @@ __all__ = (
     "DemoSession",
     "GuidanceState",
     "GuidanceStep",
+    "GoalRequestState",
+    "build_goal_request",
     "RevisionLineage",
     "ReplanRunState",
     "lineage_from_proposal",

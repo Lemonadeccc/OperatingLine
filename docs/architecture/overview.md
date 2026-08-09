@@ -57,6 +57,12 @@ PlannerProvider
   ├─ receives an AbortSignal and returns an untrusted JSON draft
   └─ strict validation + quality evidence, never auto-proposes
 
+GuideGoalRequest
+  ├─ immutable host-authored goal + reserved Plan ID
+  ├─ exact adapter + instance + ActionCatalog version
+  ├─ pending MCP discovery + exact PlanningPromptPacket lookup
+  └─ linked instance-scoped Proposal, never automatic execution
+
 GuideRevisionRequest
   ├─ requestId + adapterId + instanceId + catalogVersion
   ├─ complete immutable base Plan
@@ -159,6 +165,17 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 同一实例对同一 proposal 的同值重试是 duplicate，相反决策是 conflict；另一个宿主实例拥有
 独立的审查决定。提案和决策都以完整版本化 payload 追加写入数据库，Orchestrator 重启后仍可
 恢复尚未决定的最新提案与 Plan revision 水位。
+
+宿主还可以从没有初始 AI 计划的状态提交不可变 `GuideGoalRequest`。请求只记录用户目标、预留 Plan ID、
+精确 adapter/instance/catalog 和时间，不选择或调用 Provider。外部 MCP 客户端通过
+`operatingline.goal.requests.list` 发现 pending 请求，再用 `operatingline.goal.prompt.get` 取得现有
+供应商无关 PlanningPromptPacket。客户端先 evaluate 完整 draft，再把 draft 与 `goalRequestId` 交给
+既有 `operatingline.guide.propose`；Orchestrator 核对请求身份并把 Proposal 只投递给原实例。请求提交、
+packet 获取、规划、Proposal 到达和 Reject 都不改变宿主场景；Accept 只安装，`Next` 才可能执行动作。
+同一实例只保留一个 pending goal request 或非终态 Replan Run 工作槽；未决 Proposal 继续占用独立的
+宿主审查槽。Goal 来源规划事件在 packet 外层携带 request/instance 来源，实例范围 Eval 不接受无来源或
+其他实例的 context、prompt、quality 证据。
+完整边界见 [ADR 0020](../adr/0020-host-initiated-goal-to-guidance.md)。
 
 宿主还可以把活动树或待审树的节点引用提交为不可变 GuideRevisionRequest。Orchestrator 核对完整
 base Plan、精确目录版本与每个节点编号，并通过 MCP 暴露待处理请求。外部模型客户端只能返回相同

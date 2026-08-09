@@ -40,6 +40,11 @@
 - [x] 供应商无关 Planner Packet：MCP Prompt、MCP Tool 与 HTTP 复用同一版本化构建器，提供一致的
       PlanningContext、Proposal 草案 Schema 和 evaluate→propose 规则；生成事件进入 Eval，不依赖
       已弃用的 MCP Sampling，也不在 Orchestrator 保存模型密钥。
+- [x] 宿主发起 Goal-to-Guidance：Blender 可从 Sidebar 提交不可变自然语言目标；MCP 客户端通过
+      `goal.requests.list` 与 `goal.prompt.get` 取得精确 packet，再把完整 draft 与 `goalRequestId` 交给
+      既有 `guide.propose`。请求和 Proposal 只绑定原宿主实例，默认不自动调用 Provider；Accept 前不
+      替换 Session 或修改场景。Synthetic Canvas contract 与真实 Blender 跨进程闭环均已验证。见
+      [ADR 0020](adr/0020-host-initiated-goal-to-guidance.md)。
 - [x] 显式 Planner Provider 契约与运行时边界：嵌入方可注入进程内插件，MCP/HTTP 可列出并明确选择
       provider；核心只发送严格 Planner Packet，验证返回草案、identity、嵌套 ActionCatalog 参数和
       结构质量，固定返回 `proposalCreated: false`，并记录可重放 requested/completed/failed 证据。

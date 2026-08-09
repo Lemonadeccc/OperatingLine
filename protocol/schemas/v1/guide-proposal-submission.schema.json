@@ -2,6 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "goalRequestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
     "targetAdapterId": {
       "type": "string",
       "minLength": 1
@@ -411,5 +416,16 @@
     "plan"
   ],
   "additionalProperties": false,
+  "if": {
+    "required": [
+      "goalRequestId"
+    ]
+  },
+  "then": {
+    "required": [
+      "catalogVersion",
+      "planning"
+    ]
+  },
   "$id": "https://operatingline.dev/schema/v1/guide-proposal-submission.json"
 }

@@ -5,6 +5,7 @@
 当前需求不需要给 Blender 仓库提 PR。Blender Extension 可以通过公开 API 注册：
 
 - `Panel` / `UILayout`：Sidebar 任务树和 Start、Next、Back。
+- `Panel` / `UILayout`：可折叠 Goal-to-Guidance 输入、异步请求状态和初始 Proposal 审批入口。
 - `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
 - `Panel` / `UILayout`：可折叠 Revision Workspace，包含活动树/待审树节点 `Ref`、逐条移除、
   独立修订正文、Provider 选择/披露、异步 Run 状态、历史、Plan diff 与 Accept/Reject。
@@ -53,8 +54,9 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 
 ## 主线程规则
 
-当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权从回环 Orchestrator
-短轮询 GuidePlan/GuideProposal、Provider descriptor 和异步 Replan Run 状态，并把 JSON 放入队列。
+当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权向回环 Orchestrator 提交初始
+GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor 和异步 Replan Run 状态，再把
+JSON 放入队列。
 长达 120 秒的 Provider 调用运行在 Orchestrator 后台，不占用 Blender 的短请求线程。`bpy.app.timers` 在 Blender 主线程校验
 提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
 不修改场景，只从当前会话派生最多四个相邻步骤，并为
@@ -73,13 +75,28 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 `guide.publish` 路径运行中收到新计划不会触发场景回退。若当前会话仍持有 action receipt，更新
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
+`Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
+`blender + instanceId + ActionCatalog 1.3.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
+error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
+Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，外部 MCP 客户端仍须
+显式 list → prompt.get → evaluate → guide.propose。
+
+请求关联 Proposal 必须带匹配的 `goalRequestId`、当前 `instanceId`、目录版本和预留 Plan ID，且不能
+同时伪装成 revision Proposal。Blender 在主线程核对后才复用既有只读 Proposal 树；错误或无关 Proposal
+不会清除 active goal。Accept/Reject 只在精确关联的审查结束后清除该请求状态。请求提交、重试、预览和
+Reject 保持活动 Session、receipt、默认 Cube/Camera/Light 与场景对象不变。
+
 `guide.propose` 路径始终进入独立审查状态：Blender 完整验证计划结构、动作允许列表与参数，
 只创建不执行的预览 Session，并在 Revision Workspace 显示 proposal ID 对应的计划标题、
 revision、目标宿主、Plan diff、只读任务树以及 Accept/Reject。存在提案时 Start/Next 在 UI 与
 Operator 两层都被门禁，Back 保留，
 以便活动会话回到起点。Accept 只有在 receipt 为空时才原子替换活动 Session，仍不会执行第一个
-action；Reject 只清除预览。两种决策由网络线程异步回传且按宿主实例幂等。Disconnect 会取消
-本地 pending 更新和待审提案。
+action；Reject 只清除预览。两种决策由主线程各生成一次稳定 payload，由网络线程异步重试且按宿主
+实例幂等；只有 `accepted/duplicate` acknowledgement 回到主线程后才清除 pending 决策。连接替换保留
+待审 Proposal、Goal 关联和同一决策身份；校验失败的 Proposal 只在当前连接隔离并报告，不会回传人工
+Reject。普通 UI Disconnect 只暂停网络并保留待审 Proposal、Goal 关联和活动修订草稿；Extension
+unregister 才显式清理这些进程内状态。
 
 活动树和待审树的每个节点都提供 `Ref`。引用以结构化行显示，不插入或篡改用户正文；重复点击
 去重，每条可独立移除。同一草稿最多引用 8 个节点，且不能混合两个 Plan 基线；尝试引用其他

@@ -16,6 +16,10 @@ import {
   evalExportRequestSchema,
   guidePlanSchema,
   guidePlanDiffSchema,
+  guideGoalPromptRequestSchema,
+  guideGoalRequestAcknowledgementSchema,
+  guideGoalRequestListSchema,
+  guideGoalRequestSchema,
   guideProposalDecisionSchema,
   guideProposalSchema,
   guideProposalSubmissionSchema,
@@ -54,6 +58,26 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'guide-goal-request.schema.json',
+    'https://operatingline.dev/schema/v1/guide-goal-request.json',
+    guideGoalRequestSchema,
+  ],
+  [
+    'guide-goal-request-acknowledgement.schema.json',
+    'https://operatingline.dev/schema/v1/guide-goal-request-acknowledgement.json',
+    guideGoalRequestAcknowledgementSchema,
+  ],
+  [
+    'guide-goal-request-list.schema.json',
+    'https://operatingline.dev/schema/v1/guide-goal-request-list.json',
+    guideGoalRequestListSchema,
+  ],
+  [
+    'guide-goal-prompt-request.schema.json',
+    'https://operatingline.dev/schema/v1/guide-goal-prompt-request.json',
+    guideGoalPromptRequestSchema,
+  ],
   [
     'human-eval-suite.schema.json',
     'https://operatingline.dev/schema/v1/human-eval-suite.json',

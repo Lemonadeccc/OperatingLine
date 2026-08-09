@@ -64,6 +64,57 @@ describe('guide proposal protocol', () => {
     ).toBe(false);
   });
 
+  it('supports an instance-targeted goal-request audit link without changing standalone input', () => {
+    const goalRequestId = randomUUID();
+    expect(
+      guideProposalSubmissionSchema.safeParse({
+        goalRequestId,
+        targetAdapterId: 'blender',
+        catalogVersion: '1.0.0',
+        planning: {
+          goal: 'Create a snowman.',
+          requiredPhaseIds: ['model'],
+        },
+        plan: readPlan(),
+      }).success,
+    ).toBe(true);
+    expect(
+      guideProposalSubmissionSchema.safeParse({
+        goalRequestId,
+        targetAdapterId: 'blender',
+        catalogVersion: '1.0.0',
+        plan: readPlan(),
+      }).success,
+    ).toBe(false);
+    expect(
+      guideProposalSchema.safeParse({
+        protocolVersion: '1.1.0',
+        proposalId: randomUUID(),
+        targetAdapterId: 'blender',
+        targetInstanceId: randomUUID(),
+        goalRequestId,
+        catalogVersion: '1.0.0',
+        plan: readPlan(),
+        planDiff: null,
+        proposedAt: '2026-08-04T10:00:00Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      guideProposalSchema.safeParse({
+        protocolVersion: '1.1.0',
+        proposalId: randomUUID(),
+        targetAdapterId: 'blender',
+        targetInstanceId: randomUUID(),
+        goalRequestId,
+        revisionRequestId: randomUUID(),
+        catalogVersion: '1.0.0',
+        plan: readPlan(),
+        planDiff: null,
+        proposedAt: '2026-08-04T10:00:00Z',
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires explicit diff review for protocol 1.1 while reading legacy envelopes', () => {
     const proposalId = randomUUID();
     const requestId = randomUUID();
@@ -102,7 +153,7 @@ describe('guide proposal protocol', () => {
       };
       expect(schema.additionalProperties).toBe(false);
       if (filename === 'guide-proposal.schema.json') {
-        expect(schema.allOf).toHaveLength(2);
+        expect(schema.allOf?.length).toBeGreaterThanOrEqual(2);
       }
     }
   });

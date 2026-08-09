@@ -4,8 +4,9 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 > 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
-> 计划投递/状态回传闭环已可运行；AI/MCP 客户端还可以提交待审 GuideProposal，由用户在
-> Blender 内预览任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
+> 计划投递/状态回传闭环已可运行；用户现在可以直接在 Blender 的 `Goal to Guidance` 输入目标，
+> 再由 Codex、Claude 或其他 MCP 客户端发现不可变请求、取得精确 Planner Packet，并提交只返回该
+> Blender 实例的待审 GuideProposal。用户在 Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
 > Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
@@ -69,6 +70,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `semanticCapabilities` 的目录生成 packet `1.1.0` 并要求具体需求覆盖链；历史目录继续生成和解析
   packet `1.0.0`。客户端
   选择自己的模型和发送授权；Orchestrator 不读取模型 API Key，也不使用已弃用的 MCP Sampling。
+- **宿主发起 Goal-to-Guidance**：Blender 原生 Sidebar 可提交自然语言目标；Runtime 把
+  `adapter + instance + catalog + goal + planId` 保存为不可变 pending request。Codex、Claude 或其他
+  MCP 客户端通过 `operatingline.goal.requests.list` 发现请求、用
+  `operatingline.goal.prompt.get` 取得同一 Planner Packet，evaluate 完整 draft 后把它与
+  `goalRequestId` 交给既有 `operatingline.guide.propose`。Proposal 只投递给原实例，仍须在 Blender
+  Accept/Reject；请求、packet、规划、预览和 Reject 都不改场景。默认 Runtime 不自动调用 Provider。
 - **显式 Planner Provider 边界**：嵌入 Orchestrator 的调用方可通过
   `@operatingline/planner-provider-sdk` 注入一个或多个进程内 provider，再由
   `operatingline.planner.providers.list` 与 `operatingline.planner.generate` 显式选择并调用。
@@ -331,8 +338,18 @@ pnpm dev
 2. `Runtime URL` 填写 `http://127.0.0.1:43123`。
 3. `Bearer token` 填写同一个 Token；该字段使用 `SKIP_SAVE`，不会写入 `.blend`。
 4. 点击 `Connect`。连接成功后，Extension 会保留当前离线计划，并只拉取 ID/revision 更新的计划。
-5. 把 Codex、Claude 或其他 MCP Client 连接到 `http://127.0.0.1:43123/mcp`。AI 生成的计划
-   可由用户选择 `operatingline.plan_and_propose` MCP Prompt，或让模型调用
+5. 把 Codex、Claude 或其他 MCP Client 连接到 `http://127.0.0.1:43123/mcp`。推荐从 Blender 的
+   `Goal to Guidance` 输入目标并点击 `Create Guidance`。MCP 客户端先调用
+   `operatingline.goal.requests.list({ targetAdapterId: "blender" })`，再以返回的 `requestId` 调用
+   `operatingline.goal.prompt.get`。根据 packet 生成完整 draft，调用 `operatingline.planning.evaluate`
+   并解决全部 error 后，把完整 draft 原样传给 `operatingline.guide.propose`，只额外加入同一个
+   `goalRequestId`。Runtime 会核对 adapter、catalog、Plan ID 和 planning goal，并把 Proposal 只投递给
+   发起请求的 Blender 实例。Blender 显示完整只读树；`Accept Plan` 只安装，`Start` / `Next` 才可能
+   修改场景。普通 Disconnect/Connect、连接替换或决策响应丢失都会保留审查并重放同一个决策 ID，
+   不会把重连伪装成人工 Reject；永久目标提交冲突会停止该请求的当前自动重试，但 Companion 仍继续
+   轮询可审查的 Proposal。
+
+   客户端也可以不从宿主请求开始，直接选择 `operatingline.plan_and_propose` MCP Prompt，或调用
    `operatingline.planning.prompt.get`，传入目标宿主、自然语言 `goal` 和稳定 `planId`；没有这些
    客户端能力时仍可直接调用 `operatingline.planning.context`。根据返回的精确 catalog、
    `planningPhases`、`semanticCapabilities`、`recommendedRevision` 和响应 Schema 构造完整
@@ -352,6 +369,7 @@ pnpm dev
    `operatingline.guide.propose`。错误对象的 `retryMode` 会明确要求复用原 ID、换新 ID 或不要重试；
    provider 已开始后的失败、超时或进程中断不会自动重试，显式重试需使用新的 UUID。默认 `pnpm dev`
    standalone 没有配置 provider，因此列表为空且不会调用模型。
+
 6. 若要修改某个局部节点，在活动树或待审树点击 `Ref`，在 `Revision request` 中描述变化并发送。
    MCP 客户端先调用 `operatingline.replan.requests.list` 读取 pending request。Provider-free 客户端可用
    `operatingline.replan.prompt.get` 取得独立的类型化 packet，自行生成完整更高 revision，再直接调用
@@ -379,6 +397,18 @@ pnpm dev
    `snapshotUpperSequence`。继续分页时必须同时提交这两个值，并把上一页 `nextAfterSequence` 作为新的
    `afterSequence`；这样翻页期间追加的事件不会进入同一快照。导出未自动脱敏，分享或用于训练前必须
    检查目标文本、修订消息、动作参数、观察和错误详情。
+
+初始 Goal-to-Guidance 的权限边界：
+
+| 操作                                | 调用 provider/可能计费 | 创建 Proposal | 安装或执行计划 |
+| ----------------------------------- | ---------------------- | ------------- | -------------- |
+| Blender `Create Guidance`           | 否                     | 否            | 否             |
+| `goal.requests.list` / `prompt.get` | 否                     | 否            | 否             |
+| 客户端自己的模型调用                | 由客户端决定           | 否            | 否             |
+| `planning.evaluate`                 | 否                     | 否            | 否             |
+| `guide.propose` + `goalRequestId`   | 否                     | 是            | 否             |
+| Blender `Accept Plan`               | 否                     | 审批既有提案  | 只安装         |
+| Blender `Start` / `Next`            | 否                     | 否            | 用户显式执行   |
 
 局部重规划的权限边界：
 
@@ -464,8 +494,9 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    Proposal，输入区会显示将继续的 thread 与下一 turn。
 9. `Revision history` 显示每轮请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
    `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
-10. `Connect`/`Disconnect` 控制本地实时 Companion；Disconnect 会取消尚未安装的远端计划更新
-    和本地待审提案。
+10. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
+    `guide.publish` 更新，但保留待审 Proposal、Goal 关联、活动修订草稿和待确认的精确决策，供下次
+    Connect 恢复。Extension 卸载/重载才清理这些进程内状态。
 
 Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形。当前对象和世界坐标锚点会
 绘制真实目标线；`operator` 锚点只显示操作 ID 或 `menuPath` 语义路径，并明确标记
@@ -495,8 +526,8 @@ revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
 自动回退场景。该受信任更新会显示为 pending，用户 Back 到起点后才会安装。`guide.propose`
-始终进入独立人工审批，不会自动安装；Disconnect 会取消本地 pending/待审状态。非法协议版本、
-非允许列表动作、非回环 URL、超大响应和过期/冲突状态报告都会显式失败。
+始终进入独立人工审批，不会自动安装；普通 Disconnect 保留人工审批状态，Extension 卸载/重载才
+清理它。非法协议版本、非允许列表动作、非回环 URL、超大响应和过期/冲突状态报告都会显式失败。
 
 ## 与现有 Blender MCP 并存
 
@@ -577,15 +608,17 @@ pnpm package:blender
 Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 320 PNG、隔离 Scene，
 以及 15 步完整
 前进/回退。`pnpm test:blender:companion`
-会启动真实 Orchestrator 进程和 Blender，经过 MCP 提交初版提案、Blender 节点引用与修订请求、
+会启动真实 Orchestrator 进程和 Blender，经过 Blender 提交初始目标、MCP pending discovery、精确
+Planner Packet、evaluate、实例定向初版 Proposal、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会为十个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
-Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-revision-request.png`、
+`pnpm test:blender:visual` 会为十一个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-goal-request.png`、`guidance-revision-request.png`、
 `guidance-revision-collapsed.png`、`guidance-proposal-review.png`、
 `guidance-provider-disclosure.png`、`guidance-provider-generating.png`、`guidance-mid-forward.png`、
 `guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
+宿主目标请求与 awaiting-planner 状态、
 节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、远端 Provider 数据/费用披露、异步 generating 状态与 Run ID、修订历史与接受/拒绝控件、红色 Back/绿色
 Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
 
@@ -605,6 +638,7 @@ OPERATINGLINE_ACCESS_TOKEN=development-token OPERATINGLINE_PORT=43123 pnpm dev
 `operatingline.health`、`operatingline.adapters.list`、`operatingline.companions.list`、
 `operatingline.action_catalog.get`、`operatingline.planning.context`、
 `operatingline.planning.evaluate`、`operatingline.planning.prompt.get`、
+`operatingline.goal.requests.list`、`operatingline.goal.prompt.get`、
 `operatingline.planner.providers.list`、`operatingline.planner.generate`、
 `operatingline.replan.providers.list`、`operatingline.replan.requests.list`、
 `operatingline.replan.prompt.get`、`operatingline.replan.generate`、
@@ -626,7 +660,7 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 ## 路线图与当前边界
 
-已完成的是协议、Orchestrator 发布/投递/状态端、持久化 Proposal/Decision 与 Blender 内人工
+已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision 与 Blender 内人工
 审批、Blender 内引导与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环，以及受限的
 现有 MCP Bridge。当前仍未完成：
 

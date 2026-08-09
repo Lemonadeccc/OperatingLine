@@ -51,6 +51,11 @@ def _draw_wrapped_text(layout, value, *, icon: str | None = None) -> None:
             layout.label(text=line)
 
 
+def draw_wrapped_text(layout, value, *, icon: str | None = None) -> None:
+    """Draw wrapped text consistently across narrow Sidebar surfaces."""
+    _draw_wrapped_text(layout, value, icon=icon)
+
+
 def _reference_button(row, companion, *, scope: str, node_id: str):
     referenced = companion.has_revision_reference(scope, node_id)
     button = row.row(align=True)
@@ -273,6 +278,7 @@ def _draw_revision_request(layout, context, companion) -> None:
     send = composer.row()
     send.enabled = (
         companion.connected
+        and not companion.goal_request.active
         and not companion.provider_handoff.active
         and bool(references)
         and bool(context.window_manager.operating_line_revision_message.strip())
@@ -291,6 +297,12 @@ def _draw_revision_request(layout, context, companion) -> None:
         _draw_wrapped_text(
             composer,
             "Wait for the active provider run before sending another request.",
+            icon="TIME",
+        )
+    elif companion.goal_request.active:
+        _draw_wrapped_text(
+            composer,
+            "Wait for the active goal request and proposal review before sending a revision.",
             icon="TIME",
         )
     _draw_wrapped_text(

@@ -220,6 +220,62 @@ function removeProposalEvidence(
 }
 
 describe('asynchronous companion replan runs', () => {
+  it('shares the durable instance work slot with pending host goals in both creation orders', async () => {
+    let releaseProvider!: () => void;
+    const providerGate = new Promise<void>((resolveGate) => {
+      releaseProvider = resolveGate;
+    });
+    const fakeProvider = provider(async ({ packet }) => {
+      await providerGate;
+      return validDraft(packet);
+    });
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      plannerProviders: [fakeProvider],
+    });
+    const submitGoal = (instanceId: string, suffix: string) =>
+      fetch(`${runtime.baseUrl}/api/v1/companion/goal-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          protocolVersion: '1.1.0',
+          requestId: randomUUID(),
+          adapterId: 'blender',
+          catalogVersion: blenderActionCatalog.catalogVersion,
+          instanceId,
+          goal: `Create the ${suffix} host guide.`,
+          planId: `work-slot-${suffix}`,
+          occurredAt: new Date().toISOString(),
+        }),
+      });
+
+    try {
+      const goalFirst = await submitRevision(runtime);
+      expect((await submitGoal(goalFirst.instanceId, 'goal-first')).status).toBe(200);
+      const blockedRun = await createRun(
+        runtime,
+        runRequest(goalFirst.revisionRequestId, goalFirst.instanceId),
+      );
+      expect(blockedRun.status).toBe(409);
+      await expect(blockedRun.json()).resolves.toMatchObject({ error: 'replan_run_conflict' });
+
+      const runFirst = await submitRevision(runtime);
+      const acceptedRequest = runRequest(runFirst.revisionRequestId, runFirst.instanceId);
+      const acceptedRun = await createRun(runtime, acceptedRequest);
+      expect(acceptedRun.status).toBe(202);
+      const blockedGoal = await submitGoal(runFirst.instanceId, 'run-first');
+      expect(blockedGoal.status).toBe(409);
+      await expect(blockedGoal.json()).resolves.toMatchObject({ result: 'conflict' });
+      releaseProvider();
+      await waitForTerminal(runtime, acceptedRequest.generationRequestId);
+    } finally {
+      releaseProvider();
+      await runtime.stop();
+    }
+  });
+
   it('requires bearer authorization, a strict consent envelope, and an explicit provider', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',

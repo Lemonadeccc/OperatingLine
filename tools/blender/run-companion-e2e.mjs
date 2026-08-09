@@ -12,8 +12,7 @@ import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
 
 const accessToken = 'operatingline-companion-e2e-token-0001';
-const planId = 'snowman-companion-e2e';
-const planRevision = 41;
+const goal = 'Create the reviewed Blender guidance plan for this round trip';
 const rootTitle = 'Create a snowman through the live Companion';
 const revisedRootTitle = 'Create a snowman with a larger reviewed head';
 const twiceRevisedRootTitle = 'Create a fully reviewed snowman with a larger head';
@@ -209,8 +208,11 @@ const runtime = await startRuntime({
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
 const proposalDecisions = [];
+const goalRequests = [];
+const goalResults = [];
 const revisionRequests = [];
 const replanResults = [];
+let goalWork = Promise.resolve();
 let replanWork = Promise.resolve();
 
 const proxy = createServer(async (request, response) => {
@@ -254,6 +256,96 @@ const proxy = createServer(async (request, response) => {
       'content-type': upstream.headers.get('content-type') ?? 'application/json',
     });
     response.end(upstreamBody);
+    if (
+      upstream.ok &&
+      request.method === 'POST' &&
+      request.url === '/api/v1/companion/goal-request'
+    ) {
+      const goalRequest = JSON.parse(body.toString('utf8'));
+      goalRequests.push(goalRequest);
+      goalWork = goalWork.then(async () => {
+        assert.equal(goalRequest.goal, goal);
+        assert.equal(goalRequest.adapterId, 'blender');
+        assert.equal(goalRequest.catalogVersion, '1.3.0');
+
+        const pending = await callMcpTool(
+          runtime,
+          100 + goalRequests.length,
+          'operatingline.goal.requests.list',
+          { targetAdapterId: 'blender' },
+        );
+        const pendingRequests = JSON.parse(pending.result?.content?.[0]?.text ?? '{}').requests;
+        assert.ok(
+          pendingRequests.some((candidate) => candidate.requestId === goalRequest.requestId),
+        );
+
+        const prompt = await callMcpTool(
+          runtime,
+          110 + goalRequests.length,
+          'operatingline.goal.prompt.get',
+          { requestId: goalRequest.requestId },
+        );
+        assert.notEqual(
+          prompt.result?.isError,
+          true,
+          prompt.result?.content?.[0]?.text ?? 'Goal prompt failed',
+        );
+        const packet = JSON.parse(prompt.result?.content?.[0]?.text ?? '{}');
+        assert.equal(packet.context.targetAdapterId, goalRequest.adapterId);
+        assert.equal(packet.context.catalog.catalogVersion, goalRequest.catalogVersion);
+        assert.equal(packet.context.goal, goalRequest.goal);
+        assert.equal(packet.context.requestedPlanId, goalRequest.planId);
+        assert.equal(packet.workflow.submitToolName, 'operatingline.guide.propose');
+
+        const fixture = JSON.parse(
+          readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        );
+        fixture.id = goalRequest.planId;
+        fixture.revision = packet.context.recommendedRevision;
+        fixture.title = rootTitle;
+        fixture.steps.find((step) => step.id === fixture.rootStepId).title = rootTitle;
+        const planning = {
+          goal: goalRequest.goal,
+          requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
+          capabilityCoverage: fullSnowmanCapabilityCoverage(),
+        };
+        const qualityResponse = await callMcpTool(
+          runtime,
+          120 + goalRequests.length,
+          'operatingline.planning.evaluate',
+          {
+            targetAdapterId: goalRequest.adapterId,
+            catalogVersion: goalRequest.catalogVersion,
+            ...planning,
+            plan: fixture,
+          },
+        );
+        const quality = JSON.parse(qualityResponse.result?.content?.[0]?.text ?? '{}');
+        assert.equal(quality.valid, true);
+
+        const proposed = await callMcpTool(
+          runtime,
+          130 + goalRequests.length,
+          'operatingline.guide.propose',
+          {
+            goalRequestId: goalRequest.requestId,
+            targetAdapterId: goalRequest.adapterId,
+            catalogVersion: goalRequest.catalogVersion,
+            planning,
+            plan: fixture,
+          },
+        );
+        assert.notEqual(
+          proposed.result?.isError,
+          true,
+          proposed.result?.content?.[0]?.text ?? 'Goal-linked proposal failed',
+        );
+        const proposal = JSON.parse(proposed.result?.content?.[0]?.text ?? '{}');
+        assert.equal(proposal.goalRequestId, goalRequest.requestId);
+        assert.equal(proposal.targetInstanceId, goalRequest.instanceId);
+        goalResults.push({ packet, quality, proposal });
+      });
+    }
     if (
       upstream.ok &&
       request.method === 'POST' &&
@@ -306,40 +398,6 @@ const proxy = createServer(async (request, response) => {
 });
 
 try {
-  const fixture = JSON.parse(
-    readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
-  );
-  fixture.id = planId;
-  fixture.revision = planRevision;
-  fixture.title = rootTitle;
-  fixture.steps.find((step) => step.id === fixture.rootStepId).title = rootTitle;
-  const goal = 'Create, review, revise, execute, and fully roll back a guided snowman.';
-  const planning = await callMcpTool(runtime, 0, 'operatingline.planning.context', {
-    targetAdapterId: 'blender',
-    goal,
-    planId,
-  });
-  assert.notEqual(
-    planning.result?.isError,
-    true,
-    planning.result?.content?.[0]?.text ?? 'Planning context failed',
-  );
-  const proposed = await callMcpTool(runtime, 1, 'operatingline.guide.propose', {
-    targetAdapterId: 'blender',
-    catalogVersion: '1.3.0',
-    planning: {
-      goal,
-      requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
-      capabilityCoverage: fullSnowmanCapabilityCoverage(),
-    },
-    plan: fixture,
-  });
-  assert.notEqual(
-    proposed.result?.isError,
-    true,
-    proposed.result?.content?.[0]?.text ?? 'Initial proposal failed',
-  );
-
   const proxyAddress = await listen(proxy);
   assert.ok(proxyAddress && typeof proxyAddress !== 'string');
   const proxyUrl = `http://127.0.0.1:${proxyAddress.port}`;
@@ -347,16 +405,22 @@ try {
     OPERATINGLINE_E2E_RUNTIME_URL: proxyUrl,
     OPERATINGLINE_E2E_ACCESS_TOKEN: accessToken,
     OPERATINGLINE_E2E_RESULT_PATH: resultPath,
-    OPERATINGLINE_E2E_PLAN_ID: planId,
-    OPERATINGLINE_E2E_PLAN_REVISION: String(planRevision),
     OPERATINGLINE_E2E_ROOT_TITLE: rootTitle,
     OPERATINGLINE_E2E_REVISED_ROOT_TITLE: revisedRootTitle,
     OPERATINGLINE_E2E_TWICE_REVISED_ROOT_TITLE: twiceRevisedRootTitle,
     OPERATINGLINE_RENDER_OUTPUT_DIR: join(temporaryDirectory, 'renders'),
   });
+  await goalWork;
   await replanWork;
 
   const result = JSON.parse(readFileSync(resultPath, 'utf8'));
+  assert.equal(goalRequests.length, 1);
+  assert.equal(goalResults.length, 1);
+  const planId = goalRequests[0].planId;
+  const planRevision = goalResults[0].packet.context.recommendedRevision;
+  assert.equal(planRevision, 1);
+  assert.equal(result.goalRequestId, goalRequests[0].requestId);
+  assert.equal(result.goalProposalPreservedHostStateBeforeAccept, true);
   assert.deepEqual(
     {
       planId: result.planId,
@@ -504,7 +568,7 @@ try {
   assert.equal(evalBundle.catalogs.length, 1);
   assert.equal(evalBundle.catalogs[0].catalogVersion, '1.3.0');
   assert.equal(evalBundle.page.hasMore, false);
-  assert.equal(evalBundle.summary.matchedEventCount, 18 + 2 * result.stepCount);
+  assert.equal(evalBundle.summary.matchedEventCount, 21 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });
   assert.equal(evalBundle.summary.transitionCounts.connected, undefined);
   assert.equal(evalBundle.summary.transitionCounts.step_succeeded, result.stepCount);
@@ -515,7 +579,15 @@ try {
         event.eventType === 'planning.context.generated' && event.payload.context.goal === goal,
     ),
   );
+  assert.equal(evalBundle.summary.eventTypeCounts['guide.goal.requested'], 1);
+  assert.equal(evalBundle.summary.eventTypeCounts['guide.goal.proposed'], 1);
+  assert.equal(evalBundle.summary.eventTypeCounts['planning.prompt.generated'], 1);
   assert.equal(evalBundle.summary.eventTypeCounts['planning.quality.evaluated'], 3);
+  assert.ok(
+    evalBundle.events
+      .filter((event) => event.eventType === 'planning.quality.evaluated')
+      .every((event) => event.payload.targetInstanceId === revisionRequests[0].instanceId),
+  );
   assert.ok(
     evalBundle.events.some(
       (event) =>
@@ -525,6 +597,22 @@ try {
         event.payload.report.capabilityCoverage?.policyVersion ===
           'catalog_capability_coverage_v1' &&
         !Object.hasOwn(event.payload.report, 'score'),
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'guide.goal.requested' &&
+        event.payload.requestId === result.goalRequestId &&
+        event.payload.goal === goal,
+    ),
+  );
+  assert.ok(
+    evalBundle.events.some(
+      (event) =>
+        event.eventType === 'guide.proposal.created' &&
+        event.payload.goalRequestId === result.goalRequestId &&
+        event.payload.targetInstanceId === goalRequests[0].instanceId,
     ),
   );
   assert.ok(
@@ -559,7 +647,7 @@ try {
   );
 
   console.log(
-    `OperatingLine two-turn replan/diff and Eval export E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports and ${evalBundle.events.length} scoped events; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
+    `OperatingLine host-goal, two-turn replan/diff, and Eval export E2E passed ${result.stepCount} forward/back steps with ${reportsById.size} reports and ${evalBundle.events.length} scoped events; max main-thread pump ${result.maximumPumpSeconds.toFixed(4)}s`,
   );
 } finally {
   if (proxy.listening) {

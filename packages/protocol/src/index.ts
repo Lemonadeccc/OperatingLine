@@ -12,6 +12,7 @@ export * from './eval-comparison.js';
 export * from './eval-run.js';
 export * from './eval-suite.js';
 export * from './guide.js';
+export * from './goal.js';
 export * from './history.js';
 export * from './planning.js';
 export * from './prompt.js';

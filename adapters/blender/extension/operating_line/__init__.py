@@ -97,6 +97,26 @@ def register() -> None:
             maxlen=4000,
             options={"SKIP_SAVE"},
         )
+    if not hasattr(bpy.types.WindowManager, "operating_line_goal"):
+        bpy.types.WindowManager.operating_line_goal = bpy.props.StringProperty(
+            name="Goal",
+            description="Describe the result for a new review-gated guidance plan",
+            default="",
+            maxlen=10000,
+            options={"SKIP_SAVE"},
+        )
+    if not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_goal_workspace_expanded",
+    ):
+        bpy.types.WindowManager.operating_line_goal_workspace_expanded = (
+            bpy.props.BoolProperty(
+                name="Goal to Guidance expanded",
+                description="Show initial goal entry or its current delivery status",
+                default=True,
+                options={"SKIP_SAVE"},
+            )
+        )
     if not hasattr(
         bpy.types.WindowManager,
         "operating_line_revision_history_expanded",
@@ -158,6 +178,8 @@ def unregister() -> None:
         "operating_line_runtime_url",
         "operating_line_bearer_token",
         "operating_line_revision_message",
+        "operating_line_goal",
+        "operating_line_goal_workspace_expanded",
         "operating_line_revision_history_expanded",
         "operating_line_revision_workspace_expanded",
     ):

@@ -21,6 +21,7 @@ from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession
+from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import ReplanRunState
 from .revision_review import (
     RevisionLineage,
@@ -70,10 +71,12 @@ class CompanionController:
         self.revision_request_status = ""
         self.last_revision_request_id: str | None = None
         self.provider_handoff = ReplanRunState()
+        self.goal_request = GoalRequestState()
         self._pending_revision_request_ids: set[str] = set()
         self._last_rejected_plan: tuple[Any, ...] | None = None
         self._last_rejected_proposal: tuple[Any, ...] | None = None
         self._delivered_proposal_plan_content_sha256: str | None = None
+        self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
 
     @property
     def connected(self) -> bool:
@@ -94,7 +97,12 @@ class CompanionController:
         self._timer_registered = True
 
     def unregister_timer(self) -> None:
-        self.disconnect(flush_timeout=0.0, wait_timeout=0.1)
+        self.disconnect(
+            flush_timeout=0.0,
+            wait_timeout=0.1,
+            preserve_active_revision_draft=False,
+            preserve_proposal_review=False,
+        )
         if self._timer_registered and bpy.app.timers.is_registered(self._timer_callback):
             bpy.app.timers.unregister(self._timer_callback)
         self._timer_registered = False
@@ -112,17 +120,34 @@ class CompanionController:
             known_plan_id=session.plan_id,
             known_revision=session.revision,
             known_plan_content_sha256=session.plan_content_sha256,
+            known_proposal_id=(
+                self.proposed_plan.get("proposalId")
+                if self.proposed_plan is not None
+                else None
+            ),
             known_revision_thread_id=(
                 self._active_revision_lineage.thread_id
                 if self._active_revision_lineage is not None
                 else None
             ),
         )
-        self.disconnect(preserve_active_revision_draft=True)
+        self.disconnect(
+            preserve_active_revision_draft=True,
+            preserve_proposal_review=True,
+        )
         self._transport = transport
         self.error = ""
         self.status = "Connecting"
         transport.start()
+        retained_goal = self.goal_request.payload
+        if retained_goal is not None and self.goal_request.phase in {
+            "local",
+            "delivering",
+            "error",
+        }:
+            transport.submit_goal_request(retained_goal)
+        for decision in self._pending_proposal_decisions.values():
+            transport.submit_proposal_decision(decision)
         self.status = "Connected"
         self.report("connected")
 
@@ -131,7 +156,8 @@ class CompanionController:
         *,
         flush_timeout: float = 1.5,
         wait_timeout: float = 0.0,
-        preserve_active_revision_draft: bool = False,
+        preserve_active_revision_draft: bool = True,
+        preserve_proposal_review: bool = True,
     ) -> None:
         transport = self._transport
         self._transport = None
@@ -144,9 +170,10 @@ class CompanionController:
         self._reap_stopping_transports(wait_timeout)
         self.pending_plan = None
         self.pending_plan_content_sha256 = None
-        self.proposed_plan = None
-        self.proposal_session = None
-        self._proposal_candidates.clear()
+        if not preserve_proposal_review:
+            self.proposed_plan = None
+            self.proposal_session = None
+            self._proposal_candidates.clear()
         if self._active_revision_lineage is None:
             self._clear_revision_history()
         self.revision_history_error = ""
@@ -163,6 +190,59 @@ class CompanionController:
             self.revision_request_status = ""
         self._last_rejected_plan = None
         self._last_rejected_proposal = None
+        if (
+            not preserve_proposal_review
+            and self.goal_request.phase == "proposal_received"
+        ):
+            self.goal_request.clear()
+
+    def _queue_proposal_decision(
+        self, proposal_id: str, decision: str
+    ) -> dict[str, Any]:
+        payload = {
+            "protocolVersion": PROTOCOL_VERSION,
+            "decisionId": str(uuid.uuid4()),
+            "proposalId": proposal_id,
+            "adapterId": "blender",
+            "instanceId": self.instance_id,
+            "decision": decision,
+            "occurredAt": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        self._pending_proposal_decisions[payload["decisionId"]] = payload
+        transport = self._transport
+        if transport is not None:
+            submit = getattr(transport, "submit_proposal_decision", None)
+            if submit is not None:
+                submit(payload)
+            else:
+                transport.decide_proposal(proposal_id, decision)
+                self._pending_proposal_decisions.pop(payload["decisionId"], None)
+        return payload
+
+    @property
+    def goal_entry_blocked(self) -> bool:
+        """Whether existing revision/proposal work owns the review workspace."""
+        return (
+            self.proposed_plan is not None
+            or self._revision_base_session is not None
+            or bool(self._pending_revision_request_ids)
+            or self.provider_handoff.pending_revision_request_id is not None
+            or self.provider_handoff.acknowledged_revision_request_id is not None
+        )
+
+    def submit_goal_request(self, goal: str) -> dict[str, Any]:
+        """Queue one immutable initial goal without planning on Blender's main thread."""
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect to the OperatingLine runtime before sending a goal")
+        if self.goal_entry_blocked:
+            raise ValueError("Finish the current revision or proposal review first")
+        request = build_goal_request(self.instance_id, goal)
+        self.goal_request.submit(request)
+        transport.submit_goal_request(request)
+        return request
 
     def _reap_stopping_transports(self, wait_timeout: float = 0.0) -> None:
         deadline = time.monotonic() + max(0.0, wait_timeout)
@@ -402,6 +482,8 @@ class CompanionController:
         return request
 
     def submit_revision_request(self, message: str) -> dict[str, Any]:
+        if self.goal_request.active:
+            raise ValueError("Finish the active goal request before sending a revision")
         self.provider_handoff.ensure_revision_submission_allowed()
         transport = self._transport
         if transport is None or not transport.running:
@@ -570,6 +652,7 @@ class CompanionController:
             "proposedAt",
         }
         optional_fields = {
+            "goalRequestId",
             "revisionRequestId",
             "revisionThread",
             "planDiff",
@@ -610,6 +693,22 @@ class CompanionController:
                 uuid.UUID(revision_request_id)
             except ValueError as error:
                 raise ValueError("Proposal revision request id must be a UUID") from error
+        goal_request_id = proposal.get("goalRequestId")
+        if goal_request_id is not None:
+            if not isinstance(goal_request_id, str):
+                raise ValueError("Proposal goal request id must be a UUID")
+            try:
+                uuid.UUID(goal_request_id)
+            except ValueError as error:
+                raise ValueError("Proposal goal request id must be a UUID") from error
+            if revision_request_id is not None:
+                raise ValueError(
+                    "A proposal cannot link both a goal request and revision request"
+                )
+            if goal_request_id != self.goal_request.request_id:
+                raise ValueError("Proposal does not match the active goal request")
+            if proposal_protocol_version != PROTOCOL_VERSION:
+                raise ValueError("Goal-linked proposals require protocol 1.1")
         revision_thread = proposal.get("revisionThread")
         if revision_thread is not None:
             if revision_request_id is None:
@@ -633,7 +732,7 @@ class CompanionController:
             raise ValueError(
                 f"Unsupported proposal catalog version: {catalog_version}"
             )
-        if revision_request_id is not None and (
+        if (revision_request_id is not None or goal_request_id is not None) and (
             target_instance_id is None or catalog_version is None
         ):
             raise ValueError(
@@ -661,6 +760,13 @@ class CompanionController:
             raise ValueError("Proposal timestamp must include a timezone")
 
         proposed_plan = proposal.get("plan")
+        active_goal_payload = self.goal_request.payload
+        if goal_request_id is not None and (
+            active_goal_payload is None
+            or not isinstance(proposed_plan, dict)
+            or proposed_plan.get("id") != active_goal_payload["planId"]
+        ):
+            raise ValueError("Proposal plan id does not match the active goal request")
         replacement = self._validated_session(
             proposed_plan,
             proposal_plan_content_sha256,
@@ -736,6 +842,11 @@ class CompanionController:
         self.status = (
             f"Plan proposal {replacement.plan_id} r{replacement.revision} awaiting review"
         )
+        if (
+            self.goal_request.active
+            and proposal.get("goalRequestId") == self.goal_request.request_id
+        ):
+            self.goal_request.proposal_received()
         if (
             not self.provider_handoff.active
             and revision_request_id is not None
@@ -851,6 +962,10 @@ class CompanionController:
             return False
 
         proposal_id = proposal["proposalId"]
+        completes_goal_request = (
+            self.goal_request.active
+            and proposal.get("goalRequestId") == self.goal_request.request_id
+        )
         accepted_lineage = lineage_from_proposal(proposal)
         accepted_session = self.proposal_session
         if not self.install_plan(
@@ -864,8 +979,7 @@ class CompanionController:
         ):
             return False
         transport = self._transport
-        if transport is not None:
-            transport.decide_proposal(proposal_id, "accepted")
+        decision = self._queue_proposal_decision(proposal_id, "accepted")
         self.proposed_plan = None
         self.proposal_session = None
         self._active_revision_lineage = accepted_lineage
@@ -874,7 +988,10 @@ class CompanionController:
                 accepted_lineage.thread_id if accepted_lineage is not None else None
             )
         self._last_rejected_proposal = None
-        self.status = f"Plan {get_session().plan_id} r{get_session().revision} accepted"
+        self.status = (
+            f"Plan {get_session().plan_id} r{get_session().revision} accepted; "
+            f"decision {decision['decisionId'][:8]} awaiting runtime acknowledgement"
+        )
         self.error = ""
         if self._revision_base_session is accepted_session:
             self._revision_base_session = get_session()
@@ -887,6 +1004,8 @@ class CompanionController:
         self._finish_proposal_review(
             proposal_id, proposal.get("revisionRequestId")
         )
+        if completes_goal_request:
+            self.goal_request.clear()
         return True
 
     def reject_proposal(self) -> bool:
@@ -912,9 +1031,13 @@ class CompanionController:
             self.error = "Wait for the provider proposal before deciding deferred work"
             return False
         rejected_session = self.proposal_session
-        transport = self._transport
-        if transport is not None:
-            transport.decide_proposal(proposal["proposalId"], "rejected")
+        completes_goal_request = (
+            self.goal_request.active
+            and proposal.get("goalRequestId") == self.goal_request.request_id
+        )
+        decision = self._queue_proposal_decision(
+            proposal["proposalId"], "rejected"
+        )
         self.proposed_plan = None
         self.proposal_session = None
         if self._revision_base_session is rejected_session:
@@ -922,9 +1045,12 @@ class CompanionController:
         self._last_rejected_proposal = None
         session = get_session()
         self.status = (
-            f"Plan {session.plan_id} r{session.revision}"
+            f"Plan {session.plan_id} r{session.revision}; rejected decision "
+            f"{decision['decisionId'][:8]} awaiting runtime acknowledgement"
             if session.plan_id is not None and session.revision is not None
-            else ("Connected" if self.connected else "Offline")
+            else (
+                f"Rejected decision {decision['decisionId'][:8]} awaiting runtime acknowledgement"
+            )
         )
         self.error = ""
         self.provider_handoff.complete_proposal_review(
@@ -933,6 +1059,8 @@ class CompanionController:
         self._finish_proposal_review(
             proposal["proposalId"], proposal.get("revisionRequestId")
         )
+        if completes_goal_request:
+            self.goal_request.clear()
         return True
 
     def pump(self) -> float | None:
@@ -1012,7 +1140,7 @@ class CompanionController:
                         if valid_proposal_id and not isinstance(
                             error, ProposalQueueFullError
                         ):
-                            transport.decide_proposal(proposal_id, "rejected")
+                            transport.quarantine_proposal(proposal_id)
                         rejection_fingerprint = (
                             proposal_id if valid_proposal_id else str(error),
                             str(error),
@@ -1023,7 +1151,7 @@ class CompanionController:
                             self.status = (
                                 "Proposal review queue full"
                                 if isinstance(error, ProposalQueueFullError)
-                                else "Plan proposal rejected"
+                                else "Plan proposal quarantined"
                             )
                             self.report("error", error=self.error)
                     finally:
@@ -1032,6 +1160,39 @@ class CompanionController:
                     request_id = message.get("requestId")
                     if isinstance(request_id, str):
                         self._acknowledge_revision_request(request_id)
+                elif message.get("kind") == "goal_request_delivering":
+                    self.goal_request.delivering(message.get("requestId"))
+                elif message.get("kind") == "goal_request_acknowledged":
+                    self.goal_request.acknowledged(message.get("requestId"))
+                elif message.get("kind") == "goal_request_rejected":
+                    detail = str(
+                        message.get("message", "Goal request rejected")
+                    ).strip()
+                    if self.goal_request.delivery_rejected(
+                        message.get("requestId"), detail
+                    ):
+                        self.error = detail
+                        self.status = "Goal delivery rejected"
+                elif message.get("kind") == "proposal_decision_acknowledged":
+                    decision = message.get("decision")
+                    decision_id = (
+                        decision.get("decisionId")
+                        if isinstance(decision, dict)
+                        else None
+                    )
+                    pending = self._pending_proposal_decisions.get(decision_id)
+                    if pending == decision:
+                        self._pending_proposal_decisions.pop(decision_id, None)
+                        session = get_session()
+                        if decision.get("decision") == "accepted":
+                            self.status = (
+                                f"Plan {session.plan_id} r{session.revision} accepted"
+                            )
+                        elif session.plan_id is not None and session.revision is not None:
+                            self.status = f"Plan {session.plan_id} r{session.revision}"
+                        else:
+                            self.status = "Connected" if self.connected else "Offline"
+                        self.error = ""
                 elif message.get("kind") == "replan_provider_list":
                     try:
                         self.provider_handoff.set_providers(message.get("providers"))
@@ -1089,6 +1250,7 @@ class CompanionController:
                         self.revision_request_status = (
                             "Request queued locally; delivery will retry after reconnect"
                         )
+                    self.goal_request.delivery_error(self.error)
                 elif message.get("kind") == "recovered":
                     self.error = ""
                     session = get_session()

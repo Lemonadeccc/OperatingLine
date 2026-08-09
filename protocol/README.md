@@ -37,6 +37,15 @@ PlanningContext、严格 Proposal 草案 JSON Schema、固定工作流规则和�
 构建器服务 MCP Prompt、MCP Tool 和 HTTP；Prompt 呈现渲染文本，Tool/HTTP 返回完整 packet。
 它不调用模型，也不改变宿主内人工接受门禁。
 
+`guide-goal-request.schema.json`、`guide-goal-request-acknowledgement.schema.json`、
+`guide-goal-request-list.schema.json` 与 `guide-goal-prompt-request.schema.json` 定义宿主发起的初始
+Goal-to-Guidance 边界。请求把用户目标绑定到精确 `adapterId + instanceId + catalogVersion + planId`，
+列表的 `limit` 是可选线字段，Runtime 缺省使用 20；请求不携带模型、Provider、凭据或费用授权。
+MCP 客户端列出 pending 请求、按 ID 取得上述同一
+PlanningPromptPacket，再把完整 draft 连同 `goalRequestId` 交给既有 `guide.propose`。服务端核对请求
+路由和规划证据，生成只投递给原实例、仍须宿主内 Accept/Reject 的 Proposal；它不会自动调用模型或
+执行宿主动作。
+
 `planner-provider-descriptor.schema.json`、`planner-provider-list.schema.json`、
 `planner-generate-request.schema.json`、`planner-generation-result.schema.json` 与
 `planner-generation-error.schema.json` 定义显式 Planner Provider 的公开边界。Descriptor 只披露
@@ -111,6 +120,9 @@ adjudication 保存逐 criterion 人工判断和内容寻址分歧。Comparison 
 - 同一 Plan ID 的 `revision` 必须严格递增；切换到其他计划后也不能重新发布旧 revision。
 - AI 计划使用 `GuideProposal` 信封投递；接收和校验不等于接受，只有宿主内显式
   `accepted` 决策才能把它安装为活动计划。`rejected` 不得修改宿主场景或活动计划。
+- 初始目标请求以 `requestId` 幂等；同一实例最多有一个未关联 Proposal 的请求，已有未决 Proposal 时
+  也不能创建新请求。请求关联提交必须使用 packet 规定的完整 draft，并令 adapter、catalog、Plan ID
+  和 planning goal 精确匹配持久请求；成功 Proposal 只路由到请求的原 `instanceId`。
 - Proposal 决策以 `proposalId + adapterId + instanceId` 唯一；同一实例的同值重试幂等，
   相反决策是 conflict。其他实例仍可独立审查同一提案。
 - 修订请求以 `requestId` 幂等；相同 ID 的不同 payload 是 conflict。引用的 `nodeId + nodeNumber`

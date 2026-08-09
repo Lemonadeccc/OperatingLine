@@ -17,6 +17,10 @@ import {
   companionReplanRunStatusRequestSchema,
   companionStateReportSchema,
   evalExportRequestSchema,
+  guideGoalPromptRequestSchema,
+  guideGoalRequestAcknowledgementSchema,
+  guideGoalRequestListSchema,
+  guideGoalRequestSchema,
   guidePlanSchema,
   guideProposalDecisionSchema,
   guideProposalSchema,
@@ -42,6 +46,7 @@ import {
   type ActionCatalog,
   type CompanionStateReport,
   type GuidePlan,
+  type GuideGoalRequest,
   type GuideProposal,
   type PlanningIntent,
   type PlanningQualityReport,
@@ -222,6 +227,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const getPlanningContext = (
       request: ReturnType<typeof planningContextRequestSchema.parse>,
       recordEvent = true,
+      provenance?: { goalRequestId: string; targetInstanceId: string },
     ) => {
       const catalog = actionCatalogRegistry.get(request);
       const latestRevision =
@@ -277,7 +283,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         database.appendEvent({
           id: randomUUID(),
           eventType: 'planning.context.generated',
-          payload: { request, context },
+          payload: { request, context, ...provenance },
         });
       }
       return context;
@@ -286,6 +292,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const getPlanningPrompt = (
       request: ReturnType<typeof planningPromptRequestSchema.parse>,
       recordEvents = true,
+      provenance?: { goalRequestId: string; targetInstanceId: string },
     ) => {
       const context = getPlanningContext(
         planningContextRequestSchema.parse({
@@ -297,16 +304,45 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           planId: request.planId,
         }),
         recordEvents,
+        provenance,
       );
       const packet = buildPlanningPromptPacket(context);
       if (recordEvents) {
         database.appendEvent({
           id: randomUUID(),
           eventType: 'planning.prompt.generated',
-          payload: { request, packet },
+          payload: { request, packet, ...provenance },
         });
       }
       return packet;
+    };
+
+    const getGuideGoalRequest = (requestId: string): GuideGoalRequest => {
+      const stored = database.getGuideGoalRequest(requestId);
+      if (stored === null) {
+        throw new Error(`Guide goal request was not found: ${requestId}`);
+      }
+      return guideGoalRequestSchema.parse(stored);
+    };
+
+    const getGuideGoalPrompt = (request: ReturnType<typeof guideGoalPromptRequestSchema.parse>) => {
+      const goalRequest = getGuideGoalRequest(request.requestId);
+      if (database.getGuideGoalProposalForRequest(goalRequest.requestId) !== null) {
+        throw new Error(`Guide goal request already has a proposal: ${goalRequest.requestId}`);
+      }
+      return getPlanningPrompt(
+        {
+          targetAdapterId: goalRequest.adapterId,
+          catalogVersion: goalRequest.catalogVersion,
+          goal: goalRequest.goal,
+          planId: goalRequest.planId,
+        },
+        true,
+        {
+          goalRequestId: goalRequest.requestId,
+          targetInstanceId: goalRequest.instanceId,
+        },
+      );
     };
 
     const getEvalExport = (request: ReturnType<typeof evalExportRequestSchema.parse>) =>
@@ -321,6 +357,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const getPlanningQuality = (
       request: ReturnType<typeof planningQualityEvaluationRequestSchema.parse>,
       selectedCatalog?: ActionCatalog,
+      provenance?: {
+        targetInstanceId: string;
+        goalRequestId?: string;
+        revisionRequestId?: string;
+        generationRequestId?: string;
+      },
     ): PlanningQualityReport => {
       const catalog =
         selectedCatalog ??
@@ -344,6 +386,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             : { capabilityCoverage: request.capabilityCoverage }),
           plan: request.plan,
           report,
+          ...provenance,
         },
       });
       return report;
@@ -391,6 +434,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       targetInstanceId?: string;
       catalogVersion?: string;
       plan: GuidePlan;
+      goalRequestId?: string;
       replan?: {
         requestId: string;
         generationRequestId?: string;
@@ -423,6 +467,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           plan: input.plan,
         }),
         catalog,
+        input.targetInstanceId === undefined
+          ? undefined
+          : input.goalRequestId !== undefined
+            ? {
+                goalRequestId: input.goalRequestId,
+                targetInstanceId: input.targetInstanceId,
+              }
+            : input.replan === undefined
+              ? undefined
+              : {
+                  revisionRequestId: input.replan.requestId,
+                  ...(input.replan.generationRequestId === undefined
+                    ? {}
+                    : { generationRequestId: input.replan.generationRequestId }),
+                  targetInstanceId: input.targetInstanceId,
+                },
       );
       if (!planningQuality.valid) {
         const errors = planningQuality.findings
@@ -452,6 +512,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               revisionRequestId: input.replan.requestId,
               revisionThread: input.replan.revisionThread,
             }),
+        ...(input.goalRequestId === undefined ? {} : { goalRequestId: input.goalRequestId }),
         planDiff:
           input.replan === undefined
             ? null
@@ -459,7 +520,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         catalogVersion: catalog.catalogVersion,
         proposedAt: new Date().toISOString(),
       });
-      if (input.replan === undefined) {
+      if (input.goalRequestId !== undefined) {
+        database.recordGuideGoalProposal(proposal, input.goalRequestId);
+      } else if (input.replan === undefined) {
         database.recordGuideProposal(proposal);
       } else {
         database.recordGuideReplanProposal(
@@ -480,6 +543,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       planId: proposal.plan.id,
       revision: proposal.plan.revision,
       catalogVersion: proposal.catalogVersion,
+      goalRequestId: proposal.goalRequestId ?? null,
       revisionRequestId: proposal.revisionRequestId ?? null,
       revisionThread: proposal.revisionThread ?? null,
       planDiff: proposal.planDiff ?? null,
@@ -677,6 +741,52 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                 {
                   type: 'text' as const,
                   text: JSON.stringify(plannerGenerationErrorResponse(error, request.requestId)),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.goal.requests.list',
+        {
+          description:
+            'List pending immutable host-authored goal requests that do not yet have a linked Proposal.',
+          inputSchema: guideGoalRequestListSchema,
+        },
+        async (requestInput) => {
+          const request = guideGoalRequestListSchema.parse(requestInput);
+          const requests = database
+            .listPendingGuideGoalRequests(request.targetAdapterId, request.limit ?? 20)
+            .map((item) => guideGoalRequestSchema.parse(item));
+          return { content: [{ type: 'text', text: JSON.stringify({ requests }) }] };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.goal.prompt.get',
+        {
+          description:
+            "Build the exact deterministic Planner Prompt Packet from one pending stored host goal request and its pinned ActionCatalog. Add the same requestId as goalRequestId to the packet's complete draft when calling operatingline.guide.propose. This never calls a Provider.",
+          inputSchema: guideGoalPromptRequestSchema,
+        },
+        async (requestInput) => {
+          const request = guideGoalPromptRequestSchema.parse(requestInput);
+          try {
+            const packet = getGuideGoalPrompt(request);
+            return { content: [{ type: 'text', text: JSON.stringify(packet) }] };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'goal_prompt_unavailable',
+                    requestId: request.requestId,
+                    message: error instanceof Error ? error.message : 'Unknown goal prompt error',
+                  }),
                 },
               ],
             };
@@ -928,27 +1038,78 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.guide.propose',
         {
           description:
-            'Validate and submit an AI-authored guide plan for in-host human review. The proposal cannot execute until the target companion accepts it.',
+            'Validate and submit an AI-authored guide plan for in-host human review. For a stored host goal, submit the complete Planner draft unchanged plus goalRequestId; adapter, catalog, plan, and goal evidence must match the immutable request. The proposal cannot execute until the target companion accepts it.',
           inputSchema: guideProposalSubmissionSchema,
         },
         async (submissionInput) => {
           const submission = guideProposalSubmissionSchema.parse(submissionInput);
-          const { proposal, planningQuality } = createProposal({
-            targetAdapterId: submission.targetAdapterId,
-            plan: submission.plan,
-            ...(submission.catalogVersion === undefined
-              ? {}
-              : { catalogVersion: submission.catalogVersion }),
-            ...(submission.planning === undefined ? {} : { planning: submission.planning }),
-          });
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(proposalResult(proposal, planningQuality)),
-              },
-            ],
-          };
+          try {
+            const goalRequest =
+              submission.goalRequestId === undefined
+                ? null
+                : getGuideGoalRequest(submission.goalRequestId);
+            if (goalRequest !== null) {
+              if (database.getGuideGoalProposalForRequest(goalRequest.requestId) !== null) {
+                throw new Error(
+                  `Guide goal request already has a proposal: ${goalRequest.requestId}`,
+                );
+              }
+              if (submission.plan.id !== goalRequest.planId) {
+                throw new Error(
+                  `Guide plan id ${submission.plan.id} does not match requested ${goalRequest.planId}`,
+                );
+              }
+              if (submission.targetAdapterId !== goalRequest.adapterId) {
+                throw new Error(
+                  `Proposal adapter ${submission.targetAdapterId} does not match requested ${goalRequest.adapterId}`,
+                );
+              }
+              if (submission.catalogVersion !== goalRequest.catalogVersion) {
+                throw new Error(
+                  `Proposal catalog ${submission.catalogVersion} does not match requested ${goalRequest.catalogVersion}`,
+                );
+              }
+              if (submission.planning?.goal !== goalRequest.goal) {
+                throw new Error('Planning evidence goal does not match the stored goal request');
+              }
+            }
+            const { proposal, planningQuality } = createProposal({
+              targetAdapterId: goalRequest?.adapterId ?? submission.targetAdapterId,
+              ...(goalRequest === null
+                ? submission.catalogVersion === undefined
+                  ? {}
+                  : { catalogVersion: submission.catalogVersion }
+                : {
+                    targetInstanceId: goalRequest.instanceId,
+                    catalogVersion: goalRequest.catalogVersion,
+                    goalRequestId: goalRequest.requestId,
+                  }),
+              plan: submission.plan,
+              ...(submission.planning === undefined ? {} : { planning: submission.planning }),
+            });
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(proposalResult(proposal, planningQuality)),
+                },
+              ],
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'guide_proposal_rejected',
+                    goalRequestId: submission.goalRequestId ?? null,
+                    message: error instanceof Error ? error.message : 'Unknown proposal error',
+                  }),
+                },
+              ],
+            };
+          }
         },
       );
 
@@ -972,6 +1133,33 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
+    runtimeApp.post('/api/v1/companion/goal-request', async (request, reply) => {
+      const parsedRequest = guideGoalRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_goal_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        actionCatalogRegistry.get({
+          targetAdapterId: parsedRequest.data.adapterId,
+          catalogVersion: parsedRequest.data.catalogVersion,
+        });
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'invalid_goal_request',
+          message: error instanceof Error ? error.message : 'Unknown goal request error',
+        });
+      }
+      const result = database.recordGuideGoalRequest(parsedRequest.data);
+      if (result === 'conflict') {
+        return reply.code(409).send({ result, requestId: parsedRequest.data.requestId });
+      }
+      return guideGoalRequestAcknowledgementSchema.parse({
+        result,
+        requestId: parsedRequest.data.requestId,
+      });
+    });
     runtimeApp.get('/api/v1/action-catalog', async (request, reply) => {
       const parsedRequest = actionCatalogRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {

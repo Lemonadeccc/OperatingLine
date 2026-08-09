@@ -36,8 +36,6 @@ def main() -> None:
     runtime_url = required_environment("OPERATINGLINE_E2E_RUNTIME_URL")
     access_token = required_environment("OPERATINGLINE_E2E_ACCESS_TOKEN")
     result_path = Path(required_environment("OPERATINGLINE_E2E_RESULT_PATH"))
-    expected_plan_id = required_environment("OPERATINGLINE_E2E_PLAN_ID")
-    expected_revision = int(required_environment("OPERATINGLINE_E2E_PLAN_REVISION"))
     expected_root_title = required_environment("OPERATINGLINE_E2E_ROOT_TITLE")
     expected_revised_title = required_environment("OPERATINGLINE_E2E_REVISED_ROOT_TITLE")
     expected_twice_revised_title = required_environment(
@@ -105,9 +103,31 @@ def main() -> None:
         window_manager.operating_line_bearer_token = access_token
         assert bpy.ops.operating_line.connect() == {"FINISHED"}
 
+        initial_session = operating_line.get_session()
+        initial_session_started = initial_session.started
+        initial_session_receipts = tuple(initial_session.receipts)
+        window_manager.operating_line_goal = (
+            "Create the reviewed Blender guidance plan for this round trip"
+        )
+        assert bpy.ops.operating_line.submit_goal_request() == {"FINISHED"}
+        goal_request_id = controller.goal_request.request_id
+        assert goal_request_id is not None
+        goal_request_payload = controller.goal_request.payload
+        assert goal_request_payload is not None
+        expected_plan_id = goal_request_payload["planId"]
+        expected_revision = 1
+        assert window_manager.operating_line_goal == ""
+        wait_until(
+            lambda: controller.goal_request.acknowledged_request_id
+            == goal_request_id,
+            "goal request acknowledgement",
+        )
+
         wait_until(
             lambda: (
-                controller.proposal_session is not None
+                controller.proposed_plan is not None
+                and controller.proposed_plan.get("goalRequestId") == goal_request_id
+                and controller.proposal_session is not None
                 and controller.proposal_session.plan_id == expected_plan_id
                 and controller.proposal_session.revision == expected_revision
             ),
@@ -117,6 +137,7 @@ def main() -> None:
         assert proposal_stage_threads == [threading.main_thread().ident]
         assert plan_install_threads == []
         assert controller.proposed_plan is not None
+        assert controller.proposed_plan["goalRequestId"] == goal_request_id
         assert controller.proposal_session.root.title == expected_root_title
         assert bpy.ops.operating_line.start() == {"CANCELLED"}
         assert bpy.ops.operating_line.next() == {"CANCELLED"}
@@ -124,8 +145,22 @@ def main() -> None:
         for item in factory_objects:
             assert bpy.data.objects.get(item.name) is item
             assert item.as_pointer() == factory_object_pointers[item.name]
+        goal_proposal_preserved_host_state = (
+            operating_line.get_session() is initial_session
+            and initial_session.started == initial_session_started
+            and tuple(initial_session.receipts) == initial_session_receipts
+            and bpy.context.scene is factory_scene
+            and factory_scene.as_pointer() == factory_scene_pointer
+            and all(
+                bpy.data.objects.get(item.name) is item
+                and item.data.as_pointer() == factory_data_pointers[item.name]
+                for item in factory_objects
+            )
+        )
+        assert goal_proposal_preserved_host_state
 
         assert bpy.ops.operating_line.accept_proposal() == {"FINISHED"}
+        assert controller.goal_request.active is False
         assert controller.proposed_plan is None
         assert controller.proposal_session is None
         assert operating_line.get_session().plan_id == expected_plan_id
@@ -403,6 +438,10 @@ def main() -> None:
                     "lastTransition": controller.last_report["transition"],
                     "lastSequence": controller.last_report["sequence"],
                     "proposalReviewedBeforeExecution": True,
+                    "goalRequestId": goal_request_id,
+                    "goalProposalPreservedHostStateBeforeAccept": (
+                        goal_proposal_preserved_host_state
+                    ),
                     "revisionRequestId": revision_request_id,
                     "secondRevisionRequestId": second_revision_request_id,
                     "revisionThreadId": first_thread["threadId"],

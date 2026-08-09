@@ -26,6 +26,7 @@ OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 STATE = os.environ.get("OPERATINGLINE_VISUAL_STATE", "forward")
 OUTPUT_NAMES = {
     "initial": "guidance-initial.png",
+    "goal-request": "guidance-goal-request.png",
     "revision": "guidance-revision-request.png",
     "revision-collapsed": "guidance-revision-collapsed.png",
     "proposal": "guidance-proposal-review.png",
@@ -81,9 +82,13 @@ class StrictFakeTransport:
         self.running = True
         self.last_delivered_sequence = 0
         self.replan_run_requests = []
+        self.goal_requests = []
 
     def start_replan_run(self, request):
         self.replan_run_requests.append(json.loads(json.dumps(request)))
+
+    def submit_goal_request(self, request):
+        self.goal_requests.append(json.loads(json.dumps(request)))
 
     def stop(self, *, flush_timeout=0.0):
         del flush_timeout
@@ -171,6 +176,21 @@ def configure_provider_handoff(*, generating):
     assert_active_session_preserved()
 
 
+def configure_goal_request():
+    companion = extension.get_companion()
+    fake_transport = StrictFakeTransport()
+    companion._transport = fake_transport
+    companion.status = "Connected"
+    request = companion.submit_goal_request(
+        "Create a friendly low-poly robot with simple materials"
+    )
+    companion.goal_request.delivering(request["requestId"])
+    companion.goal_request.acknowledged(request["requestId"])
+    assert fake_transport.goal_requests == [request]
+    assert companion.goal_request.phase == "awaiting_planner"
+    assert_active_session_preserved()
+
+
 def view3d_context():
     for area in bpy.context.screen.areas:
         if area.type != "VIEW_3D":
@@ -184,6 +204,8 @@ def view3d_context():
 def configure_state():
     if STATE == "initial":
         assert session.active_index == -1
+    elif STATE == "goal-request":
+        configure_goal_request()
     elif STATE in {"revision", "revision-collapsed"}:
         assert bpy.ops.operating_line.reference_node(
             scope="active",
@@ -378,7 +400,7 @@ def configure_state():
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
     assert_factory_objects_preserved()
-    if STATE in {"provider-disclosure", "provider-generating"}:
+    if STATE in {"goal-request", "provider-disclosure", "provider-generating"}:
         assert_active_session_preserved()
 
 

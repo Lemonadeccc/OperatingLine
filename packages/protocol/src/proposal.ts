@@ -6,12 +6,32 @@ import { planningIntentSchema } from './planning.js';
 import { guideRevisionThreadSchema } from './revision.js';
 import { catalogVersionSchema } from './version.js';
 
-export const guideProposalSubmissionSchema = z.strictObject({
-  targetAdapterId: z.string().min(1),
-  catalogVersion: catalogVersionSchema.optional(),
-  planning: planningIntentSchema.optional(),
-  plan: guidePlanSchema,
-});
+export const guideProposalSubmissionSchema = z
+  .strictObject({
+    goalRequestId: z.uuid().optional(),
+    targetAdapterId: z.string().min(1),
+    catalogVersion: catalogVersionSchema.optional(),
+    planning: planningIntentSchema.optional(),
+    plan: guidePlanSchema,
+  })
+  .superRefine((submission, context) => {
+    if (submission.goalRequestId !== undefined && submission.catalogVersion === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Goal-linked proposals require catalogVersion',
+      });
+    }
+    if (submission.goalRequestId !== undefined && submission.planning === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Goal-linked proposals require planning evidence',
+      });
+    }
+  })
+  .meta({
+    if: { required: ['goalRequestId'] },
+    then: { required: ['catalogVersion', 'planning'] },
+  });
 export type GuideProposalSubmission = z.infer<typeof guideProposalSubmissionSchema>;
 
 export const guideProposalSchema = z
@@ -21,6 +41,7 @@ export const guideProposalSchema = z
     targetAdapterId: z.string().min(1),
     targetInstanceId: z.uuid().optional(),
     plan: guidePlanSchema,
+    goalRequestId: z.uuid().optional(),
     revisionRequestId: z.uuid().optional(),
     revisionThread: guideRevisionThreadSchema.optional(),
     planDiff: guidePlanDiffSchema.nullable().optional(),
@@ -28,6 +49,12 @@ export const guideProposalSchema = z
     proposedAt: z.iso.datetime({ offset: true }),
   })
   .superRefine((proposal, context) => {
+    if (proposal.goalRequestId !== undefined && proposal.revisionRequestId !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'A proposal cannot link both a goal request and a revision request',
+      });
+    }
     if (proposal.protocolVersion === '1.1.0' && proposal.planDiff === undefined) {
       context.addIssue({ code: 'custom', message: 'Protocol 1.1 proposals require planDiff' });
     }
@@ -74,6 +101,10 @@ export const guideProposalSchema = z
         then: { required: ['planDiff'] },
       },
       {
+        if: { required: ['goalRequestId'] },
+        then: { required: ['targetInstanceId', 'catalogVersion'] },
+      },
+      {
         if: { required: ['revisionRequestId'] },
         then: {
           required: ['targetInstanceId', 'catalogVersion', 'revisionThread', 'planDiff'],
@@ -83,6 +114,9 @@ export const guideProposalSchema = z
           not: { required: ['revisionThread'] },
           properties: { planDiff: { type: 'null' } },
         },
+      },
+      {
+        not: { required: ['goalRequestId', 'revisionRequestId'] },
       },
     ],
   });

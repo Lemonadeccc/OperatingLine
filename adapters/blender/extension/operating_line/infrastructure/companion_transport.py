@@ -106,6 +106,7 @@ class CompanionTransport:
         self.outgoing: Queue[dict[str, Any]] = Queue()
         self.decisions: Queue[dict[str, Any]] = Queue()
         self.revision_requests: Queue[dict[str, Any]] = Queue()
+        self.goal_requests: Queue[dict[str, Any]] = Queue()
         self.replan_runs: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
@@ -242,6 +243,12 @@ class CompanionTransport:
             raise ValueError("Revision request must contain a requestId")
         self.revision_requests.put(request)
 
+    def submit_goal_request(self, request: dict[str, Any]) -> None:
+        request_id = request.get("requestId")
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("Goal request must contain a requestId")
+        self.goal_requests.put(request)
+
     def refresh_replan_providers(self) -> None:
         """Queue a short provider-descriptor request on the existing worker."""
         self.control.put({"kind": "refresh_replan_providers"})
@@ -255,10 +262,7 @@ class CompanionTransport:
         self.replan_runs.put(request)
 
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
-        if decision not in {"accepted", "rejected"}:
-            raise ValueError("Proposal decision must be accepted or rejected")
-        self.control.put({"kind": "proposal_seen", "proposalId": proposal_id})
-        self.decisions.put(
+        self.submit_proposal_decision(
             {
                 "protocolVersion": PROTOCOL_VERSION,
                 "decisionId": str(uuid.uuid4()),
@@ -271,6 +275,23 @@ class CompanionTransport:
                 .replace("+00:00", "Z"),
             }
         )
+
+    def submit_proposal_decision(self, payload: dict[str, Any]) -> None:
+        """Queue an already-identified decision without changing its identity."""
+        proposal_id = payload.get("proposalId")
+        decision_id = payload.get("decisionId")
+        decision = payload.get("decision")
+        self._validated_optional_uuid(proposal_id, "Proposal id")
+        self._validated_optional_uuid(decision_id, "Proposal decision id")
+        if decision not in {"accepted", "rejected"}:
+            raise ValueError("Proposal decision must be accepted or rejected")
+        self.control.put({"kind": "proposal_seen", "proposalId": proposal_id})
+        self.decisions.put(dict(payload))
+
+    def quarantine_proposal(self, proposal_id: str) -> None:
+        """Suppress redelivery of an invalid proposal without inventing a decision."""
+        self._validated_optional_uuid(proposal_id, "Proposal id")
+        self.control.put({"kind": "proposal_seen", "proposalId": proposal_id})
 
     def _request_json(
         self,
@@ -544,19 +565,26 @@ class CompanionTransport:
         pending_report: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
+        pending_goal_request: dict[str, Any] | None = None
         pending_replan_run: dict[str, Any] | None = None
         active_replan_run_id: str | None = None
         replan_run_signature: str | None = None
         refresh_replan_providers = True
+        decision_retry_at = 0.0
+        decision_retry_delay = 0.05
+        goal_retry_at = 0.0
+        goal_retry_delay = 0.05
         last_error = ""
         while (
             not self._stop.is_set()
             or pending_report is not None
             or pending_decision is not None
             or pending_revision_request is not None
+            or pending_goal_request is not None
             or not self.outgoing.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
+            or not self.goal_requests.empty()
         ):
             if self._stop.is_set() and time.monotonic() >= self._flush_deadline:
                 break
@@ -620,18 +648,44 @@ class CompanionTransport:
                         pending_decision = self.decisions.get_nowait()
                     except Empty:
                         pass
-                if pending_decision is not None:
-                    response = self._request_json(
-                        "POST",
-                        "/api/v1/companion/proposal-decision",
-                        pending_decision,
-                    )
-                    if response.get("result") not in {"accepted", "duplicate"}:
-                        raise ValueError(
-                            "Runtime rejected or did not acknowledge proposal decision"
+                if (
+                    pending_decision is not None
+                    and time.monotonic() >= decision_retry_at
+                ):
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/proposal-decision",
+                            pending_decision,
                         )
-                    request_succeeded = True
-                    pending_decision = None
+                        if response.get("result") not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime rejected or did not acknowledge proposal decision"
+                            )
+                    except (
+                        HTTPError,
+                        HTTPException,
+                        OSError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        message = str(error)
+                        if message != last_error:
+                            self.incoming.put({"kind": "error", "message": message})
+                            last_error = message
+                        decision_retry_at = time.monotonic() + decision_retry_delay
+                        decision_retry_delay = min(decision_retry_delay * 2, 2.0)
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "proposal_decision_acknowledged",
+                                "decision": dict(pending_decision),
+                            }
+                        )
+                        request_succeeded = True
+                        pending_decision = None
+                        decision_retry_at = 0.0
+                        decision_retry_delay = 0.05
                 if pending_revision_request is None:
                     try:
                         pending_revision_request = self.revision_requests.get_nowait()
@@ -667,6 +721,81 @@ class CompanionTransport:
                     )
                     request_succeeded = True
                     pending_revision_request = None
+                if pending_goal_request is None:
+                    try:
+                        pending_goal_request = self.goal_requests.get_nowait()
+                    except Empty:
+                        pass
+                if (
+                    pending_goal_request is not None
+                    and time.monotonic() >= goal_retry_at
+                ):
+                    request_id = pending_goal_request.get("requestId")
+                    self.incoming.put(
+                        {"kind": "goal_request_delivering", "requestId": request_id}
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/goal-request",
+                            pending_goal_request,
+                        )
+                        if response.get("result") not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime rejected or did not acknowledge goal request"
+                            )
+                        if response.get("requestId") != request_id:
+                            raise ValueError("Runtime acknowledged the wrong goal request")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            message = str(error)
+                            if message != last_error:
+                                self.incoming.put({"kind": "error", "message": message})
+                                last_error = message
+                            goal_retry_at = time.monotonic() + goal_retry_delay
+                            goal_retry_delay = min(goal_retry_delay * 2, 2.0)
+                        else:
+                            error_payload = getattr(error, "runtime_payload", {})
+                            detail = (
+                                error_payload.get("message")
+                                if isinstance(error_payload, dict)
+                                else None
+                            )
+                            self.incoming.put(
+                                {
+                                    "kind": "goal_request_rejected",
+                                    "requestId": request_id,
+                                    "message": (
+                                        detail
+                                        if isinstance(detail, str) and detail.strip()
+                                        else f"Runtime permanently rejected goal request (HTTP {error.code})"
+                                    ),
+                                }
+                            )
+                            pending_goal_request = None
+                            goal_retry_at = 0.0
+                            goal_retry_delay = 0.05
+                            request_succeeded = True
+                    except (
+                        HTTPException,
+                        OSError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        message = str(error)
+                        if message != last_error:
+                            self.incoming.put({"kind": "error", "message": message})
+                            last_error = message
+                        goal_retry_at = time.monotonic() + goal_retry_delay
+                        goal_retry_delay = min(goal_retry_delay * 2, 2.0)
+                    else:
+                        self.incoming.put(
+                            {"kind": "goal_request_acknowledged", "requestId": request_id}
+                        )
+                        pending_goal_request = None
+                        goal_retry_at = 0.0
+                        goal_retry_delay = 0.05
+                        request_succeeded = True
                 if not self._stop.is_set() and pending_replan_run is None:
                     try:
                         pending_replan_run = self.replan_runs.get_nowait()

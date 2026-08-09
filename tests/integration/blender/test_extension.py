@@ -282,6 +282,7 @@ def assert_companion_and_plan_semantics() -> None:
     requests: list[dict] = []
     reports: list[dict] = []
     revision_requests: list[dict] = []
+    goal_requests: list[dict] = []
     proposal_decisions: list[dict] = []
     replan_runs: list[dict] = []
     replan_post_attempts: list[dict] = []
@@ -462,6 +463,15 @@ def assert_companion_and_plan_semantics() -> None:
             assert self.headers.get("Authorization") == f"Bearer {token}"
             length = int(self.headers["Content-Length"])
             payload = json.loads(self.rfile.read(length))
+            if urlsplit(self.path).path == "/api/v1/companion/goal-request":
+                goal_requests.append(payload)
+                self._reply(
+                    {
+                        "result": "accepted",
+                        "requestId": payload["requestId"],
+                    }
+                )
+                return
             if urlsplit(self.path).path == "/api/v1/companion/revision-request":
                 revision_requests.append(payload)
                 self._reply(
@@ -1557,9 +1567,13 @@ def assert_companion_and_plan_semantics() -> None:
         companion.disconnect()
         assert time.monotonic() - disconnect_started < 0.25
         assert companion.status in {"Disconnecting", "Offline"}
-        assert companion.revision_reference_nodes() == ()
-        assert companion.revision_base_session is None
-        assert bpy.context.window_manager.operating_line_revision_message == ""
+        assert tuple(
+            node.id for node in companion.revision_reference_nodes()
+        ) == ("snowman.model.head",)
+        assert companion.revision_base_session is session_before_request
+        assert bpy.context.window_manager.operating_line_revision_message == (
+            "Preserve this draft while guidance is hidden"
+        )
         if active_transport.running:
             assert companion.status == "Disconnecting"
             assert active_transport in companion._stopping_transports
@@ -1568,6 +1582,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion.status == "Offline"
         assert companion._stopping_transports == []
         assert active_transport.last_delivered_sequence >= expected_sequence
+        companion.clear_revision_draft()
         transitions = [report["transition"] for report in reports]
         assert transitions[:2] == ["connected", "plan_loaded"]
         report = reports[-1]
@@ -1631,6 +1646,65 @@ def assert_companion_and_plan_semantics() -> None:
         assert rejected_transport.wait_stopped(2.0)
         assert rejected_transport.last_delivered_sequence == 99
 
+        # Reconnecting while a goal-linked proposal awaits the human must keep
+        # the exact goal/proposal correlation and must not manufacture Reject.
+        reconnect_transport = CompanionTransport(
+            runtime_url,
+            token,
+            companion.instance_id,
+            known_plan_id="live-snowman",
+            known_revision=DYNAMIC_REVISION,
+            known_plan_content_sha256=dynamic_plan_content_sha256,
+        )
+        companion._transport = reconnect_transport
+        reconnect_transport.start()
+        reconnect_goal = companion.submit_goal_request(
+            "Keep this proposal reviewable across reconnect"
+        )
+        reconnect_plan = deepcopy(dynamic_plan)
+        reconnect_plan["id"] = reconnect_goal["planId"]
+        reconnect_plan["revision"] += 30
+        reconnect_proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": str(uuid.uuid4()),
+            "goalRequestId": reconnect_goal["requestId"],
+            "targetAdapterId": "blender",
+            "targetInstanceId": companion.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "plan": reconnect_plan,
+            "planDiff": None,
+            "proposedAt": "2026-08-09T12:00:00Z",
+        }
+        assert companion.stage_proposal(reconnect_proposal)
+        decisions_before_reconnect = len(proposal_decisions)
+        assert bpy.ops.operating_line.disconnect() == {"FINISHED"}
+        assert companion.proposed_plan is reconnect_proposal
+        assert companion.goal_request.request_id == reconnect_goal["requestId"]
+        bpy.context.window_manager.operating_line_runtime_url = runtime_url
+        bpy.context.window_manager.operating_line_bearer_token = token
+        previous_online_access = bpy.context.preferences.system.use_online_access
+        bpy.context.preferences.system.use_online_access = True
+        try:
+            assert bpy.ops.operating_line.connect() == {"FINISHED"}
+        finally:
+            bpy.context.preferences.system.use_online_access = previous_online_access
+        assert companion.proposed_plan is reconnect_proposal
+        assert companion.goal_request.request_id == reconnect_goal["requestId"]
+        assert companion.goal_request.phase == "proposal_received"
+        assert len(proposal_decisions) == decisions_before_reconnect
+        assert companion.reject_proposal()
+        assert len(companion._pending_proposal_decisions) == 1
+        decision_deadline = time.monotonic() + 2.0
+        while (
+            time.monotonic() < decision_deadline
+            and companion._pending_proposal_decisions
+        ):
+            companion.pump()
+            time.sleep(0.01)
+        assert companion._pending_proposal_decisions == {}
+        assert proposal_decisions[-1]["proposalId"] == reconnect_proposal["proposalId"]
+        assert proposal_decisions[-1]["decision"] == "rejected"
+
         # A drip-fed body cannot hold Disconnect/unregister or leave a
         # process-blocking worker behind.
         slow_guide[0] = True
@@ -1685,9 +1759,34 @@ def assert_companion_and_plan_semantics() -> None:
         companion.pump()
         assert companion.last_report["sequence"] == malformed_sequence
 
+        invalid_proposal_id = str(uuid.uuid4())
+        decisions_before_quarantine = len(proposal_decisions)
+        probe_transport.incoming.put(
+            {
+                "kind": "proposal",
+                "proposal": {
+                    "protocolVersion": "1.1.0",
+                    "proposalId": invalid_proposal_id,
+                    "targetAdapterId": "not-blender",
+                    "plan": deepcopy(dynamic_plan),
+                    "planDiff": None,
+                    "proposedAt": "2026-08-09T12:00:00Z",
+                },
+                "proposalPlanContentSha256": dynamic_plan_content_sha256,
+            }
+        )
+        companion.pump()
+        assert len(proposal_decisions) == decisions_before_quarantine
+        assert probe_transport.control.get_nowait() == {
+            "kind": "proposal_seen",
+            "proposalId": invalid_proposal_id,
+        }
+        assert companion.status == "Plan proposal quarantined"
+        quarantine_sequence = companion.last_report["sequence"]
+
         known_plan = deepcopy(dynamic_plan)
         companion.install_plan(known_plan)
-        assert companion.last_report["sequence"] == malformed_sequence
+        assert companion.last_report["sequence"] == quarantine_sequence
         probe_transport.incoming.put({"kind": "error", "message": "temporary outage"})
         companion.pump()
         assert companion.status == "Connection error"
@@ -2379,8 +2478,118 @@ def main() -> None:
         "operating_line_revision_workspace_expanded",
     )
     assert bpy.context.window_manager.operating_line_revision_workspace_expanded is True
+    assert hasattr(bpy.types.WindowManager, "operating_line_goal")
+    assert hasattr(
+        bpy.types.WindowManager,
+        "operating_line_goal_workspace_expanded",
+    )
+    assert bpy.context.window_manager.operating_line_goal_workspace_expanded is True
     assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
     assert_companion_and_plan_semantics()
+
+    # Initial goal entry uses the same nonblocking transport boundary and keeps
+    # the accepted session/scene untouched until the linked proposal is accepted.
+    class GoalFakeTransport:
+        running = True
+
+        def __init__(self):
+            self.requests = []
+            self.decisions = []
+
+        def submit_goal_request(self, request):
+            self.requests.append(deepcopy(request))
+
+        def decide_proposal(self, proposal_id, decision):
+            self.decisions.append((proposal_id, decision))
+
+    goal_transport = GoalFakeTransport()
+    registered_companion._transport = goal_transport
+    accepted_before_goal = operating_line.get_session()
+    active_index_before_goal = accepted_before_goal.active_index
+    receipts_before_goal = tuple(accepted_before_goal.receipts)
+    scene_objects_before_goal = tuple(bpy.context.scene.objects)
+    bpy.context.window_manager.operating_line_goal = "  Build a reviewed robot guide  "
+    assert bpy.ops.operating_line.submit_goal_request() == {"FINISHED"}
+    assert bpy.context.window_manager.operating_line_goal == ""
+    assert len(goal_transport.requests) == 1
+    goal_request = goal_transport.requests[0]
+    assert goal_request["goal"] == "Build a reviewed robot guide"
+    assert goal_request["adapterId"] == ACTION_CATALOG["adapterId"] == "blender"
+    assert goal_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
+    assert registered_companion.goal_request.phase == "local"
+    bpy.context.window_manager.operating_line_goal = "A second active goal"
+    try:
+        registered_companion.submit_goal_request(
+            bpy.context.window_manager.operating_line_goal
+        )
+    except ValueError as error:
+        assert "already active" in str(error)
+    else:
+        raise AssertionError("A parallel active goal request must be blocked")
+    assert bpy.context.window_manager.operating_line_goal == "A second active goal"
+    bpy.context.window_manager.operating_line_goal = ""
+
+    goal_plan = deepcopy(BUNDLED_PLAN)
+    goal_plan["id"] = goal_request["planId"]
+    goal_plan["revision"] += 20
+    goal_proposal = {
+        "protocolVersion": "1.1.0",
+        "proposalId": str(uuid.uuid4()),
+        "goalRequestId": goal_request["requestId"],
+        "targetAdapterId": "blender",
+        "targetInstanceId": registered_companion.instance_id,
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+        "plan": goal_plan,
+        "planDiff": None,
+        "proposedAt": "2026-08-09T12:00:00Z",
+    }
+    wrong_goal_proposal = {
+        **goal_proposal,
+        "proposalId": str(uuid.uuid4()),
+        "goalRequestId": str(uuid.uuid4()),
+    }
+    try:
+        registered_companion.stage_proposal(wrong_goal_proposal)
+    except ValueError as error:
+        assert "active goal request" in str(error)
+    else:
+        raise AssertionError("An unrelated goal proposal must be rejected")
+    conflicting_proposal = {
+        **goal_proposal,
+        "proposalId": str(uuid.uuid4()),
+        "revisionRequestId": str(uuid.uuid4()),
+    }
+    try:
+        registered_companion.stage_proposal(conflicting_proposal)
+    except ValueError as error:
+        assert "both a goal request and revision request" in str(error)
+    else:
+        raise AssertionError("A proposal cannot link two request kinds")
+
+    unrelated_proposal = {
+        key: value for key, value in goal_proposal.items() if key != "goalRequestId"
+    }
+    unrelated_proposal["proposalId"] = str(uuid.uuid4())
+    assert registered_companion.stage_proposal(unrelated_proposal)
+    assert registered_companion.goal_request.phase == "local"
+    assert registered_companion.reject_proposal()
+    assert registered_companion.goal_request.active
+
+    assert registered_companion.stage_proposal(goal_proposal)
+    assert registered_companion.goal_request.phase == "proposal_received"
+    assert operating_line.get_session() is accepted_before_goal
+    assert tuple(bpy.context.scene.objects) == scene_objects_before_goal
+    assert accepted_before_goal.active_index == active_index_before_goal
+    assert tuple(accepted_before_goal.receipts) == receipts_before_goal
+    assert bpy.ops.operating_line.reject_proposal() == {"FINISHED"}
+    assert registered_companion.goal_request.active is False
+    assert operating_line.get_session() is accepted_before_goal
+    assert tuple(bpy.context.scene.objects) == scene_objects_before_goal
+    assert goal_transport.decisions == [
+        (unrelated_proposal["proposalId"], "rejected"),
+        (goal_proposal["proposalId"], "rejected"),
+    ]
+    registered_companion._transport = None
     assert all(
         "UNDO" not in operator.bl_options
         for operator in (OPERATINGLINE_OT_start, OPERATINGLINE_OT_next, OPERATINGLINE_OT_back)
@@ -2666,6 +2875,11 @@ def main() -> None:
     assert not hasattr(bpy.types.WindowManager, "operating_line_runtime_url")
     assert not hasattr(bpy.types.WindowManager, "operating_line_bearer_token")
     assert not hasattr(bpy.types.WindowManager, "operating_line_revision_message")
+    assert not hasattr(bpy.types.WindowManager, "operating_line_goal")
+    assert not hasattr(
+        bpy.types.WindowManager,
+        "operating_line_goal_workspace_expanded",
+    )
     assert not hasattr(
         bpy.types.WindowManager,
         "operating_line_revision_history_expanded",

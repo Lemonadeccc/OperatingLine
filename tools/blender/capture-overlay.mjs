@@ -31,6 +31,7 @@ const renderOutputDirectory = mkdtempSync(join(tmpdir(), 'operatingline-visual-r
 try {
   const states = [
     'initial',
+    'goal-request',
     'revision',
     'revision-collapsed',
     'proposal',

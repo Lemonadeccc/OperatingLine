@@ -4,7 +4,7 @@ import bpy
 
 from ..application import GuidanceState, node_state
 from ..visual_theme import STATE_ICONS, STATE_SYMBOLS
-from .revision_workspace import draw_revision_workspace
+from .revision_workspace import draw_revision_workspace, draw_wrapped_text
 
 
 def _step_ordinal(index: int | None) -> str:
@@ -106,6 +106,59 @@ def _draw_guidance_status(layout, session) -> None:
         )
 
 
+def _draw_goal_workspace(layout, context, companion) -> None:
+    if companion.goal_entry_blocked and not companion.goal_request.active:
+        return
+    workspace = layout.box()
+    header = workspace.row(align=True)
+    expanded = context.window_manager.operating_line_goal_workspace_expanded
+    header.prop(
+        context.window_manager,
+        "operating_line_goal_workspace_expanded",
+        text="",
+        icon="DOWNARROW_HLT" if expanded else "RIGHTARROW",
+        emboss=False,
+    )
+    header.label(text="Goal to Guidance", icon="LIGHT")
+    if not expanded:
+        if companion.goal_request.active:
+            draw_wrapped_text(workspace, companion.goal_request.message, icon="TIME")
+        return
+
+    if companion.goal_request.active:
+        icon = (
+            "ERROR"
+            if companion.goal_request.phase == "error"
+            else "QUESTION"
+            if companion.goal_request.phase == "proposal_received"
+            else "TIME"
+        )
+        draw_wrapped_text(
+            workspace,
+            f"Goal: {companion.goal_request.goal_summary}",
+            icon="GREASEPENCIL",
+        )
+        draw_wrapped_text(workspace, companion.goal_request.message, icon=icon)
+        draw_wrapped_text(
+            workspace,
+            "Scene and active plan unchanged",
+            icon="LOCKED",
+        )
+        if companion.goal_request.phase == "proposal_received":
+            workspace.label(text="Review the full proposal below")
+        return
+
+    workspace.label(text="What do you want to accomplish?")
+    workspace.prop(context.window_manager, "operating_line_goal", text="Goal")
+    submit = workspace.row()
+    goal = context.window_manager.operating_line_goal
+    submit.enabled = companion.connected and bool(goal.strip())
+    submit.operator("operating_line.submit_goal_request", icon="PLAY")
+    if not companion.connected:
+        workspace.label(text="Connect the runtime to send", icon="INFO")
+    workspace.label(text="A proposal will require Accept or Reject", icon="LOCKED")
+
+
 class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
     bl_label = "OperatingLine"
     bl_idname = "OPERATINGLINE_PT_sidebar"
@@ -136,6 +189,7 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
         elif companion.error:
             connection.label(text=companion.error, icon="ERROR")
 
+        _draw_goal_workspace(layout, context, companion)
         draw_revision_workspace(layout, context, companion, session)
         layout.prop(context.scene, "operating_line_replace_factory_scene")
         _draw_walkthrough_controls(

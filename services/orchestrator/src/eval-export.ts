@@ -90,24 +90,65 @@ function revisionRequestMatches(payload: unknown, request: EvalExportRequest): b
   );
 }
 
-function planningContextMatches(payload: unknown, request: EvalExportRequest): boolean {
+function goalPlanMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    stringAt(payload, 'adapterId') === request.targetAdapterId &&
+    stringAt(payload, 'planId') === request.planId
+  );
+}
+
+function goalRequestMatches(payload: unknown, request: EvalExportRequest): boolean {
+  return (
+    goalPlanMatches(payload, request) &&
+    (request.instanceId === undefined || stringAt(payload, 'instanceId') === request.instanceId)
+  );
+}
+
+function planningProvenanceMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+  goalScopedPlan: boolean,
+): boolean {
+  if (request.instanceId === undefined) {
+    return true;
+  }
+  const targetInstanceId = stringAt(payload, 'targetInstanceId');
+  return targetInstanceId === null ? !goalScopedPlan : targetInstanceId === request.instanceId;
+}
+
+function planningContextMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+  goalScopedPlan: boolean,
+): boolean {
   return (
     stringAt(payload, 'context', 'targetAdapterId') === request.targetAdapterId &&
-    stringAt(payload, 'context', 'requestedPlanId') === request.planId
+    stringAt(payload, 'context', 'requestedPlanId') === request.planId &&
+    planningProvenanceMatches(payload, request, goalScopedPlan)
   );
 }
 
-function planningPromptMatches(payload: unknown, request: EvalExportRequest): boolean {
+function planningPromptMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+  goalScopedPlan: boolean,
+): boolean {
   return (
     stringAt(payload, 'packet', 'context', 'targetAdapterId') === request.targetAdapterId &&
-    stringAt(payload, 'packet', 'context', 'requestedPlanId') === request.planId
+    stringAt(payload, 'packet', 'context', 'requestedPlanId') === request.planId &&
+    planningProvenanceMatches(payload, request, goalScopedPlan)
   );
 }
 
-function plannerGenerationMatches(payload: unknown, request: EvalExportRequest): boolean {
+function plannerGenerationMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+  goalScopedPlan: boolean,
+): boolean {
   return (
     stringAt(payload, 'targetAdapterId') === request.targetAdapterId &&
-    stringAt(payload, 'planId') === request.planId
+    stringAt(payload, 'planId') === request.planId &&
+    planningProvenanceMatches(payload, request, goalScopedPlan)
   );
 }
 
@@ -145,7 +186,11 @@ function plannerReplanGenerationMatches(payload: unknown, request: EvalExportReq
   );
 }
 
-function planningQualityMatches(payload: unknown, request: EvalExportRequest): boolean {
+function planningQualityMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+  goalScopedPlan: boolean,
+): boolean {
   if (
     stringAt(payload, 'targetAdapterId') !== request.targetAdapterId ||
     stringAt(payload, 'plan', 'id') !== request.planId
@@ -159,9 +204,9 @@ function planningQualityMatches(payload: unknown, request: EvalExportRequest): b
   const isReplanEvaluation =
     stringAt(payload, 'revisionRequestId') !== null ||
     stringAt(payload, 'generationRequestId') !== null;
-  return isReplanEvaluation
-    ? targetInstanceId === request.instanceId
-    : targetInstanceId === null || targetInstanceId === request.instanceId;
+  return targetInstanceId === null
+    ? !goalScopedPlan && !isReplanEvaluation
+    : targetInstanceId === request.instanceId;
 }
 
 function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boolean {
@@ -177,6 +222,7 @@ function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boo
 function collectRelations(events: readonly StoredExecutionEvent[], request: EvalExportRequest) {
   const proposalPayloads = new Map<string, unknown>();
   const revisionRequestPayloads = new Map<string, unknown>();
+  const goalRequestPayloads = new Map<string, unknown>();
   const links: Array<{ requestId: string; proposalId: string }> = [];
 
   for (const event of events) {
@@ -190,7 +236,18 @@ function collectRelations(events: readonly StoredExecutionEvent[], request: Eval
       if (requestId !== null) {
         revisionRequestPayloads.set(requestId, event.payload);
       }
+    } else if (event.eventType === 'guide.goal.requested') {
+      const requestId = stringAt(event.payload, 'requestId');
+      if (requestId !== null) {
+        goalRequestPayloads.set(requestId, event.payload);
+      }
     } else if (event.eventType === 'guide.revision.proposed') {
+      const requestId = stringAt(event.payload, 'requestId');
+      const proposalId = stringAt(event.payload, 'proposalId');
+      if (requestId !== null && proposalId !== null) {
+        links.push({ requestId, proposalId });
+      }
+    } else if (event.eventType === 'guide.goal.proposed') {
       const requestId = stringAt(event.payload, 'requestId');
       const proposalId = stringAt(event.payload, 'proposalId');
       if (requestId !== null && proposalId !== null) {
@@ -209,11 +266,23 @@ function collectRelations(events: readonly StoredExecutionEvent[], request: Eval
       .filter(([, payload]) => revisionRequestMatches(payload, request))
       .map(([requestId]) => requestId),
   );
+  const goalScopedPlan = [...goalRequestPayloads.values()].some((payload) =>
+    goalPlanMatches(payload, request),
+  );
+  for (const [requestId, payload] of goalRequestPayloads) {
+    if (goalRequestMatches(payload, request)) {
+      requestIds.add(requestId);
+    }
+  }
 
   for (const proposalId of proposalIds) {
     const revisionRequestId = stringAt(proposalPayloads.get(proposalId), 'revisionRequestId');
     if (revisionRequestId !== null) {
       requestIds.add(revisionRequestId);
+    }
+    const goalRequestId = stringAt(proposalPayloads.get(proposalId), 'goalRequestId');
+    if (goalRequestId !== null) {
+      requestIds.add(goalRequestId);
     }
   }
   for (const link of links) {
@@ -223,7 +292,7 @@ function collectRelations(events: readonly StoredExecutionEvent[], request: Eval
     }
   }
 
-  return { proposalIds, requestIds };
+  return { proposalIds, requestIds, goalScopedPlan };
 }
 
 function eventMatches(
@@ -231,12 +300,13 @@ function eventMatches(
   request: EvalExportRequest,
   proposalIds: ReadonlySet<string>,
   requestIds: ReadonlySet<string>,
+  goalScopedPlan: boolean,
 ): boolean {
   switch (event.eventType) {
     case 'planning.context.generated':
-      return planningContextMatches(event.payload, request);
+      return planningContextMatches(event.payload, request, goalScopedPlan);
     case 'planning.prompt.generated':
-      return planningPromptMatches(event.payload, request);
+      return planningPromptMatches(event.payload, request, goalScopedPlan);
     case 'planning.replan.context.generated':
       return replanningContextMatches(event.payload, request);
     case 'planning.replan.prompt.generated':
@@ -244,7 +314,7 @@ function eventMatches(
     case 'planning.provider.generation.requested':
     case 'planning.provider.generation.completed':
     case 'planning.provider.generation.failed':
-      return plannerGenerationMatches(event.payload, request);
+      return plannerGenerationMatches(event.payload, request, goalScopedPlan);
     case 'planning.provider.replan.requested':
     case 'planning.provider.replan.completed':
     case 'planning.provider.replan.failed':
@@ -258,7 +328,7 @@ function eventMatches(
       );
     }
     case 'planning.quality.evaluated':
-      return planningQualityMatches(event.payload, request);
+      return planningQualityMatches(event.payload, request, goalScopedPlan);
     case 'guide.plan.published':
       return publishedPlanMatches(event.payload, request);
     case 'guide.proposal.created': {
@@ -280,6 +350,18 @@ function eventMatches(
       return requestId !== null && requestIds.has(requestId);
     }
     case 'guide.revision.proposed': {
+      const requestId = stringAt(event.payload, 'requestId');
+      const proposalId = stringAt(event.payload, 'proposalId');
+      return (
+        (requestId !== null && requestIds.has(requestId)) ||
+        (proposalId !== null && proposalIds.has(proposalId))
+      );
+    }
+    case 'guide.goal.requested': {
+      const requestId = stringAt(event.payload, 'requestId');
+      return requestId !== null && requestIds.has(requestId);
+    }
+    case 'guide.goal.proposed': {
       const requestId = stringAt(event.payload, 'requestId');
       const proposalId = stringAt(event.payload, 'proposalId');
       return (
@@ -471,7 +553,13 @@ export function createEvalExport(options: EvalExportOptions): CurrentEvalExportB
   const snapshotEvents = options.events.filter((event) => event.sequence <= snapshotUpperSequence);
   const relations = collectRelations(snapshotEvents, options.request);
   const matchingEvents = snapshotEvents.filter((event) =>
-    eventMatches(event, options.request, relations.proposalIds, relations.requestIds),
+    eventMatches(
+      event,
+      options.request,
+      relations.proposalIds,
+      relations.requestIds,
+      relations.goalScopedPlan,
+    ),
   );
   const pageCandidates = matchingEvents.filter(
     (event) => event.sequence > options.request.afterSequence,

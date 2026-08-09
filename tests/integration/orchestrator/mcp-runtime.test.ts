@@ -243,6 +243,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.planning.prompt.get' },
             { name: 'operatingline.planner.providers.list' },
             { name: 'operatingline.planner.generate' },
+            { name: 'operatingline.goal.requests.list' },
+            { name: 'operatingline.goal.prompt.get' },
             { name: 'operatingline.replan.providers.list' },
             { name: 'operatingline.replan.prompt.get' },
             { name: 'operatingline.replan.generate' },

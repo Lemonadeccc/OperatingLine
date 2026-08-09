@@ -137,6 +137,31 @@ class OPERATINGLINE_OT_disconnect(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class OPERATINGLINE_OT_submit_goal_request(bpy.types.Operator):
+    bl_idname = "operating_line.submit_goal_request"
+    bl_label = "Create Guidance"
+    bl_description = (
+        "Queue this goal for the runtime planner; no plan is accepted or executed"
+    )
+
+    def execute(self, context):
+        companion = _companion()
+        try:
+            request = companion.submit_goal_request(
+                context.window_manager.operating_line_goal
+            )
+        except ValueError as error:
+            companion.goal_request.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        context.window_manager.operating_line_goal = ""
+        self.report(
+            {"INFO"},
+            f"Goal request {request['requestId'][:8]} queued; scene unchanged",
+        )
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_accept_proposal(bpy.types.Operator):
     bl_idname = "operating_line.accept_proposal"
     bl_label = "Accept Plan"
@@ -389,6 +414,7 @@ class OPERATINGLINE_OT_toggle_branch(bpy.types.Operator):
 CLASSES = (
     OPERATINGLINE_OT_connect,
     OPERATINGLINE_OT_disconnect,
+    OPERATINGLINE_OT_submit_goal_request,
     OPERATINGLINE_OT_accept_proposal,
     OPERATINGLINE_OT_reject_proposal,
     OPERATINGLINE_OT_reference_node,

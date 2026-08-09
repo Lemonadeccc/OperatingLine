@@ -28,6 +28,8 @@ export interface GuideProposalInput {
   proposalId: string;
   targetAdapterId: string;
   targetInstanceId?: string | undefined;
+  goalRequestId?: string | undefined;
+  catalogVersion?: string | undefined;
   proposedAt: string;
   plan: {
     id: string;
@@ -65,6 +67,18 @@ export interface GuideRevisionRequestInput {
 }
 
 export type RecordGuideRevisionRequestResult = 'accepted' | 'duplicate' | 'conflict';
+
+export interface GuideGoalRequestInput {
+  requestId: string;
+  adapterId: string;
+  catalogVersion: string;
+  instanceId: string;
+  goal: string;
+  planId: string;
+  occurredAt: string;
+}
+
+export type RecordGuideGoalRequestResult = 'accepted' | 'duplicate' | 'conflict';
 
 export interface StoredGuideRevisionThreadTurn {
   request: unknown;
@@ -107,6 +121,7 @@ export interface OperatingLineDatabase {
   listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
   getExecutionEvent(id: string): StoredExecutionEvent | null;
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
+  recordGuideGoalProposal<T extends GuideProposalInput>(proposal: T, goalRequestId: string): void;
   recordGuideReplanProposal<T extends GuideProposalInput>(
     proposal: T,
     revisionRequestId: string,
@@ -136,6 +151,10 @@ export interface OperatingLineDatabase {
     limit: number,
   ): StoredGuideRevisionThreadTurn[];
   listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
+  recordGuideGoalRequest<T extends GuideGoalRequestInput>(request: T): RecordGuideGoalRequestResult;
+  getGuideGoalRequest(requestId: string): unknown | null;
+  getGuideGoalProposalForRequest(requestId: string): unknown | null;
+  listPendingGuideGoalRequests(adapterId: string | undefined, limit: number): unknown[];
   recordCompanionReplanRun<T extends CompanionReplanRunInput>(
     run: T,
   ): RecordCompanionReplanRunResult;
@@ -336,6 +355,30 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (8, datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS guide_goal_requests (
+      request_id TEXT PRIMARY KEY,
+      adapter_id TEXT NOT NULL,
+      catalog_version TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS guide_goal_requests_pending_order
+    ON guide_goal_requests (adapter_id, occurred_at, request_id);
+
+    CREATE TABLE IF NOT EXISTS guide_goal_request_proposals (
+      request_id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE,
+      linked_at TEXT NOT NULL,
+      FOREIGN KEY (request_id) REFERENCES guide_goal_requests(request_id),
+      FOREIGN KEY (proposal_id) REFERENCES guide_proposals(proposal_id)
+    );
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (9, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -401,6 +444,57 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT adapter_id, instance_id, base_plan_id, base_revision, payload
     FROM guide_revision_requests
     WHERE request_id = ?
+  `);
+  const findGoalRequest = sqlite.prepare(`
+    SELECT adapter_id, catalog_version, instance_id, plan_id, payload
+    FROM guide_goal_requests
+    WHERE request_id = ?
+  `);
+  const insertGoalRequest = sqlite.prepare(`
+    INSERT INTO guide_goal_requests (
+      request_id,
+      adapter_id,
+      catalog_version,
+      instance_id,
+      plan_id,
+      occurred_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const listPendingGoalRequests = sqlite.prepare(`
+    SELECT request.payload
+    FROM guide_goal_requests AS request
+    LEFT JOIN guide_goal_request_proposals AS linked
+      ON linked.request_id = request.request_id
+    WHERE linked.request_id IS NULL
+      AND (? IS NULL OR request.adapter_id = ?)
+    ORDER BY request.occurred_at, request.request_id
+    LIMIT ?
+  `);
+  const findPendingGoalRequestForTarget = sqlite.prepare(`
+    SELECT request.request_id
+    FROM guide_goal_requests AS request
+    LEFT JOIN guide_goal_request_proposals AS linked
+      ON linked.request_id = request.request_id
+    WHERE linked.request_id IS NULL
+      AND request.adapter_id = ?
+      AND request.instance_id = ?
+    LIMIT 1
+  `);
+  const findGoalRequestProposal = sqlite.prepare(`
+    SELECT proposal_id
+    FROM guide_goal_request_proposals
+    WHERE request_id = ?
+  `);
+  const findGoalRequestProposalPayload = sqlite.prepare(`
+    SELECT proposal.payload
+    FROM guide_goal_request_proposals AS linked
+    JOIN guide_proposals AS proposal ON proposal.proposal_id = linked.proposal_id
+    WHERE linked.request_id = ?
+  `);
+  const insertGoalRequestProposal = sqlite.prepare(`
+    INSERT INTO guide_goal_request_proposals (request_id, proposal_id, linked_at)
+    VALUES (?, ?, ?)
   `);
   const insertRevisionRequest = sqlite.prepare(`
     INSERT INTO guide_revision_requests (
@@ -671,6 +765,73 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           'guide.proposal.created',
           payload,
           new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    recordGuideGoalProposal(proposal, goalRequestId) {
+      const payload = canonicalJson(proposal);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const request = findGoalRequest.get(goalRequestId) as
+          | {
+              adapter_id: string;
+              catalog_version: string;
+              instance_id: string;
+              plan_id: string;
+            }
+          | undefined;
+        if (request === undefined) {
+          throw new Error(`Unknown guide goal request: ${goalRequestId}`);
+        }
+        if (findGoalRequestProposal.get(goalRequestId) !== undefined) {
+          throw new Error(`Guide goal request already has a proposal: ${goalRequestId}`);
+        }
+        if (
+          proposal.goalRequestId !== goalRequestId ||
+          proposal.targetAdapterId !== request.adapter_id ||
+          proposal.targetInstanceId !== request.instance_id ||
+          proposal.catalogVersion !== request.catalog_version ||
+          proposal.plan.id !== request.plan_id
+        ) {
+          throw new Error(`Guide goal proposal does not match request: ${goalRequestId}`);
+        }
+        if (
+          findPendingGuideProposal.get(
+            request.adapter_id,
+            request.instance_id,
+            request.adapter_id,
+            request.instance_id,
+          ) !== undefined
+        ) {
+          throw new Error(
+            `Guide target already has an unresolved proposal: ${request.adapter_id}/${request.instance_id}`,
+          );
+        }
+        insertGuideProposal.run(
+          proposal.proposalId,
+          proposal.targetAdapterId,
+          proposal.plan.id,
+          proposal.plan.revision,
+          proposal.proposedAt,
+          payload,
+        );
+        const linkedAt = new Date().toISOString();
+        insertEvent.run(
+          `guide-proposal:${proposal.proposalId}`,
+          'guide.proposal.created',
+          payload,
+          linkedAt,
+        );
+        insertGoalRequestProposal.run(goalRequestId, proposal.proposalId, linkedAt);
+        insertEvent.run(
+          `guide-goal-proposal:${goalRequestId}`,
+          'guide.goal.proposed',
+          canonicalJson({ requestId: goalRequestId, proposalId: proposal.proposalId }),
+          linkedAt,
         );
         sqlite.exec('COMMIT;');
       } catch (error) {
@@ -974,6 +1135,95 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           return JSON.parse(payload) as unknown;
         });
     },
+    recordGuideGoalRequest(request) {
+      const payload = canonicalJson(request);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findGoalRequest.get(request.requestId) as
+          | {
+              adapter_id: string;
+              catalog_version: string;
+              instance_id: string;
+              plan_id: string;
+              payload: string;
+            }
+          | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.adapter_id === request.adapterId &&
+            existing.catalog_version === request.catalogVersion &&
+            existing.instance_id === request.instanceId &&
+            existing.plan_id === request.planId &&
+            existing.payload === payload
+            ? 'duplicate'
+            : 'conflict';
+        }
+        if (
+          findPendingGoalRequestForTarget.get(request.adapterId, request.instanceId) !==
+            undefined ||
+          findActiveCompanionReplanRun.get(request.adapterId, request.instanceId) !== undefined ||
+          findPendingGuideProposal.get(
+            request.adapterId,
+            request.instanceId,
+            request.adapterId,
+            request.instanceId,
+          ) !== undefined
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+        insertGoalRequest.run(
+          request.requestId,
+          request.adapterId,
+          request.catalogVersion,
+          request.instanceId,
+          request.planId,
+          request.occurredAt,
+          payload,
+        );
+        insertEvent.run(
+          `guide-goal-request:${request.requestId}`,
+          'guide.goal.requested',
+          payload,
+          new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getGuideGoalRequest(requestId) {
+      const row = findGoalRequest.get(requestId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide goal request payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    getGuideGoalProposalForRequest(requestId) {
+      const row = findGoalRequestProposalPayload.get(requestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide goal proposal payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    listPendingGuideGoalRequests(adapterId, limit) {
+      return listPendingGoalRequests.all(adapterId ?? null, adapterId ?? null, limit).map((row) => {
+        const payload = (row as { payload?: unknown }).payload;
+        if (typeof payload !== 'string') {
+          throw new Error('SQLite returned an invalid guide goal request payload');
+        }
+        return JSON.parse(payload) as unknown;
+      });
+    },
     recordCompanionReplanRun(run) {
       const payload = canonicalJson(run);
       sqlite.exec('BEGIN IMMEDIATE;');
@@ -985,7 +1235,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           return existing.payload === payload ? 'duplicate' : 'conflict';
         }
         const active = findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId);
-        if (active !== undefined) {
+        const pendingGoal = findPendingGoalRequestForTarget.get(
+          run.targetAdapterId,
+          run.targetInstanceId,
+        );
+        if (active !== undefined || pendingGoal !== undefined) {
           sqlite.exec('COMMIT;');
           return 'conflict';
         }

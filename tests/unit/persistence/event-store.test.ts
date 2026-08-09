@@ -3,10 +3,48 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 
 import { describe, expect, it } from 'vitest';
 
 import { openOperatingLineDatabase } from '@operatingline/persistence';
+
+function recordWorkSlotFromWorker(
+  databasePath: string,
+  operation: 'goal' | 'replan',
+  payload: unknown,
+): Promise<string> {
+  return new Promise((resolveWorker, rejectWorker) => {
+    const worker = new Worker(
+      `
+        const { parentPort, workerData } = require('node:worker_threads');
+        import('@operatingline/persistence').then(({ openOperatingLineDatabase }) => {
+          const database = openOperatingLineDatabase(workerData.databasePath);
+          try {
+            const result = workerData.operation === 'goal'
+              ? database.recordGuideGoalRequest(workerData.payload)
+              : database.recordCompanionReplanRun(workerData.payload);
+            parentPort.postMessage(result);
+          } finally {
+            database.close();
+          }
+        }).catch((error) => parentPort.postMessage({ error: String(error) }));
+      `,
+      {
+        eval: true,
+        workerData: { databasePath, operation, payload },
+      },
+    );
+    worker.once('message', (result: unknown) => {
+      if (typeof result === 'object' && result !== null && 'error' in result) {
+        rejectWorker(new Error(String((result as { error: unknown }).error)));
+      } else {
+        resolveWorker(String(result));
+      }
+    });
+    worker.once('error', rejectWorker);
+  });
+}
 
 function guideProposal(planId = 'snowman', revision = 1) {
   return {
@@ -45,6 +83,20 @@ function revisionRequest(requestId = randomUUID()) {
     references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
     message: 'Make the head slightly larger.',
     occurredAt: new Date().toISOString(),
+  };
+}
+
+function goalRequest(overrides: Record<string, unknown> = {}) {
+  return {
+    protocolVersion: '1.1.0',
+    requestId: randomUUID(),
+    adapterId: 'canvas',
+    catalogVersion: '2.0.0',
+    instanceId: randomUUID(),
+    goal: 'Create a launch diagram.',
+    planId: 'launch-diagram',
+    occurredAt: '2026-08-09T10:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -176,6 +228,69 @@ describe('OperatingLine persistence', () => {
       expect(restarted.listNonterminalCompanionReplanRuns()).toEqual([queued]);
       restarted.close();
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('atomically reserves one goal or replan work slot per instance in both creation orders', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-instance-work-slot-'));
+    const databasePath = join(directory, 'state.db');
+    const first = openOperatingLineDatabase(databasePath);
+    const second = openOperatingLineDatabase(databasePath);
+    try {
+      const goalFirst = goalRequest();
+      const blockedRun = companionReplanRun({
+        targetAdapterId: goalFirst.adapterId,
+        targetInstanceId: goalFirst.instanceId,
+      });
+      expect(first.recordGuideGoalRequest(goalFirst)).toBe('accepted');
+      expect(second.recordCompanionReplanRun(blockedRun)).toBe('conflict');
+
+      const runFirst = companionReplanRun({ targetAdapterId: 'canvas' });
+      expect(
+        first.recordGuideRevisionRequest({
+          ...revisionRequest(runFirst.revisionRequestId),
+          adapterId: runFirst.targetAdapterId,
+          instanceId: runFirst.targetInstanceId,
+        }),
+      ).toBe('accepted');
+      expect(second.recordCompanionReplanRun(runFirst)).toBe('accepted');
+      expect(
+        first.recordGuideGoalRequest(
+          goalRequest({
+            instanceId: runFirst.targetInstanceId,
+            planId: 'blocked-by-replan',
+          }),
+        ),
+      ).toBe('conflict');
+
+      expect(first.listPendingGuideGoalRequests('canvas', 20)).toEqual([goalFirst]);
+      expect(second.listNonterminalCompanionReplanRuns()).toEqual([runFirst]);
+
+      const racingGoal = goalRequest({ instanceId: randomUUID(), planId: 'racing-work-slot' });
+      const racingRun = companionReplanRun({
+        targetAdapterId: racingGoal.adapterId,
+        targetInstanceId: racingGoal.instanceId,
+      });
+      expect(
+        first.recordGuideRevisionRequest({
+          ...revisionRequest(racingRun.revisionRequestId),
+          adapterId: racingRun.targetAdapterId,
+          instanceId: racingRun.targetInstanceId,
+        }),
+      ).toBe('accepted');
+      const raceResults = await Promise.all([
+        recordWorkSlotFromWorker(databasePath, 'goal', racingGoal),
+        recordWorkSlotFromWorker(databasePath, 'replan', racingRun),
+      ]);
+      expect(raceResults.sort()).toEqual(['accepted', 'conflict']);
+      expect(
+        Number(first.getGuideGoalRequest(racingGoal.requestId) !== null) +
+          Number(first.getCompanionReplanRun(racingRun.generationRequestId) !== null),
+      ).toBe(1);
+    } finally {
+      first.close();
+      second.close();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -415,6 +530,71 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('stores one pending goal request per instance and atomically links its targeted proposal', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const request = goalRequest();
+    const otherRequest = goalRequest({
+      instanceId: randomUUID(),
+      planId: 'other-diagram',
+      occurredAt: '2026-08-09T10:00:01.000Z',
+    });
+
+    expect(database.recordGuideGoalRequest(request)).toBe('accepted');
+    expect(database.recordGuideGoalRequest(request)).toBe('duplicate');
+    expect(database.recordGuideGoalRequest({ ...request, goal: 'Conflicting reuse.' })).toBe(
+      'conflict',
+    );
+    expect(
+      database.recordGuideGoalRequest(
+        goalRequest({ instanceId: request.instanceId, planId: 'racing-plan' }),
+      ),
+    ).toBe('conflict');
+    expect(database.recordGuideGoalRequest(otherRequest)).toBe('accepted');
+    expect(database.getGuideGoalRequest(request.requestId)).toEqual(request);
+    expect(database.listPendingGuideGoalRequests('canvas', 20)).toEqual([request, otherRequest]);
+
+    const proposal = {
+      ...guideProposal(request.planId, 1),
+      targetAdapterId: request.adapterId,
+      targetInstanceId: request.instanceId,
+      goalRequestId: request.requestId,
+      catalogVersion: request.catalogVersion,
+    };
+    database.recordGuideGoalProposal(proposal, request.requestId);
+    expect(database.getGuideGoalProposalForRequest(request.requestId)).toEqual(proposal);
+    expect(database.listPendingGuideGoalRequests('canvas', 20)).toEqual([otherRequest]);
+    expect(database.getPendingGuideProposal('canvas', request.instanceId)).toEqual(proposal);
+    expect(database.getPendingGuideProposal('canvas', otherRequest.instanceId)).toBeNull();
+    expect(() =>
+      database.recordGuideGoalProposal(
+        {
+          ...guideProposal(request.planId, 2),
+          targetAdapterId: request.adapterId,
+          targetInstanceId: request.instanceId,
+          goalRequestId: request.requestId,
+          catalogVersion: request.catalogVersion,
+        },
+        request.requestId,
+      ),
+    ).toThrow('already has a proposal');
+    expect(
+      database.recordGuideGoalRequest(
+        goalRequest({ instanceId: request.instanceId, planId: 'blocked-by-review' }),
+      ),
+    ).toBe('conflict');
+    expect(
+      database.listExecutionEventsByTypes(['guide.goal.requested', 'guide.goal.proposed']),
+    ).toMatchObject([
+      { eventType: 'guide.goal.requested', payload: request },
+      { eventType: 'guide.goal.requested', payload: otherRequest },
+      {
+        eventType: 'guide.goal.proposed',
+        payload: { requestId: request.requestId, proposalId: proposal.proposalId },
+      },
+    ]);
+    database.close();
+  });
+
   it('rolls back a generated replan proposal when provenance evidence cannot be written', () => {
     const database = openOperatingLineDatabase(':memory:');
     const request = revisionRequest();
@@ -632,7 +812,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 8,
+        count: 9,
       });
       expect(
         inspected
