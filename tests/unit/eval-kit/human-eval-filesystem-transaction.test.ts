@@ -73,6 +73,22 @@ describe('Human Eval filesystem transactions', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('reports typed contention when competing tickets disappear during acquisition', async () => {
+    const root = await temporaryDirectory();
+    const results = await Promise.allSettled(
+      Array.from({ length: 32 }, () => withHumanEvalDatasetWriteLock(root, async () => undefined)),
+    );
+
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        expect(result.reason).toBeInstanceOf(HumanEvalDatasetBusyError);
+      }
+    }
+    await expect(
+      withHumanEvalDatasetWriteLock(root, async () => undefined),
+    ).resolves.toBeUndefined();
+  });
+
   it('recovers only a complete lock whose recorded process no longer exists', async () => {
     const root = await temporaryDirectory();
     const lockDirectory = join(root, '.human-eval-write.lock');

@@ -89,10 +89,16 @@ async function acquireDatasetWriteTicket(
     let acquired = false;
     try {
       const tickets = await lockTicketNames(lockDirectory);
-      await Promise.all(
-        tickets.map((name) => safeLockTicketMetadata(resolve(lockDirectory, name))),
-      );
-      if (tickets.every((name) => resolve(lockDirectory, name) === ticketPath)) {
+      let stableSnapshot = true;
+      try {
+        await Promise.all(
+          tickets.map((name) => safeLockTicketMetadata(resolve(lockDirectory, name))),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        stableSnapshot = false;
+      }
+      if (stableSnapshot && tickets.every((name) => resolve(lockDirectory, name) === ticketPath)) {
         acquired = true;
         return ticketPath;
       }

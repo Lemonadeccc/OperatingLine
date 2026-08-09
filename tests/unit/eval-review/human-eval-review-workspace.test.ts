@@ -402,7 +402,18 @@ describe('HumanEvalReviewWorkspace', () => {
       workspaceB.submitReview(sessionB, submission(dtoB, 'not_met')),
     ]);
 
-    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled.length).toBeLessThanOrEqual(1);
+    for (const result of rejected) {
+      expect(result.reason).toMatchObject({
+        code: expect.stringMatching(/^(dataset_busy|duplicate_submission)$/u),
+      });
+    }
+    if (fulfilled.length === 0) {
+      expect(rejected.every((result) => result.reason.code === 'dataset_busy')).toBe(true);
+      await workspaceA.submitReview(sessionA, submission(dtoA, 'met'));
+    }
     expect(await annotations(directory)).toHaveLength(1);
     await expect(
       HumanEvalReviewWorkspace.open({ datasetDirectory: directory }),

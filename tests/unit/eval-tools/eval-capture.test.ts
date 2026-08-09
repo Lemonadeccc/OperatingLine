@@ -7,7 +7,9 @@ import {
   computeHumanEvalContentSha256,
   computePlanContentSha256,
   contentWithoutIntegrity,
+  HumanEvalDatasetBusyError,
   HumanEvalDatasetError,
+  loadHumanEvalDatasetDirectory,
   sealHumanEvalSuite,
   validateHumanEvalDataset,
 } from '@operatingline/eval-kit';
@@ -435,8 +437,23 @@ describe('offline Human Eval capture CLI', () => {
         captureProviderEvalRun(workspace),
       ]);
 
-      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const fulfilled = results.filter((result) => result.status === 'fulfilled');
+      const rejected = results.filter((result) => result.status === 'rejected');
+      expect(fulfilled.length).toBeLessThanOrEqual(1);
+      for (const result of rejected) {
+        expect(
+          result.reason instanceof HumanEvalDatasetBusyError || result.reason.code === 'EEXIST',
+        ).toBe(true);
+      }
+      if (fulfilled.length === 0) {
+        expect(rejected.every((result) => result.reason instanceof HumanEvalDatasetBusyError)).toBe(
+          true,
+        );
+        await captureProviderEvalRun(workspace);
+      }
       expect(await directoryEntries(join(workspace.datasetDirectory, 'runs'))).toHaveLength(1);
+      const dataset = await loadHumanEvalDatasetDirectory(workspace.datasetDirectory);
+      expect(dataset.runs).toHaveLength(1);
       await expect(
         directoryEntries(join(workspace.datasetDirectory, '.human-eval-write.lock')),
       ).resolves.toEqual([]);
