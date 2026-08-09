@@ -315,6 +315,14 @@ function eventMatches(
     case 'planning.provider.generation.completed':
     case 'planning.provider.generation.failed':
       return plannerGenerationMatches(event.payload, request, goalScopedPlan);
+    case 'planning.provider.generation.proposed': {
+      const goalRequestId = stringAt(event.payload, 'goalRequestId');
+      const proposalId = stringAt(event.payload, 'proposalId');
+      return (
+        (goalRequestId !== null && requestIds.has(goalRequestId)) ||
+        (proposalId !== null && proposalIds.has(proposalId))
+      );
+    }
     case 'planning.provider.replan.requested':
     case 'planning.provider.replan.completed':
     case 'planning.provider.replan.failed':
@@ -368,6 +376,11 @@ function eventMatches(
         (requestId !== null && requestIds.has(requestId)) ||
         (proposalId !== null && proposalIds.has(proposalId))
       );
+    }
+    case 'companion.initial-plan-run.authorized':
+    case 'companion.initial-plan-run.transitioned': {
+      const goalRequestId = stringAt(event.payload, 'goalRequestId');
+      return goalRequestId !== null && requestIds.has(goalRequestId);
     }
     case 'companion.state.reported':
       return (

@@ -8,6 +8,9 @@ import {
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
+  companionInitialPlanRunCreateRequestSchema,
+  companionInitialPlanRunSchema,
+  companionInitialPlanRunStatusRequestSchema,
   companionReplanRunCreateRequestSchema,
   companionReplanRunSchema,
   companionReplanRunStatusRequestSchema,
@@ -102,6 +105,21 @@ const schemas = [
     'human-eval-comparison-report.schema.json',
     'https://operatingline.dev/schema/v1/human-eval-comparison-report.json',
     humanEvalComparisonReportSchema,
+  ],
+  [
+    'companion-initial-plan-run-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-initial-plan-run-create-request.json',
+    companionInitialPlanRunCreateRequestSchema,
+  ],
+  [
+    'companion-initial-plan-run-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-initial-plan-run-status-request.json',
+    companionInitialPlanRunStatusRequestSchema,
+  ],
+  [
+    'companion-initial-plan-run.schema.json',
+    'https://operatingline.dev/schema/v1/companion-initial-plan-run.json',
+    companionInitialPlanRunSchema,
   ],
   [
     'companion-replan-run-create-request.schema.json',

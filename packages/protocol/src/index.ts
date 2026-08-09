@@ -3,6 +3,7 @@ export * from './action-arguments.js';
 export * from './catalog.js';
 export * from './canonical-json-value.js';
 export * from './companion.js';
+export * from './companion-initial-plan-run.js';
 export * from './companion-replan-run.js';
 export * from './diff.js';
 export * from './eval.js';

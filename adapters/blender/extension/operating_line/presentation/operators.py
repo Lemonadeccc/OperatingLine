@@ -22,6 +22,37 @@ def _companion():
     return get_companion()
 
 
+def _draw_provider_authorization(layout, provider, *, initial: bool) -> None:
+    """Draw the shared per-call data and possible-charge disclosure."""
+    layout.label(
+        text=f"Authorize one run with {provider['displayName']}?",
+        icon="QUESTION",
+    )
+    location = provider["dataHandling"]["executionLocation"]
+    if location == "remote":
+        layout.label(text="Data is sent to the selected remote provider", icon="URL")
+        if initial:
+            layout.label(
+                text=(
+                    "Sends your goal, ActionCatalog, and current state of "
+                    "this exact Blender instance"
+                )
+            )
+        else:
+            layout.label(text="Sends your message, base Plan, and node references")
+            layout.label(text="Also sends ActionCatalog and latest companion state")
+        layout.label(text="The provider may charge for this call")
+        layout.label(text="OperatingLine cannot estimate provider charges")
+    else:
+        layout.label(text="Local provider: no provider data transmission", icon="HOME")
+        layout.label(text="The provider description may define local execution costs")
+        layout.label(text="OperatingLine cannot estimate provider charges")
+    layout.separator()
+    layout.label(text="The runtime may create one review proposal")
+    layout.label(text="It will not Accept, execute, or change the scene")
+    layout.label(text="Retrying opens a new confirmation and uses a new run ID")
+
+
 class OPERATINGLINE_OT_start(bpy.types.Operator):
     bl_idname = "operating_line.start"
     bl_label = "Start"
@@ -158,6 +189,86 @@ class OPERATINGLINE_OT_submit_goal_request(bpy.types.Operator):
         self.report(
             {"INFO"},
             f"Goal request {request['requestId'][:8]} queued; scene unchanged",
+        )
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_refresh_initial_plan_providers(bpy.types.Operator):
+    bl_idname = "operating_line.refresh_initial_plan_providers"
+    bl_label = "Refresh Initial Providers"
+    bl_description = "Refresh initial planner descriptors from the loopback runtime"
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.refresh_initial_plan_providers()
+        except ValueError as error:
+            companion.initial_plan_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_select_initial_plan_provider(bpy.types.Operator):
+    bl_idname = "operating_line.select_initial_plan_provider"
+    bl_label = "Select Initial Provider"
+    bl_description = "Explicitly select this provider for a future confirmed initial run"
+
+    provider_id: bpy.props.StringProperty()
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            provider = companion.select_initial_plan_provider(self.provider_id)
+        except ValueError as error:
+            companion.initial_plan_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Selected {provider['displayName']}")
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_run_initial_plan_provider(bpy.types.Operator):
+    bl_idname = "operating_line.run_initial_plan_provider"
+    bl_label = "Confirm Initial Planner Run"
+    bl_description = (
+        "Authorize one initial planner run; its proposal still requires Accept or Reject"
+    )
+
+    def invoke(self, context, _event):
+        handoff = _companion().initial_plan_handoff
+        if not handoff.can_run:
+            message = "Select an available provider after the runtime acknowledges the goal"
+            handoff.message = message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self._confirmation_opened = True
+        return context.window_manager.invoke_props_dialog(self, width=520)
+
+    def draw(self, _context):
+        provider = _companion().initial_plan_handoff.selected_provider
+        if provider is None:
+            self.layout.label(text="No provider selected", icon="ERROR")
+            return
+        _draw_provider_authorization(self.layout, provider, initial=True)
+
+    def execute(self, _context):
+        companion = _companion()
+        if not getattr(self, "_confirmation_opened", False):
+            message = "Open and confirm the initial planner authorization dialog first"
+            companion.initial_plan_handoff.message = message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self._confirmation_opened = False
+        try:
+            request = companion.begin_initial_plan_run()
+        except ValueError as error:
+            companion.initial_plan_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Initial planner run {request['generationRequestId'][:8]} queued; scene unchanged",
         )
         return {"FINISHED"}
 
@@ -342,27 +453,7 @@ class OPERATINGLINE_OT_run_replan_provider(bpy.types.Operator):
         if provider is None:
             layout.label(text="No provider selected", icon="ERROR")
             return
-        layout.label(
-            text=f"Authorize one run with {provider['displayName']}?",
-            icon="QUESTION",
-        )
-        location = provider["dataHandling"]["executionLocation"]
-        if location == "remote":
-            layout.label(
-                text="Data is sent to the selected remote provider", icon="URL"
-            )
-            layout.label(text="Sends your message, base Plan, and node references")
-            layout.label(text="Also sends ActionCatalog and latest companion state")
-            layout.label(text="The provider may charge for this call")
-            layout.label(text="OperatingLine cannot estimate provider charges")
-        else:
-            layout.label(text="Local provider: no provider data transmission", icon="HOME")
-            layout.label(text="The provider description may define local execution costs")
-            layout.label(text="OperatingLine cannot estimate provider charges")
-        layout.separator()
-        layout.label(text="The runtime may create one review proposal")
-        layout.label(text="It will not Accept, execute, or change the scene")
-        layout.label(text="Retrying opens a new confirmation and uses a new run ID")
+        _draw_provider_authorization(layout, provider, initial=False)
 
     def execute(self, _context):
         companion = _companion()
@@ -415,6 +506,9 @@ CLASSES = (
     OPERATINGLINE_OT_connect,
     OPERATINGLINE_OT_disconnect,
     OPERATINGLINE_OT_submit_goal_request,
+    OPERATINGLINE_OT_refresh_initial_plan_providers,
+    OPERATINGLINE_OT_select_initial_plan_provider,
+    OPERATINGLINE_OT_run_initial_plan_provider,
     OPERATINGLINE_OT_accept_proposal,
     OPERATINGLINE_OT_reject_proposal,
     OPERATINGLINE_OT_reference_node,

@@ -266,12 +266,29 @@ const plannerGenerationEventScopeSchema = z.strictObject({
   targetAdapterId: z.string().trim().min(1).max(180),
   catalogVersion: catalogVersionSchema,
   planId: z.string().trim().min(1).max(180),
+  goalRequestId: z.uuid().optional(),
+  targetInstanceId: z.uuid().optional(),
 });
 
-export const plannerGenerationRequestedEventSchema = plannerGenerationEventScopeSchema.extend({
-  packetFormatVersion: planningPromptFormatVersionSchema,
-  occurredAt: z.iso.datetime({ offset: true }),
-});
+function requirePairedGoalRunScope(
+  event: { goalRequestId?: string | undefined; targetInstanceId?: string | undefined },
+  context: z.RefinementCtx,
+): void {
+  if ((event.goalRequestId === undefined) !== (event.targetInstanceId === undefined)) {
+    context.addIssue({
+      code: 'custom',
+      path: [event.goalRequestId === undefined ? 'goalRequestId' : 'targetInstanceId'],
+      message: 'goalRequestId and targetInstanceId must be provided together',
+    });
+  }
+}
+
+export const plannerGenerationRequestedEventSchema = plannerGenerationEventScopeSchema
+  .extend({
+    packetFormatVersion: planningPromptFormatVersionSchema,
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine(requirePairedGoalRunScope);
 export type PlannerGenerationRequestedEvent = z.infer<typeof plannerGenerationRequestedEventSchema>;
 
 export const plannerGenerationCompletedEventSchema = z
@@ -281,9 +298,12 @@ export const plannerGenerationCompletedEventSchema = z
     targetAdapterId: z.string().trim().min(1).max(180),
     catalogVersion: catalogVersionSchema,
     planId: z.string().trim().min(1).max(180),
+    goalRequestId: z.uuid().optional(),
+    targetInstanceId: z.uuid().optional(),
     result: plannerGenerationResultSchema,
   })
   .superRefine((event, context) => {
+    requirePairedGoalRunScope(event, context);
     if (
       event.result.requestId !== event.request.requestId ||
       event.result.provider.id !== event.request.providerId ||
@@ -304,9 +324,11 @@ export const plannerGenerationCompletedEventSchema = z
   });
 export type PlannerGenerationCompletedEvent = z.infer<typeof plannerGenerationCompletedEventSchema>;
 
-export const plannerGenerationFailedEventSchema = plannerGenerationEventScopeSchema.extend({
-  error: plannerGenerationErrorCodeSchema,
-  durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  occurredAt: z.iso.datetime({ offset: true }),
-});
+export const plannerGenerationFailedEventSchema = plannerGenerationEventScopeSchema
+  .extend({
+    error: plannerGenerationErrorCodeSchema,
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine(requirePairedGoalRunScope);
 export type PlannerGenerationFailedEvent = z.infer<typeof plannerGenerationFailedEventSchema>;

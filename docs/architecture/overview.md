@@ -172,10 +172,10 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 供应商无关 PlanningPromptPacket。客户端先 evaluate 完整 draft，再把 draft 与 `goalRequestId` 交给
 既有 `operatingline.guide.propose`；Orchestrator 核对请求身份并把 Proposal 只投递给原实例。请求提交、
 packet 获取、规划、Proposal 到达和 Reject 都不改变宿主场景；Accept 只安装，`Next` 才可能执行动作。
-同一实例只保留一个 pending goal request 或非终态 Replan Run 工作槽；未决 Proposal 继续占用独立的
-宿主审查槽。Goal 来源规划事件在 packet 外层携带 request/instance 来源，实例范围 Eval 不接受无来源或
-其他实例的 context、prompt、quality 证据。
-完整边界见 [ADR 0020](../adr/0020-host-initiated-goal-to-guidance.md)。
+同一实例只保留一个 pending goal request，并在 Initial Plan Run、Replan Run 与未决 Proposal 之间执行
+目标级互斥。Goal 来源 PlanningContext 只携带发起实例的状态；规划事件在 packet 外层保存
+request/instance 来源，实例范围 Eval 不接受无来源或其他实例的 context、prompt、quality 证据。
+完整请求边界见 [ADR 0020](../adr/0020-host-initiated-goal-to-guidance.md)。
 
 宿主还可以把活动树或待审树的节点引用提交为不可变 GuideRevisionRequest。Orchestrator 核对完整
 base Plan、精确目录版本与每个节点编号，并通过 MCP 暴露待处理请求。外部模型客户端只能返回相同
@@ -317,7 +317,31 @@ action/capability 不匹配以及局部范围外 step 作为 planning-quality er
 组合该调用）才能创建待审 Proposal。Coverage 不改变 provider 的显式选择、数据披露、宿主 Accept 或
 `Start`/`Next` 执行边界。
 
-能够等待长 Promise 的 MCP/HTTP 客户端继续使用上述分离路径。宿主 Companion 另有版本化异步
+能够等待长 Promise 的 MCP/HTTP 客户端继续使用上述分离路径。Initial Goal 还可以在 Goal 已持久化后，
+由宿主用户明确选择 Provider、查看数据/可能费用披露并逐次确认异步
+`CompanionInitialPlanRun 1.0.0`：
+
+```text
+Goal acknowledgement + explicit provider + per-call disclosure confirmation
+                                │
+                                ▼
+POST companion/initial-plan-run ── 202 queued
+                                │ background, exact Goal provenance
+                                ├─ needs_revision ── no Proposal
+                                └─ ready ── canonical Goal Proposal
+                                                    │
+short GET status ◄──────────────────────────────────┘
+        │ proposal_created
+        ▼
+existing Companion delivery → in-host Accept/Reject → Next may mutate scene
+```
+
+Goal Run 把 `goalRequestId + targetInstanceId` 与完整生成请求一起纳入 fingerprint 和事件，普通 MCP
+generate 不能以相同 UUID 冒充宿主授权。Goal Proposal、请求关联与唯一 generation provenance 在一个
+事务中写入；恢复只认该来源并且绝不再次调用 Provider。详细决策见
+[ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
+
+局部修订的宿主 Companion 另有版本化异步
 `CompanionReplanRun 1.0.0`：它在用户查看 Provider descriptor 并逐次确认后，先持久化授权并立即返回
 `202 queued`，再由 Orchestrator 后台复用相同 generate 和 canonical propose 权威。
 
@@ -531,6 +555,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
 宿主授权的异步 Replan Run 见
 [ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
+宿主授权的异步 Initial Plan Run 见
+[ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

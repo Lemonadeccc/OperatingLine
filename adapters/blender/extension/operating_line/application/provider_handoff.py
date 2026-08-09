@@ -79,6 +79,7 @@ REPLAN_RUN_PHASES = frozenset(
         *TERMINAL_REPLAN_RUN_PHASES,
     }
 )
+INITIAL_PLAN_RUN_PHASES = REPLAN_RUN_PHASES
 
 
 def _uuid(value: Any, label: str) -> str:
@@ -361,8 +362,10 @@ class ReplanRunState:
         if self.active:
             raise ValueError("Provider selection is locked while a run is active")
         if (
-            self.selected_provider_id is not None
-            and provider_id != self.selected_provider_id
+            (
+                self.selected_provider_id is None
+                or provider_id != self.selected_provider_id
+            )
             and self.phase in {"needs_revision", "failed", "interrupted"}
         ):
             self.generation_request_id = None
@@ -700,7 +703,340 @@ class ReplanRunState:
         )
 
 
+@dataclass
+class InitialPlanRunState:
+    """Main-thread state for one explicitly authorized initial-plan run."""
+
+    providers: tuple[dict[str, Any], ...] = ()
+    selected_provider_id: str | None = None
+    acknowledged_goal_request_id: str | None = None
+    generation_request_id: str | None = None
+    target_instance_id: str | None = None
+    proposal_id: str | None = None
+    phase: str = "idle"
+    message: str = ""
+    retry_mode: str | None = None
+    needs_revision_summary: str = ""
+    needs_revision_findings: tuple[str, ...] = ()
+    loading_providers: bool = False
+    _provider_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    @property
+    def selected_provider(self) -> dict[str, Any] | None:
+        if self.selected_provider_id is None:
+            return None
+        return self._provider_by_id.get(self.selected_provider_id)
+
+    @property
+    def active(self) -> bool:
+        return self.phase in {"queued", "generating"}
+
+    @property
+    def can_run(self) -> bool:
+        provider = self.selected_provider
+        retry_allowed = not (
+            self.phase in {"failed", "interrupted"} and self.retry_mode == "never"
+        )
+        return bool(
+            provider is not None
+            and provider["availability"]["available"]
+            and self.acknowledged_goal_request_id is not None
+            and not self.active
+            and self.phase != "proposal_created"
+            and retry_allowed
+        )
+
+    def clear(self) -> None:
+        self.providers = ()
+        self._provider_by_id.clear()
+        self.selected_provider_id = None
+        self.acknowledged_goal_request_id = None
+        self.generation_request_id = None
+        self.target_instance_id = None
+        self.proposal_id = None
+        self.phase = "idle"
+        self.message = ""
+        self.retry_mode = None
+        self.needs_revision_summary = ""
+        self.needs_revision_findings = ()
+        self.loading_providers = False
+
+    def set_providers(self, payload: Any) -> None:
+        if self.active:
+            raise ValueError("Provider descriptors are locked while a run is active")
+        providers = validate_provider_list(payload)
+        previous_selection = self.selected_provider
+        self.providers = providers
+        self._provider_by_id = {provider["id"]: provider for provider in providers}
+        if self.selected_provider_id not in self._provider_by_id:
+            self.selected_provider_id = None
+        elif (
+            previous_selection is not None
+            and self.selected_provider["version"] != previous_selection["version"]
+        ):
+            self.selected_provider_id = None
+        elif not self.selected_provider["availability"]["available"]:
+            self.selected_provider_id = None
+        self.loading_providers = False
+        if not providers:
+            self.message = "No initial planner provider is configured"
+
+    def select(self, provider_id: str) -> dict[str, Any]:
+        provider = self._provider_by_id.get(provider_id)
+        if provider is None:
+            raise ValueError("Select a provider returned by this runtime")
+        if not provider["availability"]["available"]:
+            raise ValueError(
+                str(provider["availability"].get("message", "Provider unavailable"))
+            )
+        if self.active:
+            raise ValueError("Provider selection is locked while a run is active")
+        if (
+            (
+                self.selected_provider_id is None
+                or provider_id != self.selected_provider_id
+            )
+            and self.phase in {"needs_revision", "failed", "interrupted"}
+        ):
+            self.generation_request_id = None
+            self.target_instance_id = None
+            self.phase = "idle"
+            self.retry_mode = None
+            self.needs_revision_summary = ""
+            self.needs_revision_findings = ()
+        self.selected_provider_id = provider_id
+        self.message = f"Selected {provider['displayName']}"
+        return provider
+
+    def goal_acknowledged(self, goal_request_id: Any) -> None:
+        validated = _uuid(goal_request_id, "Acknowledged goal request id")
+        if self.acknowledged_goal_request_id not in {None, validated}:
+            self.clear()
+        self.acknowledged_goal_request_id = validated
+        if self.phase == "idle":
+            self.message = "Goal request is ready for an optional provider run"
+
+    def ensure_provider_refresh_allowed(self) -> None:
+        if self.active:
+            raise ValueError("Wait for the active initial-plan run before refreshing providers")
+
+    def begin(self, *, target_instance_id: str) -> dict[str, Any]:
+        if not self.can_run:
+            raise ValueError(
+                "Select an available provider after the runtime acknowledges the goal"
+            )
+        provider = self.selected_provider
+        goal_request_id = self.acknowledged_goal_request_id
+        assert provider is not None and goal_request_id is not None
+        generation_request_id = str(uuid.uuid4())
+        self.generation_request_id = generation_request_id
+        self.target_instance_id = _uuid(target_instance_id, "Target instance id")
+        self.proposal_id = None
+        self.phase = "queued"
+        self.retry_mode = None
+        self.needs_revision_summary = ""
+        self.needs_revision_findings = ()
+        self.message = "Initial planner run queued; scene and active plan are unchanged"
+        return {
+            "generationRequestId": generation_request_id,
+            "goalRequestId": goal_request_id,
+            "providerId": provider["id"],
+            "providerVersion": provider["version"],
+            "targetAdapterId": "blender",
+            "targetInstanceId": self.target_instance_id,
+            "authorization": {
+                "disclosureVersion": "1.0.0",
+                "dataHandlingAcknowledged": True,
+                "possibleChargesAcknowledged": True,
+                "proposalCreationAcknowledged": True,
+                "authorizedAt": datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+            },
+        }
+
+    def reject_authorization(self, generation_request_id: Any, message: Any) -> None:
+        rejected_id = _uuid(generation_request_id, "Rejected generation request id")
+        if rejected_id != self.generation_request_id:
+            raise ValueError("Runtime rejected a different initial-plan run")
+        self.phase = "failed"
+        self.retry_mode = "never"
+        self.proposal_id = None
+        self.message = (
+            message.strip()
+            if isinstance(message, str) and message.strip()
+            else "Runtime rejected this initial planner authorization"
+        )
+
+    def complete_proposal_review(self, goal_request_id: Any, proposal_id: Any) -> bool:
+        if self.active:
+            return False
+        if (
+            self.acknowledged_goal_request_id is None
+            or goal_request_id != self.acknowledged_goal_request_id
+        ):
+            return False
+        if self.proposal_id is not None and proposal_id != self.proposal_id:
+            return False
+        self.clear()
+        self.message = "Create a new goal request for another initial planner run"
+        return True
+
+    def apply_status(self, payload: Any) -> None:
+        if not isinstance(payload, dict):
+            raise ValueError("Initial-plan run status must be a JSON object")
+        if set(payload) != {
+            "contractVersion",
+            "generationRequestId",
+            "goalRequestId",
+            "targetAdapterId",
+            "targetInstanceId",
+            "provider",
+            "status",
+            "terminal",
+            "sceneChanged",
+            "proposalId",
+            "error",
+            "needsRevision",
+            "updatedAt",
+        }:
+            raise ValueError("Initial-plan run status contains unsupported fields")
+        if payload.get("contractVersion") != "1.0.0":
+            raise ValueError("Unsupported initial-plan run contract version")
+        generation_request_id = _uuid(
+            payload.get("generationRequestId"), "Run generation request id"
+        )
+        goal_request_id = _uuid(payload.get("goalRequestId"), "Run goal request id")
+        if generation_request_id != self.generation_request_id:
+            raise ValueError("Runtime returned status for a different initial-plan run")
+        if goal_request_id != self.acknowledged_goal_request_id:
+            raise ValueError("Runtime returned status for a different goal request")
+        if payload.get("targetAdapterId") != "blender":
+            raise ValueError("Runtime returned status for a different adapter")
+        if payload.get("targetInstanceId") != self.target_instance_id:
+            raise ValueError("Runtime returned status for a different Blender instance")
+        provider = payload.get("provider")
+        selected = self.selected_provider
+        if (
+            not isinstance(provider, dict)
+            or set(provider) != {"id", "version", "displayName"}
+            or selected is None
+            or provider.get("id") != selected["id"]
+            or provider.get("version") != selected["version"]
+            or _bounded_text(
+                provider.get("displayName"), "Run provider display name", 180
+            )
+            != selected["displayName"]
+        ):
+            raise ValueError("Runtime returned status for a different provider")
+        if payload.get("sceneChanged") is not False:
+            raise ValueError("Runtime did not preserve the scene-change safety invariant")
+        _rfc3339_datetime(payload.get("updatedAt"), "Initial-plan run update timestamp")
+        phase = payload.get("status")
+        if phase not in INITIAL_PLAN_RUN_PHASES - {"idle"}:
+            raise ValueError("Runtime returned an unsupported initial-plan run status")
+        terminal = payload.get("terminal")
+        if terminal is not (phase in TERMINAL_REPLAN_RUN_PHASES):
+            raise ValueError("Runtime initial-plan terminal marker does not match status")
+        proposal_id = payload.get("proposalId")
+        if phase == "proposal_created":
+            _uuid(proposal_id, "Created proposal id")
+        elif proposal_id is not None:
+            raise ValueError("Only a created proposal may contain a proposal id")
+        safe_error = payload.get("error")
+        if phase in {"failed", "interrupted"}:
+            if not isinstance(safe_error, dict) or set(safe_error) != {
+                "code",
+                "retryMode",
+                "message",
+            }:
+                raise ValueError("Failed initial-plan run must contain a safe error")
+            if safe_error.get("code") not in PLANNER_ERROR_CODES:
+                raise ValueError("Initial-plan error code is invalid")
+            if safe_error.get("retryMode") not in {"new_request_id", "never"}:
+                raise ValueError("Terminal retry mode must use a new request id or never")
+            _bounded_text(safe_error.get("message"), "Initial-plan error message", 500)
+        elif safe_error is not None:
+            raise ValueError("Only failed initial-plan runs may contain an error")
+        needs_revision = payload.get("needsRevision")
+        if phase == "needs_revision":
+            if not isinstance(needs_revision, dict) or set(needs_revision) != {"planning"}:
+                raise ValueError("Needs-revision status must contain planning findings")
+            planning = needs_revision.get("planning")
+            if (
+                not isinstance(planning, dict)
+                or set(planning) != {"errorCount", "warningCount", "findings"}
+                or not isinstance(planning.get("findings"), list)
+            ):
+                raise ValueError("Needs-revision planning findings are invalid")
+            for count_name in ("errorCount", "warningCount"):
+                count = planning.get(count_name)
+                if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                    raise ValueError("Needs-revision finding counts are invalid")
+            if planning["errorCount"] == 0:
+                raise ValueError("Needs-revision planning must contain an error")
+            for finding in planning["findings"]:
+                if not isinstance(finding, dict) or set(finding) != {
+                    "code",
+                    "severity",
+                    "message",
+                    "stepIds",
+                    "phaseIds",
+                }:
+                    raise ValueError("Planning finding contains unsupported fields")
+                _text(finding.get("code"), "Planning finding code")
+                if finding.get("severity") not in {"error", "warning"}:
+                    raise ValueError("Planning finding severity is invalid")
+                _text(finding.get("message"), "Planning finding message")
+                _string_list(finding.get("stepIds"), "Planning finding step ids")
+                _string_list(finding.get("phaseIds"), "Planning finding phase ids")
+            error_count = sum(
+                finding["severity"] == "error" for finding in planning["findings"]
+            )
+            if (
+                planning["errorCount"] != error_count
+                or planning["warningCount"] != len(planning["findings"]) - error_count
+            ):
+                raise ValueError("Needs-revision planning counts are inconsistent")
+            if not planning["findings"]:
+                raise ValueError("Needs-revision evidence has no planning finding")
+        elif needs_revision is not None:
+            raise ValueError("Only needs-revision runs may contain findings")
+        self.phase = phase
+        self.proposal_id = proposal_id if phase == "proposal_created" else None
+        self.retry_mode = (
+            safe_error.get("retryMode") if isinstance(safe_error, dict) else None
+        )
+        planning = needs_revision.get("planning") if isinstance(needs_revision, dict) else None
+        self.needs_revision_summary = (
+            f"{planning['errorCount']} planning errors, "
+            f"{planning['warningCount']} warnings"
+            if isinstance(planning, dict)
+            else ""
+        )
+        self.needs_revision_findings = tuple(
+            finding["message"].strip()
+            for finding in planning["findings"]
+            if isinstance(finding.get("message"), str) and finding["message"].strip()
+        )[:3] if isinstance(planning, dict) else ()
+        detail = safe_error.get("message") if isinstance(safe_error, dict) else None
+        self.message = (
+            detail.strip()
+            if isinstance(detail, str) and detail.strip()
+            else {
+                "queued": "Initial planner run queued",
+                "generating": "Provider is generating an initial plan",
+                "proposal_created": "Proposal created; waiting for review delivery",
+                "needs_revision": "Provider output needs another explicitly authorized run",
+                "failed": "Initial planner run failed; retry requires confirmation",
+                "interrupted": "Initial planner run was interrupted; retry requires confirmation",
+            }[phase]
+        )
+
+
 __all__ = (
+    "INITIAL_PLAN_RUN_PHASES",
+    "InitialPlanRunState",
     "REPLAN_RUN_PHASES",
     "ReplanRunState",
     "TERMINAL_REPLAN_RUN_PHASES",

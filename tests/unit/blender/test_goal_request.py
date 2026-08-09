@@ -101,6 +101,97 @@ class GoalRequestPayloadTests(unittest.TestCase):
 
 
 class GoalRequestTransportTests(unittest.TestCase):
+    def test_initial_plan_provider_run_is_explicit_and_polls_exact_run(self) -> None:
+        instance_id = str(uuid.uuid4())
+        generation_id = str(uuid.uuid4())
+        goal_id = str(uuid.uuid4())
+        proposal_id = str(uuid.uuid4())
+        request = {
+            "generationRequestId": generation_id,
+            "goalRequestId": goal_id,
+            "providerId": "fake-planner",
+            "providerVersion": "0.1.0",
+            "targetAdapterId": "blender",
+            "targetInstanceId": instance_id,
+            "authorization": {},
+        }
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+            poll_interval=0.01,
+            timeout=0.1,
+        )
+        calls = []
+
+        def run_status(status, proposal=None):
+            return {
+                "generationRequestId": generation_id,
+                "status": status,
+                "terminal": status == "proposal_created",
+                "proposalId": proposal,
+            }
+
+        def request_json(method, path, body=None, **_kwargs):
+            calls.append((method, path, body))
+            if path == "/api/v1/replan/providers":
+                return {
+                    "contractVersion": "1.0.0",
+                    "generationAvailable": False,
+                    "providers": [],
+                }
+            if path == "/api/v1/planner/providers":
+                return {
+                    "contractVersion": "1.0.0",
+                    "generationAvailable": False,
+                    "providers": [],
+                }
+            if path == "/api/v1/companion/initial-plan-run":
+                self.assertEqual(body, request)
+                return run_status("queued")
+            if path.startswith("/api/v1/companion/initial-plan-run?"):
+                self.assertIn(f"generationRequestId={generation_id}", path)
+                return run_status("proposal_created", proposal_id)
+            raise AssertionError(f"Unexpected request: {method} {path}")
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport.start()
+        time.sleep(0.05)
+        self.assertFalse(
+            any(path == "/api/v1/planner/providers" for _, path, _ in calls),
+            "initial provider discovery must wait for an explicit refresh",
+        )
+        transport.refresh_initial_plan_providers()
+        transport.start_initial_plan_run(request)
+        messages = []
+        deadline = time.monotonic() + 2.0
+        try:
+            while time.monotonic() < deadline:
+                try:
+                    message = transport.incoming.get(timeout=0.05)
+                except Empty:
+                    continue
+                messages.append(message)
+                if (
+                    message.get("kind") == "initial_plan_run_status"
+                    and message["run"].get("status") == "proposal_created"
+                ):
+                    break
+        finally:
+            transport.stop(flush_timeout=0.0)
+            transport.wait_stopped(1.0)
+
+        self.assertTrue(
+            any(item.get("kind") == "initial_plan_provider_list" for item in messages)
+        )
+        statuses = [
+            item["run"]["status"]
+            for item in messages
+            if item.get("kind") == "initial_plan_run_status"
+        ]
+        self.assertEqual(statuses, ["queued", "proposal_created"])
+
     def test_background_queue_retries_same_payload_and_accepts_duplicate_ack(self) -> None:
         instance_id = str(uuid.uuid4())
         payload = build_goal_request(instance_id, "Build a robot")

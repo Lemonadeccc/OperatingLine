@@ -97,6 +97,17 @@ export interface CompanionReplanRunInput {
 
 export type RecordCompanionReplanRunResult = 'accepted' | 'duplicate' | 'conflict';
 
+export interface CompanionInitialPlanRunInput {
+  generationRequestId: string;
+  goalRequestId: string;
+  targetAdapterId: string;
+  targetInstanceId: string;
+  status: string;
+  updatedAt: string;
+}
+
+export type RecordCompanionInitialPlanRunResult = 'accepted' | 'duplicate' | 'conflict';
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -121,7 +132,11 @@ export interface OperatingLineDatabase {
   listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
   getExecutionEvent(id: string): StoredExecutionEvent | null;
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
-  recordGuideGoalProposal<T extends GuideProposalInput>(proposal: T, goalRequestId: string): void;
+  recordGuideGoalProposal<T extends GuideProposalInput>(
+    proposal: T,
+    goalRequestId: string,
+    generationRequestId?: string,
+  ): void;
   recordGuideReplanProposal<T extends GuideProposalInput>(
     proposal: T,
     revisionRequestId: string,
@@ -154,6 +169,7 @@ export interface OperatingLineDatabase {
   recordGuideGoalRequest<T extends GuideGoalRequestInput>(request: T): RecordGuideGoalRequestResult;
   getGuideGoalRequest(requestId: string): unknown | null;
   getGuideGoalProposalForRequest(requestId: string): unknown | null;
+  getGuideGoalProposalForGeneration(generationRequestId: string): unknown | null;
   listPendingGuideGoalRequests(adapterId: string | undefined, limit: number): unknown[];
   recordCompanionReplanRun<T extends CompanionReplanRunInput>(
     run: T,
@@ -164,6 +180,15 @@ export interface OperatingLineDatabase {
     expectedStatuses: readonly string[],
   ): boolean;
   listNonterminalCompanionReplanRuns(): unknown[];
+  recordCompanionInitialPlanRun<T extends CompanionInitialPlanRunInput>(
+    run: T,
+  ): RecordCompanionInitialPlanRunResult;
+  getCompanionInitialPlanRun(generationRequestId: string): unknown | null;
+  transitionCompanionInitialPlanRun<T extends CompanionInitialPlanRunInput>(
+    run: T,
+    expectedStatuses: readonly string[],
+  ): boolean;
+  listNonterminalCompanionInitialPlanRuns(): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -379,6 +404,52 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (9, datetime('now'));
+
+    CREATE TABLE IF NOT EXISTS companion_initial_plan_runs (
+      generation_request_id TEXT PRIMARY KEY,
+      goal_request_id TEXT NOT NULL,
+      target_adapter_id TEXT NOT NULL,
+      target_instance_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'queued',
+          'generating',
+          'needs_revision',
+          'proposal_created',
+          'failed',
+          'interrupted'
+        )
+      ),
+      updated_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      FOREIGN KEY (goal_request_id) REFERENCES guide_goal_requests(request_id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS companion_initial_plan_runs_active_target
+    ON companion_initial_plan_runs (target_adapter_id, target_instance_id)
+    WHERE status IN ('queued', 'generating');
+
+  `);
+
+  const goalProposalColumns = sqlite
+    .prepare("PRAGMA table_info('guide_goal_request_proposals')")
+    .all();
+  const hasGoalProposalGenerationRequestId = goalProposalColumns.some(
+    (row) => (row as { name?: unknown }).name === 'generation_request_id',
+  );
+  if (!hasGoalProposalGenerationRequestId) {
+    sqlite.exec(`
+      ALTER TABLE guide_goal_request_proposals
+      ADD COLUMN generation_request_id TEXT;
+    `);
+  }
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS guide_goal_proposals_generation_request
+    ON guide_goal_request_proposals (generation_request_id)
+    WHERE generation_request_id IS NOT NULL;
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (10, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -492,9 +563,19 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     JOIN guide_proposals AS proposal ON proposal.proposal_id = linked.proposal_id
     WHERE linked.request_id = ?
   `);
+  const findGoalRequestProposalByGenerationPayload = sqlite.prepare(`
+    SELECT proposal.payload
+    FROM guide_goal_request_proposals AS linked
+    JOIN guide_proposals AS proposal ON proposal.proposal_id = linked.proposal_id
+    WHERE linked.generation_request_id = ?
+  `);
   const insertGoalRequestProposal = sqlite.prepare(`
-    INSERT INTO guide_goal_request_proposals (request_id, proposal_id, linked_at)
-    VALUES (?, ?, ?)
+    INSERT INTO guide_goal_request_proposals (
+      request_id,
+      proposal_id,
+      linked_at,
+      generation_request_id
+    ) VALUES (?, ?, ?, ?)
   `);
   const insertRevisionRequest = sqlite.prepare(`
     INSERT INTO guide_revision_requests (
@@ -654,6 +735,41 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     WHERE status IN ('queued', 'generating')
     ORDER BY rowid
   `);
+  const findCompanionInitialPlanRun = sqlite.prepare(`
+    SELECT status, payload
+    FROM companion_initial_plan_runs
+    WHERE generation_request_id = ?
+  `);
+  const findActiveCompanionInitialPlanRun = sqlite.prepare(`
+    SELECT generation_request_id
+    FROM companion_initial_plan_runs
+    WHERE target_adapter_id = ?
+      AND target_instance_id = ?
+      AND status IN ('queued', 'generating')
+    LIMIT 1
+  `);
+  const insertCompanionInitialPlanRun = sqlite.prepare(`
+    INSERT INTO companion_initial_plan_runs (
+      generation_request_id,
+      goal_request_id,
+      target_adapter_id,
+      target_instance_id,
+      status,
+      updated_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateCompanionInitialPlanRun = sqlite.prepare(`
+    UPDATE companion_initial_plan_runs
+    SET status = ?, updated_at = ?, payload = ?
+    WHERE generation_request_id = ? AND status = ?
+  `);
+  const listNonterminalCompanionInitialPlanRunRows = sqlite.prepare(`
+    SELECT payload
+    FROM companion_initial_plan_runs
+    WHERE status IN ('queued', 'generating')
+    ORDER BY rowid
+  `);
 
   const parseExecutionEventRow = (row: unknown): StoredExecutionEvent => {
     const candidate = row as {
@@ -772,7 +888,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw error;
       }
     },
-    recordGuideGoalProposal(proposal, goalRequestId) {
+    recordGuideGoalProposal(proposal, goalRequestId, generationRequestId) {
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
@@ -798,6 +914,23 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           proposal.plan.id !== request.plan_id
         ) {
           throw new Error(`Guide goal proposal does not match request: ${goalRequestId}`);
+        }
+        if (generationRequestId !== undefined) {
+          const run = findCompanionInitialPlanRun.get(generationRequestId) as
+            { payload?: unknown } | undefined;
+          if (run === undefined || typeof run.payload !== 'string') {
+            throw new Error(`Unknown companion initial plan run: ${generationRequestId}`);
+          }
+          const storedRun = JSON.parse(run.payload) as CompanionInitialPlanRunInput;
+          if (
+            storedRun.goalRequestId !== goalRequestId ||
+            storedRun.targetAdapterId !== request.adapter_id ||
+            storedRun.targetInstanceId !== request.instance_id
+          ) {
+            throw new Error(
+              `Companion initial plan run does not match goal request: ${generationRequestId}`,
+            );
+          }
         }
         if (
           findPendingGuideProposal.get(
@@ -826,13 +959,31 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           payload,
           linkedAt,
         );
-        insertGoalRequestProposal.run(goalRequestId, proposal.proposalId, linkedAt);
+        insertGoalRequestProposal.run(
+          goalRequestId,
+          proposal.proposalId,
+          linkedAt,
+          generationRequestId ?? null,
+        );
         insertEvent.run(
           `guide-goal-proposal:${goalRequestId}`,
           'guide.goal.proposed',
           canonicalJson({ requestId: goalRequestId, proposalId: proposal.proposalId }),
           linkedAt,
         );
+        if (generationRequestId !== undefined) {
+          insertEvent.run(
+            `planning-generation-proposed:${generationRequestId}`,
+            'planning.provider.generation.proposed',
+            canonicalJson({
+              generationRequestId,
+              goalRequestId,
+              proposalId: proposal.proposalId,
+              occurredAt: linkedAt,
+            }),
+            linkedAt,
+          );
+        }
         sqlite.exec('COMMIT;');
       } catch (error) {
         sqlite.exec('ROLLBACK;');
@@ -1162,6 +1313,8 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           findPendingGoalRequestForTarget.get(request.adapterId, request.instanceId) !==
             undefined ||
           findActiveCompanionReplanRun.get(request.adapterId, request.instanceId) !== undefined ||
+          findActiveCompanionInitialPlanRun.get(request.adapterId, request.instanceId) !==
+            undefined ||
           findPendingGuideProposal.get(
             request.adapterId,
             request.instanceId,
@@ -1215,6 +1368,17 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       }
       return JSON.parse(row.payload) as unknown;
     },
+    getGuideGoalProposalForGeneration(generationRequestId) {
+      const row = findGoalRequestProposalByGenerationPayload.get(generationRequestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid generated guide goal proposal payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
     listPendingGuideGoalRequests(adapterId, limit) {
       return listPendingGoalRequests.all(adapterId ?? null, adapterId ?? null, limit).map((row) => {
         const payload = (row as { payload?: unknown }).payload;
@@ -1235,11 +1399,25 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           return existing.payload === payload ? 'duplicate' : 'conflict';
         }
         const active = findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId);
+        const activeInitial = findActiveCompanionInitialPlanRun.get(
+          run.targetAdapterId,
+          run.targetInstanceId,
+        );
         const pendingGoal = findPendingGoalRequestForTarget.get(
           run.targetAdapterId,
           run.targetInstanceId,
         );
-        if (active !== undefined || pendingGoal !== undefined) {
+        if (
+          active !== undefined ||
+          activeInitial !== undefined ||
+          pendingGoal !== undefined ||
+          findPendingGuideProposal.get(
+            run.targetAdapterId,
+            run.targetInstanceId,
+            run.targetAdapterId,
+            run.targetInstanceId,
+          ) !== undefined
+        ) {
           sqlite.exec('COMMIT;');
           return 'conflict';
         }
@@ -1317,6 +1495,129 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         const payload = (row as { payload?: unknown }).payload;
         if (typeof payload !== 'string') {
           throw new Error('SQLite returned an invalid companion replan run payload');
+        }
+        return JSON.parse(payload) as unknown;
+      });
+    },
+    recordCompanionInitialPlanRun(run) {
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionInitialPlanRun.get(run.generationRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.payload === payload ? 'duplicate' : 'conflict';
+        }
+        const goal = findGoalRequest.get(run.goalRequestId) as
+          { adapter_id: string; instance_id: string } | undefined;
+        const pendingGoal = findPendingGoalRequestForTarget.get(
+          run.targetAdapterId,
+          run.targetInstanceId,
+        ) as { request_id?: unknown } | undefined;
+        if (
+          goal === undefined ||
+          goal.adapter_id !== run.targetAdapterId ||
+          goal.instance_id !== run.targetInstanceId ||
+          pendingGoal?.request_id !== run.goalRequestId ||
+          findGoalRequestProposal.get(run.goalRequestId) !== undefined ||
+          findActiveCompanionInitialPlanRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findPendingGuideProposal.get(
+            run.targetAdapterId,
+            run.targetInstanceId,
+            run.targetAdapterId,
+            run.targetInstanceId,
+          ) !== undefined
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+        insertCompanionInitialPlanRun.run(
+          run.generationRequestId,
+          run.goalRequestId,
+          run.targetAdapterId,
+          run.targetInstanceId,
+          run.status,
+          run.updatedAt,
+          payload,
+        );
+        insertEvent.run(
+          `companion-initial-plan-run:${run.generationRequestId}:authorized`,
+          'companion.initial-plan-run.authorized',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getCompanionInitialPlanRun(generationRequestId) {
+      const row = findCompanionInitialPlanRun.get(generationRequestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid companion initial plan run payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    transitionCompanionInitialPlanRun(run, expectedStatuses) {
+      if (expectedStatuses.length === 0) {
+        throw new Error('Companion initial plan run transition requires an expected status');
+      }
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionInitialPlanRun.get(run.generationRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing === undefined || !expectedStatuses.includes(existing.status)) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const stored = JSON.parse(existing.payload) as CompanionInitialPlanRunInput;
+        if (
+          stored.goalRequestId !== run.goalRequestId ||
+          stored.targetAdapterId !== run.targetAdapterId ||
+          stored.targetInstanceId !== run.targetInstanceId
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const updated = updateCompanionInitialPlanRun.run(
+          run.status,
+          run.updatedAt,
+          payload,
+          run.generationRequestId,
+          existing.status,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Companion initial plan run transition lost its expected state');
+        }
+        insertEvent.run(
+          `companion-initial-plan-run:${run.generationRequestId}:${run.status}`,
+          'companion.initial-plan-run.transitioned',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return true;
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    listNonterminalCompanionInitialPlanRuns() {
+      return listNonterminalCompanionInitialPlanRunRows.all().map((row) => {
+        const payload = (row as { payload?: unknown }).payload;
+        if (typeof payload !== 'string') {
+          throw new Error('SQLite returned an invalid companion initial plan run payload');
         }
         return JSON.parse(payload) as unknown;
       });

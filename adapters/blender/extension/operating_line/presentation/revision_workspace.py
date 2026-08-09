@@ -196,7 +196,9 @@ def draw_proposal_review(layout, companion, active_session) -> None:
     _draw_plan_diff(review, proposal.get("planDiff"))
 
     decisions = review.row(align=True)
-    decisions.enabled = not companion.provider_handoff.active
+    decisions.enabled = not (
+        companion.provider_handoff.active or companion.initial_plan_handoff.active
+    )
     accept = decisions.row(align=True)
     missing_verifiable_base = _proposal_accept_requires_verifiable_base(proposal)
     accept.enabled = not bool(active_session.receipts) and not missing_verifiable_base
@@ -209,7 +211,7 @@ def draw_proposal_review(layout, companion, active_session) -> None:
         )
     elif active_session.receipts:
         review.label(text="Use Back to reach the start before accepting", icon="ERROR")
-    elif companion.provider_handoff.active:
+    elif companion.provider_handoff.active or companion.initial_plan_handoff.active:
         review.label(
             text="Wait for the active provider run before deciding",
             icon="TIME",

@@ -22,7 +22,7 @@ from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession
 from .goal_request import GoalRequestState, build_goal_request
-from .provider_handoff import ReplanRunState
+from .provider_handoff import InitialPlanRunState, ReplanRunState
 from .revision_review import (
     RevisionLineage,
     lineage_from_proposal,
@@ -71,6 +71,8 @@ class CompanionController:
         self.revision_request_status = ""
         self.last_revision_request_id: str | None = None
         self.provider_handoff = ReplanRunState()
+        self.initial_plan_handoff = InitialPlanRunState()
+        self._initial_plan_run_request: dict[str, Any] | None = None
         self.goal_request = GoalRequestState()
         self._pending_revision_request_ids: set[str] = set()
         self._last_rejected_plan: tuple[Any, ...] | None = None
@@ -102,6 +104,7 @@ class CompanionController:
             wait_timeout=0.1,
             preserve_active_revision_draft=False,
             preserve_proposal_review=False,
+            preserve_initial_plan_handoff=False,
         )
         if self._timer_registered and bpy.app.timers.is_registered(self._timer_callback):
             bpy.app.timers.unregister(self._timer_callback)
@@ -148,6 +151,8 @@ class CompanionController:
             transport.submit_goal_request(retained_goal)
         for decision in self._pending_proposal_decisions.values():
             transport.submit_proposal_decision(decision)
+        if self.initial_plan_handoff.active and self._initial_plan_run_request is not None:
+            transport.start_initial_plan_run(self._initial_plan_run_request)
         self.status = "Connected"
         self.report("connected")
 
@@ -158,6 +163,7 @@ class CompanionController:
         wait_timeout: float = 0.0,
         preserve_active_revision_draft: bool = True,
         preserve_proposal_review: bool = True,
+        preserve_initial_plan_handoff: bool = True,
     ) -> None:
         transport = self._transport
         self._transport = None
@@ -186,6 +192,9 @@ class CompanionController:
             self.clear_revision_draft()
         self._pending_revision_request_ids.clear()
         self.provider_handoff.clear()
+        if not preserve_initial_plan_handoff:
+            self.initial_plan_handoff.clear()
+            self._initial_plan_run_request = None
         if not preserve_revision_draft:
             self.revision_request_status = ""
         self._last_rejected_plan = None
@@ -230,6 +239,7 @@ class CompanionController:
             or bool(self._pending_revision_request_ids)
             or self.provider_handoff.pending_revision_request_id is not None
             or self.provider_handoff.acknowledged_revision_request_id is not None
+            or self.initial_plan_handoff.active
         )
 
     def submit_goal_request(self, goal: str) -> dict[str, Any]:
@@ -240,6 +250,8 @@ class CompanionController:
         if self.goal_entry_blocked:
             raise ValueError("Finish the current revision or proposal review first")
         request = build_goal_request(self.instance_id, goal)
+        self.initial_plan_handoff.clear()
+        self._initial_plan_run_request = None
         self.goal_request.submit(request)
         transport.submit_goal_request(request)
         return request
@@ -453,6 +465,45 @@ class CompanionController:
 
     def select_replan_provider(self, provider_id: str) -> dict[str, Any]:
         return self.provider_handoff.select(provider_id)
+
+    @property
+    def initial_plan_provider_descriptors(self) -> tuple[dict[str, Any], ...]:
+        return self.initial_plan_handoff.providers
+
+    @property
+    def selected_initial_plan_provider_id(self) -> str | None:
+        return self.initial_plan_handoff.selected_provider_id
+
+    def refresh_initial_plan_providers(self) -> None:
+        self.initial_plan_handoff.ensure_provider_refresh_allowed()
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect the runtime before refreshing initial providers")
+        if self.goal_request.acknowledged_request_id is None:
+            raise ValueError("Wait for the runtime to acknowledge the goal first")
+        self.initial_plan_handoff.loading_providers = True
+        self.initial_plan_handoff.message = "Refreshing initial planner providers"
+        transport.refresh_initial_plan_providers()
+
+    def select_initial_plan_provider(self, provider_id: str) -> dict[str, Any]:
+        return self.initial_plan_handoff.select(provider_id)
+
+    def begin_initial_plan_run(self) -> dict[str, Any]:
+        """Queue one authorized initial plan run without accepting or executing it."""
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect the runtime before running an initial planner")
+        if self.goal_request.acknowledged_request_id is None:
+            raise ValueError("Wait for the runtime to acknowledge the goal first")
+        self.initial_plan_handoff.goal_acknowledged(
+            self.goal_request.acknowledged_request_id
+        )
+        if self.proposed_plan is not None:
+            raise ValueError("Review the current proposal before running an initial planner")
+        request = self.initial_plan_handoff.begin(target_instance_id=self.instance_id)
+        self._initial_plan_run_request = request
+        transport.start_initial_plan_run(request)
+        return request
 
     def _invalidate_handoff_for_plan_install(self) -> None:
         if self.provider_handoff.invalidate_for_plan_install():
@@ -780,13 +831,23 @@ class CompanionController:
                 self.provider_handoff.acknowledged_revision_request_id,
                 expected_provider_proposal_id,
             )
-            is_expected_provider = (
-                expected_provider_proposal_id is not None
-                and candidate_key == expected_provider_key
-            )
+            expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
+            expected_initial_key = (None, expected_initial_proposal_id)
+            expected_keys = {
+                key
+                for expected_id, key in (
+                    (expected_provider_proposal_id, expected_provider_key),
+                    (expected_initial_proposal_id, expected_initial_key),
+                )
+                if expected_id is not None
+            }
+            is_expected_provider = candidate_key in expected_keys
             reserve_provider_slot = (
-                expected_provider_proposal_id is None
-                or expected_provider_key not in self._proposal_candidates
+                self.provider_handoff.active
+                or self.initial_plan_handoff.active
+                or any(
+                    key not in self._proposal_candidates for key in expected_keys
+                )
             )
             candidate_limit = (
                 MAX_DEFERRED_PROPOSALS
@@ -810,6 +871,25 @@ class CompanionController:
             proposal, replacement = existing_candidate
 
         expected_provider_proposal_id = self.provider_handoff.proposal_id
+        expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
+        if (
+            self.initial_plan_handoff.active
+            and goal_request_id
+            == self.initial_plan_handoff.acknowledged_goal_request_id
+            and expected_initial_proposal_id is None
+        ):
+            return True
+        if (
+            expected_initial_proposal_id is not None
+            and (
+                proposal_id != expected_initial_proposal_id
+                or goal_request_id
+                != self.initial_plan_handoff.acknowledged_goal_request_id
+            )
+        ):
+            return True
+        if expected_initial_proposal_id is not None:
+            return self._bind_initial_plan_proposal()
         if (
             expected_provider_proposal_id is not None
             and (
@@ -847,6 +927,24 @@ class CompanionController:
             and proposal.get("goalRequestId") == self.goal_request.request_id
         ):
             self.goal_request.proposal_received()
+        if (
+            not self.initial_plan_handoff.active
+            and self.initial_plan_handoff.acknowledged_goal_request_id is not None
+            and proposal.get("goalRequestId")
+            == self.initial_plan_handoff.acknowledged_goal_request_id
+            and (
+                self.initial_plan_handoff.generation_request_id is None
+                or (
+                    self.initial_plan_handoff.phase == "proposal_created"
+                    and proposal_id == self.initial_plan_handoff.proposal_id
+                )
+            )
+        ):
+            self.initial_plan_handoff.phase = "proposal_created"
+            self.initial_plan_handoff.proposal_id = proposal_id
+            self.initial_plan_handoff.message = (
+                "Proposal delivered; review it before Accept or Reject"
+            )
         if (
             not self.provider_handoff.active
             and revision_request_id is not None
@@ -895,11 +993,50 @@ class CompanionController:
         self._show_proposal(*candidate)
         return True
 
+    def _bind_initial_plan_proposal(self) -> bool:
+        proposal_id = self.initial_plan_handoff.proposal_id
+        goal_request_id = self.initial_plan_handoff.acknowledged_goal_request_id
+        if proposal_id is None or goal_request_id is None:
+            return False
+        candidate = self._proposal_candidates.get((None, proposal_id))
+        if candidate is None:
+            if (
+                self.proposed_plan is not None
+                and (
+                    self.proposed_plan.get("proposalId") != proposal_id
+                    or self.proposed_plan.get("goalRequestId") != goal_request_id
+                )
+            ):
+                self.proposed_plan = None
+                self.proposal_session = None
+            return False
+        if candidate[0].get("goalRequestId") != goal_request_id:
+            return False
+        self._show_proposal(*candidate)
+        return True
+
+    def _promote_deferred_goal_proposal(self) -> bool:
+        """Reveal an external Goal proposal after an Initial Run ends without one."""
+        goal_request_id = self.initial_plan_handoff.acknowledged_goal_request_id
+        if (
+            goal_request_id is None
+            or self.initial_plan_handoff.active
+            or self.initial_plan_handoff.phase == "proposal_created"
+        ):
+            return False
+        for proposal, replacement in reversed(
+            tuple(self._proposal_candidates.values())
+        ):
+            if proposal.get("goalRequestId") == goal_request_id:
+                self._show_proposal(proposal, replacement)
+                return True
+        return False
+
     def _finish_proposal_review(
         self, proposal_id: str, revision_request_id: str | None
     ) -> None:
         self._proposal_candidates.pop((revision_request_id, proposal_id), None)
-        if self._bind_provider_proposal():
+        if self._bind_initial_plan_proposal() or self._bind_provider_proposal():
             return
         if self._proposal_candidates:
             self._show_proposal(*next(reversed(self._proposal_candidates.values())))
@@ -912,8 +1049,19 @@ class CompanionController:
         if proposal is None or self.proposal_session is None:
             self.error = "No plan proposal is awaiting review"
             return False
-        if self.provider_handoff.active:
+        if self.provider_handoff.active or self.initial_plan_handoff.active:
             self.error = "Wait for the active provider run before deciding a proposal"
+            return False
+        expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
+        if (
+            expected_initial_proposal_id is not None
+            and (
+                proposal["proposalId"] != expected_initial_proposal_id
+                or proposal.get("goalRequestId")
+                != self.initial_plan_handoff.acknowledged_goal_request_id
+            )
+        ):
+            self.error = "Wait for the initial planner proposal before deciding deferred work"
             return False
         expected_proposal_id = self.provider_handoff.proposal_id
         if (
@@ -1001,6 +1149,10 @@ class CompanionController:
         self.provider_handoff.complete_proposal_review(
             proposal.get("revisionRequestId"), proposal_id
         )
+        self.initial_plan_handoff.complete_proposal_review(
+            proposal.get("goalRequestId"), proposal_id
+        )
+        self._initial_plan_run_request = None
         self._finish_proposal_review(
             proposal_id, proposal.get("revisionRequestId")
         )
@@ -1016,8 +1168,19 @@ class CompanionController:
         if proposal is None:
             self.error = "No plan proposal is awaiting review"
             return False
-        if self.provider_handoff.active:
+        if self.provider_handoff.active or self.initial_plan_handoff.active:
             self.error = "Wait for the active provider run before deciding a proposal"
+            return False
+        expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
+        if (
+            expected_initial_proposal_id is not None
+            and (
+                proposal["proposalId"] != expected_initial_proposal_id
+                or proposal.get("goalRequestId")
+                != self.initial_plan_handoff.acknowledged_goal_request_id
+            )
+        ):
+            self.error = "Wait for the initial planner proposal before deciding deferred work"
             return False
         expected_proposal_id = self.provider_handoff.proposal_id
         if (
@@ -1056,6 +1219,10 @@ class CompanionController:
         self.provider_handoff.complete_proposal_review(
             proposal.get("revisionRequestId"), proposal["proposalId"]
         )
+        self.initial_plan_handoff.complete_proposal_review(
+            proposal.get("goalRequestId"), proposal["proposalId"]
+        )
+        self._initial_plan_run_request = None
         self._finish_proposal_review(
             proposal["proposalId"], proposal.get("revisionRequestId")
         )
@@ -1164,6 +1331,13 @@ class CompanionController:
                     self.goal_request.delivering(message.get("requestId"))
                 elif message.get("kind") == "goal_request_acknowledged":
                     self.goal_request.acknowledged(message.get("requestId"))
+                    if (
+                        self.goal_request.acknowledged_request_id
+                        == message.get("requestId")
+                    ):
+                        self.initial_plan_handoff.goal_acknowledged(
+                            message.get("requestId")
+                        )
                 elif message.get("kind") == "goal_request_rejected":
                     detail = str(
                         message.get("message", "Goal request rejected")
@@ -1222,6 +1396,44 @@ class CompanionController:
                         )
                     except (TypeError, ValueError) as error:
                         self.provider_handoff.message = str(error)
+                        self.error = str(error)
+                elif message.get("kind") == "initial_plan_provider_list":
+                    try:
+                        self.initial_plan_handoff.set_providers(
+                            message.get("providers")
+                        )
+                    except (TypeError, ValueError) as error:
+                        self.initial_plan_handoff.loading_providers = False
+                        self.initial_plan_handoff.message = str(error)
+                elif message.get("kind") == "initial_plan_provider_list_unavailable":
+                    self.initial_plan_handoff.loading_providers = False
+                    self.initial_plan_handoff.message = str(
+                        message.get(
+                            "message",
+                            "Initial planner provider discovery is unavailable",
+                        )
+                    )
+                elif message.get("kind") == "initial_plan_run_status":
+                    try:
+                        self.initial_plan_handoff.apply_status(message.get("run"))
+                        if self.initial_plan_handoff.phase == "proposal_created":
+                            self._bind_initial_plan_proposal()
+                        else:
+                            self._promote_deferred_goal_proposal()
+                    except (TypeError, ValueError) as error:
+                        self.initial_plan_handoff.phase = "failed"
+                        self.initial_plan_handoff.retry_mode = "never"
+                        self.initial_plan_handoff.message = str(error)
+                        self.error = str(error)
+                elif message.get("kind") == "initial_plan_run_rejected":
+                    try:
+                        self.initial_plan_handoff.reject_authorization(
+                            message.get("generationRequestId"),
+                            message.get("message"),
+                        )
+                        self._promote_deferred_goal_proposal()
+                    except (TypeError, ValueError) as error:
+                        self.initial_plan_handoff.message = str(error)
                         self.error = str(error)
                 elif message.get("kind") == "revision_thread_history":
                     try:

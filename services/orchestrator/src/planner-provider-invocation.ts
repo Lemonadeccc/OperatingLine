@@ -56,7 +56,11 @@ export interface PlannerProviderInvocationRequest<TResult> extends InvocationIde
 
 export interface PlannerProviderInvocationManager {
   execute<TResult>(request: PlannerProviderInvocationRequest<TResult>): Promise<TResult>;
-  completedResult(requestId: string, operation: PlannerProviderOperation): unknown | null;
+  completedResult(
+    requestId: string,
+    operation: PlannerProviderOperation,
+    expectedFingerprint?: string,
+  ): unknown | null;
   close(): Promise<void>;
 }
 
@@ -337,9 +341,18 @@ export function createPlannerProviderInvocationManager(
       inFlight.set(request.requestId, { ...identity, promise });
       return structuredClone(await promise);
     },
-    completedResult: (requestId, operation) => {
+    completedResult: (requestId, operation, expectedFingerprint) => {
       const result = completed.get(requestId);
-      return result?.operation === operation ? structuredClone(result.result) : null;
+      if (result === undefined || result.operation !== operation) {
+        return null;
+      }
+      if (expectedFingerprint !== undefined) {
+        assertMatchingIdentity(requestId, result, {
+          operation,
+          fingerprint: expectedFingerprint,
+        });
+      }
+      return structuredClone(result.result);
     },
     close: () => {
       closePromise ??= (async () => {

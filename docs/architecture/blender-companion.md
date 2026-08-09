@@ -55,7 +55,8 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 ## 主线程规则
 
 当前 Companion 使用无 `bpy` 依赖的 Python 标准库网络线程，经鉴权向回环 Orchestrator 提交初始
-GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor 和异步 Replan Run 状态，再把
+GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异步 Initial Plan Run 与 Replan Run
+状态，再把
 JSON 放入队列。
 长达 120 秒的 Provider 调用运行在 Orchestrator 后台，不占用 Blender 的短请求线程。`bpy.app.timers` 在 Blender 主线程校验
 提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
@@ -79,8 +80,16 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 `blender + instanceId + ActionCatalog 1.3.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
-Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，外部 MCP 客户端仍须
-显式 list → prompt.get → evaluate → guide.propose。
+Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
+Provider。外部 MCP 客户端仍可显式执行 list → prompt.get → evaluate → guide.propose。
+
+若显式 Runtime 已注册 Planner Provider，acknowledgement 后的同一 Goal Workspace 还会提供可选 Initial
+Plan Run。用户必须主动刷新公开 descriptor、选择 Provider、阅读 local/remote 数据传输和可能费用说明，
+再通过 `Confirm Initial Planner Run` 原生 dialog 授权一个新 generation UUID。远端 Provider 只接收该
+Goal、精确 ActionCatalog 和发起 Blender instance 的状态；Blender 不保存 API Key、模型或 endpoint。
+transport 只发送短 `POST` 并轮询短 `GET` 状态，queued/generating/needs_revision/failed/interrupted 均不
+修改 Session 或场景。ready 只创建既有 Goal-linked Proposal，仍需独立 Accept/Reject；Retry 必须重新
+确认并换新 UUID。活动 Run 断线重连只重发完全相同的授权，Runtime 幂等返回持久状态，不再次授权调用。
 
 请求关联 Proposal 必须带匹配的 `goalRequestId`、当前 `instanceId`、目录版本和预留 Plan ID，且不能
 同时伪装成 revision Proposal。Blender 在主线程核对后才复用既有只读 Proposal 树；错误或无关 Proposal
@@ -95,8 +104,8 @@ Operator 两层都被门禁，Back 保留，
 action；Reject 只清除预览。两种决策由主线程各生成一次稳定 payload，由网络线程异步重试且按宿主
 实例幂等；只有 `accepted/duplicate` acknowledgement 回到主线程后才清除 pending 决策。连接替换保留
 待审 Proposal、Goal 关联和同一决策身份；校验失败的 Proposal 只在当前连接隔离并报告，不会回传人工
-Reject。普通 UI Disconnect 只暂停网络并保留待审 Proposal、Goal 关联和活动修订草稿；Extension
-unregister 才显式清理这些进程内状态。
+Reject。普通 UI Disconnect 只暂停网络并保留待审 Proposal、Goal 关联、活动 Initial Plan Run 的精确
+授权和活动修订草稿；Extension unregister 才显式清理这些进程内状态。
 
 活动树和待审树的每个节点都提供 `Ref`。引用以结构化行显示，不插入或篡改用户正文；重复点击
 去重，每条可独立移除。同一草稿最多引用 8 个节点，且不能混合两个 Plan 基线；尝试引用其他
@@ -129,8 +138,9 @@ Run 的 revision/generation identity 不会被普通 Plan/Proposal 投递或重�
 把过期请求重新变成可运行状态。
 
 Proposal delivery 可能早于或晚于 terminal status。Companion 使用有界的复合键候选集隔离这些消息，
-只显示 status 指定的 `(revisionRequestId, proposalId)`；错误 request、同 ID poisoning 或后到的无关
-Proposal 不得覆盖 Provider Proposal。队列满只显示本地错误，不自动发送 Reject。Request-linked Proposal
+初始 Run 只按精确 `(goalRequestId, proposalId)` 绑定，Replan Run 只显示 status 指定的
+`(revisionRequestId, proposalId)`；错误 request、同 ID poisoning 或后到的无关 Proposal 不得覆盖
+Provider Proposal。队列为活动/已知 Provider 结果保留容量；队列满只显示本地错误，不自动发送 Reject。Request-linked Proposal
 的 Accept 还会把 diff base 与当前 active Session 精确比较，漂移时保持 Proposal、场景、Session 和证据
 不变。没有可验证 `planDiff.basePlan` 的旧版 request-linked Proposal 仍能查看和 Reject，但 Accept 在 UI
 与 Controller 两层 fail closed。

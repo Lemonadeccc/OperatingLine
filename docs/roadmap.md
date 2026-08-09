@@ -45,6 +45,12 @@
       既有 `guide.propose`。请求和 Proposal 只绑定原宿主实例，默认不自动调用 Provider；Accept 前不
       替换 Session 或修改场景。Synthetic Canvas contract 与真实 Blender 跨进程闭环均已验证。见
       [ADR 0020](adr/0020-host-initiated-goal-to-guidance.md)。
+- [x] 宿主授权的异步 Initial Plan Run：Goal 获得 Runtime acknowledgement 后，Blender 可显式选择
+      Planner Provider、查看目标/目录/精确实例状态的数据传输与可能费用披露，并逐次确认后台生成。
+      Runtime 快速返回 `202`，只在严格结果 ready 时创建待审 Goal Proposal；generation fingerprint、事件和
+      原子 `generation -> proposal` 关联证明精确授权来源，重启不重复 Provider 调用。默认 standalone 仍
+      provider-free，外部 Codex/Claude MCP 路径保持可用。见
+      [ADR 0021](adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
 - [x] 显式 Planner Provider 契约与运行时边界：嵌入方可注入进程内插件，MCP/HTTP 可列出并明确选择
       provider；核心只发送严格 Planner Packet，验证返回草案、identity、嵌套 ActionCatalog 参数和
       结构质量，固定返回 `proposalCreated: false`，并记录可重放 requested/completed/failed 证据。

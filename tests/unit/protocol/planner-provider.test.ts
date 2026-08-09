@@ -3,7 +3,10 @@ import { resolve } from 'node:path';
 
 import {
   plannerGenerateRequestSchema,
+  plannerGenerationCompletedEventSchema,
   plannerGenerationErrorSchema,
+  plannerGenerationFailedEventSchema,
+  plannerGenerationRequestedEventSchema,
   plannerGenerationResultSchema,
   plannerProviderContractVersion,
   plannerProviderDescriptorSchema,
@@ -191,6 +194,59 @@ describe('planner provider protocol', () => {
       plannerGenerationErrorSchema.safeParse({ ...error, retryMode: undefined, retryable: true })
         .success,
     ).toBe(false);
+  });
+
+  it('requires paired goal and target provenance on generation events', () => {
+    const goalRequestId = '00000000-0000-4000-8000-000000000020';
+    const targetInstanceId = '00000000-0000-4000-8000-000000000021';
+    const scope = {
+      requestId: '00000000-0000-4000-8000-000000000002',
+      requestFingerprint: 'a'.repeat(64),
+      providerId: descriptor.id,
+      providerVersion: descriptor.version,
+      targetAdapterId: 'blender',
+      catalogVersion: '1.2.0',
+      planId: 'robot-preview-baseline',
+    };
+    const requested = {
+      ...scope,
+      packetFormatVersion: '1.0.0',
+      occurredAt: '2026-08-05T00:00:00.000Z',
+    };
+    const failed = {
+      ...scope,
+      error: 'planner_provider_failed',
+      durationMs: 42,
+      occurredAt: '2026-08-05T00:00:00.000Z',
+    };
+    const result = generationResult();
+    const request = {
+      requestId: result.requestId,
+      providerId: descriptor.id,
+      targetAdapterId: result.draft.targetAdapterId,
+      catalogVersion: result.draft.catalogVersion,
+      goal: result.draft.planning.goal,
+      planId: result.draft.plan.id,
+    };
+    const completed = {
+      request,
+      requestFingerprint: scope.requestFingerprint,
+      targetAdapterId: scope.targetAdapterId,
+      catalogVersion: scope.catalogVersion,
+      planId: scope.planId,
+      result,
+    };
+
+    for (const [schema, event] of [
+      [plannerGenerationRequestedEventSchema, requested],
+      [plannerGenerationFailedEventSchema, failed],
+      [plannerGenerationCompletedEventSchema, completed],
+    ] as const) {
+      expect(schema.safeParse(event).success).toBe(true);
+      expect(schema.safeParse({ ...event, goalRequestId }).success).toBe(false);
+      expect(schema.safeParse({ ...event, targetInstanceId }).success).toBe(false);
+      expect(schema.safeParse({ ...event, goalRequestId, targetInstanceId }).success).toBe(true);
+    }
   });
 
   it('generates strict public provider schemas', () => {

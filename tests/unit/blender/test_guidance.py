@@ -20,6 +20,7 @@ application = import_module(f"{PACKAGE_NAME}.application")
 domain = import_module(f"{PACKAGE_NAME}.domain")
 visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
+InitialPlanRunState = application.InitialPlanRunState
 DemoSession = application.DemoSession
 RevisionLineage = application.RevisionLineage
 ReplanRunState = application.ReplanRunState
@@ -98,6 +99,37 @@ def replan_run_status(
         "error": error,
         "needsRevision": needs_revision,
         "updatedAt": "2026-08-05T12:00:01.000Z",
+    }
+
+
+def initial_plan_run_status(
+    state: InitialPlanRunState,
+    status: str,
+    *,
+    proposal_id: str | None = None,
+    error: dict | None = None,
+    needs_revision: dict | None = None,
+) -> dict:
+    provider = state.selected_provider
+    assert provider is not None
+    return {
+        "contractVersion": "1.0.0",
+        "generationRequestId": state.generation_request_id,
+        "goalRequestId": state.acknowledged_goal_request_id,
+        "targetAdapterId": "blender",
+        "targetInstanceId": state.target_instance_id,
+        "provider": {
+            "id": provider["id"],
+            "version": provider["version"],
+            "displayName": provider["displayName"],
+        },
+        "status": status,
+        "terminal": status not in {"queued", "generating"},
+        "sceneChanged": False,
+        "proposalId": proposal_id,
+        "error": error,
+        "needsRevision": needs_revision,
+        "updatedAt": "2026-08-09T12:00:01.000Z",
     }
 
 
@@ -333,6 +365,28 @@ class ProviderHandoffTests(unittest.TestCase):
 
             self.assertEqual(state.retry_mode, "never")
             self.assertFalse(state.can_run)
+
+    def test_changed_provider_descriptor_requires_a_new_explicit_run(self) -> None:
+        state = ReplanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        acknowledge_revision(state)
+        request = state.begin(target_instance_id=str(uuid.uuid4()))
+        state.reject_authorization(
+            request["generationRequestId"], "Selected provider version is stale"
+        )
+        self.assertEqual(state.retry_mode, "never")
+        self.assertFalse(state.can_run)
+
+        refreshed = provider_list()
+        refreshed["providers"][0]["version"] = "0.2.0"
+        state.set_providers(refreshed)
+        self.assertIsNone(state.selected_provider_id)
+        state.select("fake-planner")
+
+        self.assertEqual(state.phase, "idle")
+        self.assertIsNone(state.retry_mode)
+        self.assertTrue(state.can_run)
 
     def test_newer_pending_request_rejects_an_older_acknowledgement(self) -> None:
         state = ReplanRunState()
@@ -697,6 +751,140 @@ class ProviderHandoffTests(unittest.TestCase):
         self.assertIsNone(state.acknowledged_revision_request_id)
         self.assertIsNone(state.generation_request_id)
         self.assertFalse(state.can_run)
+
+
+class InitialPlanProviderHandoffTests(unittest.TestCase):
+    def ready_state(self) -> InitialPlanRunState:
+        state = InitialPlanRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        state.goal_acknowledged(str(uuid.uuid4()))
+        return state
+
+    def test_discovery_never_selects_or_runs_a_provider(self) -> None:
+        state = InitialPlanRunState()
+        state.goal_acknowledged(str(uuid.uuid4()))
+
+        state.set_providers(provider_list())
+
+        self.assertIsNone(state.selected_provider_id)
+        self.assertFalse(state.can_run)
+        self.assertIsNone(state.generation_request_id)
+
+    def test_authorization_is_bound_to_goal_provider_and_instance(self) -> None:
+        state = self.ready_state()
+        instance_id = str(uuid.uuid4())
+
+        request = state.begin(target_instance_id=instance_id)
+
+        self.assertEqual(request["goalRequestId"], state.acknowledged_goal_request_id)
+        self.assertEqual(request["providerId"], "fake-planner")
+        self.assertEqual(request["providerVersion"], "0.1.0")
+        self.assertEqual(request["targetInstanceId"], instance_id)
+        self.assertEqual(request["authorization"]["dataHandlingAcknowledged"], True)
+        self.assertEqual(request["authorization"]["possibleChargesAcknowledged"], True)
+        self.assertEqual(state.phase, "queued")
+
+    def test_status_rejects_goal_provider_instance_and_scene_drift(self) -> None:
+        mutations = (
+            ("goalRequestId", str(uuid.uuid4()), "different goal request"),
+            ("targetInstanceId", str(uuid.uuid4()), "different Blender instance"),
+            ("sceneChanged", True, "scene-change safety"),
+        )
+        for field, value, message in mutations:
+            state = self.ready_state()
+            state.begin(target_instance_id=str(uuid.uuid4()))
+            payload = initial_plan_run_status(state, "generating")
+            payload[field] = value
+            with self.assertRaisesRegex(ValueError, message):
+                state.apply_status(payload)
+        state = self.ready_state()
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        payload = initial_plan_run_status(state, "generating")
+        payload["provider"]["version"] = "0.2.0"
+        with self.assertRaisesRegex(ValueError, "different provider"):
+            state.apply_status(payload)
+
+    def test_needs_revision_accepts_planning_only_and_requires_an_error(self) -> None:
+        state = self.ready_state()
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        finding = {
+            "code": "missing_required_phase",
+            "severity": "error",
+            "message": "Add a supported modeling phase",
+            "stepIds": [],
+            "phaseIds": [],
+        }
+        state.apply_status(
+            initial_plan_run_status(
+                state,
+                "needs_revision",
+                needs_revision={
+                    "planning": {
+                        "errorCount": 1,
+                        "warningCount": 0,
+                        "findings": [finding],
+                    }
+                },
+            )
+        )
+        self.assertEqual(state.phase, "needs_revision")
+        self.assertEqual(state.needs_revision_summary, "1 planning errors, 0 warnings")
+        self.assertTrue(state.can_run)
+
+        invalid = self.ready_state()
+        invalid.begin(target_instance_id=str(uuid.uuid4()))
+        payload = initial_plan_run_status(
+            invalid,
+            "needs_revision",
+            needs_revision={
+                "planning": {"errorCount": 0, "warningCount": 0, "findings": []}
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "must contain an error"):
+            invalid.apply_status(payload)
+
+    def test_proposal_created_requires_exact_review_identity(self) -> None:
+        state = self.ready_state()
+        state.begin(target_instance_id=str(uuid.uuid4()))
+        proposal_id = str(uuid.uuid4())
+        state.apply_status(
+            initial_plan_run_status(
+                state, "proposal_created", proposal_id=proposal_id
+            )
+        )
+
+        self.assertFalse(
+            state.complete_proposal_review(
+                state.acknowledged_goal_request_id, str(uuid.uuid4())
+            )
+        )
+        self.assertEqual(state.proposal_id, proposal_id)
+        self.assertTrue(
+            state.complete_proposal_review(
+                state.acknowledged_goal_request_id, proposal_id
+            )
+        )
+        self.assertEqual(state.phase, "idle")
+
+    def test_changed_provider_descriptor_requires_a_new_explicit_run(self) -> None:
+        state = self.ready_state()
+        request = state.begin(target_instance_id=str(uuid.uuid4()))
+        state.reject_authorization(
+            request["generationRequestId"], "Selected provider version is stale"
+        )
+        self.assertEqual(state.retry_mode, "never")
+        self.assertFalse(state.can_run)
+
+        refreshed = provider_list()
+        refreshed["providers"][0]["version"] = "0.2.0"
+        state.set_providers(refreshed)
+        self.assertIsNone(state.selected_provider_id)
+        state.select("fake-planner")
+
+        self.assertEqual(state.phase, "idle")
+        self.assertIsNone(state.retry_mode)
+        self.assertTrue(state.can_run)
 
 
 class RevisionContractTests(unittest.TestCase):

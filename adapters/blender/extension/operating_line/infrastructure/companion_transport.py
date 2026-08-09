@@ -34,6 +34,8 @@ REPLAN_RUN_STATUSES = frozenset(
     }
 )
 TERMINAL_REPLAN_RUN_STATUSES = REPLAN_RUN_STATUSES - {"queued", "generating"}
+INITIAL_PLAN_RUN_STATUSES = REPLAN_RUN_STATUSES
+TERMINAL_INITIAL_PLAN_RUN_STATUSES = TERMINAL_REPLAN_RUN_STATUSES
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
@@ -108,6 +110,7 @@ class CompanionTransport:
         self.revision_requests: Queue[dict[str, Any]] = Queue()
         self.goal_requests: Queue[dict[str, Any]] = Queue()
         self.replan_runs: Queue[dict[str, Any]] = Queue()
+        self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -260,6 +263,18 @@ class CompanionTransport:
             "Replan generation request id",
         )
         self.replan_runs.put(request)
+
+    def refresh_initial_plan_providers(self) -> None:
+        """Queue an explicit initial-planner provider discovery request."""
+        self.control.put({"kind": "refresh_initial_plan_providers"})
+
+    def start_initial_plan_run(self, request: dict[str, Any]) -> None:
+        generation_request_id = request.get("generationRequestId")
+        self._validated_optional_uuid(
+            generation_request_id,
+            "Initial-plan generation request id",
+        )
+        self.initial_plan_runs.put(request)
 
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
         self.submit_proposal_decision(
@@ -547,6 +562,17 @@ class CompanionTransport:
             raise ValueError("Runtime returned the wrong replan run")
         return response
 
+    def _poll_initial_plan_run(self, generation_request_id: str) -> dict[str, Any]:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/initial-plan-run?"
+            + urlencode({"generationRequestId": generation_request_id}),
+            abort_on_stop=True,
+        )
+        if response.get("generationRequestId") != generation_request_id:
+            raise ValueError("Runtime returned the wrong initial-plan run")
+        return response
+
     @staticmethod
     def _validate_replan_run_response(
         response: dict[str, Any], generation_request_id: Any
@@ -560,6 +586,21 @@ class CompanionTransport:
             raise ValueError("Runtime returned an inconsistent replan run status")
         return status
 
+    @staticmethod
+    def _validate_initial_plan_run_response(
+        response: dict[str, Any], generation_request_id: Any
+    ) -> str:
+        if response.get("generationRequestId") != generation_request_id:
+            raise ValueError("Runtime returned the wrong initial-plan run")
+        status = response.get("status")
+        if status not in INITIAL_PLAN_RUN_STATUSES:
+            raise ValueError("Runtime returned an unsupported initial-plan run status")
+        if response.get("terminal") is not (
+            status in TERMINAL_INITIAL_PLAN_RUN_STATUSES
+        ):
+            raise ValueError("Runtime returned an inconsistent initial-plan run status")
+        return status
+
     def _run(self) -> None:
         next_poll = 0.0
         pending_report: dict[str, Any] | None = None
@@ -569,7 +610,11 @@ class CompanionTransport:
         pending_replan_run: dict[str, Any] | None = None
         active_replan_run_id: str | None = None
         replan_run_signature: str | None = None
+        pending_initial_plan_run: dict[str, Any] | None = None
+        active_initial_plan_run_id: str | None = None
+        initial_plan_run_signature: str | None = None
         refresh_replan_providers = True
+        refresh_initial_plan_providers = False
         decision_retry_at = 0.0
         decision_retry_delay = 0.05
         goal_retry_at = 0.0
@@ -612,6 +657,8 @@ class CompanionTransport:
                         self._revision_history_signature = None
                     elif control.get("kind") == "refresh_replan_providers":
                         refresh_replan_providers = True
+                    elif control.get("kind") == "refresh_initial_plan_providers":
+                        refresh_initial_plan_providers = True
                 if refresh_replan_providers and not self._stop.is_set():
                     try:
                         providers = self._request_json(
@@ -642,6 +689,40 @@ class CompanionTransport:
                             {"kind": "replan_provider_list", "providers": providers}
                         )
                     refresh_replan_providers = False
+                    request_succeeded = True
+                if refresh_initial_plan_providers and not self._stop.is_set():
+                    try:
+                        providers = self._request_json(
+                            "GET", "/api/v1/planner/providers"
+                        )
+                    except (
+                        HTTPError,
+                        HTTPException,
+                        OSError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        status_code = getattr(error, "code", None)
+                        suffix = (
+                            f" (HTTP {status_code})"
+                            if isinstance(status_code, int)
+                            else ""
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "initial_plan_provider_list_unavailable",
+                                "message": "Initial planner provider discovery is unavailable"
+                                + suffix,
+                            }
+                        )
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "initial_plan_provider_list",
+                                "providers": providers,
+                            }
+                        )
+                    refresh_initial_plan_providers = False
                     request_succeeded = True
                 if pending_decision is None:
                     try:
@@ -850,6 +931,60 @@ class CompanionTransport:
                         )
                     pending_replan_run = None
                     request_succeeded = True
+                if not self._stop.is_set() and pending_initial_plan_run is None:
+                    try:
+                        pending_initial_plan_run = self.initial_plan_runs.get_nowait()
+                    except Empty:
+                        pass
+                if not self._stop.is_set() and pending_initial_plan_run is not None:
+                    generation_request_id = pending_initial_plan_run.get(
+                        "generationRequestId"
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/initial-plan-run",
+                            pending_initial_plan_run,
+                        )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        error_payload = getattr(error, "runtime_payload", {})
+                        message = (
+                            error_payload.get("message")
+                            if isinstance(error_payload, dict)
+                            else None
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "initial_plan_run_rejected",
+                                "generationRequestId": generation_request_id,
+                                "message": (
+                                    message
+                                    if isinstance(message, str) and message.strip()
+                                    else "Runtime rejected this initial planner authorization"
+                                ),
+                            }
+                        )
+                        pending_initial_plan_run = None
+                        request_succeeded = True
+                        continue
+                    status = self._validate_initial_plan_run_response(
+                        response, generation_request_id
+                    )
+                    self.incoming.put(
+                        {"kind": "initial_plan_run_status", "run": response}
+                    )
+                    if status in TERMINAL_INITIAL_PLAN_RUN_STATUSES:
+                        active_initial_plan_run_id = None
+                        initial_plan_run_signature = None
+                    else:
+                        active_initial_plan_run_id = str(generation_request_id)
+                        initial_plan_run_signature = json.dumps(
+                            response, sort_keys=True, separators=(",", ":")
+                        )
+                    pending_initial_plan_run = None
+                    request_succeeded = True
                 if pending_report is None:
                     try:
                         pending_report = self.outgoing.get_nowait()
@@ -887,6 +1022,22 @@ class CompanionTransport:
                         if status in TERMINAL_REPLAN_RUN_STATUSES:
                             active_replan_run_id = None
                             replan_run_signature = None
+                    if active_initial_plan_run_id is not None:
+                        run = self._poll_initial_plan_run(active_initial_plan_run_id)
+                        status = self._validate_initial_plan_run_response(
+                            run, active_initial_plan_run_id
+                        )
+                        signature = json.dumps(
+                            run, sort_keys=True, separators=(",", ":")
+                        )
+                        if signature != initial_plan_run_signature:
+                            initial_plan_run_signature = signature
+                            self.incoming.put(
+                                {"kind": "initial_plan_run_status", "run": run}
+                            )
+                        if status in TERMINAL_INITIAL_PLAN_RUN_STATUSES:
+                            active_initial_plan_run_id = None
+                            initial_plan_run_signature = None
                     request_succeeded = True
                     next_poll = now + self._poll_interval
                 if request_succeeded and last_error:

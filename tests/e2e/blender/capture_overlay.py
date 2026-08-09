@@ -30,6 +30,9 @@ OUTPUT_NAMES = {
     "revision": "guidance-revision-request.png",
     "revision-collapsed": "guidance-revision-collapsed.png",
     "proposal": "guidance-proposal-review.png",
+    "initial-provider-disclosure": "guidance-initial-provider-disclosure.png",
+    "initial-provider-generating": "guidance-initial-provider-generating.png",
+    "initial-provider-failed": "guidance-initial-provider-failed.png",
     "provider-disclosure": "guidance-provider-disclosure.png",
     "provider-generating": "guidance-provider-generating.png",
     "forward": "guidance-mid-forward.png",
@@ -82,10 +85,14 @@ class StrictFakeTransport:
         self.running = True
         self.last_delivered_sequence = 0
         self.replan_run_requests = []
+        self.initial_plan_run_requests = []
         self.goal_requests = []
 
     def start_replan_run(self, request):
         self.replan_run_requests.append(json.loads(json.dumps(request)))
+
+    def start_initial_plan_run(self, request):
+        self.initial_plan_run_requests.append(json.loads(json.dumps(request)))
 
     def submit_goal_request(self, request):
         self.goal_requests.append(json.loads(json.dumps(request)))
@@ -110,12 +117,8 @@ def assert_active_session_preserved():
     assert tuple(session.receipts) == initial_receipts == ()
 
 
-def configure_provider_handoff(*, generating):
-    companion = extension.get_companion()
-    fake_transport = StrictFakeTransport()
-    companion._transport = fake_transport
-    companion.status = "Connected"
-    provider_list = {
+def visual_provider_list():
+    return {
         "contractVersion": "1.0.0",
         "generationAvailable": True,
         "providers": [
@@ -135,7 +138,14 @@ def configure_provider_handoff(*, generating):
             }
         ],
     }
-    companion.provider_handoff.set_providers(provider_list)
+
+
+def configure_provider_handoff(*, generating):
+    companion = extension.get_companion()
+    fake_transport = StrictFakeTransport()
+    companion._transport = fake_transport
+    companion.status = "Connected"
+    companion.provider_handoff.set_providers(visual_provider_list())
     companion.select_replan_provider("visual.remote-planner")
     revision_request_id = str(uuid.uuid4())
     companion.provider_handoff.revision_submitted(revision_request_id)
@@ -186,8 +196,58 @@ def configure_goal_request():
     )
     companion.goal_request.delivering(request["requestId"])
     companion.goal_request.acknowledged(request["requestId"])
+    companion.initial_plan_handoff.goal_acknowledged(request["requestId"])
     assert fake_transport.goal_requests == [request]
     assert companion.goal_request.phase == "awaiting_planner"
+    assert_active_session_preserved()
+
+
+def configure_initial_provider_handoff(*, generating, failed=False):
+    assert not (generating and failed)
+    configure_goal_request()
+    companion = extension.get_companion()
+    fake_transport = companion._transport
+    assert isinstance(fake_transport, StrictFakeTransport)
+    companion.initial_plan_handoff.set_providers(visual_provider_list())
+    companion.select_initial_plan_provider("visual.remote-planner")
+    if generating or failed:
+        run = companion.begin_initial_plan_run()
+        companion.initial_plan_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "generationRequestId": run["generationRequestId"],
+                "goalRequestId": run["goalRequestId"],
+                "targetAdapterId": "blender",
+                "targetInstanceId": companion.instance_id,
+                "provider": {
+                    "id": "visual.remote-planner",
+                    "version": "1.0.0",
+                    "displayName": "Remote Snowman Planner",
+                },
+                "status": "failed" if failed else "generating",
+                "terminal": failed,
+                "sceneChanged": False,
+                "proposalId": None,
+                "error": (
+                    {
+                        "code": "planner_provider_failed",
+                        "retryMode": "new_request_id",
+                        "message": "Provider failed safely; confirm a new run to retry",
+                    }
+                    if failed
+                    else None
+                ),
+                "needsRevision": None,
+                "updatedAt": "2026-08-09T12:00:00Z",
+            }
+        )
+        assert fake_transport.initial_plan_run_requests == [run]
+        assert companion.initial_plan_handoff.phase == (
+            "failed" if failed else "generating"
+        )
+    else:
+        assert companion.initial_plan_handoff.can_run
+        assert not fake_transport.initial_plan_run_requests
     assert_active_session_preserved()
 
 
@@ -369,6 +429,15 @@ def configure_state():
         assert extension.get_session() is accepted_session
         assert extension.get_companion().proposal_session is not None
         assert not session.receipts
+    elif STATE in {
+        "initial-provider-disclosure",
+        "initial-provider-generating",
+        "initial-provider-failed",
+    }:
+        configure_initial_provider_handoff(
+            generating=STATE == "initial-provider-generating",
+            failed=STATE == "initial-provider-failed",
+        )
     elif STATE in {"provider-disclosure", "provider-generating"}:
         configure_provider_handoff(generating=STATE == "provider-generating")
     elif STATE == "forward":
@@ -400,7 +469,14 @@ def configure_state():
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
     assert_factory_objects_preserved()
-    if STATE in {"goal-request", "provider-disclosure", "provider-generating"}:
+    if STATE in {
+        "goal-request",
+        "initial-provider-disclosure",
+        "initial-provider-generating",
+        "initial-provider-failed",
+        "provider-disclosure",
+        "provider-generating",
+    }:
         assert_active_session_preserved()
 
 
@@ -434,7 +510,13 @@ def prepare_view():
     print(f"OperatingLine panel invocation result: {sorted(result)}", flush=True)
     assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
     bpy.context.window.cursor_warp(1100, 500)
-    if STATE in {"provider-disclosure", "provider-generating"}:
+    if STATE in {
+        "initial-provider-disclosure",
+        "initial-provider-generating",
+        "initial-provider-failed",
+        "provider-disclosure",
+        "provider-generating",
+    }:
         bpy.app.timers.register(scroll_provider_panel, first_interval=0.35)
     else:
         bpy.app.timers.register(capture_and_quit, first_interval=0.75)
@@ -457,7 +539,13 @@ def capture_and_quit():
     bpy.ops.screen.screenshot(filepath=str(OUTPUT))
     assert OUTPUT.is_file() and OUTPUT.stat().st_size > 10_000
     assert_guidance_pixels()
-    if STATE in {"provider-disclosure", "provider-generating"}:
+    if STATE in {
+        "initial-provider-disclosure",
+        "initial-provider-generating",
+        "initial-provider-failed",
+        "provider-disclosure",
+        "provider-generating",
+    }:
         assert_factory_objects_preserved()
         assert_active_session_preserved()
     if STATE == "forward":
@@ -509,6 +597,9 @@ def assert_guidance_pixels():
         "revision",
         "revision-collapsed",
         "proposal",
+        "initial-provider-disclosure",
+        "initial-provider-generating",
+        "initial-provider-failed",
         "provider-disclosure",
         "provider-generating",
     }:

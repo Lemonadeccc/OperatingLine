@@ -51,6 +51,7 @@ from operating_line_extension.operating_line.application.session import (  # noq
 )
 from operating_line_extension.operating_line.application.companion import (  # noqa: E402
     CompanionController,
+    ProposalQueueFullError,
 )
 from operating_line_extension.operating_line import (  # noqa: E402
     replace_session as replace_operating_line_session,
@@ -1302,6 +1303,17 @@ def assert_companion_and_plan_semantics() -> None:
                 "updatedAt": "2026-08-05T12:00:07Z",
             }
         )
+        try:
+            bounded_controller.stage_proposal(
+                bounded_candidate(str(uuid.uuid4()))
+            )
+        except ProposalQueueFullError:
+            pass
+        else:
+            raise AssertionError(
+                "A known provider proposal must retain its reserved queue slot"
+            )
+        assert len(bounded_controller._proposal_candidates) == 7
         exact_bounded_proposal = bounded_candidate(bounded_request_id)
         assert bounded_controller.stage_proposal(exact_bounded_proposal)
         assert bounded_controller.proposed_plan is exact_bounded_proposal
@@ -2493,14 +2505,23 @@ def main() -> None:
         running = True
 
         def __init__(self):
+            self.incoming = Queue()
             self.requests = []
             self.decisions = []
+            self.initial_provider_refreshes = 0
+            self.initial_runs = []
 
         def submit_goal_request(self, request):
             self.requests.append(deepcopy(request))
 
         def decide_proposal(self, proposal_id, decision):
             self.decisions.append((proposal_id, decision))
+
+        def refresh_initial_plan_providers(self):
+            self.initial_provider_refreshes += 1
+
+        def start_initial_plan_run(self, request):
+            self.initial_runs.append(deepcopy(request))
 
     goal_transport = GoalFakeTransport()
     registered_companion._transport = goal_transport
@@ -2589,6 +2610,208 @@ def main() -> None:
         (unrelated_proposal["proposalId"], "rejected"),
         (goal_proposal["proposalId"], "rejected"),
     ]
+
+    # An optional initial provider remains a separate, explicit authorization
+    # gate and binds the delivered proposal to the exact goal/run/instance.
+    initial_goal = registered_companion.submit_goal_request(
+        "Build a provider-authored reviewed guide"
+    )
+    registered_companion.goal_request.acknowledged(initial_goal["requestId"])
+    registered_companion.initial_plan_handoff.goal_acknowledged(
+        initial_goal["requestId"]
+    )
+    assert registered_companion.selected_initial_plan_provider_id is None
+    registered_companion.refresh_initial_plan_providers()
+    assert goal_transport.initial_provider_refreshes == 1
+    registered_companion.initial_plan_handoff.set_providers(
+        {
+            "contractVersion": "1.0.0",
+            "generationAvailable": True,
+            "providers": [
+                {
+                    "contractVersion": "1.0.0",
+                    "id": "available-planner",
+                    "version": "0.1.0",
+                    "displayName": "Available Planner",
+                    "description": "Local deterministic initial planner.",
+                    "availability": {"available": True},
+                    "limits": {"maxConcurrency": 1},
+                    "dataHandling": {
+                        "executionLocation": "local",
+                        "dataTransmission": "none",
+                        "credentialManagement": "provider_managed",
+                    },
+                }
+            ],
+        }
+    )
+    assert registered_companion.selected_initial_plan_provider_id is None
+    try:
+        bpy.ops.operating_line.run_initial_plan_provider()
+    except RuntimeError as error:
+        assert "authorization dialog" in str(error)
+    else:
+        raise AssertionError("Direct execute must not bypass initial provider confirmation")
+    assert goal_transport.initial_runs == []
+    assert registered_companion.select_initial_plan_provider(
+        "available-planner"
+    )["id"] == "available-planner"
+    scene_before_initial_run = {item.as_pointer() for item in bpy.data.objects}
+    session_before_initial_run = operating_line.get_session()
+    initial_run = registered_companion.begin_initial_plan_run()
+    assert goal_transport.initial_runs == [initial_run]
+    assert initial_run["goalRequestId"] == initial_goal["requestId"]
+    assert initial_run["targetInstanceId"] == registered_companion.instance_id
+    assert operating_line.get_session() is session_before_initial_run
+    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
+    initial_proposal_id = str(uuid.uuid4())
+    registered_companion.initial_plan_handoff.apply_status(
+        {
+            "contractVersion": "1.0.0",
+            "generationRequestId": initial_run["generationRequestId"],
+            "goalRequestId": initial_goal["requestId"],
+            "targetAdapterId": "blender",
+            "targetInstanceId": registered_companion.instance_id,
+            "provider": {
+                "id": "available-planner",
+                "version": "0.1.0",
+                "displayName": "Available Planner",
+            },
+            "status": "proposal_created",
+            "terminal": True,
+            "sceneChanged": False,
+            "proposalId": initial_proposal_id,
+            "error": None,
+            "needsRevision": None,
+            "updatedAt": "2026-08-09T12:00:01.000Z",
+        }
+    )
+    initial_plan = deepcopy(BUNDLED_PLAN)
+    initial_plan["id"] = initial_goal["planId"]
+    initial_plan["revision"] += 21
+    initial_proposal = {
+        "protocolVersion": "1.1.0",
+        "proposalId": initial_proposal_id,
+        "goalRequestId": initial_goal["requestId"],
+        "targetAdapterId": "blender",
+        "targetInstanceId": registered_companion.instance_id,
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+        "plan": initial_plan,
+        "planDiff": None,
+        "proposedAt": "2026-08-09T12:00:02Z",
+    }
+    assert registered_companion.stage_proposal(initial_proposal)
+    assert registered_companion.proposed_plan is initial_proposal
+    assert operating_line.get_session() is session_before_initial_run
+    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
+    assert registered_companion.reject_proposal()
+    assert registered_companion.goal_request.active is False
+    assert registered_companion.initial_plan_handoff.phase == "idle"
+    assert operating_line.get_session() is session_before_initial_run
+    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
+
+    # An external MCP Goal Proposal may win the unresolved Proposal slot while
+    # an Initial Run is still generating. The Run then fails safely, but the
+    # already-delivered external Proposal must become reviewable in either
+    # delivery ordering without being relabeled as the Provider result.
+    def initial_race_fixture(label):
+        controller = CompanionController()
+        transport = GoalFakeTransport()
+        controller._transport = transport
+        goal = controller.submit_goal_request(f"External proposal race {label}")
+        controller.goal_request.acknowledged(goal["requestId"])
+        controller.initial_plan_handoff.goal_acknowledged(goal["requestId"])
+        controller.initial_plan_handoff.set_providers(
+            {
+                "contractVersion": "1.0.0",
+                "generationAvailable": True,
+                "providers": [
+                    {
+                        "contractVersion": "1.0.0",
+                        "id": "available-planner",
+                        "version": "0.1.0",
+                        "displayName": "Available Planner",
+                        "description": "Local deterministic initial planner.",
+                        "availability": {"available": True},
+                        "limits": {"maxConcurrency": 1},
+                        "dataHandling": {
+                            "executionLocation": "local",
+                            "dataTransmission": "none",
+                            "credentialManagement": "provider_managed",
+                        },
+                    }
+                ],
+            }
+        )
+        controller.select_initial_plan_provider("available-planner")
+        run = controller.begin_initial_plan_run()
+        plan = deepcopy(BUNDLED_PLAN)
+        plan["id"] = goal["planId"]
+        plan["revision"] += 30
+        proposal = {
+            "protocolVersion": "1.1.0",
+            "proposalId": str(uuid.uuid4()),
+            "goalRequestId": goal["requestId"],
+            "targetAdapterId": "blender",
+            "targetInstanceId": controller.instance_id,
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "plan": plan,
+            "planDiff": None,
+            "proposedAt": "2026-08-09T12:00:03Z",
+        }
+        failed = {
+            "contractVersion": "1.0.0",
+            "generationRequestId": run["generationRequestId"],
+            "goalRequestId": goal["requestId"],
+            "targetAdapterId": "blender",
+            "targetInstanceId": controller.instance_id,
+            "provider": {
+                "id": "available-planner",
+                "version": "0.1.0",
+                "displayName": "Available Planner",
+            },
+            "status": "failed",
+            "terminal": True,
+            "sceneChanged": False,
+            "proposalId": None,
+            "error": {
+                "code": "planner_internal_failed",
+                "retryMode": "new_request_id",
+                "message": "Provider result lost the Proposal review slot",
+            },
+            "needsRevision": None,
+            "updatedAt": "2026-08-09T12:00:04Z",
+        }
+        return controller, transport, proposal, failed
+
+    proposal_first, proposal_first_transport, external_first, failed_after = (
+        initial_race_fixture("proposal-first")
+    )
+    assert proposal_first.stage_proposal(external_first)
+    assert proposal_first.proposed_plan is None
+    proposal_first_transport.incoming.put(
+        {"kind": "initial_plan_run_status", "run": failed_after}
+    )
+    proposal_first.pump()
+    assert proposal_first.proposed_plan is external_first
+    assert proposal_first.initial_plan_handoff.phase == "failed"
+    assert proposal_first.goal_request.phase == "proposal_received"
+    assert proposal_first.reject_proposal()
+
+    status_first, status_first_transport, external_after, failed_first = (
+        initial_race_fixture("status-first")
+    )
+    status_first_transport.incoming.put(
+        {"kind": "initial_plan_run_status", "run": failed_first}
+    )
+    status_first.pump()
+    assert status_first.proposed_plan is None
+    assert status_first.stage_proposal(external_after)
+    assert status_first.proposed_plan is external_after
+    assert status_first.initial_plan_handoff.phase == "failed"
+    assert status_first.goal_request.phase == "proposal_received"
+    assert status_first.reject_proposal()
+
     registered_companion._transport = None
     assert all(
         "UNDO" not in operator.bl_options

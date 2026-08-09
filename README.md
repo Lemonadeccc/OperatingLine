@@ -6,7 +6,9 @@
 > 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
 > 计划投递/状态回传闭环已可运行；用户现在可以直接在 Blender 的 `Goal to Guidance` 输入目标，
 > 再由 Codex、Claude 或其他 MCP 客户端发现不可变请求、取得精确 Planner Packet，并提交只返回该
-> Blender 实例的待审 GuideProposal。用户在 Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
+> Blender 实例的待审 GuideProposal；若显式 Runtime 已配置 Provider，用户也可以留在 Blender 中查看
+> 数据传输/可能费用、逐次确认异步 Initial Plan Run。两条路径最终都只创建待审 Proposal。用户在
+> Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
 > Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
@@ -23,8 +25,9 @@
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
 > capability-aware `PlanningPromptPacket` / `ReplanningPromptPacket 1.1.0`、引用子树 locality 门禁和可选
 > provider `replan()`；历史目录继续使用 `1.0.0` packet 精确回放。MCP 客户端仍以
-> 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认请求后，明确选择一个
-> 已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Replan Run；Runtime 只在 canonical
+> 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认 Goal 或 revision request
+> 后，明确选择一个已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Initial Plan Run 或
+> Replan Run；Runtime 只在 canonical
 > 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
 > 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。Blender 内已有可折叠的
 > Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、完成真实采集与
@@ -76,6 +79,14 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `operatingline.goal.prompt.get` 取得同一 Planner Packet，evaluate 完整 draft 后把它与
   `goalRequestId` 交给既有 `operatingline.guide.propose`。Proposal 只投递给原实例，仍须在 Blender
   Accept/Reject；请求、packet、规划、预览和 Reject 都不改场景。默认 Runtime 不自动调用 Provider。
+- **宿主授权的异步 Initial Plan Run**：Goal 获得 Runtime acknowledgement 后，Blender 可刷新公开
+  Planner Provider descriptor；默认不选择，用户选中后会看到目标、ActionCatalog、精确宿主实例状态的
+  local/remote 传输方式与可能费用提示。每次原生确认只授权一个新 generation UUID；
+  `POST /api/v1/companion/initial-plan-run` 立即返回 `202`，后台只在严格结果 ready 时创建 Goal-linked
+  Proposal。普通 MCP generate 与 Goal Run 使用不同 provenance fingerprint，Proposal 还原子保存
+  `generationRequestId → proposalId`，因此重启只恢复精确来源而不重复调用 Provider。整个 Run、预览和
+  Reject 不改场景；Accept 只安装，`Start` / `Next` 才可能执行。默认 standalone 的 Provider 列表为空，
+  前述 Codex/Claude MCP 路径不受影响。
 - **显式 Planner Provider 边界**：嵌入 Orchestrator 的调用方可通过
   `@operatingline/planner-provider-sdk` 注入一个或多个进程内 provider，再由
   `operatingline.planner.providers.list` 与 `operatingline.planner.generate` 显式选择并调用。
@@ -370,6 +381,12 @@ pnpm dev
    provider 已开始后的失败、超时或进程中断不会自动重试，显式重试需使用新的 UUID。默认 `pnpm dev`
    standalone 没有配置 provider，因此列表为空且不会调用模型。
 
+   若启动的是显式配置 Provider 的 Runtime，Goal 被 acknowledgement 后也可以完全留在 Blender：刷新
+   `Goal to Guidance` 内的 Provider 列表，明确选择一项，阅读传输范围和可能费用，再点击
+   `Confirm Initial Planner Run` 并在原生 dialog 中确认。Blender 只轮询短状态请求；`needs_revision` 或失败
+   不创建 Proposal，`proposal_created` 仍只进入同一只读树与 Accept/Reject 审批。Retry 会重新披露、
+   重新确认并使用新 generation UUID。该入口不自动选择或调用 Provider。
+
 6. 若要修改某个局部节点，在活动树或待审树点击 `Ref`，在 `Revision request` 中描述变化并发送。
    MCP 客户端先调用 `operatingline.replan.requests.list` 读取 pending request。Provider-free 客户端可用
    `operatingline.replan.prompt.get` 取得独立的类型化 packet，自行生成完整更高 revision，再直接调用
@@ -405,6 +422,7 @@ pnpm dev
 | Blender `Create Guidance`           | 否                     | 否            | 否             |
 | `goal.requests.list` / `prompt.get` | 否                     | 否            | 否             |
 | 客户端自己的模型调用                | 由客户端决定           | 否            | 否             |
+| Blender Initial Plan Run            | 是（每次确认）         | ready 时是    | 否             |
 | `planning.evaluate`                 | 否                     | 否            | 否             |
 | `guide.propose` + `goalRequestId`   | 否                     | 是            | 否             |
 | Blender `Accept Plan`               | 否                     | 审批既有提案  | 只安装         |
@@ -437,11 +455,12 @@ pnpm dev:openai
 该入口只注册 OpenAI provider，不会自动调用模型。外部调用方仍须先读取
 `operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
 提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`；Blender 路径则要求用户
-在 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Packet 中的目标或修订
+在 Goal Workspace 或 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Packet 中的目标或修订
 消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、需求覆盖链、
 quality/locality 报告和 provenance
 会进入 OperatingLine 的未脱敏 Eval 证据。底层 generation 不会创建 Proposal、修改 Blender 或执行
-节点；初始规划仍须单独调用 `guide.propose`。局部规划可以由外部调用方用 canonical
+节点；外部初始规划仍须单独调用 `guide.propose`，已逐次确认的 Blender Initial Plan Run 可在 ready 时
+组合同一 Proposal 权威。局部规划可以由外部调用方用 canonical
 `generationRequestId` 调用 `replan.propose`，或由已逐次确认的 Blender Replan Run 在 ready 时组合该
 调用；两者产生的 Proposal 都必须由宿主用户接受。
 
@@ -494,9 +513,13 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    Proposal，输入区会显示将继续的 thread 与下一 turn。
 9. `Revision history` 显示每轮请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
    `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
-10. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
-    `guide.publish` 更新，但保留待审 Proposal、Goal 关联、活动修订草稿和待确认的精确决策，供下次
-    Connect 恢复。Extension 卸载/重载才清理这些进程内状态。
+10. `Goal to Guidance` 在 Goal acknowledgement 后可显示可选 Initial Plan Provider；列表默认不选择，
+    每次调用都要重新确认。queued、generating、needs_revision、failed、interrupted 或
+    proposal_created 状态只描述后台规划，不代表场景已改变。
+11. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
+    `guide.publish` 更新，但保留待审 Proposal、Goal 关联、活动 Initial Plan Run 的精确授权、修订草稿
+    和待确认的精确决策。重新 Connect 后只会以同一 generation UUID 恢复状态，不会另行授权一次
+    Provider 调用；Extension 卸载/重载才清理这些进程内状态。
 
 Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形。当前对象和世界坐标锚点会
 绘制真实目标线；`operator` 锚点只显示操作 ID 或 `menuPath` 语义路径，并明确标记
@@ -612,14 +635,17 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 Planner Packet、evaluate、实例定向初版 Proposal、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会为十一个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+`pnpm test:blender:visual` 会为十四个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-goal-request.png`、`guidance-revision-request.png`、
 `guidance-revision-collapsed.png`、`guidance-proposal-review.png`、
+`guidance-initial-provider-disclosure.png`、`guidance-initial-provider-generating.png`、
+`guidance-initial-provider-failed.png`、
 `guidance-provider-disclosure.png`、`guidance-provider-generating.png`、`guidance-mid-forward.png`、
 `guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
 宿主目标请求与 awaiting-planner 状态、
-节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、远端 Provider 数据/费用披露、异步 generating 状态与 Run ID、修订历史与接受/拒绝控件、红色 Back/绿色
+节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、Initial/Replan
+Provider 的远端数据/费用披露、异步 generating 状态与 Run ID、修订历史与接受/拒绝控件、红色 Back/绿色
 Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
 
 产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、

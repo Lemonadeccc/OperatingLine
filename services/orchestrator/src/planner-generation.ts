@@ -50,7 +50,10 @@ export interface PlannerGenerationCoordinatorOptions {
   readonly timeoutMs?: number;
   readonly invocationManager?: PlannerProviderInvocationManager;
   readonly existingEvents: readonly StoredExecutionEvent[];
-  readonly buildPacket: (request: PlanningPromptRequest) => PlanningPromptPacket;
+  readonly buildPacket: (
+    request: PlanningPromptRequest,
+    provenance?: PlannerGenerationGoalProvenance,
+  ) => PlanningPromptPacket;
   readonly evaluateDraft: (
     packet: PlanningPromptPacket,
     draft: PlanningProposalDraft,
@@ -58,8 +61,22 @@ export interface PlannerGenerationCoordinatorOptions {
   readonly appendEvent: (event: ExecutionEventInput) => void;
 }
 
+export interface PlannerGenerationGoalProvenance {
+  readonly goalRequestId: string;
+  readonly targetInstanceId: string;
+}
+
 export interface PlannerGenerationCoordinator {
   generate(request: PlannerGenerateRequest): Promise<PlannerGenerationResult>;
+  generateForGoal(
+    request: PlannerGenerateRequest,
+    provenance: PlannerGenerationGoalProvenance,
+  ): Promise<PlannerGenerationResult>;
+  completedResult(requestId: string): PlannerGenerationResult | null;
+  completedGoalResult(
+    request: PlannerGenerateRequest,
+    provenance: PlannerGenerationGoalProvenance,
+  ): PlannerGenerationResult | null;
   close(): Promise<void>;
 }
 
@@ -175,6 +192,7 @@ export function createPlannerGenerationCoordinator(
     request: PlannerGenerateRequest,
     requestFingerprint: string,
     attemptContext: PlannerProviderAttemptContext,
+    provenance?: PlannerGenerationGoalProvenance,
   ): Promise<PlannerGenerationResult> => {
     let packet: PlanningPromptPacket | null = null;
     const startedAt = Date.now();
@@ -182,7 +200,7 @@ export function createPlannerGenerationCoordinator(
     try {
       const promptRequest = requestToPrompt(request);
       try {
-        packet = planningPromptPacketSchema.parse(options.buildPacket(promptRequest));
+        packet = planningPromptPacketSchema.parse(options.buildPacket(promptRequest, provenance));
       } catch (error) {
         if (error instanceof PlannerGenerationRuntimeError) {
           throw error;
@@ -197,7 +215,7 @@ export function createPlannerGenerationCoordinator(
         {
           id: randomUUID(),
           eventType: 'planning.context.generated',
-          payload: { request: promptRequest, context: packet.context },
+          payload: { request: promptRequest, context: packet.context, ...provenance },
         },
         'same_request_id',
       );
@@ -205,7 +223,7 @@ export function createPlannerGenerationCoordinator(
         {
           id: randomUUID(),
           eventType: 'planning.prompt.generated',
-          payload: { request: promptRequest, packet },
+          payload: { request: promptRequest, packet, ...provenance },
         },
         'same_request_id',
       );
@@ -219,6 +237,7 @@ export function createPlannerGenerationCoordinator(
         planId: packet.context.requestedPlanId,
         packetFormatVersion: packet.formatVersion,
         occurredAt: new Date().toISOString(),
+        ...provenance,
       });
       appendEvidence(
         {
@@ -267,6 +286,7 @@ export function createPlannerGenerationCoordinator(
               : { capabilityCoverage: draft.planning.capabilityCoverage }),
             plan: draft.plan,
             report: planningQuality,
+            ...provenance,
           },
         },
         'new_request_id',
@@ -294,6 +314,7 @@ export function createPlannerGenerationCoordinator(
         catalogVersion: result.draft.catalogVersion,
         planId: result.draft.plan.id,
         result,
+        ...provenance,
       });
       appendEvidence(
         {
@@ -318,6 +339,7 @@ export function createPlannerGenerationCoordinator(
           error: safeError.code,
           durationMs: Math.max(0, Date.now() - startedAt),
           occurredAt: new Date().toISOString(),
+          ...provenance,
         });
         appendEvidence(
           {
@@ -332,20 +354,43 @@ export function createPlannerGenerationCoordinator(
     }
   };
 
+  const generate = async (
+    requestInput: PlannerGenerateRequest,
+    provenance?: PlannerGenerationGoalProvenance,
+  ): Promise<PlannerGenerationResult> => {
+    const request = plannerGenerateRequestSchema.parse(requestInput);
+    const requestFingerprint = plannerProviderRequestFingerprint(
+      provenance === undefined ? request : { request, ...provenance },
+    );
+    const result = await invocationManager.execute({
+      requestId: request.requestId,
+      operation: 'initial_plan',
+      fingerprint: requestFingerprint,
+      providerId: request.providerId,
+      planKey: [request.targetAdapterId, request.planId],
+      requiresReplan: false,
+      attempt: (attemptContext) =>
+        generateAttempt(request, requestFingerprint, attemptContext, provenance),
+    });
+    return plannerGenerationResultSchema.parse(result);
+  };
+
   return {
-    generate: async (requestInput) => {
+    generate: (requestInput) => generate(requestInput),
+    generateForGoal: (requestInput, provenance) => generate(requestInput, provenance),
+    completedResult: (requestId) => {
+      const result = invocationManager.completedResult(requestId, 'initial_plan');
+      return result === null ? null : plannerGenerationResultSchema.parse(result);
+    },
+    completedGoalResult: (requestInput, provenance) => {
       const request = plannerGenerateRequestSchema.parse(requestInput);
-      const requestFingerprint = plannerProviderRequestFingerprint(request);
-      const result = await invocationManager.execute({
-        requestId: request.requestId,
-        operation: 'initial_plan',
-        fingerprint: requestFingerprint,
-        providerId: request.providerId,
-        planKey: [request.targetAdapterId, request.planId],
-        requiresReplan: false,
-        attempt: (attemptContext) => generateAttempt(request, requestFingerprint, attemptContext),
-      });
-      return plannerGenerationResultSchema.parse(result);
+      const requestFingerprint = plannerProviderRequestFingerprint({ request, ...provenance });
+      const result = invocationManager.completedResult(
+        request.requestId,
+        'initial_plan',
+        requestFingerprint,
+      );
+      return result === null ? null : plannerGenerationResultSchema.parse(result);
     },
     close: () => invocationManager.close(),
   };

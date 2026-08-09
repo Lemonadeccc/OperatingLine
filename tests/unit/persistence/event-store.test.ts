@@ -150,7 +150,166 @@ function companionReplanRun(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function companionInitialPlanRun(
+  goal: ReturnType<typeof goalRequest>,
+  overrides: Record<string, unknown> = {},
+) {
+  const generationRequestId = randomUUID();
+  return {
+    contractVersion: '1.0.0',
+    generationRequestId,
+    goalRequestId: goal.requestId,
+    targetAdapterId: goal.adapterId,
+    targetInstanceId: goal.instanceId,
+    provider: { id: 'fake-planner', version: '0.1.0', displayName: 'Fake Planner' },
+    status: 'queued',
+    terminal: false,
+    sceneChanged: false,
+    proposalId: null,
+    error: null,
+    needsRevision: null,
+    updatedAt: '2026-08-09T12:00:00.000Z',
+    request: {
+      generationRequestId,
+      goalRequestId: goal.requestId,
+      providerId: 'fake-planner',
+      providerVersion: '0.1.0',
+      targetAdapterId: goal.adapterId,
+      targetInstanceId: goal.instanceId,
+      authorization: {
+        disclosureVersion: '1.0.0',
+        dataHandlingAcknowledged: true,
+        possibleChargesAcknowledged: true,
+        proposalCreationAcknowledged: true,
+        authorizedAt: '2026-08-09T12:00:00.000Z',
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('OperatingLine persistence', () => {
+  it('stores and compare-and-set transitions one authorized initial plan run per target', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const goal = goalRequest();
+    const queued = companionInitialPlanRun(goal);
+    expect(database.recordGuideGoalRequest(goal)).toBe('accepted');
+    expect(database.recordCompanionInitialPlanRun(queued)).toBe('accepted');
+    expect(database.recordCompanionInitialPlanRun(queued)).toBe('duplicate');
+    expect(
+      database.recordCompanionInitialPlanRun({
+        ...queued,
+        provider: { ...queued.provider, version: '9.9.9' },
+      }),
+    ).toBe('conflict');
+    expect(database.listNonterminalCompanionInitialPlanRuns()).toEqual([queued]);
+
+    const generating = {
+      ...queued,
+      status: 'generating',
+      updatedAt: '2026-08-09T12:00:01.000Z',
+    };
+    expect(database.transitionCompanionInitialPlanRun(generating, ['queued'])).toBe(true);
+    expect(database.transitionCompanionInitialPlanRun(generating, ['queued'])).toBe(false);
+    expect(
+      database.transitionCompanionInitialPlanRun({ ...generating, goalRequestId: randomUUID() }, [
+        'generating',
+      ]),
+    ).toBe(false);
+    const completed = {
+      ...generating,
+      status: 'proposal_created',
+      terminal: true,
+      proposalId: randomUUID(),
+      updatedAt: '2026-08-09T12:00:02.000Z',
+    };
+    expect(database.transitionCompanionInitialPlanRun(completed, ['generating'])).toBe(true);
+    expect(database.getCompanionInitialPlanRun(queued.generationRequestId)).toEqual(completed);
+    expect(database.listNonterminalCompanionInitialPlanRuns()).toEqual([]);
+    expect(
+      database.listExecutionEventsByTypes([
+        'companion.initial-plan-run.authorized',
+        'companion.initial-plan-run.transitioned',
+      ]),
+    ).toMatchObject([
+      { eventType: 'companion.initial-plan-run.authorized' },
+      { eventType: 'companion.initial-plan-run.transitioned' },
+      { eventType: 'companion.initial-plan-run.transitioned' },
+    ]);
+    database.close();
+  });
+
+  it('persists initial runs and exact generation-to-proposal provenance across restart', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-initial-plan-run-store-'));
+    const databasePath = join(directory, 'state.db');
+    const goal = goalRequest({ adapterId: 'blender', catalogVersion: '1.0.0' });
+    const queued = companionInitialPlanRun(goal);
+    const proposal = {
+      ...guideProposal(goal.planId),
+      targetInstanceId: goal.instanceId,
+      goalRequestId: goal.requestId,
+      catalogVersion: goal.catalogVersion,
+      planning: { goal: goal.goal, requiredPhaseIds: [] },
+    };
+    try {
+      const first = openOperatingLineDatabase(databasePath);
+      expect(first.recordGuideGoalRequest(goal)).toBe('accepted');
+      expect(first.recordCompanionInitialPlanRun(queued)).toBe('accepted');
+      expect(() => first.recordGuideGoalProposal(proposal, goal.requestId, randomUUID())).toThrow(
+        'Unknown companion initial plan run',
+      );
+      first.recordGuideGoalProposal(proposal, goal.requestId, queued.generationRequestId);
+      first.close();
+
+      const restarted = openOperatingLineDatabase(databasePath);
+      expect(restarted.getCompanionInitialPlanRun(queued.generationRequestId)).toEqual(queued);
+      expect(restarted.listNonterminalCompanionInitialPlanRuns()).toEqual([queued]);
+      expect(restarted.getGuideGoalProposalForGeneration(queued.generationRequestId)).toEqual(
+        proposal,
+      );
+      expect(restarted.getGuideGoalProposalForGeneration(randomUUID())).toBeNull();
+      expect(
+        restarted.listExecutionEventsByTypes([
+          'guide.goal.proposed',
+          'planning.provider.generation.proposed',
+        ]),
+      ).toMatchObject([
+        { eventType: 'guide.goal.proposed' },
+        {
+          id: `planning-generation-proposed:${queued.generationRequestId}`,
+          eventType: 'planning.provider.generation.proposed',
+          payload: {
+            generationRequestId: queued.generationRequestId,
+            goalRequestId: goal.requestId,
+            proposalId: proposal.proposalId,
+            occurredAt: expect.any(String),
+          },
+        },
+      ]);
+      restarted.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects initial runs without the exact pending goal or with unresolved target work', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const unknownGoal = goalRequest();
+    expect(database.recordCompanionInitialPlanRun(companionInitialPlanRun(unknownGoal))).toBe(
+      'conflict',
+    );
+
+    const goal = goalRequest({ adapterId: 'blender', catalogVersion: '1.0.0' });
+    expect(database.recordGuideGoalRequest(goal)).toBe('accepted');
+    const unresolved = {
+      ...guideProposal('external-plan'),
+      targetInstanceId: goal.instanceId,
+    };
+    database.recordGuideProposal(unresolved);
+    expect(database.recordCompanionInitialPlanRun(companionInitialPlanRun(goal))).toBe('conflict');
+    database.close();
+  });
+
   it('stores one active companion replan run per host and transitions it with compare-and-set', () => {
     const database = openOperatingLineDatabase(':memory:');
     const queued = companionReplanRun();
@@ -812,7 +971,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 9,
+        count: 10,
       });
       expect(
         inspected

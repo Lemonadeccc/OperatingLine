@@ -106,6 +106,129 @@ def _draw_guidance_status(layout, session) -> None:
         )
 
 
+def _draw_initial_plan_handoff(layout, companion) -> None:
+    handoff = companion.initial_plan_handoff
+    provider_box = layout.box()
+    header = provider_box.row(align=True)
+    header.label(text="Optional initial AI planner", icon="NETWORK_DRIVE")
+    refresh = header.row(align=True)
+    refresh.enabled = companion.connected and not handoff.active
+    refresh.operator(
+        "operating_line.refresh_initial_plan_providers",
+        text="",
+        icon="FILE_REFRESH",
+    )
+    draw_wrapped_text(
+        provider_box,
+        "Never automatic. Refresh, select a provider, then confirm each run.",
+        icon="INFO",
+    )
+    if handoff.loading_providers:
+        provider_box.label(text="Refreshing providers...", icon="TIME")
+    elif not handoff.providers:
+        provider_box.label(text="No initial provider loaded", icon="INFO")
+    for provider in handoff.providers:
+        availability = provider["availability"]
+        available = availability["available"]
+        selected = provider["id"] == handoff.selected_provider_id
+        item = provider_box.box()
+        row = item.row(align=True)
+        row.enabled = available and not handoff.active
+        select = row.operator(
+            "operating_line.select_initial_plan_provider",
+            text=provider["displayName"],
+            icon="RADIOBUT_ON" if selected else "RADIOBUT_OFF",
+            depress=selected,
+        )
+        select.provider_id = provider["id"]
+        row.label(text=f"v{provider['version']}")
+        draw_wrapped_text(item, provider["description"])
+        location = provider["dataHandling"]["executionLocation"]
+        if location == "remote":
+            draw_wrapped_text(
+                item,
+                (
+                    "Remote: goal, ActionCatalog, and this exact Blender instance "
+                    "state are transmitted."
+                ),
+                icon="URL",
+            )
+        else:
+            item.label(text="Local: no provider data transmission", icon="HOME")
+        if not available:
+            draw_wrapped_text(
+                item,
+                str(availability.get("message", "Provider unavailable")),
+                icon="ERROR",
+            )
+    selected = handoff.selected_provider
+    if selected is not None:
+        disclosure = provider_box.box()
+        disclosure.label(text=f"Selected: {selected['displayName']}", icon="CHECKMARK")
+        if selected["dataHandling"]["executionLocation"] == "remote":
+            draw_wrapped_text(
+                disclosure,
+                (
+                    "A confirmed run sends this goal, the ActionCatalog, and current "
+                    "state of this exact Blender instance."
+                ),
+                icon="URL",
+            )
+        else:
+            disclosure.label(
+                text="Provider runs locally with no provider transmission",
+                icon="HOME",
+            )
+        draw_wrapped_text(
+            disclosure,
+            "The provider may charge. OperatingLine cannot estimate provider fees.",
+            icon="ERROR",
+        )
+        draw_wrapped_text(
+            disclosure,
+            "No API key, model, or provider endpoint is stored by this Blender add-on.",
+        )
+    run = provider_box.row()
+    run.enabled = handoff.can_run and companion.proposed_plan is None
+    label = (
+        "Confirm New Initial Run"
+        if handoff.phase in {"needs_revision", "failed", "interrupted"}
+        else "Confirm Initial Planner Run"
+    )
+    run.operator("operating_line.run_initial_plan_provider", text=label, icon="PLAY")
+    if handoff.message:
+        icon = (
+            "ERROR"
+            if handoff.phase in {"needs_revision", "failed", "interrupted"}
+            else "INFO"
+        )
+        draw_wrapped_text(provider_box, handoff.message, icon=icon)
+    if handoff.needs_revision_summary:
+        draw_wrapped_text(
+            provider_box,
+            f"Validation: {handoff.needs_revision_summary}",
+            icon="ERROR",
+        )
+        for finding in handoff.needs_revision_findings:
+            draw_wrapped_text(provider_box, f"- {finding}")
+    if handoff.retry_mode == "never":
+        draw_wrapped_text(
+            provider_box,
+            "This run cannot be retried. Refresh the provider or submit a new goal.",
+            icon="CANCEL",
+        )
+    if handoff.generation_request_id is not None:
+        provider_box.label(
+            text=f"Run {handoff.generation_request_id[:8]}  {handoff.phase}",
+            icon="TIME" if handoff.active else "INFO",
+        )
+    draw_wrapped_text(
+        provider_box,
+        "A created proposal still requires review; this run cannot Accept or execute it.",
+        icon="LOCKED",
+    )
+
+
 def _draw_goal_workspace(layout, context, companion) -> None:
     if companion.goal_entry_blocked and not companion.goal_request.active:
         return
@@ -146,6 +269,8 @@ def _draw_goal_workspace(layout, context, companion) -> None:
         )
         if companion.goal_request.phase == "proposal_received":
             workspace.label(text="Review the full proposal below")
+        elif companion.goal_request.acknowledged_request_id is not None:
+            _draw_initial_plan_handoff(workspace, companion)
         return
 
     workspace.label(text="What do you want to accomplish?")

@@ -13,6 +13,8 @@ import {
   adapterStatusSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
+  companionInitialPlanRunCreateRequestSchema,
+  companionInitialPlanRunStatusRequestSchema,
   companionReplanRunCreateRequestSchema,
   companionReplanRunStatusRequestSchema,
   companionStateReportSchema,
@@ -55,6 +57,11 @@ import {
 import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
+import {
+  CompanionInitialPlanRunRequestError,
+  createCompanionInitialPlanRunCoordinator,
+  type CompanionInitialPlanRunCoordinator,
+} from './companion-initial-plan-run.js';
 import {
   CompanionReplanRunRequestError,
   createCompanionReplanRunCoordinator,
@@ -153,8 +160,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
+  let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
+    () => companionInitialPlanRunCoordinator?.beginClose(),
     () => companionReplanRunCoordinator?.beginClose(),
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
@@ -163,6 +172,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         await plannerReplanGenerationCoordinator?.close();
       }
     },
+    () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
     () => plannerProviderRegistry.close(),
     () => app?.close(),
@@ -246,7 +256,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         recommendedRevision: latestRevision === null ? null : latestRevision + 1,
         catalog,
         companionStates: listCompanionStates().filter(
-          (state) => state.adapterId === request.targetAdapterId,
+          (state) =>
+            state.adapterId === request.targetAdapterId &&
+            (provenance === undefined || state.instanceId === provenance.targetInstanceId),
         ),
         constraints: {
           singleAdapterPlan: true,
@@ -412,7 +424,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       registry: plannerProviderRegistry,
       invocationManager: plannerProviderInvocationManager,
       existingEvents: existingPlannerGenerationEvents,
-      buildPacket: (request) => getPlanningPrompt(request, false),
+      buildPacket: (request, provenance) => getPlanningPrompt(request, false, provenance),
       evaluateDraft: (packet, draft) =>
         evaluatePlanningQuality(
           planningQualityEvaluationRequestSchema.parse({
@@ -435,6 +447,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       catalogVersion?: string;
       plan: GuidePlan;
       goalRequestId?: string;
+      goalGenerationRequestId?: string;
       replan?: {
         requestId: string;
         generationRequestId?: string;
@@ -521,7 +534,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         proposedAt: new Date().toISOString(),
       });
       if (input.goalRequestId !== undefined) {
-        database.recordGuideGoalProposal(proposal, input.goalRequestId);
+        database.recordGuideGoalProposal(
+          proposal,
+          input.goalRequestId,
+          input.goalGenerationRequestId,
+        );
       } else if (input.replan === undefined) {
         database.recordGuideProposal(proposal);
       } else {
@@ -597,6 +614,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       providerRegistry: plannerProviderRegistry,
       generationCoordinator: plannerReplanGenerationCoordinator,
       replanningService,
+    });
+    companionInitialPlanRunCoordinator = createCompanionInitialPlanRunCoordinator({
+      database,
+      providerRegistry: plannerProviderRegistry,
+      generationCoordinator: plannerGenerationCoordinator,
+      createProposal: (input) => createProposal(input).proposal,
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
@@ -1248,6 +1271,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply
           .code(plannerGenerationHttpStatus(error))
           .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/companion/initial-plan-run', async (request, reply) => {
+      const parsedRequest = companionInitialPlanRunCreateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion initial plan run authorization violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionInitialPlanRunCoordinator!.create(parsedRequest.data);
+        return reply.code(202).send(run);
+      } catch (error) {
+        if (error instanceof CompanionInitialPlanRunRequestError) {
+          return reply.code(error.statusCode).send({
+            error: error.code,
+            message: error.message,
+          });
+        }
+        return reply.code(500).send({
+          error: 'initial_plan_run_failed',
+          message: 'The initial plan run could not be safely authorized',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/companion/initial-plan-run', async (request, reply) => {
+      const parsedRequest = companionInitialPlanRunStatusRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion initial plan run status request violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionInitialPlanRunCoordinator!.get(parsedRequest.data.generationRequestId);
+        return run === null
+          ? reply.code(404).send({
+              error: 'initial_plan_run_not_found',
+              message: 'The requested companion initial plan run was not found',
+            })
+          : run;
+      } catch {
+        return reply.code(500).send({
+          error: 'initial_plan_run_unavailable',
+          message: 'The initial plan run status could not be read safely',
+        });
       }
     });
     runtimeApp.get('/api/v1/replan/providers', async () =>
