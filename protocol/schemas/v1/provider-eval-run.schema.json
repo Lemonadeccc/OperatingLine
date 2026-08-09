@@ -6068,6 +6068,7 @@
               "guide_plan",
               "eval_export",
               "rendered_image",
+              "manual_review_image",
               "host_project",
               "provider_output",
               "other"
@@ -6210,6 +6211,27 @@
               "required": [
                 "visualEnvironment"
               ]
+            }
+          },
+          {
+            "if": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "manual_review_image"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "type": "object",
+              "not": {
+                "required": [
+                  "visualEnvironment"
+                ]
+              }
             }
           }
         ]

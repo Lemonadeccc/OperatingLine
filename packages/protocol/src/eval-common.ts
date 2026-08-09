@@ -30,6 +30,17 @@ const evalArtifactReferenceJsonSchemaMetadata = {
       },
       then: { type: 'object', required: ['visualEnvironment'] },
     },
+    {
+      if: {
+        type: 'object',
+        properties: { kind: { const: 'manual_review_image' } },
+        required: ['kind'],
+      },
+      then: {
+        type: 'object',
+        not: { required: ['visualEnvironment'] },
+      },
+    },
   ],
 } as const;
 
@@ -41,6 +52,7 @@ export const evalArtifactReferenceSchema = z
       'guide_plan',
       'eval_export',
       'rendered_image',
+      'manual_review_image',
       'host_project',
       'provider_output',
       'other',
@@ -72,6 +84,13 @@ export const evalArtifactReferenceSchema = z
         code: 'custom',
         path: ['visualEnvironment'],
         message: 'Rendered image evidence requires the exact visual environment',
+      });
+    }
+    if (artifact.kind === 'manual_review_image' && artifact.visualEnvironment !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['visualEnvironment'],
+        message: 'Manual review images cannot claim an exact visual environment',
       });
     }
   })

@@ -23,6 +23,7 @@ import {
 import {
   buildHumanEvalAnnotationFixture,
   buildHumanEvalSuiteFixture,
+  buildProviderBlindSignoffFixture,
   buildProviderEvalRunFixture,
 } from '../../support/human-eval-fixtures.js';
 
@@ -173,10 +174,11 @@ async function writeDataset(
     runs?: readonly { runId: string }[];
     annotations?: readonly { annotationId: string }[];
     adjudications?: readonly { adjudicationId: string }[];
+    blindSignoffs?: readonly { runId: string }[];
   },
 ): Promise<void> {
   await Promise.all(
-    ['runs', 'annotations', 'adjudications'].map((name) =>
+    ['runs', 'annotations', 'adjudications', 'blind-signoffs'].map((name) =>
       mkdir(join(directory, name), { recursive: true }),
     ),
   );
@@ -195,6 +197,12 @@ async function writeDataset(
       writeFile(
         join(directory, 'adjudications', `${adjudication.adjudicationId}.adjudication.json`),
         JSON.stringify(adjudication),
+      ),
+    ),
+    ...(records.blindSignoffs ?? []).map((signoff) =>
+      writeFile(
+        join(directory, 'blind-signoffs', `${signoff.runId}.provider-blind.json`),
+        JSON.stringify(signoff),
       ),
     ),
   ]);
@@ -257,7 +265,12 @@ describe('human eval dataset', () => {
         '20000000-0000-4000-8000-000000000002',
       ),
     ];
-    const dataset = validateHumanEvalDataset({ suite, runs: [run], annotations });
+    const dataset = validateHumanEvalDataset({
+      suite,
+      runs: [run],
+      annotations,
+      blindSignoffs: [buildProviderBlindSignoffFixture(suite, run)],
+    });
     expect(() =>
       buildHumanEvalComparisonReport(dataset, {
         generatedAt: '2026-08-05T00:00:00.000Z',
@@ -284,7 +297,12 @@ describe('human eval dataset', () => {
 
     const directory = await mkdtemp(join(tmpdir(), 'operatingline-human-eval-published-'));
     try {
-      await writeDataset(directory, { suite, runs: [run], annotations });
+      await writeDataset(directory, {
+        suite,
+        runs: [run],
+        annotations,
+        blindSignoffs: dataset.blindSignoffs,
+      });
       const verified = await loadHumanEvalDatasetDirectory(directory);
       const published = buildHumanEvalComparisonReport(verified, {
         generatedAt: '2026-08-05T00:00:00.000Z',
@@ -491,6 +509,7 @@ describe('human eval dataset', () => {
       runs: [run],
       annotations,
       adjudications: [adjudication],
+      blindSignoffs: [buildProviderBlindSignoffFixture(suite, run)],
     });
     const report = buildHumanEvalComparisonReport(dataset, {
       generatedAt: '2026-08-05T00:00:03.000Z',
@@ -636,7 +655,12 @@ describe('human eval dataset', () => {
       }),
     );
 
-    const structurallyReady = validateHumanEvalDataset({ suite, runs, annotations });
+    const structurallyReady = validateHumanEvalDataset({
+      suite,
+      runs,
+      annotations,
+      blindSignoffs: runs.map((run) => buildProviderBlindSignoffFixture(suite, run)),
+    });
     expect(structurallyReady.verificationLevel).toBe('structure_only');
     expect(() =>
       buildHumanEvalComparisonReport(structurallyReady, {
@@ -877,7 +901,12 @@ describe('human eval dataset', () => {
         'not_met',
       ),
     ];
-    const dataset = validateHumanEvalDataset({ suite, runs: [run], annotations });
+    const dataset = validateHumanEvalDataset({
+      suite,
+      runs: [run],
+      annotations,
+      blindSignoffs: [buildProviderBlindSignoffFixture(suite, run)],
+    });
     const report = buildHumanEvalComparisonReport(dataset, {
       generatedAt: '2026-08-05T00:00:00.000Z',
       audience: 'development',

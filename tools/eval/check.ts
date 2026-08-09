@@ -16,6 +16,7 @@ console.log(
       status: dataset.suite.status,
       caseCount: dataset.suite.cases.length,
       runCount: dataset.runs.length,
+      blindSignoffCount: dataset.blindSignoffs.length,
       annotationCount: dataset.annotations.length,
       adjudicationCount: dataset.adjudications.length,
       numericScoring: false,

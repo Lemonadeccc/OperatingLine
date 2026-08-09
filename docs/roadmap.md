@@ -72,6 +72,16 @@
       `pnpm eval:check` 与 `pnpm eval:report` 可验证和报告目录数据集。首个 Blender suite 处于
       `collecting`，包含 7 个案例、6 条 lineage，并禁止 synthetic Run 进入 published comparison。
       见 [ADR 0018](adr/0018-versioned-human-eval-evidence.md)。
+- [x] 本地 Human Eval 采集与 provider-blind 评审面：实现冻结 snapshot、`provider_only` /
+      `host_execution_with_manual_artifacts` capture、每 Run 必需的独立 preparer sign-off sidecar，以及只监听回环地址的
+      headless review service。普通浏览器只接收 opaque Run ID 和签署后的盲审投影，不接收 Provider
+      profile、alias 清单、sidecar 或真实 Run ID；reviewer/adjudicator pseudonym 不能与 preparer 重合，
+      adjudicator 也不能是该 Run 的 reviewer。默认 capture/blind/review/check/report 不调用模型 Provider
+      或产生 API 费用；snapshot 只使用且不保存本地 Runtime access token。人工 artifact 模式只验证宿主
+      terminal event；工程/PNG 没有 Runtime hash 绑定，只可供本地盲审，不能满足 released visual artifact
+      evidence。Provider profile/settings 也只是 operator-attested，Run 强制 `not_reproducible`；发布级
+      treatment comparison 仍等待 Runtime attestation。见
+      [ADR 0019](adr/0019-local-human-eval-capture-and-blind-review.md)。
 
 ## 后续里程碑
 
@@ -82,11 +92,16 @@
   - [x] 定义无分数 suite/run/annotation/adjudication/comparison 协议、`@operatingline/eval-kit`、
         `eval:check`/`eval:report`，并提交 7 个 `collecting` Blender 案例，覆盖 initial plan、local replan
         和 adversarial 能力边界。
+  - [x] 实现本地 `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` 工具链、单写者锁和
+        provider-blind 浏览器投影；这只完成安全的本地采集/评审面，不代表已经采集或评审任何真实数据，
+        也不构成发布级 treatment/artifact attestation。
   - [ ] 按明确的数据披露与可能费用确认，为 7 个案例采集真实 Provider Run；当前 `runCount` 为 0。
   - [ ] 为每个 Run 取得至少两名校准 reviewer 的 provider-blind annotation，保留并按需 adjudicate
-        分歧；当前 `annotationCount` 与 `adjudicationCount` 均为 0。
+        分歧；当前 `blindSignoffCount`、`annotationCount` 与 `adjudicationCount` 均为 0。
   - [ ] 附加真实 Blender 执行事件与内容哈希渲染 artifact，完成人工数据审核后再把 suite 从
         `collecting` 推进到 `released` 并发布 comparison。
+  - [ ] 让 Runtime 对 Provider/model/settings 与生成 artifact hash 提供不可变 attestation；在此之前，
+        operator-attested capture 固定 `not_reproducible`，手工附加 PNG 不能满足 released visual evidence。
 - [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化 provider
       local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
       provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、

@@ -138,6 +138,15 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  services/eval-review:
+    dependencies:
+      '@operatingline/eval-kit':
+        specifier: workspace:*
+        version: link:../../packages/eval-kit
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
   services/openai-runtime:
     dependencies:
       '@operatingline/blender-action-catalog':

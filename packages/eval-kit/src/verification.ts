@@ -9,6 +9,7 @@ function datasetEvidenceFingerprint(dataset: ValidatedHumanEvalDataset): string 
     runs: dataset.runs,
     annotations: dataset.annotations,
     adjudications: dataset.adjudications,
+    blindSignoffs: dataset.blindSignoffs,
   });
 }
 

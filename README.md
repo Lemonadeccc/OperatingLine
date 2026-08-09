@@ -10,8 +10,10 @@
 > 回退一张确定性的雪人渲染预览。
 > Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
-> `@operatingline/eval-kit`、7 个 `collecting` Blender 案例及 `eval:check`/`eval:report`；当前尚无真实
-> Provider Run 或人工 annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
+> `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
+> `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` →
+> `eval:check`/`eval:report` 采集与盲审工具链；当前尚无真实 Provider Run、blind sign-off 或人工
+> annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
 > Blender 4.5/5.1 中真实执行的机器人基准。`1.3.0` 目录还发布七项 `semanticCapabilities`，要求
@@ -138,9 +140,25 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `operatingline-json-value-v1`；同一 Plan ID/revision 的不同内容会被拒绝。Provider failed、
   `needs_revision` 或缺少授权/下游证据的 treatment 以
   `unable_to_judge` 保留；具备精确授权链的宿主 error 可保留 `not_met` 或 `partially_met`。两类失败都
-  不从对照中选择性删除。首个
+  不从对照中选择性删除。仓库已实现本地采集与盲审链：冻结版本化 Eval snapshot 后，按
+  `provider_only` 或 `host_execution_with_manual_artifacts` 捕获 Run；后者验证宿主 terminal event，但工程与
+  PNG 由操作者手工附加，没有 Runtime artifact hash 绑定，只供本地盲审查看，不能满足 released visual
+  artifact evidence。PNG 以无 `visualEnvironment` 的 `manual_review_image` 保存；preparer 必须人工
+  检查每个精确哈希对应的像素，再由 blind sign-off 绑定该逐图声明。项目和 PNG metadata 都标记
+  `manual_artifact_not_runtime_bound`。Capture 中的 Provider
+  profile/settings 同样是 operator-attested、不是
+  Runtime-attested，并强制 `not_reproducible`；发布级 treatment comparison 仍需后续 Runtime attestation。
+  每个 Run 必须先由独立 preparer 检查
+  provider-blind 投影并写入 sign-off sidecar，才能在回环 headless service 提供的浏览器工作台中由两名
+  独立 reviewer 审核；只有保留的分歧才交给第三个独立 adjudicator。浏览器只收到 opaque Run ID 和
+  经签署的盲审投影，不收到 Provider profile、alias 清单、sign-off sidecar 或真实 Run ID。默认
+  capture/blind/review/check/report 不读取模型 Provider 凭据、不调用模型 API，也不产生模型 API 费用；
+  `eval:snapshot` 只通过环境变量读取本地 OperatingLine Runtime access token 且不保存它。只有在此流程
+  上游显式生成新的真实 Provider 输出时才需要该 Provider 的凭据与预算；本地 Blender 渲染只使用本机
+  计算资源。首个
   `blender.core_planning@1.0.0` suite 有 7 个案例、6 条 lineage，覆盖 initial plan、local replan 和
-  adversarial 能力边界；它仍是 `collecting`，当前没有真实 Provider Run、annotation 或 adjudication。
+  adversarial 能力边界；它仍是 `collecting`，当前有 0 个 Run、0 个 blind sign-off、0 个 annotation
+  和 0 个 adjudication。
   Synthetic Run 仅用于测试，不能进入 published comparison；Suite、Run、annotation 和 adjudication 均为
   `trainingUse: not_authorized`。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
@@ -175,8 +193,8 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > Replan Run，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
 > 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality、结构质量门和需求覆盖链只证明
 > provider 的声明符合机器约束并可追溯到真实目录 action，不证明需求抽取正确、参数满足描述或模型
-> 理解了任意目标/修改意图。人工 Eval 的版本化协议、验证工具和 7 个 collecting 案例已经完成，但真实
-> Provider 采集、每个 Run 至少两名独立 reviewer 的盲审、分歧裁决、真实宿主 artifact 与 released
+> 理解了任意目标/修改意图。人工 Eval 的版本化协议、本地采集/盲审工具和 7 个 collecting 案例已经完成，
+> 但真实 Provider 采集、每个 Run 至少两名独立 reviewer 的盲审、分歧裁决、真实宿主 artifact 与 released
 > comparison 均尚未完成，因此“更大的人工 Eval”整体仍未完成。自动评分/训练治理、骨骼动画深化和
 > 第二宿主也尚未完成；`trainingUse: not_authorized` 不授予任何训练权利。
 > 未连接 Orchestrator 时，Extension 继续使用打包内的雪人 fixture；Bridge 仍只是受限控件
@@ -243,6 +261,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0017](docs/adr/0017-catalog-grounded-goal-coverage.md)。
 版本化人工 Eval suite/run/annotation/adjudication、无分数 Provider 对照和数据授权边界见
 [ADR 0018](docs/adr/0018-versioned-human-eval-evidence.md)。
+本地 snapshot/capture、provider-blind sidecar 与回环浏览器评审边界见
+[ADR 0019](docs/adr/0019-local-human-eval-capture-and-blind-review.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -529,7 +549,9 @@ pnpm check
 
 这会依次运行 ESLint、TypeScript 类型检查、Vitest、协议 Schema 漂移检查和 Prettier 格式检查。
 
-验证默认 Human Eval suite 并生成无分数 published-audience comparison：
+完整的本地 Human Eval 采集、blind sign-off、双 reviewer 与分歧裁决操作见
+[Human Eval 本地采集与盲审指南](docs/guides/human-eval-collection.md)。验证默认 suite 并生成无分数
+published-audience comparison：
 
 ```bash
 pnpm eval:check
@@ -537,8 +559,8 @@ pnpm eval:report
 ```
 
 两个命令都可把同布局的数据集目录作为第一个参数。默认
-`protocol/fixtures/v1/eval/blender-core` 当前验证为 7 个案例、0 个 Run、0 个 annotation 和 0 个
-adjudication；report 会把全部案例标记为缺少 live Run，而不会伪造分数或排名。完整记录布局与采集
+`protocol/fixtures/v1/eval/blender-core` 当前验证为 7 个案例、0 个 Run、0 个 blind sign-off、0 个
+annotation 和 0 个 adjudication；report 会把全部案例标记为缺少 live Run，而不会伪造分数或排名。完整记录布局与采集
 规则见 [Human Eval scenarios](tests/scenarios/eval/README.md)。
 
 运行 Blender Extension 集成测试并构建安装包：

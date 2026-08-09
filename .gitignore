@@ -15,6 +15,7 @@ out/
 .idea/
 *.swp
 *.tmp
+.human-eval-write.lock
 .env
 .env.*
 !.env.example

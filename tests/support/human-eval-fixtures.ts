@@ -1,9 +1,13 @@
 import {
+  computeProviderBlindReviewSurfaceSha256,
   createHumanEvalIntegrity,
   computeHumanEvalCaseSha256,
   computeHumanEvalContentSha256,
   computeHumanEvalRubricSha256,
   createProviderEvalRun,
+  providerBlindRenderedArtifacts,
+  sealProviderBlindSignoffV1,
+  type ProviderBlindSignoffV1,
 } from '@operatingline/eval-kit';
 import { buildPlanningPromptPacket, evaluatePlanningQuality } from '@operatingline/orchestrator';
 import {
@@ -262,6 +266,29 @@ export function buildProviderEvalRunFixture(suite = buildHumanEvalSuiteFixture()
       credentialsStored: false,
     },
     dataHandling,
+  });
+}
+
+export function buildProviderBlindSignoffFixture(
+  suite: HumanEvalSuite,
+  run: ProviderEvalRun,
+  options: {
+    readonly preparedBy?: string;
+    readonly supplementalAliases?: readonly string[];
+  } = {},
+): ProviderBlindSignoffV1 {
+  return sealProviderBlindSignoffV1({
+    formatVersion: '1.0.0',
+    runId: run.runId,
+    runContentSha256: run.integrity.contentSha256,
+    projectionVersion: '1.0.0',
+    projectionContentSha256: computeProviderBlindReviewSurfaceSha256(suite, run),
+    renderedArtifacts: providerBlindRenderedArtifacts(run),
+    supplementalAliases: options.supplementalAliases ?? [],
+    aliasesReviewedComplete: true,
+    assertion: 'no_provider_identity_visible',
+    preparedBy: options.preparedBy ?? 'blind.preparer',
+    reviewedAt: completedAt,
   });
 }
 

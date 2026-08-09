@@ -37,6 +37,11 @@ adjudication 处理。判断值是 `met`、`partially_met`、`not_met`、`unable
 `not_applicable`，不会换算为分数、胜率或 Provider 排名。没有执行事件或内容哈希 artifact 时，执行和
 视觉 criterion 应标记 `unable_to_judge`。
 
+本地工具强制以下角色分离：每个 Run 在 review 前必须有一份由独立 preparer 写入的 provider-blind
+sign-off；preparer 不能担任 reviewer 或 adjudicator；同一 Run 至少使用两个不同 reviewer pseudonym；
+adjudicator 只能处理已保留的 reviewer 分歧，且不能是该 Run 的 reviewer。浏览器只收到 opaque Run ID，
+不会收到 Provider profile、补充 alias、sign-off sidecar 或真实 Run ID。
+
 ## 数据集布局
 
 `@operatingline/eval-kit` 从以下目录读取记录：
@@ -45,12 +50,14 @@ adjudication 处理。判断值是 `met`、`partially_met`、`not_met`、`unable
 blender-core/
   suite.json
   runs/*.run.json
+  blind-signoffs/*.provider-blind.json
   annotations/*.annotation.json
   adjudications/*.adjudication.json
+  artifacts/sha256/*
 ```
 
-当前目录只有 `suite.json`，没有真实 Provider Run、人工 annotation 或 adjudication。不要创建空占位
-记录，也不要把 test-kit 的 synthetic Run 复制到发布数据中。
+当前目录只有 `suite.json`，有 7 个 collecting 案例、0 个 Run、0 个 blind sign-off、0 个 annotation
+和 0 个 adjudication。不要创建空占位记录，也不要把 test-kit 的 synthetic Run 复制到发布数据中。
 
 `ProviderEvalRun` 必须绑定精确 suite/case/catalog hash、Planner/Replanning Packet、Provider 与模型/API
 profile、generation settings、严格 result/error、source event 摘要和内容寻址 artifact。Local replan 的
@@ -89,6 +96,84 @@ Annotation 必须绑定精确 Run 和 rubric hash、覆盖案例全部适用 cri
 证据。更正使用 `supersedesAnnotationId`，不覆盖旧记录。Adjudication 通过 ID 与 content SHA-256 只引用
 同一 Run 上至少两名独立 reviewer 的当前 annotation。
 
+## 本地采集与盲审入口
+
+固定操作顺序为：版本化 snapshot → `provider_only` 或 `host_execution_with_manual_artifacts` capture → 独立 preparer
+blind sign-off → 两名独立 reviewer → 仅在存在分歧时由独立 adjudicator 裁决 → check/report。
+
+```bash
+pnpm eval:snapshot \
+  --runtime http://127.0.0.1:43123 \
+  --token-env OPERATINGLINE_EVAL_ACCESS_TOKEN \
+  --adapter blender \
+  --plan <plan-id> \
+  --instance <blender-instance-id> \
+  --out <private-snapshot-directory>
+
+pnpm eval:capture \
+  --dataset <dataset-directory> \
+  --snapshot <private-snapshot-directory> \
+  --manifest <capture-manifest.json> \
+  --repo-root <OperatingLine-repository-root>
+
+pnpm eval:blind \
+  --dataset <dataset-directory> \
+  --run <run-uuid> \
+  --prepared-by preparer.alpha \
+  --aliases <provider-aliases.json> \
+  --assert no_provider_identity_visible \
+  --reviewed-image-sha256 <exact-reviewed-png-sha256> \
+  --repo-root <OperatingLine-repository-root>
+
+pnpm eval:review \
+  --dataset <dataset-directory> \
+  --reviewer reviewer.alpha \
+  --qualification blender.eval.v1 \
+  --calibration 1.0.0 \
+  --locale zh-CN \
+  --repo-root <OperatingLine-repository-root>
+```
+
+`provider-aliases.json` 必须是完整审核过的 JSON string array，例如：
+
+```json
+["Provider display name", "model alias", "product alias"]
+```
+
+若 Run 包含 PNG，preparer 必须先查看每个精确文件的像素，确认没有 Provider 名称、模型名、Logo 或水印，
+再为每个 PNG 重复一次 `--reviewed-image-sha256`。只有完全没有 PNG 的 Run 才省略该参数；工具会拒绝
+缺少、多余、重复或不匹配的哈希。结构化投影会自动扫描，但图片像素依赖这份逐哈希人工声明。
+
+为第二名 reviewer 使用不同 pseudonym 重新启动 `eval:review`。只有页面列出分歧后，才用
+`--adjudicator adjudicator.alpha` 替代 `--reviewer ...` 启动裁决 session；三个角色 pseudonym 必须彼此
+独立。服务输出带 fragment token 的 `reviewUrl`，操作者在本机普通浏览器打开；这是回环 headless
+service，不是 Electron 应用。
+
+Capture、blind、review、check 和 report 默认不需要模型 Provider 凭据，不调用模型 API，也不产生模型
+API 费用。Snapshot 只从 `--token-env` 指定的环境变量读取本地 OperatingLine Runtime access token，且
+不会把 token 写入文件；该 token 不是模型 Provider key。只有在上游生成新的真实 Provider 输出时才需要
+该 Provider 的凭据与预算。Blender render 在本机执行，只消耗本地计算资源。
+
+`host_execution_with_manual_artifacts` 会验证 terminal host event，但工程与 PNG 是 operator-provided；当前
+Runtime event 没有记录它们的哈希，因此两者不存在运行时绑定。PNG 可供本地 reviewer 查看，但不能满足
+released visual artifact evidence。它以 `manual_review_image` 保存并由 blind sign-off 绑定哈希，但不能
+携带 `visualEnvironment`；工程 `host_project` 与 PNG metadata 都标记
+`manual_artifact_not_runtime_bound`。Capture 中的 Provider profile/settings 也是 operator-attested、不是
+Runtime-attested，Run 必须保持 `not_reproducible`；发布级 treatment comparison 仍需后续 Runtime
+attestation。
+
+完整 manifest 字段、两种 capture mode、锁恢复和审计步骤见
+[Human Eval 本地采集与盲审指南](../../../docs/guides/human-eval-collection.md)。
+
+数据集报告 busy 且 writer 已异常退出时，只使用安全恢复命令；不要手工删除锁：
+
+```bash
+pnpm eval:recover-lock --dataset <dataset-directory>
+```
+
+`.human-eval-write.lock/` 是私有 ticket 目录。命令只删除当前用户拥有、记录完整且 PID 已不存在的唯一
+stale ticket；活进程、权限不足或畸形 ticket 都会被拒绝，后来的 writer 不会复用旧 ticket 路径。
+
 ## 验证与报告
 
 在仓库根目录运行：
@@ -116,6 +201,7 @@ readiness。`eval:report` 向标准输出生成 published-audience、内容寻�
 ```text
 caseCount: 7
 runCount: 0
+blindSignoffCount: 0
 annotationCount: 0
 adjudicationCount: 0
 numericScoring: false
@@ -141,4 +227,5 @@ Provider 已通过评测。
 `@operatingline/eval-kit` 的目录验证。
 
 协议与边界决策见
-[ADR 0018](../../../docs/adr/0018-versioned-human-eval-evidence.md)。
+[ADR 0018](../../../docs/adr/0018-versioned-human-eval-evidence.md) 与
+[ADR 0019](../../../docs/adr/0019-local-human-eval-capture-and-blind-review.md)。

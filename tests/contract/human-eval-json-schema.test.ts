@@ -12,6 +12,7 @@ import {
 import {
   buildHumanEvalAnnotationFixture,
   buildHumanEvalSuiteFixture,
+  buildProviderBlindSignoffFixture,
   buildProviderEvalRunFixture,
 } from '../support/human-eval-fixtures.js';
 import {
@@ -34,6 +35,29 @@ describe('public Human Eval JSON Schema contracts', () => {
   it('accepts canonical records and rejects score/ranking extensions', async () => {
     const suite = buildHumanEvalSuiteFixture();
     const run = buildProviderEvalRunFixture(suite);
+    const blindSignoff = buildProviderBlindSignoffFixture(suite, run);
+    const manualImageClaimingExactEnvironment = {
+      artifactId: 'manual.render.preview',
+      kind: 'manual_review_image' as const,
+      mediaType: 'image/png',
+      uri: 'manual-render.png',
+      contentSha256: 'a'.repeat(64),
+      metadata: {},
+      visualEnvironment: {
+        width: 512,
+        height: 512,
+        frame: 1,
+        renderEngine: 'BLENDER_EEVEE_NEXT',
+        colorManagement: 'AgX',
+        hostVersion: '4.5.0',
+        adapterVersion: '1.0.0',
+        planContentSha256: 'b'.repeat(64),
+        executionId: '10000000-0000-4000-8000-000000000010',
+        terminalHostReportId: '10000000-0000-4000-8000-000000000011',
+        terminalHostEventSequence: 3,
+        hostProjectSha256: 'c'.repeat(64),
+      },
+    };
     const annotation = buildHumanEvalAnnotationFixture(
       suite,
       run,
@@ -63,7 +87,12 @@ describe('public Human Eval JSON Schema contracts', () => {
       dataHandling: run.dataHandling,
     });
     const report = buildHumanEvalComparisonReport(
-      validateHumanEvalDataset({ suite, runs: [run], annotations: [annotation] }),
+      validateHumanEvalDataset({
+        suite,
+        runs: [run],
+        annotations: [annotation],
+        blindSignoffs: [blindSignoff],
+      }),
       { generatedAt: '2026-08-05T00:00:00.000Z', audience: 'development' },
     );
 
@@ -71,6 +100,18 @@ describe('public Human Eval JSON Schema contracts', () => {
       'human-eval-suite.schema.json',
       { value: suite, accepted: true },
       { value: { ...suite, score: 1 }, accepted: false },
+      {
+        value: {
+          ...suite,
+          cases: [
+            {
+              ...suite.cases[0]!,
+              references: [manualImageClaimingExactEnvironment],
+            },
+          ],
+        },
+        accepted: false,
+      },
     );
     await expectPublicSchema(
       'provider-eval-run.schema.json',
@@ -152,6 +193,10 @@ describe('public Human Eval JSON Schema contracts', () => {
             },
           ],
         },
+        accepted: false,
+      },
+      {
+        value: { ...run, artifacts: [manualImageClaimingExactEnvironment] },
         accepted: false,
       },
     );

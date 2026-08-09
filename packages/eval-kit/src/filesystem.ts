@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 
@@ -65,27 +65,67 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, 'utf8')) as unknown;
 }
 
-async function readRecords(directory: string, suffix: string): Promise<unknown[]> {
-  let filenames: string[];
-  try {
-    filenames = await readdir(directory);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-  return Promise.all(
-    filenames
-      .filter((filename) => filename.endsWith(suffix))
-      .sort()
-      .map((filename) => readJson(resolve(directory, filename))),
-  );
-}
-
 function isWithin(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return pathFromRoot === '' || (!pathFromRoot.startsWith('..') && !isAbsolute(pathFromRoot));
+}
+
+async function readDatasetFile(
+  datasetDirectory: string,
+  relativePath: string,
+  label: string,
+): Promise<unknown> {
+  const lexicalRoot = resolve(datasetDirectory);
+  const path = resolve(lexicalRoot, relativePath);
+  if (!isWithin(lexicalRoot, path)) {
+    throw new Error(`${label} escapes its dataset root`);
+  }
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw new Error(`${label} must be a physical regular file`);
+  }
+  const [physicalRoot, physicalPath] = await Promise.all([realpath(lexicalRoot), realpath(path)]);
+  if (!isWithin(physicalRoot, physicalPath)) {
+    throw new Error(`${label} resolves outside its dataset root`);
+  }
+  return readJson(physicalPath);
+}
+
+async function readRecords(
+  datasetDirectory: string,
+  relativeDirectory: string,
+  suffix: string,
+): Promise<unknown[]> {
+  const lexicalRoot = resolve(datasetDirectory);
+  const directory = resolve(lexicalRoot, relativeDirectory);
+  const metadata = await lstat(directory).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  });
+  if (metadata === null) return [];
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`Human Eval record directory ${relativeDirectory} must be physical`);
+  }
+  const [physicalRoot, physicalDirectory] = await Promise.all([
+    realpath(lexicalRoot),
+    realpath(directory),
+  ]);
+  if (!isWithin(physicalRoot, physicalDirectory)) {
+    throw new Error(`Human Eval record directory ${relativeDirectory} escapes its dataset root`);
+  }
+  const filenames = (await readdir(physicalDirectory))
+    .filter((filename) => filename.endsWith(suffix))
+    .sort();
+  return Promise.all(
+    filenames.map(async (filename) => {
+      const path = resolve(physicalDirectory, filename);
+      const fileMetadata = await lstat(path);
+      if (fileMetadata.isSymbolicLink() || !fileMetadata.isFile()) {
+        throw new Error(`Human Eval record ${relativeDirectory}/${filename} must be physical`);
+      }
+      return readJson(path);
+    }),
+  );
 }
 
 async function resolveArtifactPath(
@@ -1107,13 +1147,20 @@ export async function loadHumanEvalDatasetDirectory(
   options: HumanEvalDatasetDirectoryOptions = {},
 ): Promise<ValidatedHumanEvalDataset> {
   const datasetDirectory = resolve(directory);
-  const [suite, runs, annotations, adjudications] = await Promise.all([
-    readJson(resolve(datasetDirectory, 'suite.json')),
-    readRecords(resolve(datasetDirectory, 'runs'), '.run.json'),
-    readRecords(resolve(datasetDirectory, 'annotations'), '.annotation.json'),
-    readRecords(resolve(datasetDirectory, 'adjudications'), '.adjudication.json'),
+  const [suite, runs, annotations, adjudications, blindSignoffs] = await Promise.all([
+    readDatasetFile(datasetDirectory, 'suite.json', 'Human Eval suite'),
+    readRecords(datasetDirectory, 'runs', '.run.json'),
+    readRecords(datasetDirectory, 'annotations', '.annotation.json'),
+    readRecords(datasetDirectory, 'adjudications', '.adjudication.json'),
+    readRecords(datasetDirectory, 'blind-signoffs', '.provider-blind.json'),
   ]);
-  const dataset = validateHumanEvalDataset({ suite, runs, annotations, adjudications });
+  const dataset = validateHumanEvalDataset({
+    suite,
+    runs,
+    annotations,
+    adjudications,
+    blindSignoffs,
+  });
   const issues: string[] = [];
   const artifactRoots = options.artifactRoots ?? {};
   const maxArtifactBytes = options.maxArtifactBytes ?? defaultMaxArtifactBytes;
@@ -1212,6 +1259,20 @@ export async function loadHumanEvalDatasetDirectory(
             } catch (error) {
               issues.push(
                 `Run ${run.runId} rendered image ${artifact.artifactId} is not a decodable PNG: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+        } else if (artifact.kind === 'manual_review_image') {
+          if (artifact.mediaType !== 'image/png' || artifact.visualEnvironment !== undefined) {
+            issues.push(
+              `Run ${run.runId} manual review image ${artifact.artifactId} has invalid evidence claims`,
+            );
+          } else {
+            try {
+              decodePngDimensions(loaded.bytes, maxArtifactBytes);
+            } catch (error) {
+              issues.push(
+                `Run ${run.runId} manual review image ${artifact.artifactId} is not a decodable PNG: ${error instanceof Error ? error.message : String(error)}`,
               );
             }
           }

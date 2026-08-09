@@ -30,6 +30,21 @@ export default tseslint.config(
     },
   },
   {
+    files: ['services/**/public/**/*.js'],
+    languageOptions: {
+      globals: {
+        CSS: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        document: 'readonly',
+        fetch: 'readonly',
+        history: 'readonly',
+        sessionStorage: 'readonly',
+        window: 'readonly',
+      },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',

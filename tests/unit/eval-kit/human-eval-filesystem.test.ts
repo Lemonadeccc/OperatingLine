@@ -28,6 +28,7 @@ import type {
 import {
   buildHumanEvalAnnotationFixture,
   buildHumanEvalSuiteFixture,
+  buildProviderBlindSignoffFixture,
   buildProviderEvalRunFixture,
 } from '../../support/human-eval-fixtures.js';
 
@@ -123,6 +124,19 @@ async function writeDataset(
           JSON.stringify(annotation),
         ),
       ),
+    );
+    await mkdir(join(directory, 'blind-signoffs'), { recursive: true });
+    const annotatedRunIds = new Set(annotations.map((annotation) => annotation.runId));
+    await Promise.all(
+      runs
+        .filter((run) => annotatedRunIds.has(run.runId))
+        .map((run) => {
+          const signoff = buildProviderBlindSignoffFixture(suite, run);
+          return writeFile(
+            join(directory, 'blind-signoffs', `${run.runId}.provider-blind.json`),
+            JSON.stringify(signoff),
+          );
+        }),
     );
   }
 }

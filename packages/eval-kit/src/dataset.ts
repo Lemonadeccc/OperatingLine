@@ -1,4 +1,14 @@
 import {
+  buildProviderBlindReviewSurface,
+  computeProviderBlindReviewSurfaceSha256,
+  deriveProviderIdentityMarkers,
+  parseProviderBlindSignoffV1,
+  providerBlindRenderedArtifacts,
+  providerBlindSignoffIntegrityMatches,
+  scanProviderIdentity,
+  type ProviderBlindSignoffV1,
+} from './blind-review.js';
+import {
   humanEvalAdjudicationSchema,
   humanEvalAnnotationSchema,
   humanEvalSuiteSchema,
@@ -25,6 +35,7 @@ export interface HumanEvalDatasetInput {
   readonly runs?: readonly unknown[];
   readonly annotations?: readonly unknown[];
   readonly adjudications?: readonly unknown[];
+  readonly blindSignoffs?: readonly unknown[];
 }
 
 export interface ValidatedHumanEvalDataset {
@@ -35,6 +46,8 @@ export interface ValidatedHumanEvalDataset {
   readonly runsById: ReadonlyMap<string, ProviderEvalRun>;
   readonly annotations: readonly HumanEvalAnnotation[];
   readonly adjudications: readonly HumanEvalAdjudication[];
+  readonly blindSignoffs: readonly ProviderBlindSignoffV1[];
+  readonly blindSignoffsByRunId: ReadonlyMap<string, ProviderBlindSignoffV1>;
 }
 
 export class HumanEvalDatasetError extends Error {
@@ -483,6 +496,9 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
       humanEvalAdjudicationSchema.parse(value),
     ),
   );
+  const blindSignoffs = (input.blindSignoffs ?? []).map((signoff, index) =>
+    parseRecord(`ProviderBlindSignoff[${index}]`, signoff, parseProviderBlindSignoffV1),
+  );
   const issues: string[] = [];
 
   checkRecordIntegrity(`Suite ${suite.suiteId}@${suite.suiteVersion}`, suite, issues);
@@ -494,9 +510,11 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
     'adjudication',
     issues,
   );
+  ensureUnique(blindSignoffs, (signoff) => signoff.runId, 'provider-blind sign-off run', issues);
 
   const casesById = new Map(suite.cases.map((evalCase) => [evalCase.id, evalCase]));
   const runsById = new Map(runs.map((run) => [run.runId, run]));
+  const blindSignoffsByRunId = new Map(blindSignoffs.map((signoff) => [signoff.runId, signoff]));
   const generationRequestIds = new Set<string>();
   const replicateKeys = new Set<string>();
   for (const run of runs) {
@@ -527,6 +545,39 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
       }
     }
   }
+
+  for (const signoff of blindSignoffs) {
+    const label = `Provider-blind sign-off for run ${signoff.runId}`;
+    const run = runsById.get(signoff.runId);
+    if (!providerBlindSignoffIntegrityMatches(signoff)) {
+      issues.push(`${label} integrity mismatch`);
+    }
+    if (run === undefined) {
+      issues.push(`${label} references an unknown run`);
+      continue;
+    }
+    if (signoff.runContentSha256 !== run.integrity.contentSha256) {
+      issues.push(`${label} does not match its exact run evidence`);
+    }
+    if (signoff.projectionContentSha256 !== computeProviderBlindReviewSurfaceSha256(suite, run)) {
+      issues.push(`${label} review projection hash mismatch`);
+    }
+    const expectedRendered = providerBlindRenderedArtifacts(run);
+    const normalizedRendered = (values: readonly { readonly artifactId: string }[]) =>
+      [...values].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
+    if (
+      computeHumanEvalContentSha256(normalizedRendered(signoff.renderedArtifacts)) !==
+      computeHumanEvalContentSha256(normalizedRendered(expectedRendered))
+    ) {
+      issues.push(`${label} rendered artifact set does not match the exact run`);
+    }
+    const markers = deriveProviderIdentityMarkers(run.profile, signoff.supplementalAliases);
+    if (
+      scanProviderIdentity(buildProviderBlindReviewSurface(suite, run), markers).hasProviderIdentity
+    ) {
+      issues.push(`${label} review projection contains a provider identity marker`);
+    }
+  }
   for (const run of runs) {
     const visited = new Set<string>([run.runId]);
     let parentId = run.parentRunId;
@@ -555,6 +606,22 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
         annotation.runContentSha256 !== run.integrity.contentSha256
       ) {
         issues.push(`${label} does not match its exact run evidence`);
+      }
+      const signoff = blindSignoffsByRunId.get(run.runId);
+      if (signoff === undefined) {
+        issues.push(`${label} requires a provider-blind sign-off for its run`);
+      } else {
+        if (annotation.reviewer.pseudonym === signoff.preparedBy) {
+          issues.push(`${label} reviewer must be independent from the blind-surface preparer`);
+        }
+        const markers = deriveProviderIdentityMarkers(run.profile, signoff.supplementalAliases);
+        const freeText = annotation.review.judgments.flatMap((judgment) => [
+          judgment.rationale,
+          ...judgment.evidence.map((evidence) => evidence.note),
+        ]);
+        if (scanProviderIdentity(freeText, markers).hasProviderIdentity) {
+          issues.push(`${label} free text contains a provider identity marker`);
+        }
       }
     }
     if (
@@ -614,6 +681,24 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
       issues.push(`${label} references unknown run ${adjudication.runId}`);
     } else if (run.caseRef.caseId !== adjudication.caseRef.caseId) {
       issues.push(`${label} does not match its exact run evidence`);
+    }
+    if (run !== undefined) {
+      const signoff = blindSignoffsByRunId.get(run.runId);
+      if (signoff === undefined) {
+        issues.push(`${label} requires a provider-blind sign-off for its run`);
+      } else {
+        if (adjudication.adjudicatorPseudonym === signoff.preparedBy) {
+          issues.push(`${label} adjudicator must be independent from the blind-surface preparer`);
+        }
+        const markers = deriveProviderIdentityMarkers(run.profile, signoff.supplementalAliases);
+        const freeText = adjudication.judgments.flatMap((judgment) => [
+          judgment.rationale,
+          ...judgment.evidence.map((evidence) => evidence.note),
+        ]);
+        if (scanProviderIdentity(freeText, markers).hasProviderIdentity) {
+          issues.push(`${label} free text contains a provider identity marker`);
+        }
+      }
     }
     if (adjudicationsByRun.has(adjudication.runId)) {
       issues.push(`Run ${adjudication.runId} has more than one adjudication`);
@@ -706,6 +791,18 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
     ) {
       issues.push('Every released run, annotation, and adjudication must pass public review');
     }
+    for (const run of runs) {
+      const hasOnlyOperatorAttestedTreatment = run.artifacts.some(
+        (artifact) =>
+          artifact.kind === 'provider_output' &&
+          artifact.metadata['evidenceClass'] === 'operator_attested_not_runtime_verified',
+      );
+      if (hasOnlyOperatorAttestedTreatment) {
+        issues.push(
+          `Released run ${run.runId} requires runtime-attested Provider profile and generation settings`,
+        );
+      }
+    }
     for (const evalCase of suite.cases) {
       const caseRuns = runs.filter(
         (run) =>
@@ -797,5 +894,7 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
     runsById,
     annotations,
     adjudications,
+    blindSignoffs,
+    blindSignoffsByRunId,
   };
 }

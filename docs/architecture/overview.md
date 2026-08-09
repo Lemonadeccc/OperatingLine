@@ -7,9 +7,11 @@ OperatingLine 的通用部分只定义意图、计划、状态和证据。宿主
 无界面 Orchestrator 是架构中唯一的计划与调度服务；当前实现已经完成协议验证、受信任计划发布、
 AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、幂等状态回传、
 事件/最新快照持久化、能力描述、版本化 ActionCatalog 注册表、PlanningContext、类型化 provider
-局部重规划和 Eval/replay 证据导出。独立 Human Eval 协议与内部 `@operatingline/eval-kit` 在离线数据集
-层验证 Provider Run、盲审 annotation、分歧裁决和无分数 comparison；它们不改变 Orchestrator 的
-Proposal 或宿主执行权威。MCP 客户端、CLI、Web 界面或其他第三方工具都是可替换的协议消费者，不承担
+局部重规划和 Eval/replay 证据导出。独立 Human Eval 协议、内部 `@operatingline/eval-kit`、本地采集 CLI
+与回环评审服务在离线数据集层验证 Provider Run、盲审 annotation、分歧裁决和无分数 comparison；它们不
+改变 Orchestrator 的 Proposal 或宿主执行权威。评审界面由本地 headless HTTP service 提供给普通浏览器，
+不是 Electron 应用，也不进入 Blender 宿主内视觉链。MCP 客户端、CLI、Web 界面或其他第三方工具都是可
+替换的协议消费者，不承担
 宿主内视觉呈现。
 
 ```text
@@ -98,6 +100,18 @@ ProviderEvalRun
   ├─ provider/model/API + host/catalog environment + generation settings
   ├─ source event/artifact hashes + condition/treatment hashes
   └─ no credentials, raw provider response, or private reasoning
+
+Local Human Eval collection
+  ├─ frozen versioned snapshot from loopback Runtime
+  ├─ provider_only or host_execution_with_manual_artifacts capture
+  ├─ one signed provider-blind sidecar required for every run
+  └─ serialized atomic writers under one dataset lock
+
+Headless Eval review service
+  ├─ loopback HTTP + ordinary browser, not Electron
+  ├─ opaque run/evidence/annotation tokens per session
+  ├─ no provider profile, aliases, sidecar, or real run id in browser DTOs
+  └─ independent preparer, two reviewers, and disagreement adjudicator
 
 HumanEvalAnnotation / HumanEvalAdjudication
   ├─ exact run + rubric content hashes
@@ -404,6 +418,43 @@ Human Eval 是原始 Eval export 之上的独立、离线数据集层，不是 O
 `treatmentSha256` 隔离 Provider profile 与 generation settings，防止把不同 catalog、模型参数或宿主
 版本伪装成同一对照。
 
+本地采集按固定顺序推进：从回环 Runtime 冻结版本化 snapshot；将其捕获为 `provider_only` 或包含已验证
+宿主终态及人工提供工程/PNG 的 `host_execution_with_manual_artifacts` Run；由独立 preparer 对盲审投影与补充 alias 清单
+执行 `no_provider_identity_visible` 检查，并对每个精确 PNG 哈希人工确认像素中没有 Provider 标记后写入
+不可覆盖的 sign-off sidecar；再由两名独立 reviewer 在
+浏览器工作台提交 annotation；若当前 annotation 存在逐 criterion 分歧，才由既不是 preparer 也不是
+reviewer 的 adjudicator 裁决。评审 workspace 在打开时要求每个 Run 都有完整、有效且仍绑定当前 Run
+内容和盲审投影的 sidecar。
+
+评审服务是只监听 `127.0.0.1` 的 headless HTTP 进程。每个进程建立一个 reviewer 或 adjudicator session，
+把 bearer token 放在输出 URL 的 fragment 中，并向浏览器返回 session 内 opaque Run ID。浏览器 DTO 不含
+Provider profile、补充 alias、私有 sign-off sidecar 或真实 Run ID；adjudicator 只看到 `Reviewer A`、
+`Reviewer B` 等匿名标签。服务在返回与接受内容时都会重新扫描 Provider identity marker。它不是 Electron
+桌面壳，也不会把数据上传到远端服务。
+
+Capture、blind preparation、review、check 与 report 默认完全离线：不需要模型 Provider 凭据，不会调用
+模型 Provider，也不产生模型 API 费用。Snapshot 命令仅访问本机 OperatingLine Runtime；其 access token
+通过命名环境变量传入且不写入 snapshot。只有在采集链上游选择生成一份新的真实 Provider 输出时，才由
+那个可选 Provider 的调用路径承担凭据、网络传输与费用边界。`host_execution_with_manual_artifacts` 所需 Blender 渲染在
+本机执行，仅消耗本地计算资源。
+
+`host_execution_with_manual_artifacts` 只把已验证的 terminal host event 与人工提供的工程/PNG 一起保存。
+当前 Runtime event 不携带这两个文件的内容哈希，因此它们没有运行时来源绑定：PNG 可以出现在本地盲审
+界面，并由 blind sign-off 绑定内容哈希，但作为 `manual_review_image` 不允许携带 `visualEnvironment`，
+不能满足 `released` artifact criterion。工程 `host_project` 与 PNG metadata 都标记
+`manual_artifact_not_runtime_bound`。Capture manifest 的 Provider profile 与 generation
+settings 也来自 operator attestation，不是 Runtime attestation；此类 Run 固定为 `not_reproducible`，不能
+形成发布级 treatment comparison。后续必须由 Runtime 记录不可变 Provider/model/settings 与 artifact
+内容哈希，才能提升这两类证据声明。
+
+Capture、blind、review 写入通过数据集根目录 `.human-eval-write.lock/` 中的唯一 UUID ticket 串行化，
+并以同目录原子、禁止覆盖的文件提交保护历史。Stale ticket 只能通过
+`pnpm eval:recover-lock --dataset <directory>` 恢复；该命令要求 ticket 属于当前用户、记录完整且 PID 已
+不存在，活进程/权限不足/畸形 ticket 一律拒绝。唯一 ticket 路径不会被新 writer 复用。`repo://`
+reference artifact 的验证必须通过 `--repo-root` 显式绑定
+仓库根目录。操作步骤和审计清单见
+[Human Eval 本地采集与盲审指南](../guides/human-eval-collection.md)。
+
 `HumanEvalAnnotation` 绑定精确 Run 与 rubric 哈希，reviewer 只以 pseudonym 和校准信息出现，且
 `providerIdentityVisible` 固定为 `false`。每个适用 criterion 都保留原始判断、理由和证据；更正通过
 supersession 新增记录。`HumanEvalAdjudication` 通过 annotation ID 与内容哈希引用同一 Run 上至少两名
@@ -417,8 +468,8 @@ artifact 的数据集。
 关联、annotation supersession、adjudication 和 released readiness 验证，并由 `pnpm eval:check` /
 `pnpm eval:report` 提供
 目录级入口。首个 `blender.core_planning@1.0.0` suite 有 7 个 collecting 案例、6 条 lineage，覆盖常规
-initial plan、adversarial 能力边界和 local replan；当前没有真实 Provider Run、人工 annotation 或
-adjudication，因此所有案例都必须报告 missing live Run，不能形成 Provider 结论。
+initial plan、adversarial 能力边界和 local replan；当前有 0 个 Run、0 个 blind sign-off、0 个人工
+annotation 和 0 个 adjudication，因此所有案例都必须报告 missing live Run，不能形成 Provider 结论。
 
 Released readiness 以 case-level stage coverage 约束证据，而不删除失败 treatment：可判断的执行结论
 必须绑定精确 Plan revision/实例/host build 的成功或 error 终态，可判断的视觉结论必须绑定实际读取的
@@ -468,7 +519,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 Eval/replay 导出决策见
 [ADR 0007](../adr/0007-versioned-eval-evidence-export.md)。
 版本化人工 Eval 与无分数 Provider 对照见
-[ADR 0018](../adr/0018-versioned-human-eval-evidence.md)。
+[ADR 0018](../adr/0018-versioned-human-eval-evidence.md)；本地采集、provider-blind sidecar 与回环浏览器
+评审见 [ADR 0019](../adr/0019-local-human-eval-capture-and-blind-review.md)。
 线性 thread 与 Plan diff 见
 [ADR 0009](../adr/0009-linear-revision-threads-and-plan-diffs.md)；修订历史见
 [ADR 0010](../adr/0010-paginated-revision-history.md)。

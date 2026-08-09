@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OperatingLine Human Eval</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">OPERATINGLINE · LOCAL HUMAN EVAL</p>
+        <h1>盲审工作台</h1>
+      </div>
+      <div id="session" class="session-badge">正在验证本地会话…</div>
+    </header>
+    <main class="workspace">
+      <aside class="queue" aria-label="审核队列">
+        <div class="queue-heading">
+          <h2>任务</h2>
+          <button id="refresh" type="button">刷新</button>
+        </div>
+        <div id="items" class="item-list"></div>
+      </aside>
+      <section id="detail" class="detail" aria-live="polite">
+        <div class="empty-state">
+          <span class="empty-mark">◎</span>
+          <h2>选择一个任务开始审核</h2>
+          <p>Provider 身份、模型和处理配置已在服务端移除。</p>
+        </div>
+      </section>
+    </main>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
