@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const manifestPath = resolve('distributions/claude-desktop/manifest.json');
+const signingScriptPath = resolve('tools/distribution/sign-claude-desktop.mjs');
 
 describe('Claude Desktop MCPB contract', () => {
   it('uses the official manifest schema and a sensitive loopback-only configuration', () => {
@@ -38,5 +39,28 @@ describe('Claude Desktop MCPB contract', () => {
         stdio: 'pipe',
       }),
     ).not.toThrow();
+  });
+
+  it('keeps development and production signing explicit and credential-gated', () => {
+    const packageManifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const signingSource = readFileSync(signingScriptPath, 'utf8');
+
+    expect(packageManifest.scripts?.['package:claude-desktop:dev-signed']).toContain(
+      '--mode development',
+    );
+    expect(packageManifest.scripts?.['package:claude-desktop:signed']).toContain(
+      '--mode production',
+    );
+    expect(signingSource).toContain('MCPB_SIGN_CERT_PATH');
+    expect(signingSource).toContain('MCPB_SIGN_KEY_PATH');
+    expect(signingSource).toContain('extractSignatureBlock');
+    expect(signingSource).toContain("'cms'");
+    expect(signingSource).toContain("'-verify'");
+    expect(signingSource).toContain(
+      "mode === 'development' ? ['-noverify'] : ['-purpose', 'codesign']",
+    );
+    expect(signingSource).not.toMatch(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/u);
   });
 });

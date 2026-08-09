@@ -19,6 +19,9 @@ out/
 .env
 .env.*
 !.env.example
+cert.pem
+key.pem
+*.private.pem
 
 __pycache__/
 *.py[cod]

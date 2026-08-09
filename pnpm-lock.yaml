@@ -32,6 +32,9 @@ importers:
       '@operatingline/blender-mcp-bridge':
         specifier: workspace:*
         version: link:adapters/blender/bridge
+      '@operatingline/cli-planner-provider':
+        specifier: workspace:*
+        version: link:packages/cli-planner-provider
       '@operatingline/client-setup':
         specifier: workspace:*
         version: link:packages/client-setup
@@ -107,6 +110,15 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/cli-planner-provider:
+    dependencies:
+      '@operatingline/planner-provider-sdk':
+        specifier: workspace:*
+        version: link:../planner-provider-sdk
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   packages/client-setup:
     dependencies:
       '@operatingline/mcp-stdio-bridge':
@@ -167,6 +179,25 @@ importers:
       '@operatingline/protocol':
         specifier: workspace:*
         version: link:../protocol
+
+  services/cli-runtime:
+    dependencies:
+      '@operatingline/blender-action-catalog':
+        specifier: workspace:*
+        version: link:../../adapters/blender/catalog
+      '@operatingline/cli-planner-provider':
+        specifier: workspace:*
+        version: link:../../packages/cli-planner-provider
+      '@operatingline/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
+      pino:
+        specifier: 10.3.1
+        version: 10.3.1
+    devDependencies:
+      tsx:
+        specifier: 4.23.5
+        version: 4.23.5
 
   services/eval-review:
     dependencies:

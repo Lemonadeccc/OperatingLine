@@ -28,8 +28,9 @@
 > 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认 Goal 或 revision request
 > 后，明确选择一个已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Initial Plan Run 或
 > Replan Run；Runtime 只在 canonical
-> 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider 和
-> 独立 opt-in composition root；默认 standalone 仍不加载厂商 SDK 或凭据。Blender 内已有可折叠的
+> 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider、
+> 本机 Codex/Claude CLI Provider 和各自独立的 opt-in composition root；默认 standalone 仍不加载这些
+> Provider 或凭据。MCP HTTP 与 stdio bridge 已自动协商稳定版 `2026-07-28`，同时兼容旧客户端。Blender 内已有可折叠的
 > Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、完成真实采集与
 > 独立盲审的任意目标语义数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
@@ -55,9 +56,19 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   把追加式事件与每个实例的最新快照写入本地数据库。
 - **本地 AI 客户端接入**：提供 Codex CLI、Codex 本地桌面端和 Claude Code 共用的回环 HTTP MCP
   配置入口，以及 Claude Desktop 使用的 MCPB stdio→HTTP 薄连接器。安装器只保存 Token 环境变量
-  引用，MCPB 只接受精确 loopback `/mcp` 地址；Runtime initialization instructions 会把
+  引用，MCPB 只接受精确 loopback `/mcp` 地址；Runtime connection instructions（现代
+  `server/discover` / 旧版 `initialize`）会把
   `pending request → exact packet → evaluate → propose → Blender review` 工作流交给客户端，连接本身
   不授予执行权限。
+- **Blender 内逐次调用本机 CLI Planner**：`pnpm dev:clients` 显式注册 Codex CLI 与 Claude Code CLI。
+  Blender 复用已有 Provider 列表、远程数据/可能费用披露和原生确认 dialog；Runtime 仅把精确 Planner
+  Packet 通过 stdin 交给 CLI，并把返回 JSON 送入相同的严格目录、coverage、quality/locality 与 Proposal
+  审批边界。Codex 使用临时空目录、ephemeral/read-only 和无 shell 环境继承；Claude 禁用 tools、配置
+  与 session persistence，并默认限制每次最多 1 USD。两者都不获得 OperatingLine Token，也不能直接
+  执行 Blender action。桌面 GUI 没有稳定 headless API，仍由用户在 GUI 内通过 MCP 发起任务。
+- **MCP `2026-07-28` 与签名分发**：HTTP Runtime 由官方 SDK 提供现代/旧版双时代入口；stdio bridge
+  上下游均自动协商新版并保留旧版回退。Claude Desktop 包可构建 unsigned、临时自签名开发包，或使用
+  外部证书/私钥生成并验证生产签名包；仓库不包含生产私钥，自签名也不代表公开可信。
 - **版本化协议**：定义 GuidePlan、GuideProposal/Decision、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
@@ -292,6 +303,8 @@ action 可以安全地出现在多个步骤中。
 [ADR 0021](docs/adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
 Codex/Claude 本地配置、MCP instructions 与 Claude Desktop MCPB 见
 [ADR 0022](docs/adr/0022-local-ai-client-distribution.md)。
+本机 CLI Planner、MCP `2026-07-28` 协商与 MCPB 签名边界见
+[ADR 0023](docs/adr/0023-local-cli-planners-and-modern-mcp.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -346,13 +359,16 @@ BLENDER_BIN=/absolute/path/to/blender pnpm package:blender
 
 ### 连接实时 Orchestrator
 
-使用固定回环端口启动 Orchestrator；Token 至少 16 个字符，并应由当前用户自行生成：
+使用固定回环端口启动带本机 CLI Provider 的 Orchestrator；Token 至少 16 个字符，并应由当前用户自行生成：
 
 ```bash
 export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
 export OPERATINGLINE_PORT=43123
-pnpm dev
+pnpm dev:clients
 ```
+
+该入口会探测已安装的 `codex` 和 `claude`，但不会自动调用。若只想由 Codex/Claude 桌面端或 CLI 作为
+外部 MCP Host 发起任务，改用 provider-free 的 `pnpm dev`。
 
 一键配置当前机器上已安装的 Codex 和 Claude Code；缺少其中一个 CLI 时会跳过它：
 
@@ -373,14 +389,17 @@ Token 值不会写入客户端配置，启动 AI 客户端的进程必须能读�
 `OPERATINGLINE_ACCESS_TOKEN` 环境变量。Codex CLI、Codex 本地桌面端和 IDE Extension 共享 Codex
 MCP 配置；Claude Code 使用自己的 MCP 配置。
 
-Claude Desktop 不能用云端 Connector 访问 localhost，需要构建并安装本地 MCPB：
+Claude Desktop 不能用云端 Connector 访问 localhost，需要构建并安装本地 MCPB。unsigned 开发包：
 
 ```bash
 pnpm package:claude-desktop
 ```
 
 产物是 `artifacts/claude-desktop/operating-line-0.1.0.mcpb`。安装时填写
-`http://127.0.0.1:43123/mcp` 和同一个 Token；当前开发包未签名。完整安装、作用域、GUI 环境变量和
+`http://127.0.0.1:43123/mcp` 和同一个 Token。要验证完整签名链路但不建立公开信任，可运行
+`pnpm package:claude-desktop:dev-signed`；它生成临时自签名证书、验证后删除私钥，产物后缀为
+`.dev-signed.mcpb`。正式分发使用外部证书与权限为 `0600` 的私钥运行
+`pnpm package:claude-desktop:signed`；仓库不提供这些凭据。完整安装、签名、作用域、GUI 环境变量和
 权限边界见 [Codex、Claude 与 Claude Desktop 接入指南](docs/guides/ai-client-setup.md)。
 
 然后在 Blender 的 `OperatingLine` Sidebar 中：
@@ -478,6 +497,30 @@ pnpm package:claude-desktop
 | Blender Replan Run       | 是（每次确认）         | ready 时是    | 否             |
 | Blender `Accept Plan`    | 否                     | 审批既有提案  | 只安装         |
 | Blender `Start` / `Next` | 否                     | 否            | 用户显式执行   |
+
+### 显式启用本机 Codex/Claude CLI Planner
+
+`pnpm dev:clients` 是 Blender 内调用本机 CLI 的独立 composition root。先用各 CLI 自己的登录流程完成
+认证；OperatingLine 不读取或保存其凭据。可选配置如下：
+
+```bash
+export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
+export OPERATINGLINE_PORT=43123
+export OPERATINGLINE_PLANNER_TIMEOUT_MS=120000
+export OPERATINGLINE_CLAUDE_MAX_BUDGET_USD=1.00
+# export OPERATINGLINE_CODEX_BIN=/absolute/path/to/codex
+# export OPERATINGLINE_CODEX_MODEL=explicit-model
+# export OPERATINGLINE_CLAUDE_BIN=/absolute/path/to/claude
+# export OPERATINGLINE_CLAUDE_MODEL=explicit-model
+pnpm dev:clients
+```
+
+连接 Blender 后，在 `Goal to Guidance` 创建目标并等待 acknowledgement；刷新 Provider 列表即可看到
+`Codex CLI Planner` 和 `Claude Code CLI Planner`。未安装的 CLI 会保留为不可用项并说明原因。选择一项、
+阅读传输与可能费用说明，然后点击 `Confirm Initial Planner Run` 并在原生 dialog 确认。局部修改在
+Revision Workspace 中以相同步骤选择并确认。每次确认只授权一个 generation UUID；失败、超时或
+`needs_revision` 不会自动重试，也不修改场景。Codex 的实际模型费用由其 CLI 配置决定，OperatingLine
+无法给出价格上限；Claude 默认带 1 USD 单次上限，可通过上述变量在 0.01–100 USD 内调整。
 
 ### 显式启用 OpenAI Planner Provider
 

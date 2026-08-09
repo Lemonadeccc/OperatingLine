@@ -61,7 +61,7 @@ PlannerProvider
 Local AI client distribution
   ├─ Codex/Claude CLI idempotent config installer
   ├─ environment-referenced Bearer token, never embedded
-  ├─ MCP initialization workflow instructions
+  ├─ MCP discover/initialize workflow instructions
   └─ Claude Desktop MCPB stdio → loopback HTTP bridge
 
 GuideGoalRequest
@@ -399,6 +399,32 @@ provider-free standalone                 services/openai-runtime
                                       official OpenAI Responses SDK
 ```
 
+本机 CLI 使用第三个显式 composition root `pnpm dev:clients`。它同时注册 Codex CLI 与 Claude Code CLI
+descriptor；缺失的 executable 保留为不可用项。Blender 仍通过同一个宿主授权 Initial/Replan Run 调用，
+而不是新增一条绕过 Provider 契约的命令路径。
+
+```text
+pnpm dev:clients
+    │ probe installed executables only
+    ▼
+services/cli-runtime
+    │ exact renderedPrompt over stdin after one Blender confirmation
+    ├─> Codex: temporary cwd + ephemeral + read-only + no shell env inheritance
+    └─> Claude: safe mode + no tools/session + bounded per-run budget
+              │ JSON only
+              ▼
+      canonical Provider validation → pending Proposal → in-host Accept/Reject
+```
+
+CLI 子进程不会继承任何 `OPERATINGLINE_*` 或 MCPB signing 变量。Codex/Claude 自己管理认证与远端费用；
+descriptor 因此声明 remote/provider-managed，而不是因 executable 在本机就错误声明“无数据传输”。默认
+runtime 仍不导入这个包。Codex/Claude 桌面 GUI 没有稳定 headless API，继续作为外部 MCP Host 使用。
+
+Runtime HTTP handler 与 stdio bridge 由 MCP SDK 2.0 提供双时代入口。bridge 上游 Client 使用 auto
+negotiation，下游使用 `serveStdio`：现代客户端协商 `2026-07-28` 的 `server/discover + _meta`，旧客户端
+继续使用 `initialize`。当前业务没有 Sampling/Roots/Elicitation/Tasks consumer，因此只声明实际使用的
+Tool、Prompt 与 Resource 转发能力。
+
 OpenAI 请求固定 `store: false`、`stream: false` 与 32,768 个输出 token 上限，SDK client 固定
 `maxRetries: 0`，并接收协调器的 `AbortSignal`。这使核心的显式重试和 at-most-once request ID 语义
 不被 SDK 隐式重试绕过，但取消仍是协作式的。当前 Proposal Schema 的 action arguments 与
@@ -564,6 +590,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
 宿主授权的异步 Initial Plan Run 见
 [ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
+本机 CLI Planner、现代 MCP 协商与 MCPB 签名边界见
+[ADR 0023](../adr/0023-local-cli-planners-and-modern-mcp.md)。
 节点引用与重规划决策见
 [ADR 0006](../adr/0006-immutable-node-revision-requests.md)。
 Eval/replay 导出决策见

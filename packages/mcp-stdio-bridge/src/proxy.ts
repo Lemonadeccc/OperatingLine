@@ -1,11 +1,11 @@
-import type { AuthProvider, Client } from '@modelcontextprotocol/client';
+import type { AuthProvider, Client, ProtocolEra } from '@modelcontextprotocol/client';
 import {
   Client as McpClient,
   StreamableHTTPClientTransport,
   type Tool,
 } from '@modelcontextprotocol/client';
 import { Server, type CallToolResult, type ServerCapabilities } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import type { Readable, Writable } from 'node:stream';
 
 const loopbackHosts = new Set(['127.0.0.1', '::1', '[::1]', 'localhost']);
@@ -18,7 +18,13 @@ export interface McpStdioBridgeConfig {
 }
 
 export interface McpStdioBridgeHandle {
+  readonly upstreamProtocol: McpStdioBridgeProtocol;
   close(): Promise<void>;
+}
+
+export interface McpStdioBridgeProtocol {
+  readonly era: ProtocolEra;
+  readonly version: string | null;
 }
 
 export interface McpStdioBridgeOptions {
@@ -79,7 +85,7 @@ export async function startMcpStdioBridge(
   };
   const upstream = new McpClient(
     { name: 'operating-line-stdio-bridge', version: '0.1.0' },
-    { capabilities: {} },
+    { capabilities: {}, versionNegotiation: { mode: 'auto' } },
   );
   const upstreamTransport = new StreamableHTTPClientTransport(config.endpoint, {
     authProvider,
@@ -87,22 +93,40 @@ export async function startMcpStdioBridge(
   upstream.onerror = (error) => reportError(safeErrorMessage('Upstream MCP error', error));
 
   await upstream.connect(upstreamTransport);
+  const upstreamEra = upstream.getProtocolEra();
+  if (upstreamEra === undefined) {
+    await upstream.close();
+    throw new Error('Upstream MCP protocol negotiation did not complete');
+  }
+  const upstreamProtocol = {
+    era: upstreamEra,
+    version: upstream.getNegotiatedProtocolVersion() ?? null,
+  } satisfies McpStdioBridgeProtocol;
   const upstreamCapabilities = upstream.getServerCapabilities() ?? {};
   const toolsByName = new Map<string, Tool>();
-  const server = createForwardingServer(upstream, upstreamCapabilities, toolsByName);
-  server.onerror = (error) => reportError(safeErrorMessage('Local MCP error', error));
-
   const transport = new StdioServerTransport(options.stdin, options.stdout);
-  await server.connect(transport);
+  const stdioHandle = serveStdio(
+    () => {
+      const server = createForwardingServer(upstream, upstreamCapabilities, toolsByName);
+      server.onerror = (error) => reportError(safeErrorMessage('Local MCP error', error));
+      return server;
+    },
+    {
+      legacy: 'serve',
+      transport,
+      onerror: (error) => reportError(safeErrorMessage('Local MCP transport error', error)),
+    },
+  );
 
   let closed = false;
   return {
+    upstreamProtocol,
     async close() {
       if (closed) {
         return;
       }
       closed = true;
-      await Promise.allSettled([server.close(), upstream.close()]);
+      await Promise.allSettled([stdioHandle.close(), upstream.close()]);
     },
   };
 }

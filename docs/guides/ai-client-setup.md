@@ -4,8 +4,11 @@ OperatingLine 的推荐产品形态不是独立桌面窗口，而是：
 
 ```text
 Codex / Claude Code ── Streamable HTTP ──┐
-                                         ├─ OperatingLine Runtime ── Blender Companion
-Claude Desktop ── stdio MCPB bridge ─────┘
+Claude Desktop ── stdio MCPB bridge ─────┤
+                                         ▼
+OperatingLine Runtime ────────────────── Blender Companion
+        │                                  │ explicit confirmation
+        └──────── spawn local CLI <────────┘
 ```
 
 AI 客户端负责理解目标和生成完整 GuideProposal；Runtime 负责精确上下文、严格验证、持久证据和实例
@@ -21,8 +24,14 @@ export OPERATINGLINE_PORT=43123
 pnpm dev
 ```
 
-外部 Codex/Claude 本身就是规划模型，因此使用 provider-free 的 `pnpm dev`。只有希望从 Blender 内逐次
-授权调用 OpenAI Provider 时才使用 `pnpm dev:openai`。
+有三种互斥的 composition root：
+
+- `pnpm dev`：Codex/Claude 桌面端或 CLI 作为外部 MCP Host，由用户在客户端内发起任务；
+- `pnpm dev:clients`：Blender 内逐次确认后，由 Runtime 启动本机 Codex/Claude CLI 生成计划；
+- `pnpm dev:openai`：Blender 内逐次确认后，Runtime 直接调用明确配置的 OpenAI Responses API。
+
+三者都不会自动选择 Provider、自动调用模型或绕过 Blender Proposal 审批。Codex/Claude 桌面 GUI 没有
+稳定的本机 headless 调用 API，因此 Blender 内启动只支持可执行的 CLI；桌面 GUI 继续走外部 MCP 路径。
 
 ## 2. 连接 Blender
 
@@ -93,15 +102,66 @@ pnpm package:claude-desktop
 - Runtime URL：`http://127.0.0.1:43123/mcp`
 - Bearer Token：与 Runtime/Blender 相同的 Token
 
-该字段在 Manifest 中标记为 sensitive。包内没有 Token。当前开发包未签名，Claude Desktop 可能显示
-本地未签名扩展提示；公开分发前必须补签名和干净机验证。
+该字段在 Manifest 中标记为 sensitive，包内没有 Token。签名命令还要求本机 `openssl` 提供 `req` 与
+`cms` 子命令。三种构建方式：
+
+```bash
+# unsigned，本地开发
+pnpm package:claude-desktop
+
+# 临时自签名并执行 OpenSSL CMS 验证；自签名不建立公开信任
+pnpm package:claude-desktop:dev-signed
+
+# 使用发布者从外部安全提供的证书与私钥
+chmod 600 /secure/path/key.private.pem
+export MCPB_SIGN_CERT_PATH=/secure/path/cert.pem
+export MCPB_SIGN_KEY_PATH=/secure/path/key.private.pem
+# 可选：用当前平台 PATH 分隔符连接中间证书路径
+# export MCPB_SIGN_INTERMEDIATE_PATHS=/secure/path/intermediate-a.pem:/secure/path/intermediate-b.pem
+pnpm package:claude-desktop:signed
+```
+
+开发签名的证书和私钥只存在于临时目录，验证完成后删除。生产命令要求 POSIX 私钥不可被 group/world
+访问，且只在官方 `mcpb sign` 与 OpenSSL CMS 签名/信任链验证成功后发布 `.signed.mcpb`。当前最新
+MCPB 2.1.2 的 `mcpb verify` 会触发 node-forge 尚未实现的 PKCS#7 verify 路径，因此本项目不把它的
+错误 unsigned 结果伪装成验证成功。仓库没有生产证书、私钥或商店授权；这些
+凭据和可能费用必须由发布者另行取得。公开分发仍需要跨平台干净机和供应链审核。
 
 Claude Desktop 的 `Customize → Connectors` 属于云端远程 Connector，不能用于这个 localhost Runtime；
 应安装 MCPB Desktop Extension。
 
-## 6. 发起任务
+Runtime 与 stdio bridge 使用官方 MCP SDK 2.0：新版客户端会通过 `server/discover` 协商稳定版
+`2026-07-28`，旧版客户端仍可回退到 `initialize`。当前 OperatingLine 流程不使用已弃用的 Sampling。
 
-Runtime 会通过 MCP initialization 自动告诉支持 instructions 的客户端正确顺序。仍可明确输入：
+## 6. 从 Blender 调用本机 Codex/Claude CLI
+
+先通过 CLI 自己的登录流程完成认证，再启动：
+
+```bash
+export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-random-token'
+export OPERATINGLINE_PORT=43123
+export OPERATINGLINE_CLAUDE_MAX_BUDGET_USD=1.00
+pnpm dev:clients
+```
+
+可选变量：`OPERATINGLINE_CODEX_BIN`、`OPERATINGLINE_CODEX_MODEL`、
+`OPERATINGLINE_CLAUDE_BIN`、`OPERATINGLINE_CLAUDE_MODEL` 和
+`OPERATINGLINE_PLANNER_TIMEOUT_MS`（100–120000 ms）。未安装的 CLI 在 Blender 中显示为不可用，不会
+阻止 Runtime 启动。
+
+在 Blender 创建 Goal 并收到 Runtime acknowledgement 后，刷新 Provider 列表，选择 `Codex CLI
+Planner` 或 `Claude Code CLI Planner`，阅读发送范围、远程数据处理和可能费用，再确认一次 Initial
+Plan Run。局部修改在 Revision Workspace 以相同方式确认 Replan Run。Runtime 通过 stdin 发送精确
+packet；命令参数不包含目标、Token 或模型输出。Codex 在临时空目录以 ephemeral/read-only 运行，Claude
+禁用 tools、自定义配置和 session persistence。返回结果只在严格校验 ready 时创建待审 Proposal。
+
+Claude 默认每次最多 1 USD，可在 0.01–100 USD 内调整；Codex 费用由其 CLI 登录、订阅、模型和 provider
+配置决定，OperatingLine 无法估价或强制美元上限。每次 Run 都必须重新确认，失败不会自动重试。
+
+## 7. 从外部 MCP 客户端发起任务
+
+Runtime 会通过现代 MCP `server/discover` 或旧版 `initialize` 自动告诉支持 instructions 的客户端正确
+顺序。仍可明确输入：
 
 ```text
 使用 operating-line 处理 Blender 中最新的 pending goal。
@@ -116,9 +176,10 @@ Proposal 到达后，在 Blender：
 3. `Start` / `Next` / `Back` 才改变场景；
 4. 需要修改时点击节点 `Ref`，提交 Revision request，再让同一 AI 客户端处理 pending replan。
 
-## 7. 当前边界
+## 8. 当前边界
 
-- 目前不从 Blender 自动启动 Codex/Claude；AI 客户端和 Runtime 分别启动。
+- `pnpm dev:clients` 只在 Blender 逐次确认后启动本机 CLI；不会启动 Codex/Claude 桌面 GUI，也不会
+  自动选择或后台调用 Provider。
 - Web/云任务访问不到回环 Runtime。
 - 当前 Blender ActionCatalog 只允许已验证动作；目录外工作必须保持 actionless/manual。
 - MCPB 是连接器，不包含 Runtime 或 Blender，不扩大场景执行权限。

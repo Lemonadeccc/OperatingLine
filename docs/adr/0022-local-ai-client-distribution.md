@@ -26,9 +26,10 @@ Codex 和 Claude Code 继续直接连接 `http://127.0.0.1:<port>/mcp`。仓库�
 - 默认只新增缺失的 `operating-line` 条目；已有条目保持不动，只有显式 `--force` 才删除并重建同名条目；
 - `--dry-run` 不探测或修改任何客户端配置。
 
-### 2. 用初始化 instructions 承载跨客户端工作流
+### 2. 用连接握手 instructions 承载跨客户端工作流
 
-Orchestrator 在 MCP initialization 中发布供应商无关 instructions。前 512 字符自包含地声明：连接不
+Orchestrator 在现代 `server/discover` 或旧版 `initialize` 握手中发布供应商无关 instructions。前 512
+字符自包含地声明：连接不
 等于执行授权、宿主 Goal 的确定顺序、禁止把不可信模型输出交给 `guide.publish`，以及 Proposal 只进入
 Blender 审批。后续段落覆盖 Provider 费用披露、局部重规划、精确身份保持和目录外能力降级。
 
@@ -41,14 +42,16 @@ Blender 审批。后续段落覆盖 Provider 费用披露、局部重规划、�
 
 1. Claude Desktop 通过 stdio 启动它；
 2. bridge 从 MCPB `user_config` 接收 loopback URL 和 sensitive Token；
-3. bridge 使用官方 MCP Client 连接真实 Runtime；
+3. bridge 使用官方 MCP Client 自动协商 `2026-07-28`，并用官方 `serveStdio` 同时兼容新版
+   `server/discover` 与旧版 `initialize` 客户端；
 4. Tool/Prompt/Resource discovery 和调用透明转发，不复制 OperatingLine Schema；
 5. bridge 继承 Runtime instructions，不自行放宽工作流；
 6. URL 运行时再次限制为 `http`、精确 loopback host、无 credentials/query/fragment、精确 `/mcp`。
 
-Token 不进入源码、命令参数、Manifest、构建日志或 `.mcpb`。MCPB 安装界面负责敏感配置输入。当前包
+Token 不进入源码、命令参数、Manifest、构建日志或 `.mcpb`。MCPB 安装界面负责敏感配置输入。包内
 同时携带项目 Apache-2.0 License、第三方 notices 和 MCP SDK 上游许可证；构建保留 dependency legal
-comments。当前包未签名，只用于本地开发/私有分发；进入公开目录前另做签名、跨平台干净机和供应链审核。
+comments。仓库提供临时自签名的开发验证和外部证书驱动的生产签名流程；不提交生产私钥，也不把
+自签名描述为公开可信。CLI Provider 与现代 MCP 的后续决策见 ADR 0023。
 
 ## 选择依据
 
@@ -67,7 +70,7 @@ comments。当前包未签名，只用于本地开发/私有分发；进入公�
   可审计的薄连接器。
 - **把 Token 写入 Codex/Claude 配置命令**：命令历史和配置文件会持久化秘密；改用环境变量引用或
   MCPB sensitive user config。
-- **为每个 AI 客户端维护独立工作流 Prompt**：容易产生权限和版本差异；初始化 instructions 为权威，
+- **为每个 AI 客户端维护独立工作流 Prompt**：容易产生权限和版本差异；连接握手 instructions 为权威，
   客户端专属说明只解释安装方式。
 
 ## 后果
@@ -83,7 +86,7 @@ comments。当前包未签名，只用于本地开发/私有分发；进入公�
 
 - 安装命令构建、幂等、`--force` 和 `--dry-run` 单元测试；
 - URL/Token 边界单元测试；
-- 官方 MCPB CLI Manifest 校验和真实 pack；
+- 官方 MCPB CLI Manifest 校验、真实 pack/sign 与独立 CMS 验证；
 - 真实 Runtime ↔ HTTP MCP Client ↔ stdio Server ↔ Claude-style Client 跨传输集成测试；
 - MCP instructions、Tool 调用和 Prompt discovery 端到端断言；
 - 全仓 lint、typecheck、tests、Schema 与格式门禁。

@@ -1,10 +1,12 @@
 import { resolve } from 'node:path';
+import { PassThrough } from 'node:stream';
 
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startRuntime, type RunningRuntime } from '@operatingline/orchestrator';
+import { startMcpStdioBridge } from '@operatingline/mcp-stdio-bridge';
 
 const accessToken = 'stdio-bridge-test-token-with-16-characters';
 const activeRuntimes: RunningRuntime[] = [];
@@ -35,10 +37,15 @@ describe('Claude Desktop stdio bridge', () => {
       },
       stderr: 'pipe',
     });
-    const client = new Client({ name: 'stdio-bridge-test', version: '0.1.0' });
+    const client = new Client(
+      { name: 'stdio-bridge-test', version: '0.1.0' },
+      { versionNegotiation: { mode: 'auto' } },
+    );
 
     try {
       await client.connect(transport);
+      expect(client.getProtocolEra()).toBe('modern');
+      expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
       expect(client.getInstructions()).toContain('connection never permits host execution');
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toContain('operatingline.health');
@@ -55,4 +62,19 @@ describe('Claude Desktop stdio bridge', () => {
       await client.close();
     }
   }, 20_000);
+
+  it('negotiates the modern protocol with the loopback HTTP runtime upstream', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    activeRuntimes.push(runtime);
+    const handle = await startMcpStdioBridge(
+      { endpoint: new URL(runtime.mcpEndpoint), accessToken },
+      { stdin: new PassThrough(), stdout: new PassThrough() },
+    );
+
+    try {
+      expect(handle.upstreamProtocol).toEqual({ era: 'modern', version: '2026-07-28' });
+    } finally {
+      await handle.close();
+    }
+  });
 });

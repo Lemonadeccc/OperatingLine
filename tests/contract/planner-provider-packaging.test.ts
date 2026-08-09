@@ -76,6 +76,7 @@ describe('planner provider packaging boundary', () => {
       const dependencyNames = Object.keys(manifest(path).dependencies ?? {});
       expect(dependencyNames, path).not.toContain('openai');
       expect(dependencyNames, path).not.toContain('@operatingline/openai-planner-provider');
+      expect(dependencyNames, path).not.toContain('@operatingline/cli-planner-provider');
     }
 
     const defaultStandalone = readFileSync(
@@ -84,6 +85,7 @@ describe('planner provider packaging boundary', () => {
     );
     expect(defaultStandalone).not.toContain('OPENAI_API_KEY');
     expect(defaultStandalone).not.toContain('openai-planner-provider');
+    expect(defaultStandalone).not.toContain('cli-planner-provider');
   });
 
   it('contains vendor dependencies only in the provider and explicit composition root', () => {
@@ -93,6 +95,13 @@ describe('planner provider packaging boundary', () => {
     });
     expect(manifest('services/openai-runtime/package.json').dependencies).toMatchObject({
       '@operatingline/openai-planner-provider': 'workspace:*',
+      '@operatingline/orchestrator': 'workspace:*',
+    });
+    expect(manifest('packages/cli-planner-provider/package.json').dependencies).toMatchObject({
+      '@operatingline/planner-provider-sdk': 'workspace:*',
+    });
+    expect(manifest('services/cli-runtime/package.json').dependencies).toMatchObject({
+      '@operatingline/cli-planner-provider': 'workspace:*',
       '@operatingline/orchestrator': 'workspace:*',
     });
   });
@@ -139,6 +148,73 @@ describe('planner provider packaging boundary', () => {
         generationAvailable: false,
         providers: [],
       });
+    } finally {
+      await stopChild(child);
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it('starts the explicit CLI composition root and publishes both provider descriptors', async () => {
+    const temporaryDirectory = mkdtempSync(resolve(tmpdir(), 'operating-line-cli-runtime-'));
+    const stderr = { value: '' };
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', resolve('services/cli-runtime/src/index.ts')],
+      {
+        cwd: resolve('.'),
+        env: {
+          ...process.env,
+          OPERATINGLINE_ACCESS_TOKEN: defaultRuntimeAccessToken,
+          OPERATINGLINE_DATABASE_PATH: resolve(temporaryDirectory, 'runtime.db'),
+          OPERATINGLINE_PORT: '0',
+          OPERATINGLINE_CODEX_BIN: process.execPath,
+          OPERATINGLINE_CLAUDE_BIN: process.execPath,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr.value += chunk.toString();
+    });
+
+    try {
+      const mcpEndpoint = await waitForRuntimeEndpoint(child, stderr);
+      const providersEndpoint = new URL('/api/v1/planner/providers', mcpEndpoint);
+      const response = await fetch(providersEndpoint, {
+        headers: { authorization: `Bearer ${defaultRuntimeAccessToken}` },
+      });
+      expect(response.status).toBe(200);
+      const providerList = (await response.json()) as {
+        contractVersion: string;
+        generationAvailable: boolean;
+        providers: unknown[];
+      };
+      expect(providerList).toMatchObject({
+        contractVersion: plannerProviderContractVersion,
+        generationAvailable: true,
+      });
+      expect(providerList.providers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'codex-cli',
+            availability: { available: true },
+            dataHandling: {
+              executionLocation: 'remote',
+              dataTransmission: 'provider_managed',
+              credentialManagement: 'provider_managed',
+            },
+          }),
+          expect.objectContaining({
+            id: 'claude-code-cli',
+            availability: { available: true },
+            dataHandling: {
+              executionLocation: 'remote',
+              dataTransmission: 'provider_managed',
+              credentialManagement: 'provider_managed',
+            },
+          }),
+        ]),
+      );
     } finally {
       await stopChild(child);
       rmSync(temporaryDirectory, { recursive: true, force: true });
