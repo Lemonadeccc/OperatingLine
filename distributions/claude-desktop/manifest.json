@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "operating-line",
+  "display_name": "OperatingLine",
+  "version": "0.1.0",
+  "description": "Connect Claude Desktop to a local OperatingLine runtime and its Blender guidance workflow.",
+  "long_description": "OperatingLine turns AI-planned host actions into a visible, reviewable task tree inside Blender. This local connector forwards Claude Desktop MCP calls only to an explicitly configured OperatingLine runtime on the loopback interface. It does not launch Blender, execute a Plan, call a paid Planner Provider, or bypass Blender's Accept, Start, Next, and Back controls.",
+  "author": {
+    "name": "OperatingLine Contributors",
+    "url": "https://github.com/Lemonadeccc/OperatingLine"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lemonadeccc/OperatingLine.git"
+  },
+  "homepage": "https://github.com/Lemonadeccc/OperatingLine",
+  "documentation": "https://github.com/Lemonadeccc/OperatingLine#readme",
+  "support": "https://github.com/Lemonadeccc/OperatingLine/issues",
+  "license": "Apache-2.0",
+  "keywords": ["blender", "guidance", "mcp", "planning", "human-in-the-loop"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"],
+      "env": {
+        "OPERATINGLINE_MCP_URL": "${user_config.runtime_url}",
+        "OPERATINGLINE_ACCESS_TOKEN": "${user_config.access_token}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "user_config": {
+    "runtime_url": {
+      "type": "string",
+      "title": "OperatingLine Runtime URL",
+      "description": "Local MCP endpoint. Only loopback http URLs ending in /mcp are accepted.",
+      "default": "http://127.0.0.1:43123/mcp",
+      "required": true
+    },
+    "access_token": {
+      "type": "string",
+      "title": "OperatingLine Bearer Token",
+      "description": "The same local token used by the OperatingLine runtime and Blender Companion (minimum 16 characters).",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

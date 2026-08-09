@@ -10,6 +10,9 @@
 - [x] 可执行并逐步补偿回退的雪人建模、材质、灯光、相机与预览渲染垂直切片。
 - [x] AI GuideProposal 的宿主内只读预览、接受/拒绝和幂等决策。
 - [x] Blender 刚性骨骼动画：版本化 rig/pose action、三段关键帧、指定帧渲染和可补偿回退。
+- [x] 本地 AI 客户端分发：Codex/Claude CLI 一键 MCP 配置、跨客户端 initialization instructions、
+      Claude Desktop MCPB stdio→loopback HTTP 连接器，以及真实跨传输 Tool/Prompt 集成验证。见
+      [ADR 0022](adr/0022-local-ai-client-distribution.md)。
 
 ## 已完成的规划基础
 

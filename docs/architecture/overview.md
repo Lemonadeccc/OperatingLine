@@ -11,8 +11,9 @@ AI 提案与逐 Companion 人工决策、经鉴权的回环 Companion 拉取、�
 与回环评审服务在离线数据集层验证 Provider Run、盲审 annotation、分歧裁决和无分数 comparison；它们不
 改变 Orchestrator 的 Proposal 或宿主执行权威。评审界面由本地 headless HTTP service 提供给普通浏览器，
 不是 Electron 应用，也不进入 Blender 宿主内视觉链。MCP 客户端、CLI、Web 界面或其他第三方工具都是可
-替换的协议消费者，不承担
-宿主内视觉呈现。
+替换的协议消费者，不承担宿主内视觉呈现。Codex/Claude Code 直接使用回环 Streamable HTTP；
+Claude Desktop 的本地 MCPB 只提供 stdio→HTTP 薄连接器并继承 Runtime instructions，不复制 Tool
+Schema、保存 Token 或取得宿主执行权。
 
 ```text
 GuidePlan
@@ -56,6 +57,12 @@ PlannerProvider
   ├─ generate(PlanningPromptPacket) + optional replan(ReplanningPromptPacket)
   ├─ receives an AbortSignal and returns an untrusted JSON draft
   └─ strict validation + quality evidence, never auto-proposes
+
+Local AI client distribution
+  ├─ Codex/Claude CLI idempotent config installer
+  ├─ environment-referenced Bearer token, never embedded
+  ├─ MCP initialization workflow instructions
+  └─ Claude Desktop MCPB stdio → loopback HTTP bridge
 
 GuideGoalRequest
   ├─ immutable host-authored goal + reserved Plan ID

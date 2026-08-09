@@ -35,3 +35,13 @@ Creative Commons Attribution 4.0 International 许可链接。
 可选的 `@operatingline/openai-planner-provider` 使用 `openai@7.4.0`。项目来源：
 <https://github.com/openai/openai-node>。该依赖采用 Apache License 2.0；安装包中的原始
 `LICENSE` 条款继续适用。
+
+## Model Context Protocol TypeScript SDK
+
+Claude Desktop MCPB 的 stdio→HTTP 桥接器打包
+`@modelcontextprotocol/client@2.0.0`、`@modelcontextprotocol/server@2.0.0` 和
+`@modelcontextprotocol/core@2.0.0`。项目来源：
+<https://github.com/modelcontextprotocol/typescript-sdk>。项目正在从 MIT 迁移到 Apache-2.0；MCPB
+在 `THIRD_PARTY_LICENSES/MODEL_CONTEXT_PROTOCOL_SDK_LICENSE.txt` 中附带上游发布的完整过渡说明和
+许可证文本。`@anthropic-ai/mcpb@2.1.2` 与 `esbuild@0.28.1` 只用于验证/构建，不进入生成的连接器包；
+二者均采用 MIT License。

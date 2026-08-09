@@ -67,6 +67,7 @@ import {
   createCompanionReplanRunCoordinator,
   type CompanionReplanRunCoordinator,
 } from './companion-replan-run.js';
+import { operatingLineMcpInstructions } from './mcp-instructions.js';
 import {
   computePlanContentSha256,
   createEvalExport,
@@ -623,7 +624,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     });
 
     const runtimeMcpHandler = createMcpHandler(() => {
-      const server = new McpServer({ name: 'operating-line', version: runtimeVersion });
+      const server = new McpServer(
+        { name: 'operating-line', version: runtimeVersion },
+        { instructions: operatingLineMcpInstructions },
+      );
 
       server.registerTool(
         'operatingline.health',
@@ -1659,6 +1663,7 @@ export {
   computePlanContentSha256,
 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
+export { operatingLineMcpInstructions } from './mcp-instructions.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 export {
   createLocalReplanScope,

@@ -42,6 +42,9 @@ jobs:
       - name: 运行仓库检查 / Run repository checks
         run: pnpm check
 
+      - name: 构建 Claude Desktop 扩展 / Build Claude Desktop extension
+        run: pnpm package:claude-desktop
+
       - name: 审计生产依赖 / Audit production dependencies
         run: pnpm audit:prod
 

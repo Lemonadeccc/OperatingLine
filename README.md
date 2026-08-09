@@ -53,6 +53,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **Headless Orchestrator**：提供经鉴权的 MCP/HTTP 接口，可验证和直接发布 GuidePlan，也可
   持久化 AI GuideProposal、按宿主实例投递并记录幂等的接受/拒绝决策；同时查询最新执行状态，
   把追加式事件与每个实例的最新快照写入本地数据库。
+- **本地 AI 客户端接入**：提供 Codex CLI、Codex 本地桌面端和 Claude Code 共用的回环 HTTP MCP
+  配置入口，以及 Claude Desktop 使用的 MCPB stdio→HTTP 薄连接器。安装器只保存 Token 环境变量
+  引用，MCPB 只接受精确 loopback `/mcp` 地址；Runtime initialization instructions 会把
+  `pending request → exact packet → evaluate → propose → Blender review` 工作流交给客户端，连接本身
+  不授予执行权限。
 - **版本化协议**：定义 GuidePlan、GuideProposal/Decision、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
@@ -281,6 +286,12 @@ action 可以安全地出现在多个步骤中。
 [ADR 0018](docs/adr/0018-versioned-human-eval-evidence.md)。
 本地 snapshot/capture、provider-blind sidecar 与回环浏览器评审边界见
 [ADR 0019](docs/adr/0019-local-human-eval-capture-and-blind-review.md)。
+宿主发起的初始 Goal 请求与实例定向 Proposal 见
+[ADR 0020](docs/adr/0020-host-initiated-goal-to-guidance.md)。
+宿主逐次授权的异步 Initial Plan Run 见
+[ADR 0021](docs/adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
+Codex/Claude 本地配置、MCP instructions 与 Claude Desktop MCPB 见
+[ADR 0022](docs/adr/0022-local-ai-client-distribution.md)。
 
 每个步骤的 action receipt 可以记录多个新建 datablock、对既有自有资源的 mutation 和文件
 产物。资源身份同时校验 Blender pointer、不可预测 receipt token 和计划内 logical ID，避免
@@ -342,6 +353,35 @@ export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
 export OPERATINGLINE_PORT=43123
 pnpm dev
 ```
+
+一键配置当前机器上已安装的 Codex 和 Claude Code；缺少其中一个 CLI 时会跳过它：
+
+```bash
+pnpm setup:ai-clients
+```
+
+也可以只配置一个客户端，或先预览不会修改配置的命令：
+
+```bash
+pnpm setup:codex
+pnpm setup:claude
+pnpm setup:ai-clients -- --dry-run
+```
+
+安装器不会覆盖已有的 `operating-line` 条目；只有明确传入 `--force` 才删除并重建这个精确条目。
+Token 值不会写入客户端配置，启动 AI 客户端的进程必须能读取同名
+`OPERATINGLINE_ACCESS_TOKEN` 环境变量。Codex CLI、Codex 本地桌面端和 IDE Extension 共享 Codex
+MCP 配置；Claude Code 使用自己的 MCP 配置。
+
+Claude Desktop 不能用云端 Connector 访问 localhost，需要构建并安装本地 MCPB：
+
+```bash
+pnpm package:claude-desktop
+```
+
+产物是 `artifacts/claude-desktop/operating-line-0.1.0.mcpb`。安装时填写
+`http://127.0.0.1:43123/mcp` 和同一个 Token；当前开发包未签名。完整安装、作用域、GUI 环境变量和
+权限边界见 [Codex、Claude 与 Claude Desktop 接入指南](docs/guides/ai-client-setup.md)。
 
 然后在 Blender 的 `OperatingLine` Sidebar 中：
 
@@ -624,6 +664,7 @@ pnpm test:blender
 pnpm test:blender:companion
 pnpm test:blender:visual
 pnpm package:blender
+pnpm package:claude-desktop
 ```
 
 `pnpm test:blender` 会先用独立 Python 进程运行纯引导状态单元测试，再在每个检测到的 Blender
@@ -686,9 +727,9 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 ## 路线图与当前边界
 
-已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision 与 Blender 内人工
-审批、Blender 内引导与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环，以及受限的
-现有 MCP Bridge。当前仍未完成：
+已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
+Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
+MCP Bridge，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；

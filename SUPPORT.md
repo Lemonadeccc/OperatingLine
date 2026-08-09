@@ -4,10 +4,15 @@
 
 请先查看 [README](README.md)、[`docs/`](docs/) 和现有 issue，并确认问题不是以下已知边界：
 
-- 实时 Orchestrator ↔ Blender 配对、计划投递、执行队列和观察回传尚未打通。
-- Blender Extension 当前使用打包内的雪人 fixture；Bridge 只提供 `start`、`next`、`back` 和
-  `toggle_overlay` 四个受限控件。
-- Bridge 所连接的第三方 Blender MCP transport 不是 OperatingLine 的安全沙箱。
+- Runtime 只监听本机回环地址；云端任务、Web 客户端和 Claude Desktop 的远程 Connector 不能直接
+  访问 localhost。Codex/Claude Code 使用本地 HTTP MCP，Claude Desktop 使用本地 MCPB。
+- 当前 Blender ActionCatalog 只覆盖仓库已经验证的动作与语义能力；接入 AI 客户端不等于已经支持
+  任意 Blender 任务，也不会绕过 Blender 内 Proposal 审批和 Start/Next 执行门禁。
+- Claude Desktop MCPB 当前是未签名的开发包，需要先单独启动 Runtime，并在安装时提供本地 URL 和
+  Token；包本身不包含 Runtime、Blender 或凭据。
+- 未连接 Runtime 时 Blender Extension 使用打包内的雪人 fixture。用于兼容第三方 Blender MCP 的
+  Bridge 只提供 `start`、`next`、`back` 和 `toggle_overlay` 四个受限控件；上游 transport 不是
+  OperatingLine 的安全沙箱。
 
 ## 在哪里求助
 
