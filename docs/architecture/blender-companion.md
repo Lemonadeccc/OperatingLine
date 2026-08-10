@@ -13,7 +13,7 @@
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
 - `Menu` / `UILayout` / `Operator`：从版本化 InteractionCatalog 读取活动叶节点配方；在 Guidance
-  可见期间，为经过版本测试的真实 `Add → Mesh → Plane/UV Sphere` 菜单项显示序号与状态，并把
+  可见期间，为经过版本测试的真实 `Add → Mesh → Plane/UV Sphere/Cone/Cylinder` 菜单项显示序号与状态，并把
   最终项路由到同一个受控计划动作。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
 - `gpu` / `blf`：形状与文字绘制。
@@ -32,11 +32,11 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.0.0` 与 ActionCatalog `1.3.0` 一一绑定 10 个 action，并由活动叶节点的 `actionName` 选择配方。
-Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/UV Sphere` 两条 `native_path` 接到
+`1.1.0` 与 ActionCatalog `1.4.0` 一一绑定 12 个 action，并由活动叶节点的 `actionName` 选择配方。
+Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/UV Sphere/Cone/Cylinder` 四条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
-三个身体球；不同 action 会切换自己的 recipe。批量几何、材质、骨骼、动画和渲染等八条
+三个身体球；鼻子和手臂会分别切换到 Cone 与 Cylinder recipe。批量几何、材质、骨骼、动画和渲染等八条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
 菜单项。未来只有新的版本专用 recipe 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md)。
@@ -97,7 +97,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.3.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.4.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -170,19 +170,27 @@ Provider Proposal。队列为活动/已知 Provider 结果保留容量；队列�
 全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
 不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、Run、历史、执行进度或场景状态。
 
-## revision 4 雪人执行切片
+## revision 5 雪人教学执行切片
 
-打包内的 `snowman-demo` revision 4 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
-执行 7 个阶段、15 个叶子步骤：创建地面和三段身体，批量创建脸部、纽扣和手臂，分配雪、煤、
+打包内的 `snowman-demo` revision 5 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
+执行 7 个阶段、25 个叶子步骤：创建地面和三段身体，再逐件创建两只眼睛、一个鼻子、五个嘴点、
+三个纽扣和两条手臂，使每个部件都能独立引用、执行与回退；随后分配雪、煤、
 胡萝卜、木头和地面材质，创建四骨骼 Armature 并把头部组件与两条手臂刚性绑定，写入第 1、20、40
 帧姿态，创建隔离的 Scene、World 与自有 Collection，加入两个 Area Light 和一台 Camera，
 最后在扩展管理的临时目录生成帧 20 的 320 × 320 Eevee PNG。
 
-当前动作目录 `1.3.0` 允许以下 10 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0` 供精确回放：
+规范源是 `protocol/fixtures/v1/snowman-teaching.plan.json`。原
+`protocol/fixtures/v1/snowman.plan.json` revision 4 保持字节与内容哈希不变，只用于既有
+ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
+稳定资源名 `resources/snowman.plan.json`。
+
+当前动作目录 `1.4.0` 允许以下 12 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0`、`1.3.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_uv_sphere`
+- `blender.mesh.create_cone`
+- `blender.mesh.create_cylinder`
 - `blender.mesh.create_primitive_batch`
 - `blender.material.create_and_assign`
 - `blender.material.create_palette_and_assign`
@@ -192,7 +200,7 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.3.0` 还发布七项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、Principled
+`1.4.0` 保留 `1.3.0` 首次发布的七项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、Principled
 material palette、rigid armature、rigid pose keyframes、render scene setup 和 PNG preview output。
 Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
 再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
@@ -208,7 +216,7 @@ Revision Workspace、Accept/Reject 或 `Start`/`Next`。它只证明 provider �
 Blender datablock、mutation 和渲染产物；资源解析同时核对 pointer、receipt token、logical ID、
 步骤 ID 和 action 名。复合动作先对整批对象、数据和逻辑 ID 做预检，执行异常时补偿已经创建或
 修改的部分。回退 mutation 前执行 compare-and-restore：当前值不再等于该动作写入的值时拒绝
-覆盖，并保留当前步骤和 receipt。`Next`/`Back` 因而可以完成 15 步正向执行与完整反向补偿，
+覆盖，并保留当前步骤和 receipt。`Next`/`Back` 因而可以完成 25 步正向执行与完整反向补偿，
 但这种补偿不是 Blender 原生 Undo。
 
 回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera/Armature data 存在额外
@@ -230,7 +238,7 @@ Blender Collection 名称已经是目标无关的 `OperatingLine Generated`。
 预览 action 只接受扩展临时目录、1–100000 的显式帧，单边分辨率上限为 1024，采样上限为 128，
 防止远端计划以合法参数长时间同步阻塞 Blender 主线程。
 
-revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+revision 5 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
 `render_artifact_exists` 七类 observation。它们读取 receipt 身份与当前 Blender 状态，并随
 Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是

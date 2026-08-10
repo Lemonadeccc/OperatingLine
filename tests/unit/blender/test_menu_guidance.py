@@ -67,7 +67,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             snapshot.recipe_id,
             "blender.mesh.create_uv_sphere.native",
         )
-        self.assertEqual(snapshot.catalog_version, "1.0.0")
+        self.assertEqual(snapshot.catalog_version, "1.1.0")
         self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
         self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
@@ -156,7 +156,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             )
         )
 
-    def test_supports_the_allowlisted_plane_path_and_refuses_other_menus(self) -> None:
+    def test_supports_each_allowlisted_single_primitive_path(self) -> None:
         plane = action_step(
             action_name="blender.mesh.create_plane",
             operator_id="mesh.primitive_plane_add",
@@ -167,6 +167,26 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         self.assertEqual(plane_snapshot.items[-1].label, "Plane")
         self.assertTrue(plane_snapshot.accepts("mesh.primitive_plane_add"))
 
+        for action_name, operator_id, label in (
+            ("blender.mesh.create_cone", "mesh.primitive_cone_add", "Cone"),
+            (
+                "blender.mesh.create_cylinder",
+                "mesh.primitive_cylinder_add",
+                "Cylinder",
+            ),
+        ):
+            primitive = action_step(
+                action_name=action_name,
+                operator_id="model.authored.operator.is.ignored",
+                menu_path=("model", "authored", "path"),
+            )
+            primitive_snapshot = self.tracker.snapshot(primitive)
+            assert primitive_snapshot is not None
+            self.assertEqual(primitive_snapshot.items[-1].label, label)
+            self.assertTrue(primitive_snapshot.accepts(operator_id))
+            self.assertFalse(primitive_snapshot.accepts("mesh.primitive_cube_add"))
+
+    def test_marks_semantic_paths_locked_and_refuses_native_execution(self) -> None:
         semantic = action_step(
             action_name="blender.material.create_and_assign",
             operator_id="material.new",

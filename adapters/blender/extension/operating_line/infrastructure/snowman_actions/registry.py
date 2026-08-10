@@ -11,6 +11,8 @@ from .model import (
     execute_geometry,
     legacy_sphere_arguments,
     validate_batch,
+    validate_cone,
+    validate_cylinder,
     validate_plane,
     validate_uv_sphere,
 )
@@ -38,6 +40,8 @@ ActionHandler = Callable[
 
 GEOMETRY_VALIDATORS = {
     "blender.mesh.create_uv_sphere": validate_uv_sphere,
+    "blender.mesh.create_cone": validate_cone,
+    "blender.mesh.create_cylinder": validate_cylinder,
     "blender.mesh.create_primitive_batch": validate_batch,
     "blender.mesh.create_plane": validate_plane,
 }

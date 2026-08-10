@@ -37,9 +37,19 @@ function fullSnowmanCapabilityCoverage() {
               'snowman.model.body_lower',
               'snowman.model.body_upper',
               'snowman.model.head',
-              'snowman.details.face',
-              'snowman.details.buttons',
-              'snowman.details.arms',
+              'snowman.details.face.eye_left',
+              'snowman.details.face.eye_right',
+              'snowman.details.face.nose',
+              'snowman.details.face.mouth_1',
+              'snowman.details.face.mouth_2',
+              'snowman.details.face.mouth_3',
+              'snowman.details.face.mouth_4',
+              'snowman.details.face.mouth_5',
+              'snowman.details.buttons.button_1',
+              'snowman.details.buttons.button_2',
+              'snowman.details.buttons.button_3',
+              'snowman.details.arms.left',
+              'snowman.details.arms.right',
             ],
           },
         ],
@@ -266,7 +276,7 @@ const proxy = createServer(async (request, response) => {
       goalWork = goalWork.then(async () => {
         assert.equal(goalRequest.goal, goal);
         assert.equal(goalRequest.adapterId, 'blender');
-        assert.equal(goalRequest.catalogVersion, '1.3.0');
+        assert.equal(goalRequest.catalogVersion, '1.4.0');
 
         const pending = await callMcpTool(
           runtime,
@@ -298,7 +308,7 @@ const proxy = createServer(async (request, response) => {
         assert.equal(packet.workflow.submitToolName, 'operatingline.guide.propose');
 
         const fixture = JSON.parse(
-          readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+          readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
         );
         fixture.id = goalRequest.planId;
         fixture.revision = packet.context.recommendedRevision;
@@ -436,7 +446,7 @@ try {
     },
   );
   assert.ok(result.maximumPumpSeconds < 0.15);
-  assert.equal(result.stepCount, 15);
+  assert.equal(result.stepCount, 25);
   assert.equal(result.proposalReviewedBeforeExecution, true);
   assert.equal(result.requestLinkedProposalReviewedBeforeExecution, true);
   assert.equal(result.planDiffReviewedBeforeExecution, true);
@@ -444,7 +454,7 @@ try {
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.3.0');
+  assert.equal(revisionRequests[0].catalogVersion, '1.4.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -566,7 +576,7 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.3.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.4.0');
   assert.equal(evalBundle.page.hasMore, false);
   assert.equal(evalBundle.summary.matchedEventCount, 21 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });

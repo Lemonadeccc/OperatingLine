@@ -24,6 +24,8 @@ const schemaKeywords = new Set([
   'uniqueTargetIds',
   'acyclicParents',
   'strictlyIncreasingFrames',
+  'distinctPropertyValues',
+  'atLeastOnePositiveProperty',
 ]);
 
 const supportedTypes = new Set([
@@ -43,6 +45,7 @@ const customArrayKeywords = [
   'acyclicParents',
   'strictlyIncreasingFrames',
 ] as const;
+const customObjectKeywords = ['distinctPropertyValues', 'atLeastOnePositiveProperty'] as const;
 
 type SchemaRecord = Record<string, unknown>;
 
@@ -208,6 +211,61 @@ function validateCustomArraySchema(schema: SchemaRecord, path: string): void {
   }
 }
 
+function customRequiredPropertyNames(
+  schema: SchemaRecord,
+  keyword: (typeof customObjectKeywords)[number],
+  path: string,
+  minimumLength: number,
+): string[] {
+  const value = schema[keyword];
+  if (
+    !Array.isArray(value) ||
+    value.length < minimumLength ||
+    value.some((name) => typeof name !== 'string' || name.length === 0)
+  ) {
+    schemaError(path, `${keyword} must contain at least ${minimumLength} nonempty property names`);
+  }
+  if (new Set(value).size !== value.length) {
+    schemaError(path, `${keyword} must not repeat property names`);
+  }
+
+  const properties = schema.properties;
+  const required = schema.required;
+  if (!isRecord(properties) || !Array.isArray(required)) {
+    schemaError(path, `${keyword} requires declared required properties`);
+  }
+  for (const name of value) {
+    if (!Object.prototype.hasOwnProperty.call(properties, name) || !required.includes(name)) {
+      schemaError(path, `${keyword} references non-required property ${name}`);
+    }
+  }
+  return value;
+}
+
+function validateCustomObjectSchema(schema: SchemaRecord, path: string): void {
+  if (schema.distinctPropertyValues !== undefined) {
+    customRequiredPropertyNames(schema, 'distinctPropertyValues', path, 2);
+  }
+  if (schema.atLeastOnePositiveProperty !== undefined) {
+    const propertyNames = customRequiredPropertyNames(
+      schema,
+      'atLeastOnePositiveProperty',
+      path,
+      1,
+    );
+    const properties = schema.properties as SchemaRecord;
+    for (const name of propertyNames) {
+      const propertySchema = properties[name];
+      if (
+        !isRecord(propertySchema) ||
+        (propertySchema.type !== 'number' && propertySchema.type !== 'integer')
+      ) {
+        schemaError(path, `atLeastOnePositiveProperty requires numeric property ${name}`);
+      }
+    }
+  }
+}
+
 function validateSchemaNode(value: unknown, path: string): void {
   if (!isRecord(value)) {
     schemaError(path, 'schema must be an object');
@@ -266,6 +324,13 @@ function validateSchemaNode(value: unknown, path: string): void {
     }
   } else if (type === 'object') {
     schemaError(path, 'object schemas require properties and additionalProperties false');
+  }
+
+  if (customObjectKeywords.some((keyword) => value[keyword] !== undefined)) {
+    if (type !== 'object') {
+      schemaError(path, 'object property keywords require type object');
+    }
+    validateCustomObjectSchema(value, path);
   }
 
   const usesArrayKeyword =
@@ -493,6 +558,46 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
   return errors;
 }
 
+function validateCustomObjectRules(
+  value: Record<string, unknown>,
+  schema: SchemaRecord,
+  path: string,
+): string[] {
+  const errors: string[] = [];
+  const displayPath = path || 'arguments';
+  const distinctPropertyValues = schema.distinctPropertyValues as string[] | undefined;
+  if (
+    distinctPropertyValues !== undefined &&
+    distinctPropertyValues.every((name) => Object.prototype.hasOwnProperty.call(value, name))
+  ) {
+    const seen = new Map<string, string>();
+    for (const name of distinctPropertyValues) {
+      const key = canonicalJson(value[name]);
+      const previousName = seen.get(key);
+      if (previousName !== undefined) {
+        errors.push(`${displayPath} properties ${previousName} and ${name} must differ`);
+        break;
+      }
+      seen.set(key, name);
+    }
+  }
+
+  const positiveProperties = schema.atLeastOnePositiveProperty as string[] | undefined;
+  if (
+    positiveProperties !== undefined &&
+    positiveProperties.every(
+      (name) =>
+        Object.prototype.hasOwnProperty.call(value, name) && typeof value[name] === 'number',
+    ) &&
+    !positiveProperties.some((name) => (value[name] as number) > 0)
+  ) {
+    errors.push(
+      `${displayPath} requires at least one positive value among ${positiveProperties.join(', ')}`,
+    );
+  }
+  return errors;
+}
+
 function collectArgumentErrors(value: unknown, schema: SchemaRecord, path: string): string[] {
   const oneOf = schema.oneOf as unknown[] | undefined;
   if (oneOf !== undefined) {
@@ -544,6 +649,7 @@ function collectArgumentErrors(value: unknown, schema: SchemaRecord, path: strin
         errors.push(...collectArgumentErrors(value[name], propertySchema, childPath(path, name)));
       }
     }
+    errors.push(...validateCustomObjectRules(value, schema, path));
   }
   if (schema.type === 'array' && Array.isArray(value)) {
     if (typeof schema.minItems === 'number' && value.length < schema.minItems) {

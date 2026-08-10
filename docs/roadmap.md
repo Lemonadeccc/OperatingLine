@@ -23,10 +23,15 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.0.0` 与 ActionCatalog `1.3.0` 一一覆盖 10 个动作。Plane/UV Sphere 使用经过 4.5/5.1 验证的
-      `native_path`，其他八个复合动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      `1.1.0` 与 ActionCatalog `1.4.0` 一一覆盖 12 个动作。Plane/UV Sphere/Cone/Cylinder 使用经过
+      4.5/5.1 验证的 `native_path`，其他八个复合动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
-      [ADR 0024](adr/0024-versioned-interaction-catalog.md)。
+      [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
+      [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)。
+- [x] 雪人教学粒度：revision 5 把眼睛、鼻子、五个嘴点、三个纽扣和两条手臂拆成一部件一叶节点；
+      ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
+      Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
+      仍可精确回放。见 [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -44,7 +49,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.3.0` 发布七项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.4.0` 保留 `1.3.0` 发布的七项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -109,8 +114,8 @@
 
 ## 后续里程碑
 
-- [ ] 教学粒度与 Blender 交互覆盖：把多部件 primitive batch 拆为可审查的一部件一叶节点；增加
-      Cube/Icosphere/Torus、Edit Mode 拓扑、Modifier 和首个 Geometry Nodes 垂直切片。每个新增 action
+- [ ] 扩大 Blender 交互覆盖：增加 Cube/Icosphere/Torus、Edit Mode 拓扑、Modifier 和首个
+      Geometry Nodes 垂直切片。每个新增 action
       必须同时具备 InteractionCatalog recipe、观察、回退和 Blender 4.5/5.1 真实 UI/执行验证；
       `semantic_path` 不得伪装为已支持的原生控件。
 

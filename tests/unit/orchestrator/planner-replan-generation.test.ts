@@ -30,7 +30,7 @@ import {
 import { buildReplanningPromptPacket } from '../../../services/orchestrator/src/replanning-prompt.js';
 
 const basePlan = JSON.parse(
-  readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+  readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
 const capabilityCoverage = {

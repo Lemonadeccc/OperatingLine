@@ -39,6 +39,8 @@ export type SemanticCapability = z.infer<typeof semanticCapabilitySchema>;
 export const actionArgumentsJsonSchemaSchema = z.strictObject({
   type: z.literal('object'),
   description: z.string().min(1).optional(),
+  distinctPropertyValues: z.array(z.string().min(1)).min(2).optional(),
+  atLeastOnePositiveProperty: z.array(z.string().min(1)).min(1).optional(),
   required: z.array(z.string().min(1)).optional(),
   properties: z.record(z.string(), z.unknown()),
   additionalProperties: z.literal(false),

@@ -11,7 +11,7 @@
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.3.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> Orchestrator 现在可以查询 Blender `1.4.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
 > `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` →
@@ -19,7 +19,7 @@
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。`1.3.0` 目录还发布七项 `semanticCapabilities`，要求
+> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.4.0` 目录保留七项 `semanticCapabilities`，要求
 > provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
@@ -76,11 +76,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.0.0` 精确绑定
-  ActionCatalog `1.3.0` 的 10 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
-  `menuPath`。Plane/UV Sphere 继续进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。见 [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)。
-- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.3.0` 把 10 个动作划分为 Geometry、Materials、
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.1.0` 精确绑定
+  ActionCatalog `1.4.0` 的 12 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  `menuPath`。Plane/UV Sphere/Cone/Cylinder 进入真实菜单；其余复合动作显示自己的灰色参考路径和
+  `UI target unavailable`，不会复用无关按钮。见 [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
+  与 [ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md)。
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.4.0` 把 12 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；七项目录语义能力进一步要求 provider
   声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的
@@ -204,13 +205,14 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
   放大的视口卡片同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头。对经过 Blender
   InteractionCatalog 为每个活动叶节点提供不同的有序参考路径；对 4.5/5.1 验证的
-  `Add → Mesh → Plane/UV Sphere` `native_path`，真实原生菜单还会显示微步骤序号、状态文字
+  `Add → Mesh → Plane/UV Sphere/Cone/Cylinder` `native_path`，真实原生菜单还会显示微步骤序号、状态文字
   和彩色图标；点击绿色最终项与点击 `Next` 执行同一个计划动作，并共享同一份回退回执。Extension
   也可显式连接回环地址上的
   Orchestrator，非阻塞拉取新计划或提案并回传步骤结果。提案会显示独立的只读任务树、
   `Accept Plan` 与 `Reject Plan`；接受前 Start/Next 不可执行，且场景与活动计划不会改变。
-- **完整雪人预览垂直切片**：内置 revision 4 计划包含 7 个阶段、15 个可执行步骤，依次完成
-  地面、三段身体、脸部、纽扣、手臂、材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
+- **完整雪人预览垂直切片**：内置 revision 5 教学计划包含 7 个阶段、25 个可执行步骤，依次完成
+  地面、三段身体，并把两只眼睛、鼻子、五个嘴点、三个纽扣和两条手臂分别作为独立可回退叶节点，
+  再完成材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
   隔离渲染场景、双 Area Light、相机和帧 20 的 320 × 320 Eevee PNG；`Back` 可以逐步反向补偿
   整条执行链。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
@@ -572,6 +574,9 @@ quality/locality 报告和 provenance
 PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、权重绘制、modifier 或
 任意 Python 操作必须明确保留为人工步骤。可重放的非雪人参考输入位于
 [`robot-preview.benchmark.json`](protocol/fixtures/v1/planning/robot-preview.benchmark.json)。
+当前 Blender 包使用 [`snowman-teaching.plan.json`](protocol/fixtures/v1/snowman-teaching.plan.json)
+revision 5；[`snowman.plan.json`](protocol/fixtures/v1/snowman.plan.json) revision 4 仅作为已有
+ActionCatalog 1.3.0 Human Eval 套件的不可变哈希输入保留。
 
 计划安装、Start/Next/Back 和步骤观察可以通过
 `operatingline.companions.list` 或 `GET /api/v1/companions` 查询。所有 `/mcp` 和 `/api/`
@@ -589,18 +594,18 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    必须先用 Back 回到起点才能接受。
 2. `Start` 重置已接受的演示会话、展示 Overlay，并将计划置于第一个可执行步骤之前；待审提案
    存在时 Start/Next 会被门禁，避免在审批期间继续修改场景。
-3. 每个步骤都可继续点击 `Next` 自动执行。当前一步属于已验证的 `Add → Mesh → Plane/UV Sphere`
+3. 每个步骤都可继续点击 `Next` 自动执行。当前一步属于已验证的 `Add → Mesh → Plane/UV Sphere/Cone/Cylinder`
    路径时，也可以打开 Blender 顶部真实 `Add` 菜单，按 `02 → 03 → 04 NEXT` 进入 `Mesh` 并点击
-   绿色最终项。两种入口执行相同的计划参数并生成相同的 receipt，不会要求切换模式。15 个步骤会
+   绿色最终项。两种入口执行相同的计划参数并生成相同的 receipt，不会要求切换模式。25 个步骤会
    依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，创建并刚性绑定四骨骼 Armature，
    插入第 1/20/40 帧姿态，建立隔离 Scene、World、双 Area Light 和 Camera，最后生成帧 20 的
    320 × 320 Eevee PNG。
-4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 15 步，不删除用户对象。
+4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 25 步，不删除用户对象。
 5. `Hide Guidance` 会一起隐藏视口卡片、彩色数字、引导线、状态详情和任务树，但保留
    Revision Workspace、Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失草稿、历史、
    当前步骤或场景状态。
 6. 任务树分支可以独立展开或折叠。蓝色 `OK` 表示已完成，红色 `BACK` 表示当前可补偿步骤，
-   绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`15`。
+   绿色 `NEXT` 表示下一步，灰色锁表示尚未开放；视口使用相同颜色显示 `01`–`25`。
 7. 顶部可折叠的 `Revision Workspace` 将引用、正文、历史、diff 和提案审批放在同一区域。
    树中每个节点的 `Ref` 会加入一条结构化 `@1.2.3  标题` 引用，不会篡改独立的正文；
    可逐条移除，且一次只能引用同一活动计划或同一待审计划中的最多 8 个节点。尝试混用
@@ -620,7 +625,7 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
 
 Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。当前对象和世界坐标锚点会绘制
 真实目标线；版本适配器只在 Guidance 可见时替换经过 Blender 4.5/5.1 测试的
-`Add → Mesh → Plane/UV Sphere` 菜单绘制，并在隐藏 Guidance 或卸载 Extension 时恢复原始方法。
+`Add → Mesh → Plane/UV Sphere/Cone/Cylinder` 菜单绘制，并在隐藏 Guidance 或卸载 Extension 时恢复原始方法。
 `Layout` 工作区上下文保留在放大的视口卡片中，不猜测页签坐标；其他 `operator` 锚点继续显示操作 ID
 或 `menuPath` 语义路径并标记 `UI target unavailable`。原生菜单以红/蓝/绿状态块和
 `BACK/CURRENT/NEXT/ALT` 文案表达状态；顶部 Add 入口的上一步/BACK 使用原生红色警示背景，当前
@@ -642,7 +647,7 @@ Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。
 遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
 外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
 
-revision 4 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+revision 5 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
 `render_artifact_exists` 七类 observation 检查资源、材质、骨架绑定、关键帧、场景、灯光相机
 和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
@@ -731,7 +736,7 @@ pnpm package:claude-desktop
 `pnpm test:blender` 会先用独立 Python 进程运行纯引导状态单元测试，再在每个检测到的 Blender
 4.5+ 可执行文件中运行基础 Extension 回归和完整雪人测试；后者验证复合动作冲突不会留下部分结果、外部
 Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 320 PNG、隔离 Scene，
-以及 15 步完整
+以及 25 步完整
 前进/回退。`pnpm test:blender:companion`
 会启动真实 Orchestrator 进程和 Blender，经过 Blender 提交初始目标、MCP pending discovery、精确
 Planner Packet、evaluate、实例定向初版 Proposal、Blender 节点引用与修订请求、

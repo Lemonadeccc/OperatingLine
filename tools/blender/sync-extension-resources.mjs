@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 const resourceMappings = [
   [
-    resolve('protocol/fixtures/v1/snowman.plan.json'),
+    resolve('protocol/fixtures/v1/snowman-teaching.plan.json'),
     resolve('adapters/blender/extension/operating_line/resources/snowman.plan.json'),
   ],
   [

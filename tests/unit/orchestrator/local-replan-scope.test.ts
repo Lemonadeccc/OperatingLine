@@ -12,7 +12,7 @@ import {
 } from '../../../services/orchestrator/src/local-replan-scope.js';
 
 const basePlan = JSON.parse(
-  readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+  readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 
 function request(references: Array<{ nodeId: string; nodeNumber: string }>) {

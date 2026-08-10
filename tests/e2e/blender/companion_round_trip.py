@@ -208,7 +208,7 @@ def main() -> None:
         assert not session.started and not session.receipts
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
-        assert controller.proposed_plan["catalogVersion"] == "1.3.0"
+        assert controller.proposed_plan["catalogVersion"] == "1.4.0"
         first_thread = controller.proposed_plan["revisionThread"]
         assert first_thread == {
             "threadId": revision_request_id,
@@ -347,7 +347,7 @@ def main() -> None:
             assert item.as_pointer() == factory_object_pointers[item.name]
 
         step_count = len(session.steps)
-        assert step_count == 15
+        assert step_count == 25
         for expected_index, expected_step in enumerate(session.steps):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
             assert session.active_index == expected_index

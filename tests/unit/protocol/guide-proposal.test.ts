@@ -11,7 +11,7 @@ import {
 } from '@operatingline/protocol';
 
 const readPlan = (): unknown =>
-  JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'));
+  JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'));
 
 describe('guide proposal protocol', () => {
   it('keeps AI submission, server envelope, and companion decision strict', () => {

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blenderActionCatalog,
   blenderInteractionCatalog,
+  blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import { interactionCatalogSchema, validateInteractionCatalog } from '@operatingline/protocol';
 
@@ -13,7 +14,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.0.0');
+    expect(catalog.catalogVersion).toBe('1.1.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
       blenderActionCatalog.actions.map((action) => action.name),
@@ -22,10 +23,18 @@ describe('interaction catalog protocol', () => {
       catalog.recipes
         .filter((recipe) => recipe.guidance.kind === 'native_path')
         .map((recipe) => recipe.actionName),
-    ).toEqual(['blender.mesh.create_uv_sphere', 'blender.mesh.create_plane']);
+    ).toEqual([
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_plane',
+      'blender.mesh.create_cone',
+      'blender.mesh.create_cylinder',
+    ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
     ).toHaveLength(8);
+    expect(
+      blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
+    ).toEqual(['1.0.0', '1.1.0']);
 
     const sphere = catalog.recipes[0]!;
     expect(sphere.guidance.steps.map((step) => step.label)).toEqual([

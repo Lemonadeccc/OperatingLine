@@ -130,6 +130,8 @@ def validate_adapter(adapter_id: str, action_name: str) -> None:
 ALLOWED_ACTIONS = frozenset(
     {
         "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_cone",
+        "blender.mesh.create_cylinder",
         "blender.mesh.create_primitive_batch",
         "blender.mesh.create_plane",
         "blender.material.create_and_assign",

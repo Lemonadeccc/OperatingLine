@@ -74,8 +74,118 @@ def _sphere(arguments: Mapping[str, Any], label: str) -> Primitive:
     )
 
 
+def _cone(arguments: Mapping[str, Any], label: str) -> Primitive:
+    required = {
+        "resourceId",
+        "objectName",
+        "radiusStart",
+        "radiusEnd",
+        "start",
+        "end",
+    }
+    require_keys(arguments, required, required | {"primitive"}, label)
+    start = vector(
+        arguments["start"],
+        f"{label}.start",
+        3,
+        minimum=-1000.0,
+        maximum=1000.0,
+    )
+    end = vector(
+        arguments["end"],
+        f"{label}.end",
+        3,
+        minimum=-1000.0,
+        maximum=1000.0,
+    )
+    if Vector(end) == Vector(start):
+        raise ValueError(f"{label}.start and end must differ")
+    radius_start = number(
+        arguments["radiusStart"],
+        f"{label}.radiusStart",
+        minimum=0.0,
+        maximum=1000.0,
+    )
+    radius_end = number(
+        arguments["radiusEnd"],
+        f"{label}.radiusEnd",
+        minimum=0.0,
+        maximum=1000.0,
+    )
+    if radius_start == 0 and radius_end == 0:
+        raise ValueError(f"{label} radii cannot both be zero")
+    return Primitive(
+        kind="cone",
+        logical_id=logical_id(arguments["resourceId"], f"{label}.resourceId"),
+        object_name=text(
+            arguments["objectName"],
+            f"{label}.objectName",
+            prefix="OperatingLine.",
+        ),
+        radius_start=radius_start,
+        radius_end=radius_end,
+        start=start,
+        end=end,
+        location=tuple((Vector(start) + Vector(end)) / 2.0),
+    )
+
+
+def _cylinder(arguments: Mapping[str, Any], label: str) -> Primitive:
+    required = {"resourceId", "objectName", "radius", "start", "end"}
+    require_keys(arguments, required, required | {"primitive"}, label)
+    start = vector(
+        arguments["start"],
+        f"{label}.start",
+        3,
+        minimum=-1000.0,
+        maximum=1000.0,
+    )
+    end = vector(
+        arguments["end"],
+        f"{label}.end",
+        3,
+        minimum=-1000.0,
+        maximum=1000.0,
+    )
+    if Vector(end) == Vector(start):
+        raise ValueError(f"{label}.start and end must differ")
+    radius = number(
+        arguments["radius"],
+        f"{label}.radius",
+        minimum=0.0001,
+        maximum=1000.0,
+    )
+    return Primitive(
+        kind="cylinder",
+        logical_id=logical_id(arguments["resourceId"], f"{label}.resourceId"),
+        object_name=text(
+            arguments["objectName"],
+            f"{label}.objectName",
+            prefix="OperatingLine.",
+        ),
+        radius=radius,
+        radius_start=radius,
+        radius_end=radius,
+        start=start,
+        end=end,
+        location=tuple((Vector(start) + Vector(end)) / 2.0),
+    )
+
+
 def validate_uv_sphere(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
     primitives = (_sphere(arguments, "arguments"),)
+    ensure_logical_ids_available({}, _created_logical_ids(primitives))
+    return primitives
+
+
+def validate_cone(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
+    primitives = (_cone(arguments, "arguments"),)
+    ensure_logical_ids_available({}, _created_logical_ids(primitives))
+    return primitives
+
+
+def validate_cylinder(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
+    primitives = (_cylinder(arguments, "arguments"),)
     ensure_logical_ids_available({}, _created_logical_ids(primitives))
     return primitives
 
@@ -125,81 +235,10 @@ def validate_batch(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
             primitives.append(_sphere(item, label))
             continue
         if kind == "cone":
-            fields = {
-                "resourceId",
-                "objectName",
-                "primitive",
-                "radiusStart",
-                "radiusEnd",
-                "start",
-                "end",
-            }
-            require_keys(item, fields, fields, label)
-            start = vector(item["start"], f"{label}.start", 3, minimum=-1000.0, maximum=1000.0)
-            end = vector(item["end"], f"{label}.end", 3, minimum=-1000.0, maximum=1000.0)
-            if Vector(end) == Vector(start):
-                raise ValueError(f"{label}.start and end must differ")
-            primitives.append(
-                Primitive(
-                    kind="cone",
-                    logical_id=logical_id(item["resourceId"], f"{label}.resourceId"),
-                    object_name=text(
-                        item["objectName"],
-                        f"{label}.objectName",
-                        prefix="OperatingLine.",
-                    ),
-                    radius_start=number(
-                        item["radiusStart"],
-                        f"{label}.radiusStart",
-                        minimum=0.0,
-                        maximum=1000.0,
-                    ),
-                    radius_end=number(
-                        item["radiusEnd"],
-                        f"{label}.radiusEnd",
-                        minimum=0.0,
-                        maximum=1000.0,
-                    ),
-                    start=start,
-                    end=end,
-                    location=tuple((Vector(start) + Vector(end)) / 2.0),
-                )
-            )
-            if primitives[-1].radius_start == 0 and primitives[-1].radius_end == 0:
-                raise ValueError(f"{label} radii cannot both be zero")
+            primitives.append(_cone(item, label))
             continue
         if kind == "cylinder":
-            fields = {
-                "resourceId",
-                "objectName",
-                "primitive",
-                "radius",
-                "start",
-                "end",
-            }
-            require_keys(item, fields, fields, label)
-            start = vector(item["start"], f"{label}.start", 3, minimum=-1000.0, maximum=1000.0)
-            end = vector(item["end"], f"{label}.end", 3, minimum=-1000.0, maximum=1000.0)
-            if Vector(end) == Vector(start):
-                raise ValueError(f"{label}.start and end must differ")
-            radius = number(item["radius"], f"{label}.radius", minimum=0.0001, maximum=1000.0)
-            primitives.append(
-                Primitive(
-                    kind="cylinder",
-                    logical_id=logical_id(item["resourceId"], f"{label}.resourceId"),
-                    object_name=text(
-                        item["objectName"],
-                        f"{label}.objectName",
-                        prefix="OperatingLine.",
-                    ),
-                    radius=radius,
-                    radius_start=radius,
-                    radius_end=radius,
-                    start=start,
-                    end=end,
-                    location=tuple((Vector(start) + Vector(end)) / 2.0),
-                )
-            )
+            primitives.append(_cylinder(item, label))
             continue
         raise ValueError(f"{label}.primitive is unsupported")
     logical_ids = [item.logical_id for item in primitives]

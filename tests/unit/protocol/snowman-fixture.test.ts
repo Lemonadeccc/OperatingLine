@@ -15,9 +15,19 @@ const executableStepIds = [
   'snowman.model.body_lower',
   'snowman.model.body_upper',
   'snowman.model.head',
-  'snowman.details.face',
-  'snowman.details.buttons',
-  'snowman.details.arms',
+  'snowman.details.face.eye_left',
+  'snowman.details.face.eye_right',
+  'snowman.details.face.nose',
+  'snowman.details.face.mouth_1',
+  'snowman.details.face.mouth_2',
+  'snowman.details.face.mouth_3',
+  'snowman.details.face.mouth_4',
+  'snowman.details.face.mouth_5',
+  'snowman.details.buttons.button_1',
+  'snowman.details.buttons.button_2',
+  'snowman.details.buttons.button_3',
+  'snowman.details.arms.left',
+  'snowman.details.arms.right',
   'snowman.materials.snow',
   'snowman.materials.accessories',
   'snowman.materials.ground',
@@ -40,7 +50,7 @@ const stageIds = [
 
 const readPlan = (): GuidePlan =>
   guidePlanSchema.parse(
-    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8')),
+    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8')),
   );
 
 const toDomainNodes = (plan: GuidePlan): TaskNode[] =>
@@ -65,18 +75,18 @@ const collectKeys = (value: unknown): string[] => {
 };
 
 describe('complete snowman guide fixture', () => {
-  it('validates as GuidePlan revision 4 and covers the seven ordered stages', () => {
+  it('validates as GuidePlan revision 5 and covers the seven ordered stages', () => {
     const plan = readPlan();
     const rootChildren = plan.steps
       .filter((step) => step.parentId === plan.rootStepId)
       .sort((left, right) => left.order - right.order)
       .map((step) => step.id);
 
-    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 4, rootStepId: 'snowman' });
+    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 5, rootStepId: 'snowman' });
     expect(rootChildren).toEqual(stageIds);
   });
 
-  it('freezes the fifteen executable leaves as one strict dependency chain', () => {
+  it('freezes the twenty-five executable leaves as one strict dependency chain', () => {
     const plan = readPlan();
     const executableSteps = plan.steps.filter((step) => step.action !== null);
 
@@ -104,7 +114,7 @@ describe('complete snowman guide fixture', () => {
     );
     const executableSteps = plan.steps.filter((step) => step.action !== null);
 
-    expect(executableSteps).toHaveLength(15);
+    expect(executableSteps).toHaveLength(25);
     for (const step of executableSteps) {
       expect(parentIds.has(step.id), step.id).toBe(false);
       expect(step.action?.adapterId, step.id).toBe('blender');
@@ -142,9 +152,19 @@ describe('complete snowman guide fixture', () => {
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_uv_sphere',
-      'blender.mesh.create_primitive_batch',
-      'blender.mesh.create_primitive_batch',
-      'blender.mesh.create_primitive_batch',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_cone',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_cylinder',
+      'blender.mesh.create_cylinder',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
       'blender.material.create_and_assign',

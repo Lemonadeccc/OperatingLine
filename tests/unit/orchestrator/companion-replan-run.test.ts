@@ -11,7 +11,7 @@ import { createCompanionReplanRunCoordinator } from '../../../services/orchestra
 import { createPlannerProviderRegistry } from '../../../services/orchestrator/src/planner-provider-registry.js';
 
 const basePlan = JSON.parse(
-  readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+  readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 
 describe('companion replan run coordinator', () => {

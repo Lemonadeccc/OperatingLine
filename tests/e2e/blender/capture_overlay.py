@@ -41,6 +41,8 @@ OUTPUT_NAMES = {
     "operator": "guidance-operator-fallback.png",
     "menu-add": "guidance-menu-add.png",
     "menu-mesh": "guidance-menu-mesh.png",
+    "menu-cone": "guidance-menu-cone.png",
+    "menu-cylinder": "guidance-menu-cylinder.png",
 }
 if STATE not in OUTPUT_NAMES:
     raise ValueError(f"Unknown visual capture state: {STATE}")
@@ -391,7 +393,7 @@ def configure_state():
             "targetInstanceId": companion.instance_id,
             "revisionRequestId": request_id,
             "revisionThread": revision_thread,
-            "catalogVersion": "1.3.0",
+            "catalogVersion": "1.4.0",
             "plan": plan,
             "planDiff": plan_diff,
             "proposedAt": "2026-08-04T12:00:00Z",
@@ -401,7 +403,7 @@ def configure_state():
             "protocolVersion": "1.1.0",
             "requestId": request_id,
             "adapterId": "blender",
-            "catalogVersion": "1.3.0",
+            "catalogVersion": "1.4.0",
             "instanceId": companion.instance_id,
             "basePlan": base_plan,
             "references": [
@@ -463,7 +465,12 @@ def configure_state():
             assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
             assert bpy.context.window_manager.operating_line_overlay_enabled is False
     elif STATE == "operator":
-        while session.active_index < 13:
+        preview_index = next(
+            index
+            for index, step in enumerate(session.steps)
+            if step.id == "snowman.render.preview"
+        )
+        while session.active_index < preview_index - 1:
             assert bpy.ops.operating_line.next() == {"FINISHED"}
         next_step = session.steps[session.active_index + 1]
         assert next_step.id == "snowman.render.preview"
@@ -484,11 +491,30 @@ def configure_state():
         if bpy.context.window is not None:
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
-    elif STATE in {"menu-add", "menu-mesh"}:
-        assert bpy.ops.operating_line.next() == {"FINISHED"}
-        assert session.active_index == 0
+    elif STATE in {"menu-add", "menu-mesh", "menu-cone", "menu-cylinder"}:
+        target_step_id = {
+            "menu-add": "snowman.model.body_lower",
+            "menu-mesh": "snowman.model.body_lower",
+            "menu-cone": "snowman.details.face.nose",
+            "menu-cylinder": "snowman.details.arms.left",
+        }[STATE]
+        target_index = next(
+            index
+            for index, step in enumerate(session.steps)
+            if step.id == target_step_id
+        )
+        while session.active_index < target_index - 1:
+            assert bpy.ops.operating_line.next() == {"FINISHED"}
         next_step = session.steps[session.active_index + 1]
-        assert next_step.id == "snowman.model.body_lower"
+        assert next_step.id == target_step_id
+        menu_path = interaction_guidance_snapshot()
+        assert menu_path is not None and menu_path.native
+        assert menu_path.items[-1].label == {
+            "menu-add": "UV Sphere",
+            "menu-mesh": "UV Sphere",
+            "menu-cone": "Cone",
+            "menu-cylinder": "Cylinder",
+        }[STATE]
     assert_factory_objects_preserved()
     if STATE in {
         "goal-request",
@@ -521,7 +547,7 @@ def prepare_view():
         space.region_3d.view_distance = 10.5
         space.region_3d.view_rotation = Quaternion((0.81, 0.37, 0.16, 0.42))
 
-    if STATE in {"menu-add", "menu-mesh"}:
+    if STATE in {"menu-add", "menu-mesh", "menu-cone", "menu-cylinder"}:
         bpy.context.preferences.view.show_tooltips = False
         bpy.context.window.cursor_warp(1400, 900)
         with bpy.context.temp_override(area=area, region=region, space_data=space):
@@ -660,7 +686,14 @@ def assert_guidance_pixels():
         # red previous/BACK menu target until a nested menu has opened.
         assert 0.00003 < completed < 0.0003
         assert back < 0.00003
-    elif STATE in {"forward", "back", "menu-add", "menu-mesh"}:
+    elif STATE in {
+        "forward",
+        "back",
+        "menu-add",
+        "menu-mesh",
+        "menu-cone",
+        "menu-cylinder",
+    }:
         assert completed > 0.00005
         assert back > 0.0003
         assert next_step > 0.0003

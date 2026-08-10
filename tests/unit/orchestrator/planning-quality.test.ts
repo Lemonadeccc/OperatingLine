@@ -13,23 +13,78 @@ import { describe, expect, it } from 'vitest';
 
 const snowmanPlan = (): GuidePlan =>
   guidePlanSchema.parse(
+    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8')),
+  );
+const historicalSnowmanPlan = (): GuidePlan =>
+  guidePlanSchema.parse(
     JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8')),
   );
 
 const historicalCatalog = blenderActionCatalogs.find(
   (catalog) => catalog.catalogVersion === '1.2.0',
 )!;
+const completeSnowmanCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'ground',
+      statement: 'Create a ground plane.',
+      coverage: [{ capabilityId: 'geometry.ground_plane', stepIds: ['snowman.scene.ground'] }],
+    },
+    {
+      requirementId: 'model',
+      statement: 'Create the snowman primitive assembly.',
+      coverage: [{ capabilityId: 'geometry.primitive_assembly', stepIds: ['snowman.model.head'] }],
+    },
+    {
+      requirementId: 'appearance',
+      statement: 'Apply snowman materials.',
+      coverage: [
+        {
+          capabilityId: 'appearance.principled_palette',
+          stepIds: ['snowman.materials.snow'],
+        },
+      ],
+    },
+    {
+      requirementId: 'rig',
+      statement: 'Create a rigid armature.',
+      coverage: [{ capabilityId: 'animation.rigid_armature', stepIds: ['snowman.animation.rig'] }],
+    },
+    {
+      requirementId: 'motion',
+      statement: 'Create pose keyframes.',
+      coverage: [
+        {
+          capabilityId: 'animation.rigid_pose_keyframes',
+          stepIds: ['snowman.animation.pose'],
+        },
+      ],
+    },
+    {
+      requirementId: 'render-setup',
+      statement: 'Prepare the render scene.',
+      coverage: [{ capabilityId: 'render.scene_setup', stepIds: ['snowman.lighting.scene'] }],
+    },
+    {
+      requirementId: 'output',
+      statement: 'Render a PNG preview.',
+      coverage: [{ capabilityId: 'output.png_preview', stepIds: ['snowman.render.preview'] }],
+    },
+  ],
+};
 
 const evaluate = (plan: GuidePlan, requiredPhaseIds: string[] = []) =>
   evaluatePlanningQuality(
     {
       targetAdapterId: 'blender',
-      catalogVersion: '1.2.0',
+      catalogVersion: blenderActionCatalog.catalogVersion,
       goal: 'Create and render an animated snowman',
       requiredPhaseIds,
+      capabilityCoverage: completeSnowmanCoverage,
       plan,
     },
-    historicalCatalog,
+    blenderActionCatalog,
   );
 
 describe('planning quality baseline', () => {
@@ -44,7 +99,7 @@ describe('planning quality baseline', () => {
       summary: {
         errorCount: 0,
         warningCount: 0,
-        executableStepCount: 15,
+        executableStepCount: 25,
         usedPhaseCount: 5,
       },
     });
@@ -128,7 +183,7 @@ describe('planning quality baseline', () => {
         targetAdapterId: 'blender',
         catalogVersion: '1.1.0',
         requiredPhaseIds: [],
-        plan: snowmanPlan(),
+        plan: historicalSnowmanPlan(),
       },
       historicalCatalogWithoutPhases,
     );

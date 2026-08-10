@@ -11,7 +11,7 @@ import {
 
 function historyFixture() {
   const basePlan = JSON.parse(
-    readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+    readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
   ) as Record<string, unknown> & { id: string; revision: number };
   const targetPlan = { ...basePlan, revision: basePlan.revision + 1 };
   const requestId = randomUUID();

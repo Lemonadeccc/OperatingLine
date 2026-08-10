@@ -309,7 +309,7 @@ def execute_through(session, last_step_id: str) -> None:
 
 def main() -> None:
     assert PLAN["id"] == "snowman-demo"
-    assert len(ACTION_STEPS) == 15
+    assert len(ACTION_STEPS) == 25
     assert os.environ.get("OPERATINGLINE_RENDER_OUTPUT_DIR")
     assert_localized_node_access()
 
@@ -369,27 +369,29 @@ def main() -> None:
         assert bpy.data.collections.get(model_actions.COLLECTION_NAME) is None
         assert owned_resources() == []
 
-        # Ground and the three snow volumes execute before the atomic face batch.
-        execute_through(session, "snowman.model.head")
-
-        # A conflict anywhere in a compound face batch must prevent every item.
-        face_items = ACTION_BY_ID["snowman.details.face"]["action"]["arguments"][
-            "items"
+        # Ground, snow volumes, and both eyes execute before the independent
+        # cone leaf. A name conflict must fail that one leaf without advancing.
+        execute_through(session, "snowman.details.face.eye_right")
+        nose_arguments = ACTION_BY_ID["snowman.details.face.nose"]["action"][
+            "arguments"
         ]
-        nose_item = next(item for item in face_items if item["primitive"] == "cone")
-        conflict_mesh = bpy.data.meshes.new(f"{nose_item['objectName']}.UserMesh")
-        conflict_nose = bpy.data.objects.new(nose_item["objectName"], conflict_mesh)
+        conflict_mesh = bpy.data.meshes.new(
+            f"{nose_arguments['objectName']}.UserMesh"
+        )
+        conflict_nose = bpy.data.objects.new(
+            nose_arguments["objectName"], conflict_mesh
+        )
         factory_scene.collection.objects.link(conflict_nose)
-        created_before = {item["objectName"] for item in face_items if item is not nose_item}
-        call_next_expect_failure(f"Cannot replace existing object: {nose_item['objectName']}")
-        assert session.active_index == ACTION_INDEX["snowman.model.head"]
+        call_next_expect_failure(
+            f"Cannot replace existing object: {nose_arguments['objectName']}"
+        )
+        assert session.active_index == ACTION_INDEX["snowman.details.face.eye_right"]
         assert len(session.receipts) == session.active_index + 1
-        assert all(bpy.data.objects.get(name) is None for name in created_before)
-        assert bpy.data.objects.get(nose_item["objectName"]) is conflict_nose
+        assert bpy.data.objects.get(nose_arguments["objectName"]) is conflict_nose
         remove_object_and_data(conflict_nose)
 
         # Finish details. Every declared observation must be satisfied after Next.
-        execute_through(session, "snowman.details.arms")
+        execute_through(session, "snowman.details.arms.right")
 
         # A missing required shader node must fail the action and roll back the
         # just-created material instead of silently assigning an unconfigured one.
@@ -412,7 +414,7 @@ def main() -> None:
             )
         finally:
             material_actions._configure_material_nodes = original_configure_material
-        assert session.active_index == ACTION_INDEX["snowman.details.arms"]
+        assert session.active_index == ACTION_INDEX["snowman.details.arms.right"]
         assert bpy.data.materials.get(snow_arguments["materialName"]) is None
         registry = build_resource_registry(session.receipts)
         assert all(
@@ -432,7 +434,7 @@ def main() -> None:
         call_next_expect_failure(
             f"Cannot replace existing material: {snow_arguments['materialName']}"
         )
-        assert session.active_index == ACTION_INDEX["snowman.details.arms"]
+        assert session.active_index == ACTION_INDEX["snowman.details.arms.right"]
         assert len(session.receipts) == session.active_index + 1
         registry = build_resource_registry(session.receipts)
         for logical_id, before in material_targets_before.items():

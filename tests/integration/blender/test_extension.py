@@ -127,7 +127,7 @@ EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_ST
 PLAN_REVISION = BUNDLED_PLAN["revision"]
 DYNAMIC_REVISION = PLAN_REVISION + 1
 FULL_PLAN_CONTENT_SHA256 = (
-    "73ca76a923816eb8d1073f6bf799d6563a7b0627ada0ac2fb92d8b9e4ec08f7a"
+    "a609769b0a12d9c4d93851106fb04db3084344287672dd0a536673ffaa3c875c"
 )
 
 
@@ -1854,11 +1854,11 @@ def assert_companion_and_plan_semantics() -> None:
         ),
         (
             "derived mesh logical ID collision",
-            "blender.mesh.create_primitive_batch",
-            lambda arguments: arguments["items"][1].update(
-                {"resourceId": f'{arguments["items"][0]["resourceId"]}.mesh'}
+            "blender.mesh.create_cone",
+            lambda arguments: arguments.update(
+                {"resourceId": "snowman.body.lower.mesh"}
             ),
-            "Created logical resource IDs must be unique",
+            "Duplicate planned logical resource ID",
         ),
         (
             "cross-step logical ID collision",
@@ -2497,11 +2497,17 @@ def main() -> None:
     assert sum(
         recipe["guidance"]["kind"] == "native_path"
         for recipe in INTERACTION_CATALOG["recipes"]
-    ) == 2
+    ) == 4
     assert (ADAPTER_ROOT / "LICENSE").read_text(encoding="utf-8") == (
         REPO_ROOT / "LICENSE"
     ).read_text(encoding="utf-8")
-    canonical_path = REPO_ROOT / "protocol" / "fixtures" / "v1" / "snowman.plan.json"
+    canonical_path = (
+        REPO_ROOT
+        / "protocol"
+        / "fixtures"
+        / "v1"
+        / "snowman-teaching.plan.json"
+    )
     with canonical_path.open(encoding="utf-8") as canonical_resource:
         assert FULL_PLAN == json.load(canonical_resource)
     canonical_interaction_path = (
@@ -2511,18 +2517,27 @@ def main() -> None:
     with canonical_interaction_path.open(encoding="utf-8") as canonical_resource:
         assert INTERACTION_CATALOG == json.load(canonical_resource)
 
-    # The active leaf selects its own catalog recipe. Repeated UV-sphere leaves
-    # correctly share a route, while Plane and composite Batch leaves do not.
+    # The active leaf selects its own catalog recipe. Each directly supported
+    # primitive resolves to its exact Add > Mesh item; batches stay semantic.
     full_steps = executable_steps(load_task_tree_data(FULL_PLAN))
     recipe_tracker = MenuGuidanceTracker()
     plane_path = recipe_tracker.snapshot(full_steps[0])
     sphere_path = recipe_tracker.snapshot(full_steps[1])
-    batch_path = recipe_tracker.snapshot(full_steps[4])
+    cone_path = recipe_tracker.snapshot(full_steps[6])
+    cylinder_path = recipe_tracker.snapshot(full_steps[15])
     assert plane_path is not None and plane_path.items[-1].label == "Plane"
     assert sphere_path is not None and sphere_path.items[-1].label == "UV Sphere"
-    assert batch_path is not None
-    assert batch_path.path_kind is InteractionPathKind.SEMANTIC
-    assert tuple(item.label for item in batch_path.items) == (
+    assert cone_path is not None and cone_path.items[-1].label == "Cone"
+    assert cone_path.operator_id == "mesh.primitive_cone_add"
+    assert cylinder_path is not None and cylinder_path.items[-1].label == "Cylinder"
+    assert cylinder_path.operator_id == "mesh.primitive_cylinder_add"
+    batch_recipe = next(
+        recipe
+        for recipe in INTERACTION_CATALOG["recipes"]
+        if recipe["actionName"] == "blender.mesh.create_primitive_batch"
+    )
+    assert batch_recipe["guidance"]["kind"] == "semantic_path"
+    assert tuple(item["label"] for item in batch_recipe["guidance"]["steps"]) == (
         "Layout",
         "Add",
         "Mesh",

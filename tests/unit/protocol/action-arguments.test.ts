@@ -146,6 +146,38 @@ describe('action argument schemas', () => {
     ]);
   });
 
+  it('enforces reusable cross-property geometry invariants', () => {
+    const schema = {
+      type: 'object',
+      distinctPropertyValues: ['start', 'end'],
+      atLeastOnePositiveProperty: ['radiusStart', 'radiusEnd'],
+      required: ['start', 'end', 'radiusStart', 'radiusEnd'],
+      properties: {
+        start: { type: 'array', items: { type: 'number' } },
+        end: { type: 'array', items: { type: 'number' } },
+        radiusStart: { type: 'number', minimum: 0 },
+        radiusEnd: { type: 'number', minimum: 0 },
+      },
+      additionalProperties: false,
+    } as const;
+
+    expect(
+      validateActionArguments(
+        { start: [0, 0, 0], end: [0, 0, 1], radiusStart: 0.2, radiusEnd: 0 },
+        schema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        { start: [0, 0, 0], end: [0, 0, 0], radiusStart: 0, radiusEnd: 0 },
+        schema,
+      ),
+    ).toEqual([
+      'arguments properties start and end must differ',
+      'arguments requires at least one positive value among radiusStart, radiusEnd',
+    ]);
+  });
+
   it('fails closed on unknown and malformed schema keywords', () => {
     expect(() => validateActionArgumentsSchema({ type: 'string', format: 'uuid' })).toThrow(
       'unknown keyword format',
@@ -185,6 +217,24 @@ describe('action argument schemas', () => {
         },
       }),
     ).toThrow('acyclicParents requires uniqueBoneNames true');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'object',
+        distinctPropertyValues: ['start', 'missing'],
+        required: ['start'],
+        properties: { start: { type: 'number' } },
+        additionalProperties: false,
+      }),
+    ).toThrow('distinctPropertyValues references non-required property missing');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'object',
+        atLeastOnePositiveProperty: ['name'],
+        required: ['name'],
+        properties: { name: { type: 'string' } },
+        additionalProperties: false,
+      }),
+    ).toThrow('atLeastOnePositiveProperty requires numeric property name');
   });
 
   it.each(['constructor', 'toString', '__proto__'])(

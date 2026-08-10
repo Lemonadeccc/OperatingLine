@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.3.0",
+  "catalogVersion": "1.4.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from planes, UV spheres, cones, and cylinders, assign Principled materials, create and bind a rigid armature, author pose keyframes, create an isolated scene, add Area lights and a camera, and render a managed PNG preview at a selected frame. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, UV spheres, cones, and cylinders or bounded primitive batches; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful part per leaf for teaching and use batches only when atomic grouped creation is intentional. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -25,6 +25,8 @@
       "actionNames": [
         "blender.mesh.create_uv_sphere",
         "blender.mesh.create_plane",
+        "blender.mesh.create_cone",
+        "blender.mesh.create_cylinder",
         "blender.mesh.create_primitive_batch"
       ]
     },
@@ -76,8 +78,13 @@
       "id": "geometry.primitive_assembly",
       "title": "Primitive assembly",
       "description": "Construct an owned model from supported sphere, cone, and cylinder primitives.",
-      "selectionGuidance": "Select when the requested form can be represented by one sphere or a bounded batch of supported primitives.",
-      "actionNames": ["blender.mesh.create_uv_sphere", "blender.mesh.create_primitive_batch"]
+      "selectionGuidance": "Select when the requested form can be represented by individual supported primitives or an intentionally atomic bounded batch.",
+      "actionNames": [
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_cone",
+        "blender.mesh.create_cylinder",
+        "blender.mesh.create_primitive_batch"
+      ]
     },
     {
       "id": "appearance.principled_palette",
@@ -140,7 +147,7 @@
           },
           "radius": {
             "type": "number",
-            "exclusiveMinimum": 0,
+            "minimum": 0.0001,
             "maximum": 1000,
             "description": "Sphere radius in Blender units."
           },
@@ -201,7 +208,7 @@
           },
           "size": {
             "type": "number",
-            "exclusiveMinimum": 0,
+            "minimum": 0.0001,
             "maximum": 1000,
             "description": "Full edge length in Blender units."
           },
@@ -211,6 +218,151 @@
             "minItems": 3,
             "maxItems": 3,
             "description": "World-space [x, y, z] center."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_cone",
+      "title": "Create one cone",
+      "description": "Creates one owned cone mesh object between two world-space endpoints in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "distinctPropertyValues": ["start", "end"],
+        "atLeastOnePositiveProperty": ["radiusStart", "radiusEnd"],
+        "required": ["resourceId", "objectName", "radiusStart", "radiusEnd", "start", "end"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radiusStart": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Cone radius at start; the two radii cannot both be zero."
+          },
+          "radiusEnd": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Cone radius at end; the two radii cannot both be zero."
+          },
+          "start": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] start point; start and end must differ."
+          },
+          "end": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] end point; start and end must differ."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "create",
+          "resourceType": "OBJECT",
+          "argumentPath": "resourceId",
+          "derivedResourceTypes": ["MESH"],
+          "description": "Creates the object resource and a resourceId.mesh datablock."
+        },
+        {
+          "access": "create",
+          "resourceType": "COLLECTION",
+          "argumentPath": "$managed.snowman.collection",
+          "derivedResourceTypes": [],
+          "description": "The first geometry action creates the shared managed collection if needed."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.create_cylinder",
+      "title": "Create one cylinder",
+      "description": "Creates one owned cylinder mesh object between two world-space endpoints in the adapter-managed collection.",
+      "argumentsSchema": {
+        "type": "object",
+        "distinctPropertyValues": ["start", "end"],
+        "required": ["resourceId", "objectName", "radius", "start", "end"],
+        "properties": {
+          "resourceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
+          },
+          "objectName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180,
+            "description": "Blender object name owned by OperatingLine."
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 0.0001,
+            "maximum": 1000,
+            "description": "Cylinder radius in Blender units."
+          },
+          "start": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] start point; start and end must differ."
+          },
+          "end": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World-space [x, y, z] end point; start and end must differ."
           }
         },
         "additionalProperties": false
@@ -268,7 +420,7 @@
                       "pattern": "^OperatingLine\\.",
                       "maxLength": 180
                     },
-                    "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+                    "radius": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
                     "location": {
                       "type": "array",
                       "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
@@ -280,6 +432,8 @@
                 },
                 {
                   "type": "object",
+                  "atLeastOnePositiveProperty": ["radiusStart", "radiusEnd"],
+                  "distinctPropertyValues": ["start", "end"],
                   "required": [
                     "primitive",
                     "resourceId",
@@ -316,6 +470,7 @@
                 },
                 {
                   "type": "object",
+                  "distinctPropertyValues": ["start", "end"],
                   "required": ["primitive", "resourceId", "objectName", "radius", "start", "end"],
                   "properties": {
                     "primitive": { "const": "cylinder" },
@@ -325,7 +480,7 @@
                       "pattern": "^OperatingLine\\.",
                       "maxLength": 180
                     },
-                    "radius": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+                    "radius": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
                     "start": {
                       "type": "array",
                       "items": { "type": "number", "minimum": -1000, "maximum": 1000 },

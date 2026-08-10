@@ -25,7 +25,7 @@ import { FakePlannerProvider } from '@operatingline/test-kit';
 import { describe, expect, it } from 'vitest';
 
 const snowmanFixture = JSON.parse(
-  readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+  readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as PlanningProposalDraft['plan'];
 const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
 const capabilityCoverage = {

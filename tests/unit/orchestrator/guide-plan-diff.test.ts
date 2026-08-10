@@ -8,7 +8,7 @@ import { computeGuidePlanDiff } from '@operatingline/orchestrator';
 
 function snowmanPlan() {
   return guidePlanSchema.parse(
-    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8')),
+    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8')),
   );
 }
 

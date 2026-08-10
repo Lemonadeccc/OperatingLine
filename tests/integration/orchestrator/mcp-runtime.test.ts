@@ -35,9 +35,19 @@ const snowmanCapabilityCoverage = {
             'snowman.model.body_lower',
             'snowman.model.body_upper',
             'snowman.model.head',
-            'snowman.details.face',
-            'snowman.details.buttons',
-            'snowman.details.arms',
+            'snowman.details.face.eye_left',
+            'snowman.details.face.eye_right',
+            'snowman.details.face.nose',
+            'snowman.details.face.mouth_1',
+            'snowman.details.face.mouth_2',
+            'snowman.details.face.mouth_3',
+            'snowman.details.face.mouth_4',
+            'snowman.details.face.mouth_5',
+            'snowman.details.buttons.button_1',
+            'snowman.details.buttons.button_2',
+            'snowman.details.buttons.button_3',
+            'snowman.details.arms.left',
+            'snowman.details.arms.right',
           ],
         },
         {
@@ -267,7 +277,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const plan = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as { id: string; revision: number };
       const publishResponse = await fetch(runtime.mcpEndpoint, {
         method: 'POST',
@@ -315,7 +325,7 @@ describe('OperatingLine runtime', () => {
         planningPhases?: Array<{ id?: string }>;
       };
       expect(catalog).toMatchObject({ catalogVersion });
-      expect(catalog.actions).toHaveLength(10);
+      expect(catalog.actions).toHaveLength(12);
       expect(catalog.planningPhases?.map((phase) => phase.id)).toEqual([
         'geometry',
         'materials',
@@ -400,7 +410,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const fixture = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as Record<string, unknown>;
       const plan = { ...fixture, id: 'mascot-demo', revision: 1 };
       const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
@@ -527,7 +537,7 @@ describe('OperatingLine runtime', () => {
 
   it('invokes an explicit planner provider without creating a proposal', async () => {
     const fixture = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as Record<string, unknown> & { id: string; revision: number };
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
     const provider = new FakePlannerProvider(({ packet }) => ({
@@ -698,7 +708,7 @@ describe('OperatingLine runtime', () => {
 
   it('generates a typed local replan before explicitly proposing its exact draft', async () => {
     const basePlan = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as {
       id: string;
       revision: number;
@@ -1019,7 +1029,7 @@ describe('OperatingLine runtime', () => {
       'content-type': 'application/json',
     };
     const plan = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as {
       id: string;
       revision: number;
@@ -1329,7 +1339,7 @@ describe('OperatingLine runtime', () => {
     };
     try {
       const basePlan = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as Record<string, unknown>;
       const requestId = randomUUID();
       const instanceId = randomUUID();
@@ -1396,7 +1406,7 @@ describe('OperatingLine runtime', () => {
           {
             requestId,
             catalogVersion,
-            basePlan: { id: 'snowman-demo', revision: 4 },
+            basePlan: { id: 'snowman-demo', revision: 5 },
             references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
           },
         ],
@@ -1404,7 +1414,7 @@ describe('OperatingLine runtime', () => {
 
       const replanned = {
         ...basePlan,
-        revision: 5,
+        revision: 6,
         title: 'Create a snowman with a larger head',
       };
       const malformedSubmission = {
@@ -1478,13 +1488,13 @@ describe('OperatingLine runtime', () => {
       expect(JSON.parse(proposed.result?.content?.[0]?.text ?? '{}')).toMatchObject({
         proposed: true,
         planId: 'snowman-demo',
-        revision: 5,
+        revision: 6,
         catalogVersion,
         revisionRequestId: requestId,
         revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
         planDiff: {
-          basePlan: { id: 'snowman-demo', revision: 4 },
-          targetPlan: { id: 'snowman-demo', revision: 5 },
+          basePlan: { id: 'snowman-demo', revision: 5 },
+          targetPlan: { id: 'snowman-demo', revision: 6 },
           summary: { planFields: 1 },
         },
       });
@@ -1526,7 +1536,7 @@ describe('OperatingLine runtime', () => {
           revisionRequestId: requestId,
           targetInstanceId: instanceId,
           catalogVersion,
-          plan: { id: 'snowman-demo', revision: 5 },
+          plan: { id: 'snowman-demo', revision: 6 },
         },
       });
       guideUrl.searchParams.set('instanceId', randomUUID());
@@ -1594,7 +1604,7 @@ describe('OperatingLine runtime', () => {
       const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
         requestId,
         catalogVersion,
-        plan: { ...replanned, revision: 6 },
+        plan: { ...replanned, revision: 7 },
       });
       expect(secondProposal.result).toMatchObject({ isError: true });
       expect(secondProposal.result?.content?.[0]?.text).toContain('already has a proposal');
@@ -1644,7 +1654,7 @@ describe('OperatingLine runtime', () => {
 
       const continuedPlan = {
         ...replanned,
-        revision: 6,
+        revision: 7,
         title: 'Create a reviewed snowman with a larger head',
       };
       const continuedProposal = await callMcpTool(runtime, 22, 'operatingline.replan.propose', {
@@ -1659,7 +1669,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(JSON.parse(continuedProposal.result?.content?.[0]?.text ?? '{}')).toMatchObject({
         proposed: true,
-        revision: 6,
+        revision: 7,
         revisionRequestId: continuedRequestId,
         revisionThread: {
           threadId: requestId,
@@ -1667,8 +1677,8 @@ describe('OperatingLine runtime', () => {
           parentRequestId: requestId,
         },
         planDiff: {
-          basePlan: { id: 'snowman-demo', revision: 5 },
-          targetPlan: { id: 'snowman-demo', revision: 6 },
+          basePlan: { id: 'snowman-demo', revision: 6 },
+          targetPlan: { id: 'snowman-demo', revision: 7 },
           summary: { planFields: 1 },
         },
       });
@@ -1705,7 +1715,7 @@ describe('OperatingLine runtime', () => {
       ).resolves.toMatchObject({
         proposal: {
           revisionRequestId: continuedRequestId,
-          plan: { id: 'snowman-demo', revision: 6 },
+          plan: { id: 'snowman-demo', revision: 7 },
         },
       });
     } finally {
@@ -1722,7 +1732,7 @@ describe('OperatingLine runtime', () => {
     const instanceId = randomUUID();
     try {
       const plan = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as { id: string; revision: number };
       expect(
         (await callMcpTool(runtime, 20, 'operatingline.guide.publish', plan)).result?.isError,
@@ -1843,7 +1853,7 @@ describe('OperatingLine runtime', () => {
     };
     try {
       const plan = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as { id: string; revision: number };
       const proposed = await callMcpTool(runtime, 30, 'operatingline.guide.propose', {
         targetAdapterId: 'blender',
@@ -1947,7 +1957,7 @@ describe('OperatingLine runtime', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-runtime-proposal-test-'));
     const databasePath = join(directory, 'state.db');
     const plan = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as { id: string; revision: number };
     let runtime: RunningRuntime | undefined;
     try {
@@ -2103,7 +2113,7 @@ describe('OperatingLine runtime', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-plan-runtime-test-'));
     const databasePath = join(directory, 'state.db');
     const plan = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as { id: string; revision: number };
     const headers = { authorization: `Bearer ${accessToken}` };
     try {
@@ -2193,7 +2203,7 @@ describe('OperatingLine runtime', () => {
     const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
     try {
       const plan = JSON.parse(
-        readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+        readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
       ) as {
         id: string;
         revision: number;

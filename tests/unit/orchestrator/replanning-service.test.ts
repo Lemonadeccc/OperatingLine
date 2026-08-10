@@ -12,7 +12,7 @@ import { PlannerGenerationRuntimeError } from '../../../services/orchestrator/sr
 import { createReplanningService } from '../../../services/orchestrator/src/replanning-service.js';
 
 const basePlan = JSON.parse(
-  readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+  readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 
 function firstRequest() {

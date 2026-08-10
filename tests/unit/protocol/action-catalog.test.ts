@@ -12,17 +12,20 @@ import {
   planningQualityReportSchema,
   replanningPromptPacketSchema,
   validateActionCatalog,
+  validateActionArguments,
 } from '@operatingline/protocol';
 
 describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.3.0');
+    expect(catalog.catalogVersion).toBe('1.4.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_plane',
+      'blender.mesh.create_cone',
+      'blender.mesh.create_cylinder',
       'blender.mesh.create_primitive_batch',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
@@ -53,7 +56,7 @@ describe('action catalog protocol', () => {
     ]);
     expect(
       blenderActionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
-    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0']);
+    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0']);
   });
 
   it('rejects duplicate actions and required argument names absent from properties', () => {
@@ -110,6 +113,67 @@ describe('action catalog protocol', () => {
     expect(() => validateActionCatalog(capabilitiesWithoutPhases)).toThrow(
       'cannot declare semantic capabilities without planning phases',
     );
+  });
+
+  it('rejects primitive arguments that the Blender executor cannot realize', () => {
+    const schemaFor = (actionName: string) => {
+      const action = blenderActionCatalog.actions.find(
+        (candidate) => candidate.name === actionName,
+      );
+      expect(action, actionName).toBeDefined();
+      return action!.argumentsSchema;
+    };
+
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'tiny-sphere',
+          objectName: 'OperatingLine.TinySphere',
+          radius: 0.00001,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_uv_sphere'),
+      ),
+    ).toContain('radius must be at least 0.0001');
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'flat-plane',
+          objectName: 'OperatingLine.FlatPlane',
+          size: 0.00001,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_plane'),
+      ),
+    ).toContain('size must be at least 0.0001');
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'zero-cone',
+          objectName: 'OperatingLine.ZeroCone',
+          radiusStart: 0,
+          radiusEnd: 0,
+          start: [0, 0, 0],
+          end: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_cone'),
+      ),
+    ).toEqual([
+      'arguments properties start and end must differ',
+      'arguments requires at least one positive value among radiusStart, radiusEnd',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'tiny-cylinder',
+          objectName: 'OperatingLine.TinyCylinder',
+          radius: 0.00001,
+          start: [0, 0, 0],
+          end: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_cylinder'),
+      ),
+    ).toEqual(['radius must be at least 0.0001', 'arguments properties start and end must differ']);
   });
 
   it('accepts strict catalog capability coverage with unique structural ids', () => {
@@ -389,7 +453,7 @@ describe('action catalog protocol', () => {
     ).toBe(false);
 
     const basePlan = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as unknown;
     const revisionRequestBase = {
       protocolVersion: '1.1.0',
@@ -430,7 +494,7 @@ describe('action catalog protocol', () => {
           ...revisionRequestBase,
           catalogVersion: blenderActionCatalog.catalogVersion,
         },
-        targetRevision: 5,
+        targetRevision: 6,
         catalog: blenderActionCatalog,
         companionState: null,
         scope,

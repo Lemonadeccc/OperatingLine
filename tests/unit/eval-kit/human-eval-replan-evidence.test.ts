@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 import {
   computeHumanEvalCaseSha256,
   contentWithoutIntegrity,
@@ -30,6 +30,9 @@ const generationRequestId = '50000000-0000-4000-8000-000000000002';
 const runId = '50000000-0000-4000-8000-000000000003';
 const instanceId = '50000000-0000-4000-8000-000000000004';
 const caseId = 'blender.snowman_rougher_body_replan';
+const historicalActionCatalog = blenderActionCatalogs.find(
+  (catalog) => catalog.catalogVersion === '1.3.0',
+)!;
 
 function rawSha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -96,7 +99,7 @@ function buildLocalReplanRun(suite: HumanEvalSuite, basePlan: GuidePlan): Provid
   const packet = buildReplanningPromptPacket({
     revisionRequest,
     targetRevision: basePlan.revision + 1,
-    catalog: blenderActionCatalog,
+    catalog: historicalActionCatalog,
     companionState: null,
     scope: createLocalReplanScope(revisionRequest),
   });

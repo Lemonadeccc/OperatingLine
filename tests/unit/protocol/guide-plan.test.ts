@@ -7,16 +7,15 @@ import { guidePlanSchema } from '@operatingline/protocol';
 
 describe('guide plan protocol fixture', () => {
   const readFixture = (): Record<string, unknown> =>
-    JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8')) as Record<
-      string,
-      unknown
-    >;
+    JSON.parse(
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
+    ) as Record<string, unknown>;
 
   it('validates the language-neutral snowman fixture', () => {
     const fixture = readFixture();
 
     const plan = guidePlanSchema.parse(fixture);
-    expect(plan.steps.filter((step) => step.action !== null)).toHaveLength(15);
+    expect(plan.steps.filter((step) => step.action !== null)).toHaveLength(25);
     expect(plan.steps.some((step) => step.anchors[0]?.kind === 'world_position')).toBe(true);
   });
 

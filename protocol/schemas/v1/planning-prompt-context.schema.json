@@ -186,6 +186,22 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "distinctPropertyValues": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "atLeastOnePositiveProperty": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
                   "required": {
                     "type": "array",
                     "items": {

@@ -25,9 +25,19 @@ const snowmanCapabilityCoverage = {
             'snowman.model.body_lower',
             'snowman.model.body_upper',
             'snowman.model.head',
-            'snowman.details.face',
-            'snowman.details.buttons',
-            'snowman.details.arms',
+            'snowman.details.face.eye_left',
+            'snowman.details.face.eye_right',
+            'snowman.details.face.nose',
+            'snowman.details.face.mouth_1',
+            'snowman.details.face.mouth_2',
+            'snowman.details.face.mouth_3',
+            'snowman.details.face.mouth_4',
+            'snowman.details.face.mouth_5',
+            'snowman.details.buttons.button_1',
+            'snowman.details.buttons.button_2',
+            'snowman.details.buttons.button_3',
+            'snowman.details.arms.left',
+            'snowman.details.arms.right',
           ],
         },
         {
@@ -117,7 +127,7 @@ describe('OpenAI planner provider runtime integration', () => {
       vi.spyOn(console, level).mockImplementation(() => undefined),
     );
     const fixture = JSON.parse(
-      readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'),
+      readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as Record<string, unknown> & { id: string; revision: number };
     const draft = {
       targetAdapterId: 'blender',

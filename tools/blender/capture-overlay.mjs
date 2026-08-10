@@ -46,6 +46,8 @@ try {
     'operator',
     'menu-add',
     'menu-mesh',
+    'menu-cone',
+    'menu-cylinder',
   ];
   for (const state of states) {
     const result = spawnSync(

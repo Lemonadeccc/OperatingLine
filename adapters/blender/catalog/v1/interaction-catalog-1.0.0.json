@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.4.0",
+  "actionCatalogVersion": "1.3.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.4.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.3.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -151,154 +151,6 @@
         "execution": {
           "stepId": "operator.plane",
           "operatorId": "mesh.primitive_plane_add",
-          "binding": "accepted_plan_action"
-        },
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
-      }
-    },
-    {
-      "id": "blender.mesh.create_cone.native",
-      "actionName": "blender.mesh.create_cone",
-      "title": "Add one cone from the 3D Viewport",
-      "guidance": {
-        "kind": "native_path",
-        "surfaceId": "VIEW_3D",
-        "preconditions": [
-          {
-            "kind": "workspace",
-            "label": "Layout workspace",
-            "value": "Layout"
-          },
-          {
-            "kind": "editor",
-            "label": "3D Viewport",
-            "value": "VIEW_3D"
-          },
-          {
-            "kind": "mode",
-            "label": "Object Mode",
-            "value": "OBJECT"
-          }
-        ],
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": {
-              "kind": "workspace",
-              "hostId": "Layout"
-            }
-          },
-          {
-            "id": "menu.add",
-            "order": 2,
-            "label": "Add",
-            "intent": "navigate",
-            "target": {
-              "kind": "menu",
-              "hostId": "VIEW3D_MT_add"
-            }
-          },
-          {
-            "id": "menu.mesh",
-            "order": 3,
-            "label": "Mesh",
-            "intent": "navigate",
-            "target": {
-              "kind": "menu",
-              "hostId": "VIEW3D_MT_mesh_add"
-            }
-          },
-          {
-            "id": "operator.cone",
-            "order": 4,
-            "label": "Cone",
-            "intent": "execute",
-            "target": {
-              "kind": "operator",
-              "hostId": "mesh.primitive_cone_add"
-            }
-          }
-        ],
-        "execution": {
-          "stepId": "operator.cone",
-          "operatorId": "mesh.primitive_cone_add",
-          "binding": "accepted_plan_action"
-        },
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
-      }
-    },
-    {
-      "id": "blender.mesh.create_cylinder.native",
-      "actionName": "blender.mesh.create_cylinder",
-      "title": "Add one cylinder from the 3D Viewport",
-      "guidance": {
-        "kind": "native_path",
-        "surfaceId": "VIEW_3D",
-        "preconditions": [
-          {
-            "kind": "workspace",
-            "label": "Layout workspace",
-            "value": "Layout"
-          },
-          {
-            "kind": "editor",
-            "label": "3D Viewport",
-            "value": "VIEW_3D"
-          },
-          {
-            "kind": "mode",
-            "label": "Object Mode",
-            "value": "OBJECT"
-          }
-        ],
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": {
-              "kind": "workspace",
-              "hostId": "Layout"
-            }
-          },
-          {
-            "id": "menu.add",
-            "order": 2,
-            "label": "Add",
-            "intent": "navigate",
-            "target": {
-              "kind": "menu",
-              "hostId": "VIEW3D_MT_add"
-            }
-          },
-          {
-            "id": "menu.mesh",
-            "order": 3,
-            "label": "Mesh",
-            "intent": "navigate",
-            "target": {
-              "kind": "menu",
-              "hostId": "VIEW3D_MT_mesh_add"
-            }
-          },
-          {
-            "id": "operator.cylinder",
-            "order": 4,
-            "label": "Cylinder",
-            "intent": "execute",
-            "target": {
-              "kind": "operator",
-              "hostId": "mesh.primitive_cylinder_add"
-            }
-          }
-        ],
-        "execution": {
-          "stepId": "operator.cylinder",
-          "operatorId": "mesh.primitive_cylinder_add",
           "binding": "accepted_plan_action"
         },
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"

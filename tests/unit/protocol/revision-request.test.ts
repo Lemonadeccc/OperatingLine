@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { guideReplanSubmissionSchema, guideRevisionRequestSchema } from '@operatingline/protocol';
 
 const readPlan = (): unknown =>
-  JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman.plan.json'), 'utf8'));
+  JSON.parse(readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'));
 
 function revisionRequest() {
   const requestId = randomUUID();
@@ -29,7 +29,7 @@ describe('guide revision request protocol', () => {
   it('binds a user message to an immutable base plan and stable node references', () => {
     const request = guideRevisionRequestSchema.parse(revisionRequest());
 
-    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 4 });
+    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 5 });
     expect(request.catalogVersion).toBe('1.0.0');
     expect(request.references).toEqual([{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }]);
     expect(request.revisionThread).toEqual({
@@ -74,13 +74,13 @@ describe('guide revision request protocol', () => {
         generationRequestId,
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
-        plan: { ...plan, revision: 5 },
+        plan: { ...plan, revision: 6 },
       }).success,
     ).toBe(true);
     expect(
       guideReplanSubmissionSchema.safeParse({
         requestId: randomUUID(),
-        plan: { ...plan, revision: 5 },
+        plan: { ...plan, revision: 6 },
       }).success,
     ).toBe(false);
     expect(
@@ -88,7 +88,7 @@ describe('guide revision request protocol', () => {
         generationRequestId,
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
-        plan: { ...plan, revision: 5 },
+        plan: { ...plan, revision: 6 },
         generationResult: 'must-not-be-embedded',
       }).success,
     ).toBe(false);
