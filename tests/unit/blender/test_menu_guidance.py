@@ -1,0 +1,154 @@
+"""Pure Python tests for allowlisted native-menu guidance state."""
+
+from importlib import import_module
+import sys
+import unittest
+from pathlib import Path
+from types import ModuleType
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PACKAGE_ROOT = REPO_ROOT / "adapters" / "blender" / "extension" / "operating_line"
+PACKAGE_NAME = "operating_line_menu_guidance_test"
+operating_line = ModuleType(PACKAGE_NAME)
+operating_line.__path__ = [str(PACKAGE_ROOT)]
+sys.modules[PACKAGE_NAME] = operating_line
+
+application = import_module(f"{PACKAGE_NAME}.application")
+domain = import_module(f"{PACKAGE_NAME}.domain")
+
+GuidanceState = application.GuidanceState
+MenuGuidanceTracker = application.MenuGuidanceTracker
+ActionSpec = domain.ActionSpec
+TaskNode = domain.TaskNode
+
+
+def action_step(
+    *,
+    step_id: str = "snowman.model.body_lower",
+    operator_id: str = "mesh.primitive_uv_sphere_add",
+    menu_path: tuple[str, ...] = ("Add", "Mesh", "UV Sphere"),
+) -> TaskNode:
+    return TaskNode(
+        id=step_id,
+        number="1.2.1",
+        title="Create the lower body",
+        order=1,
+        action=ActionSpec(
+            adapter_id="blender",
+            name="blender.mesh.create_uv_sphere",
+            arguments={},
+        ),
+        anchors=(
+            {
+                "kind": "operator",
+                "operatorId": operator_id,
+                "menuPath": list(menu_path),
+            },
+        ),
+    )
+
+
+class MenuGuidanceTrackerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tracker = MenuGuidanceTracker()
+        self.step = action_step()
+
+    def test_exposes_a_four_microstep_path_without_changing_plan_state(self) -> None:
+        snapshot = self.tracker.snapshot(self.step)
+
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertEqual(snapshot.step_id, self.step.id)
+        self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
+        self.assertEqual(
+            tuple(item.label for item in snapshot.items),
+            ("Layout", "Add", "Mesh", "UV Sphere"),
+        )
+        self.assertEqual(
+            tuple(item.state for item in snapshot.items),
+            (
+                GuidanceState.BACK,
+                GuidanceState.NEXT,
+                GuidanceState.LOCKED,
+                GuidanceState.LOCKED,
+            ),
+        )
+        self.assertEqual(snapshot.collapsed_ordinals("Add"), (2, 3, 4))
+        self.assertEqual(snapshot.collapsed_ordinals("Mesh"), (3, 4))
+
+    def test_reveals_add_then_mesh_without_marking_the_leaf_complete(self) -> None:
+        self.assertTrue(self.tracker.reveal(self.step, "Add"))
+        add_snapshot = self.tracker.snapshot(self.step)
+        assert add_snapshot is not None
+        self.assertEqual(
+            tuple(item.state for item in add_snapshot.items),
+            (
+                GuidanceState.COMPLETED,
+                GuidanceState.BACK,
+                GuidanceState.NEXT,
+                GuidanceState.LOCKED,
+            ),
+        )
+
+        self.assertTrue(self.tracker.reveal(self.step, "Mesh"))
+        mesh_snapshot = self.tracker.snapshot(self.step)
+        assert mesh_snapshot is not None
+        self.assertEqual(
+            tuple(item.state for item in mesh_snapshot.items),
+            (
+                GuidanceState.COMPLETED,
+                GuidanceState.COMPLETED,
+                GuidanceState.BACK,
+                GuidanceState.NEXT,
+            ),
+        )
+        self.assertTrue(mesh_snapshot.accepts("mesh.primitive_uv_sphere_add"))
+        self.assertFalse(mesh_snapshot.accepts("mesh.primitive_ico_sphere_add"))
+
+    def test_resets_progress_when_the_next_leaf_changes(self) -> None:
+        self.tracker.reveal(self.step, "Mesh")
+        replacement = action_step(step_id="snowman.model.body_upper")
+
+        snapshot = self.tracker.snapshot(replacement)
+
+        assert snapshot is not None
+        self.assertEqual(snapshot.step_id, replacement.id)
+        self.assertEqual(snapshot.revealed_depth, 1)
+        self.assertEqual(snapshot.items[1].state, GuidanceState.NEXT)
+
+    def test_rejects_stale_reveal_and_operator_path_mismatches(self) -> None:
+        stale = action_step(step_id="stale")
+        self.tracker.snapshot(self.step)
+
+        self.assertFalse(self.tracker.reveal(stale, "Add"))
+        self.assertIsNone(
+            self.tracker.snapshot(
+                action_step(operator_id="mesh.primitive_ico_sphere_add")
+            )
+        )
+        self.assertIsNone(
+            self.tracker.snapshot(
+                action_step(menu_path=("Add", "Mesh", "Ico Sphere"))
+            )
+        )
+
+    def test_supports_the_allowlisted_plane_path_and_refuses_other_menus(self) -> None:
+        plane = action_step(
+            operator_id="mesh.primitive_plane_add",
+            menu_path=("Add", "Mesh", "Plane"),
+        )
+        plane_snapshot = self.tracker.snapshot(plane)
+        assert plane_snapshot is not None
+        self.assertEqual(plane_snapshot.items[-1].label, "Plane")
+        self.assertTrue(plane_snapshot.accepts("mesh.primitive_plane_add"))
+
+        unsupported = action_step(
+            operator_id="material.new",
+            menu_path=("Material Properties", "New", "Surface"),
+        )
+        self.assertIsNone(self.tracker.snapshot(unsupported))
+
+
+if __name__ == "__main__":
+    unittest.main()

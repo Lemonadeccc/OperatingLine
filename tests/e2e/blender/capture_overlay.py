@@ -39,11 +39,14 @@ OUTPUT_NAMES = {
     "back": "guidance-after-back.png",
     "hidden": "guidance-hidden.png",
     "operator": "guidance-operator-fallback.png",
+    "menu-add": "guidance-menu-add.png",
+    "menu-mesh": "guidance-menu-mesh.png",
 }
 if STATE not in OUTPUT_NAMES:
     raise ValueError(f"Unknown visual capture state: {STATE}")
 OUTPUT = OUTPUT_DIRECTORY / OUTPUT_NAMES[STATE]
 SMOKE_OUTPUT = OUTPUT_DIRECTORY / "overlay-smoke.png"
+DOCS_MENU_OUTPUT = REPO_ROOT / "docs" / "assets" / "blender-menu-guidance.png"
 
 spec = importlib.util.spec_from_file_location(
     "operating_line_visual_smoke",
@@ -66,6 +69,8 @@ from operating_line_visual_smoke.operating_line.visual_theme import (  # noqa: E
 )
 
 extension.register()
+bpy.context.preferences.use_preferences_save = False
+bpy.context.preferences.view.use_translate_interface = False
 factory_objects = {
     name: bpy.data.objects.get(name) for name in ("Cube", "Camera", "Light")
 }
@@ -468,6 +473,11 @@ def configure_state():
         if bpy.context.window is not None:
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
+    elif STATE in {"menu-add", "menu-mesh"}:
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        assert session.active_index == 0
+        next_step = session.steps[session.active_index + 1]
+        assert next_step.id == "snowman.model.body_lower"
     assert_factory_objects_preserved()
     if STATE in {
         "goal-request",
@@ -499,6 +509,19 @@ def prepare_view():
         space.region_3d.view_location = Vector((0.0, 0.0, 3.0))
         space.region_3d.view_distance = 10.5
         space.region_3d.view_rotation = Quaternion((0.81, 0.37, 0.16, 0.42))
+
+    if STATE in {"menu-add", "menu-mesh"}:
+        bpy.context.preferences.view.show_tooltips = False
+        menu_name = (
+            "VIEW3D_MT_add" if STATE == "menu-add" else "VIEW3D_MT_mesh_add"
+        )
+        bpy.context.window.cursor_warp(1400, 900)
+        with bpy.context.temp_override(area=area, region=region, space_data=space):
+            result = bpy.ops.wm.call_menu("EXEC_DEFAULT", name=menu_name)
+        print(f"OperatingLine menu invocation result: {sorted(result)}", flush=True)
+        assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
+        bpy.app.timers.register(settle_menu_capture, first_interval=0.15)
+        return None
 
     bpy.context.window.cursor_warp(1320, 820)
     with bpy.context.temp_override(area=area, region=region, space_data=space):
@@ -534,6 +557,14 @@ def scroll_provider_panel():
     return None
 
 
+def settle_menu_capture():
+    """Move off the first menu row so screenshots contain no hover tooltip."""
+
+    bpy.context.window.cursor_warp(1580, 940)
+    bpy.app.timers.register(capture_and_quit, first_interval=0.15)
+    return None
+
+
 def capture_and_quit():
     bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=1)
     bpy.ops.screen.screenshot(filepath=str(OUTPUT))
@@ -550,6 +581,8 @@ def capture_and_quit():
         assert_active_session_preserved()
     if STATE == "forward":
         shutil.copyfile(OUTPUT, SMOKE_OUTPUT)
+    if STATE == "menu-mesh":
+        shutil.copyfile(OUTPUT, DOCS_MENU_OUTPUT)
     print(f"OperatingLine visual state captured: {OUTPUT.name}", flush=True)
 
     if STATE == "hidden":
@@ -605,8 +638,11 @@ def assert_guidance_pixels():
     }:
         assert next_step > 0.0003
         assert locked > 0.0001
-        assert completed < 0.00003 and back < 0.00003
-    elif STATE in {"forward", "back"}:
+        assert completed < 0.00003
+        # The supported first leaf now includes the red current microstep
+        # `01 Layout`, while the global plan still has no completed/Back leaf.
+        assert 0.00003 < back < 0.0003
+    elif STATE in {"forward", "back", "menu-add", "menu-mesh"}:
         assert completed > 0.00005
         assert back > 0.0003
         assert next_step > 0.0003

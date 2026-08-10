@@ -16,6 +16,10 @@ from .infrastructure import (
     forget_managed_collection,
 )
 from .presentation import CLASSES
+from .presentation.native_menu_guidance import (
+    disable_native_menu_guidance,
+    reset_native_menu_guidance,
+)
 
 _session: DemoSession | None = None
 _companion: CompanionController | None = None
@@ -42,6 +46,7 @@ def replace_session(replacement: DemoSession) -> None:
             "A plan update is pending; use Back to roll the walkthrough to its start first"
         )
     _session = replacement
+    reset_native_menu_guidance()
 
 
 def get_companion() -> CompanionController:
@@ -158,6 +163,7 @@ def unregister() -> None:
     global _companion, _session
     if _companion is not None:
         _companion.unregister_timer()
+    disable_native_menu_guidance()
     disable_overlay()
     reset_completed = True
     if _session is not None:

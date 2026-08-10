@@ -7,6 +7,11 @@ from .guidance import (
     relevant_steps,
     step_state,
 )
+from .menu_guidance import (
+    MenuGuidanceItem,
+    MenuGuidanceSnapshot,
+    MenuGuidanceTracker,
+)
 from .session import ActionReceipt, DemoSession
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import InitialPlanRunState, ReplanRunState, validate_provider_list
@@ -26,6 +31,9 @@ __all__ = (
     "GuidanceStep",
     "GoalRequestState",
     "InitialPlanRunState",
+    "MenuGuidanceItem",
+    "MenuGuidanceSnapshot",
+    "MenuGuidanceTracker",
     "build_goal_request",
     "RevisionLineage",
     "ReplanRunState",

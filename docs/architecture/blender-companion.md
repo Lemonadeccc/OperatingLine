@@ -12,6 +12,8 @@
 - `Operator` / 原生 dialog：每次 Provider Run 的明确确认；不保存长期 consent、模型或 Provider 凭据。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
+- `Menu` / `UILayout` / `Operator`：在 Guidance 可见期间，为经过版本测试的真实
+  `Add → Mesh → Plane/UV Sphere` 菜单项显示序号与状态，并把最终项路由到同一个受控计划动作。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
 - `gpu` / `blf`：形状与文字绘制。
 - `GizmoGroup`：后续需要可交互三维锚点时使用。
@@ -19,6 +21,7 @@
 官方参考：[Creating Extensions](https://docs.blender.org/manual/en/latest/advanced/extensions/getting_started.html)、
 [SpaceView3D](https://docs.blender.org/api/current/bpy.types.SpaceView3D.html)、
 [Panel](https://docs.blender.org/api/current/bpy.types.Panel.html)、
+[Menu](https://docs.blender.org/api/current/bpy.types.Menu.html)、
 [GizmoGroup](https://docs.blender.org/api/current/bpy.types.GizmoGroup.html)。
 
 ## 需要上游 PR 的边界
@@ -27,9 +30,12 @@
 事件阶段、需要 Blender 官方维护的持久异步运行时，或需要 Python 扩展无法实现的安全边界。
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
-和世界坐标；对内置操作保存 `operatorId` 与可选 `menuPath`。当前版本在没有公开 UI 矩形时
-显示语义路径与 `UI target unavailable`，不会绘制猜测坐标。未来只有版本专用 locator 通过
-真实宿主测试后，才能把该类锚点升级为精确目标。
+和世界坐标；对内置操作保存 `operatorId` 与可选 `menuPath`。Blender 4.5/5.1 版本适配器只处理
+允许列表中的 `Add → Mesh → Plane/UV Sphere`：Guidance 可见时临时替换三个原生菜单类的 draw
+方法，隐藏或卸载时精确恢复；最终绿色菜单项与 `Next` 进入同一个 Session action 和 receipt。
+`Layout` 上下文显示在放大的视口卡片中，不猜测工作区页签坐标。其他路径仍显示语义路径与
+`UI target unavailable`，不会绘制猜测坐标或替换无关菜单项。未来只有新的版本专用适配器通过
+真实宿主测试后，才能扩展允许列表。
 
 ## 视觉引导状态
 
@@ -47,10 +53,16 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 任意按钮背景色。视口 `POST_PIXEL` Overlay 最多显示四个相邻全局执行序号；Back/Next 的
 真实对象或世界坐标锚点分别使用红/绿 4 px 主线、8–10 px 深色描边、箭头和终点编号。
 
+底部步骤卡片使用更大的标题、状态文字、按钮提示与序号徽标。允许列表中的菜单叶子还会显示
+`Layout → Add → Mesh → target` 四个微步骤：已完成为蓝色、当前返回点为红色、下一点击为绿色、
+未开放为灰色，并以同色连线连接。真实原生菜单在标签右侧显示折叠序号与 `BACK/NEXT/ALT`，搭配
+Blender 内置彩色/锁定图标；原生 `UILayout` 无法设置任意文字颜色，因此精确红绿线和徽标由视口
+卡片承担。计划外 `ALT` 项进入同一严格校验并拒绝执行，不创建未跟踪对象。
+
 引导可见性属于 Blender 进程级 UI 状态，保存在带 `SKIP_SAVE` 的 `WindowManager` 属性中，
 因此切换到 OperatingLine 隔离 Render Scene 不会错误地把 UI 显示成隐藏。`Hide Guidance`
-移除 draw handler 并隐藏树与状态详情，但保留执行控件和 `Show Guidance` 恢复入口；步骤、receipt
-与场景内容不随隐藏而改变。
+移除 draw handler、恢复原生菜单 draw 方法，并隐藏树与状态详情，但保留执行控件和
+`Show Guidance` 恢复入口；步骤、receipt 与场景内容不随隐藏而改变。
 
 ## 主线程规则
 
@@ -60,8 +72,9 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异�
 JSON 放入队列。
 长达 120 秒的 Provider 调用运行在 Orchestrator 后台，不占用 Blender 的短请求线程。`bpy.app.timers` 在 Blender 主线程校验
 提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
-不修改场景，只从当前会话派生最多四个相邻步骤，并为
-Back/Next 解析已记录资源的屏幕锚点。
+不修改场景，只从当前会话派生最多四个相邻步骤，并为 Back/Next 解析已记录资源的
+屏幕锚点。原生菜单 draw 也只推进瞬时的菜单揭示深度；只有最终受控 Operator 或 `Next` 才执行
+同一个计划 action。
 
 Start/Next/Back/Show/Hide 由 Blender Operator 事件触发当前界面自然重绘。Blender 4.5/5.1
 没有可供 Extension 稳定调用的公开 `Area.tag_redraw` API，因此只更新远端计划或连接文案的

@@ -197,7 +197,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `trainingUse: not_authorized`。
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
-  视口同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头；可显式连接回环地址上的
+  放大的视口卡片同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头。对经过 Blender
+  4.5/5.1 验证的 `Add → Mesh → Plane/UV Sphere` 路径，真实原生菜单还会显示微步骤序号、状态文字
+  和彩色图标；点击绿色最终项与点击 `Next` 执行同一个计划动作，并共享同一份回退回执。Extension
+  也可显式连接回环地址上的
   Orchestrator，非阻塞拉取新计划或提案并回传步骤结果。提案会显示独立的只读任务树、
   `Accept Plan` 与 `Reject Plan`；接受前 Start/Next 不可执行，且场景与活动计划不会改变。
 - **完整雪人预览垂直切片**：内置 revision 4 计划包含 7 个阶段、15 个可执行步骤，依次完成
@@ -210,6 +213,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测试。
 
 ![OperatingLine 在 Blender 内的彩色任务树、前进回退按钮、步骤序号与雪人引导线](docs/assets/blender-guidance.png)
+
+![OperatingLine 在 Blender 原生 Add 和 Mesh 菜单中的分步引导，以及放大的视口步骤卡片](docs/assets/blender-menu-guidance.png)
 
 > [!IMPORTANT]
 > 当前完成的是内置 GuidePlan 驱动的确定性雪人预览，以及“外部 AI 生成计划 → Blender 内
@@ -578,9 +583,12 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
    必须先用 Back 回到起点才能接受。
 2. `Start` 重置已接受的演示会话、展示 Overlay，并将计划置于第一个可执行步骤之前；待审提案
    存在时 Start/Next 会被门禁，避免在审批期间继续修改场景。
-3. `Next` 按 15 个步骤依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，创建并
-   刚性绑定四骨骼 Armature，插入第 1/20/40 帧姿态，建立隔离 Scene、World、双 Area Light 和
-   Camera，最后生成帧 20 的 320 × 320 Eevee PNG。
+3. 每个步骤都可继续点击 `Next` 自动执行。当前一步属于已验证的 `Add → Mesh → Plane/UV Sphere`
+   路径时，也可以打开 Blender 顶部真实 `Add` 菜单，按 `02 → 03 → 04 NEXT` 进入 `Mesh` 并点击
+   绿色最终项。两种入口执行相同的计划参数并生成相同的 receipt，不会要求切换模式。15 个步骤会
+   依次创建地面、模型与细节，分配雪/煤/胡萝卜/木头/地面材质，创建并刚性绑定四骨骼 Armature，
+   插入第 1/20/40 帧姿态，建立隔离 Scene、World、双 Area Light 和 Camera，最后生成帧 20 的
+   320 × 320 Eevee PNG。
 4. `Back` 回退当前步骤；连续回退可以删除渲染产物并补偿全部 15 步，不删除用户对象。
 5. `Hide Guidance` 会一起隐藏视口卡片、彩色数字、引导线、状态详情和任务树，但保留
    Revision Workspace、Start/Back/Next 与 `Show Guidance` 恢复入口；隐藏不会丢失草稿、历史、
@@ -604,11 +612,13 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
     和待确认的精确决策。重新 Connect 后只会以同一 generation UUID 恢复状态，不会另行授权一次
     Provider 调用；Extension 卸载/重载才清理这些进程内状态。
 
-Blender 公开 Python UI API 不提供任意内置菜单项的稳定屏幕矩形。当前对象和世界坐标锚点会
-绘制真实目标线；`operator` 锚点只显示操作 ID 或 `menuPath` 语义路径，并明确标记
-`UI target unavailable`，不会伪造一条指向并未被 AI 点击的按钮连线。Back/Next 按钮使用宿主
-原生控件：Back 采用 Blender 警示色，Next 使用绿色状态图标；任意按钮背景色不是 `UILayout`
-公开能力。
+Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。当前对象和世界坐标锚点会绘制
+真实目标线；版本适配器只在 Guidance 可见时替换经过 Blender 4.5/5.1 测试的
+`Add → Mesh → Plane/UV Sphere` 菜单绘制，并在隐藏 Guidance 或卸载 Extension 时恢复原始方法。
+`Layout` 工作区上下文保留在放大的视口卡片中，不猜测页签坐标；其他 `operator` 锚点继续显示操作 ID
+或 `menuPath` 语义路径并标记 `UI target unavailable`。原生菜单以彩色图标和 `BACK/NEXT/ALT` 文案
+表达状态，因为 `UILayout` 不支持任意文字或按钮背景色；不匹配当前计划的 `ALT` 项会拒绝执行，
+不会产生未跟踪对象。
 
 本地 Start/Next/Back/Show/Hide 操作会随 Blender UI 事件自然重绘。只由 Companion timer 更新的
 远端计划或连接文案，可能要等到 Blender 下一次正常界面重绘后显示；当前版本不调用 4.5/5.1
@@ -719,18 +729,20 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 Planner Packet、evaluate、实例定向初版 Proposal、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
-`pnpm test:blender:visual` 会为十四个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
+`pnpm test:blender:visual` 会为十六个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-goal-request.png`、`guidance-revision-request.png`、
 `guidance-revision-collapsed.png`、`guidance-proposal-review.png`、
 `guidance-initial-provider-disclosure.png`、`guidance-initial-provider-generating.png`、
 `guidance-initial-provider-failed.png`、
 `guidance-provider-disclosure.png`、`guidance-provider-generating.png`、`guidance-mid-forward.png`、
-`guidance-after-back.png`、`guidance-hidden.png` 与 `guidance-operator-fallback.png`；中间前进态
+`guidance-after-back.png`、`guidance-hidden.png`、`guidance-operator-fallback.png`、
+`guidance-menu-add.png` 与 `guidance-menu-mesh.png`；中间前进态
 同时写入兼容产物 `artifacts/blender/overlay-smoke.png`。这些截图分别用于检查初始绿色 Next、
 宿主目标请求与 awaiting-planner 状态、
 节点引用与 Revision request、保留草稿的折叠摘要、待审提案的 thread/diff/参数变化、Initial/Replan
 Provider 的远端数据/费用披露、异步 generating 状态与 Run ID、修订历史与接受/拒绝控件、红色 Back/绿色
-Next 并存、回退后的颜色与对象变化、完整隐藏，以及 operator 语义降级。
+Next 并存、回退后的颜色与对象变化、完整隐藏、operator 语义降级，以及真实 Add/Mesh 菜单中的
+微步骤序号、状态图标和放大步骤卡片。
 
 产品与视觉实现的长期约束记录在 [DESIGN.md](DESIGN.md)，后续宿主不得自行发明冲突的状态色、
 锚点真实性或隐藏规则。

@@ -8,6 +8,13 @@ from ..infrastructure import (
     overlay_enabled,
     remove_factory_startup_objects,
 )
+from .native_menu_guidance import (
+    disable_native_menu_guidance,
+    enable_native_menu_guidance,
+    guided_menu_action_matches,
+    native_menu_snapshot,
+    refresh_native_menu_guidance,
+)
 
 
 def _session():
@@ -20,6 +27,32 @@ def _companion():
     from .. import get_companion
 
     return get_companion()
+
+
+def _execute_next(operator):
+    """Run the canonical next action for both control and native-menu entry."""
+
+    if _companion().proposed_plan is not None:
+        message = "Accept or reject the pending plan proposal before continuing"
+        operator.report({"WARNING"}, message)
+        return {"CANCELLED"}
+    session = _session()
+    next_index = session.active_index + 1
+    candidate = session.steps[next_index] if next_index < len(session.steps) else None
+    try:
+        step = session.next()
+    except (OSError, RuntimeError, ValueError) as error:
+        _companion().report("error", step=candidate, error=str(error))
+        operator.report({"ERROR"}, str(error))
+        refresh_native_menu_guidance()
+        return {"CANCELLED"}
+    if step is None:
+        operator.report({"INFO"}, "All demo steps are complete")
+        refresh_native_menu_guidance()
+        return {"CANCELLED"}
+    _companion().report("step_succeeded", step=step)
+    refresh_native_menu_guidance()
+    return {"FINISHED"}
 
 
 def _draw_provider_authorization(layout, provider, *, initial: bool) -> None:
@@ -83,7 +116,8 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
                     "Factory scene fingerprint did not match; no existing object was deleted",
                 )
         context.window_manager.operating_line_overlay_enabled = True
-        enable_overlay(_session)
+        enable_native_menu_guidance(_session)
+        enable_overlay(_session, native_menu_snapshot)
         _companion().report("walkthrough_started")
         return {"FINISHED"}
 
@@ -95,26 +129,26 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, _context):
-        if _companion().proposed_plan is not None:
-            message = "Accept or reject the pending plan proposal before continuing"
-            self.report({"WARNING"}, message)
+        return _execute_next(self)
+
+
+class OPERATINGLINE_OT_guided_menu_action(bpy.types.Operator):
+    bl_idname = "operating_line.guided_menu_action"
+    bl_label = "Execute Guided Plan Step"
+    bl_description = (
+        "Execute this exact accepted leaf using its planned parameters and shared Back receipt"
+    )
+    bl_options = {"INTERNAL"}
+
+    step_id: bpy.props.StringProperty()
+    operator_id: bpy.props.StringProperty()
+
+    def execute(self, _context):
+        if not guided_menu_action_matches(self.step_id, self.operator_id):
+            message = "This menu item does not match the accepted next step"
+            self.report({"ERROR"}, message)
             return {"CANCELLED"}
-        session = _session()
-        next_index = session.active_index + 1
-        candidate = (
-            session.steps[next_index] if next_index < len(session.steps) else None
-        )
-        try:
-            step = session.next()
-        except (OSError, RuntimeError, ValueError) as error:
-            _companion().report("error", step=candidate, error=str(error))
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
-        if step is None:
-            self.report({"INFO"}, "All demo steps are complete")
-            return {"CANCELLED"}
-        _companion().report("step_succeeded", step=step)
-        return {"FINISHED"}
+        return _execute_next(self)
 
 
 class OPERATINGLINE_OT_back(bpy.types.Operator):
@@ -136,6 +170,7 @@ class OPERATINGLINE_OT_back(bpy.types.Operator):
             self.report({"INFO"}, "No active step to roll back")
             return {"CANCELLED"}
         _companion().report("step_rolled_back", step=step)
+        refresh_native_menu_guidance()
         return {"FINISHED"}
 
 
@@ -483,10 +518,12 @@ class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
 
     def execute(self, context):
         if overlay_enabled():
+            disable_native_menu_guidance()
             disable_overlay()
             context.window_manager.operating_line_overlay_enabled = False
         else:
-            enable_overlay(_session)
+            enable_native_menu_guidance(_session)
+            enable_overlay(_session, native_menu_snapshot)
             context.window_manager.operating_line_overlay_enabled = True
         return {"FINISHED"}
 
@@ -521,6 +558,7 @@ CLASSES = (
     OPERATINGLINE_OT_run_replan_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
+    OPERATINGLINE_OT_guided_menu_action,
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_toggle_overlay,
     OPERATINGLINE_OT_toggle_branch,

@@ -18,17 +18,19 @@ from .snowman_actions import (
 
 _draw_handle = None
 _session_provider = None
+_menu_guidance_provider = None
 
 
 def overlay_enabled() -> bool:
     return _draw_handle is not None
 
 
-def enable_overlay(session_provider) -> None:
+def enable_overlay(session_provider, menu_guidance_provider=None) -> None:
     """Register one viewport handler; the invoking UI event schedules redraw."""
 
-    global _draw_handle, _session_provider
+    global _draw_handle, _session_provider, _menu_guidance_provider
     _session_provider = session_provider
+    _menu_guidance_provider = menu_guidance_provider
     if _draw_handle is None:
         _draw_handle = bpy.types.SpaceView3D.draw_handler_add(
             _draw_overlay, (), "WINDOW", "POST_PIXEL"
@@ -38,11 +40,12 @@ def enable_overlay(session_provider) -> None:
 def disable_overlay() -> None:
     """Remove the viewport handler without calling unavailable Area redraw APIs."""
 
-    global _draw_handle, _session_provider
+    global _draw_handle, _session_provider, _menu_guidance_provider
     if _draw_handle is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_draw_handle, "WINDOW")
         _draw_handle = None
     _session_provider = None
+    _menu_guidance_provider = None
 
 
 def _screen_anchor(region, region_3d, session, step):
@@ -229,12 +232,20 @@ def _clamp_anchor(anchor, region, margin: float = 20.0):
     )
 
 
-def _draw_badge(shader, center, ordinal, state) -> None:
+def _draw_badge(
+    shader,
+    center,
+    ordinal,
+    state,
+    *,
+    radius: float = 17.0,
+    text_size: int = 13,
+) -> None:
     color = color_for(state)
-    _draw_circle(shader, center, 17.0, HALO)
-    _draw_circle(shader, center, 14.0, color)
+    _draw_circle(shader, center, radius, HALO)
+    _draw_circle(shader, center, max(radius - 3.0, 1.0), color)
     number_color = HALO if state is not GuidanceState.LOCKED else TEXT
-    _draw_centered_text(f"{ordinal:02d}", center, 13, number_color)
+    _draw_centered_text(f"{ordinal:02d}", center, text_size, number_color)
 
 
 def _draw_overlay() -> None:
@@ -251,14 +262,19 @@ def _draw_overlay() -> None:
     if region is None or not isinstance(space, bpy.types.SpaceView3D):
         return
 
-    card_width = min(420.0, max(300.0, float(region.width) - 48.0))
-    card_height = 152.0
+    menu_guidance = (
+        _menu_guidance_provider()
+        if _menu_guidance_provider is not None
+        else None
+    )
+    card_width = min(600.0, max(390.0, float(region.width) - 48.0))
+    card_height = 284.0 if menu_guidance is not None else 210.0
     left, bottom = 24.0, 44.0
     right, top = left + card_width, bottom + card_height
-    badge_y = top - 58.0
-    available_width = card_width - 48.0
-    spacing = min(72.0, available_width / max(len(items), 1))
-    first_x = left + 28.0
+    badge_y = top - 72.0
+    available_width = card_width - 64.0
+    spacing = min(92.0, available_width / max(len(items), 1))
+    first_x = left + 36.0
     badge_centers = {
         item.index: (first_x + item_index * spacing, badge_y)
         for item_index, item in enumerate(items)
@@ -313,8 +329,8 @@ def _draw_overlay() -> None:
 
         _draw_text(
             f"GUIDANCE  {session.active_index + 1:02d} / {len(session.steps):02d}",
-            (left + 16.0, top - 24.0),
-            13,
+            (left + 20.0, top - 32.0),
+            18,
             TEXT,
         )
 
@@ -326,19 +342,26 @@ def _draw_overlay() -> None:
                 connector_color = color_for(item.state)
                 _draw_segment(
                     shader,
-                    (previous_center[0] + 15.0, badge_y),
-                    (center[0] - 15.0, badge_y),
-                    6.0,
+                    (previous_center[0] + 20.0, badge_y),
+                    (center[0] - 20.0, badge_y),
+                    8.0,
                     HALO,
                 )
                 _draw_segment(
                     shader,
-                    (previous_center[0] + 15.0, badge_y),
-                    (center[0] - 15.0, badge_y),
-                    3.0,
+                    (previous_center[0] + 20.0, badge_y),
+                    (center[0] - 20.0, badge_y),
+                    4.0,
                     connector_color,
                 )
-            _draw_badge(shader, center, item.index + 1, item.state)
+            _draw_badge(
+                shader,
+                center,
+                item.index + 1,
+                item.state,
+                radius=22.0,
+                text_size=16,
+            )
 
         back_text = (
             f"BACK {session.active_index + 1:02d}  {active.title}"
@@ -350,22 +373,80 @@ def _draw_overlay() -> None:
             if next_step is not None
             else "NEXT --  Walkthrough complete"
         )
+        back_y = bottom + (142.0 if menu_guidance is not None else 62.0)
+        next_y = bottom + (116.0 if menu_guidance is not None else 36.0)
+        semantic_y = bottom + (94.0 if menu_guidance is not None else 14.0)
         _draw_text(
             back_text,
-            (left + 16.0, bottom + 48.0),
-            12,
+            (left + 20.0, back_y),
+            15,
             color_for(GuidanceState.BACK) if active is not None else MUTED_TEXT,
         )
         _draw_text(
             next_text,
-            (left + 16.0, bottom + 28.0),
-            12,
+            (left + 20.0, next_y),
+            15,
             color_for(GuidanceState.NEXT) if next_step is not None else MUTED_TEXT,
         )
 
         semantic_step = next_step or active
         semantic_hint = _semantic_hint(semantic_step) if semantic_step is not None else None
-        if semantic_hint is not None:
-            _draw_text(semantic_hint, (left + 16.0, bottom + 10.0), 10, MUTED_TEXT)
+        if menu_guidance is not None:
+            _draw_text(
+                "MENU PATH  Click green 04 or use Next",
+                (left + 20.0, semantic_y),
+                12,
+                TEXT,
+            )
+            path_left = left + 66.0
+            path_right = right - 66.0
+            path_spacing = (path_right - path_left) / max(
+                len(menu_guidance.items) - 1,
+                1,
+            )
+            path_y = bottom + 43.0
+            path_centers = [
+                (path_left + index * path_spacing, path_y)
+                for index in range(len(menu_guidance.items))
+            ]
+            for item_index, item in enumerate(menu_guidance.items):
+                center = path_centers[item_index]
+                if item_index:
+                    previous_center = path_centers[item_index - 1]
+                    _draw_segment(
+                        shader,
+                        (previous_center[0] + 15.0, path_y),
+                        (center[0] - 15.0, path_y),
+                        7.0,
+                        HALO,
+                    )
+                    _draw_segment(
+                        shader,
+                        (previous_center[0] + 15.0, path_y),
+                        (center[0] - 15.0, path_y),
+                        3.0,
+                        color_for(item.state),
+                    )
+                _draw_badge(
+                    shader,
+                    center,
+                    item.ordinal,
+                    item.state,
+                    radius=16.0,
+                    text_size=12,
+                )
+                _draw_centered_text(
+                    item.label,
+                    (center[0], bottom + 15.0),
+                    11,
+                    TEXT,
+                )
+        elif semantic_hint is not None:
+            _draw_text(
+                semantic_hint,
+                (left + 20.0, semantic_y),
+                12,
+                MUTED_TEXT,
+            )
     finally:
         gpu.state.blend_set("NONE")

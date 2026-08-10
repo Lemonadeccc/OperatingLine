@@ -58,8 +58,14 @@ from operating_line_extension.operating_line import (  # noqa: E402
 )
 from operating_line_extension.operating_line.presentation.operators import (  # noqa: E402
     OPERATINGLINE_OT_back,
+    OPERATINGLINE_OT_guided_menu_action,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_start,
+)
+from operating_line_extension.operating_line.presentation.native_menu_guidance import (  # noqa: E402
+    native_menu_guidance_enabled,
+    native_menu_snapshot,
+    reveal_native_menu,
 )
 from operating_line_extension.operating_line.presentation.revision_workspace import (  # noqa: E402
     _display_columns,
@@ -2455,6 +2461,11 @@ def assert_companion_and_plan_semantics() -> None:
 
 
 def main() -> None:
+    original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
+    original_add_draw = bpy.types.VIEW3D_MT_add.draw
+    original_mesh_draw = bpy.types.VIEW3D_MT_mesh_add.draw
+    original_add_label = bpy.types.VIEW3D_MT_add.bl_label
+    original_mesh_label = bpy.types.VIEW3D_MT_mesh_add.bl_label
     wrapped_english = _wrap_history_message(
         "@1.2.3 Make this head larger and rougher"
     )
@@ -2481,6 +2492,10 @@ def main() -> None:
     session_before_registration = operating_line.get_session()
     operating_line.register()
     operating_line.register()
+    assert native_menu_guidance_enabled() is False
+    assert bpy.types.VIEW3D_MT_editor_menus.draw is original_editor_draw
+    assert bpy.types.VIEW3D_MT_add.draw is original_add_draw
+    assert bpy.types.VIEW3D_MT_mesh_add.draw is original_mesh_draw
     assert operating_line.get_session() is session_before_registration
     registered_companion = operating_line.get_companion()
     assert registered_companion.timer_registered
@@ -2903,12 +2918,84 @@ def main() -> None:
         assert session.started and session.active_index == -1
         assert overlay_enabled() is True
         assert bpy.context.window_manager.operating_line_overlay_enabled is True
+        assert native_menu_guidance_enabled() is True
+        assert bpy.types.VIEW3D_MT_editor_menus.draw is not original_editor_draw
+        assert bpy.types.VIEW3D_MT_add.draw is not original_add_draw
+        assert bpy.types.VIEW3D_MT_mesh_add.draw is not original_mesh_draw
+        menu_snapshot = native_menu_snapshot()
+        assert menu_snapshot is not None
+        assert menu_snapshot.step_id == ACTION_STEPS[0]["id"]
+        assert tuple(item.label for item in menu_snapshot.items) == (
+            "Layout",
+            "Add",
+            "Mesh",
+            "UV Sphere",
+        )
+
+        # Opening the real native menus only reveals the microstep path. The
+        # exact guided final operator and the existing Next operator share the
+        # canonical action and rollback receipt path.
+        assert reveal_native_menu("Add")
+        assert native_menu_snapshot().revealed_depth == 2
+        assert reveal_native_menu("Mesh")
+        assert native_menu_snapshot().revealed_depth == 3
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        assert session.active_index == -1
+        assert native_menu_snapshot().revealed_depth == 1
+        assert reveal_native_menu("Add")
+        assert reveal_native_menu("Mesh")
+        scene_before_wrong_target = {item.as_pointer() for item in bpy.data.objects}
+        try:
+            bpy.ops.operating_line.guided_menu_action(
+                step_id=ACTION_STEPS[0]["id"],
+                operator_id="mesh.primitive_ico_sphere_add",
+            )
+        except RuntimeError as error:
+            assert "does not match the accepted next step" in str(error)
+        else:
+            raise AssertionError("A gray alternative must not execute the accepted leaf")
+        assert session.active_index == -1
+        assert {item.as_pointer() for item in bpy.data.objects} == scene_before_wrong_target
+
+        assert bpy.ops.operating_line.guided_menu_action(
+            step_id=ACTION_STEPS[0]["id"],
+            operator_id="mesh.primitive_uv_sphere_add",
+        ) == {"FINISHED"}
+        guided_receipt = session.receipts[ACTION_STEPS[0]["id"]]
+        guided_signature = (
+            guided_receipt.action_name,
+            tuple(item.logical_id for item in guided_receipt.created),
+            tuple(item.display_name for item in guided_receipt.created),
+        )
+        assert session.active_index == 0
+        assert bpy.data.objects.get(EXPECTED[0]) is not None
+        assert bpy.ops.operating_line.back() == {"FINISHED"}
+        assert session.active_index == -1
+        assert_absent(EXPECTED[0])
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        automatic_receipt = session.receipts[ACTION_STEPS[0]["id"]]
+        assert (
+            automatic_receipt.action_name,
+            tuple(item.logical_id for item in automatic_receipt.created),
+            tuple(item.display_name for item in automatic_receipt.created),
+        ) == guided_signature
+        assert bpy.ops.operating_line.back() == {"FINISHED"}
+        assert session.active_index == -1
+        assert_absent(EXPECTED[0])
+
         assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
         assert overlay_enabled() is False
         assert bpy.context.window_manager.operating_line_overlay_enabled is False
+        assert native_menu_guidance_enabled() is False
+        assert bpy.types.VIEW3D_MT_editor_menus.draw is original_editor_draw
+        assert bpy.types.VIEW3D_MT_add.draw is original_add_draw
+        assert bpy.types.VIEW3D_MT_mesh_add.draw is original_mesh_draw
+        assert bpy.types.VIEW3D_MT_add.bl_label == original_add_label
+        assert bpy.types.VIEW3D_MT_mesh_add.bl_label == original_mesh_label
         assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
         assert overlay_enabled() is True
         assert bpy.context.window_manager.operating_line_overlay_enabled is True
+        assert native_menu_guidance_enabled() is True
         assert all(
             bpy.data.objects.get(name) is not None
             for name in ("Cube", "Camera", "Light")
@@ -3093,6 +3180,12 @@ def main() -> None:
         for collection in bpy.data.collections
     )
     assert overlay_enabled() is False
+    assert native_menu_guidance_enabled() is False
+    assert bpy.types.VIEW3D_MT_editor_menus.draw is original_editor_draw
+    assert bpy.types.VIEW3D_MT_add.draw is original_add_draw
+    assert bpy.types.VIEW3D_MT_mesh_add.draw is original_mesh_draw
+    assert bpy.types.VIEW3D_MT_add.bl_label == original_add_label
+    assert bpy.types.VIEW3D_MT_mesh_add.bl_label == original_mesh_label
     assert not hasattr(bpy.types.WindowManager, "operating_line_overlay_enabled")
     assert not hasattr(bpy.types.Scene, "operating_line_replace_factory_scene")
     assert not hasattr(bpy.types.WindowManager, "operating_line_runtime_url")
@@ -3112,6 +3205,7 @@ def main() -> None:
         "operating_line_revision_workspace_expanded",
     )
     assert not hasattr(bpy.types, "OPERATINGLINE_OT_remove_revision_reference")
+    assert not hasattr(bpy.types, "OPERATINGLINE_OT_guided_menu_action")
     assert not hasattr(bpy.types, "OPERATINGLINE_PT_sidebar")
     assert not registered_companion.timer_registered
     assert not bpy.app.timers.is_registered(registered_companion.timer_callback)
