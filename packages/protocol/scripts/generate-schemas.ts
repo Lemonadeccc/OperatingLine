@@ -34,6 +34,7 @@ import {
   humanEvalAnnotationSchema,
   humanEvalComparisonReportSchema,
   humanEvalSuiteSchema,
+  interactionCatalogSchema,
   planningContextSchema,
   planningBenchmarkCaseSchema,
   planningPromptContextSchema,
@@ -255,6 +256,11 @@ const schemas = [
     'action-catalog.schema.json',
     'https://operatingline.dev/schema/v1/action-catalog.json',
     actionCatalogSchema,
+  ],
+  [
+    'interaction-catalog.schema.json',
+    'https://operatingline.dev/schema/v1/interaction-catalog.json',
+    interactionCatalogSchema,
   ],
   [
     'planning-context.schema.json',

@@ -15,6 +15,7 @@ export * from './eval-suite.js';
 export * from './guide.js';
 export * from './goal.js';
 export * from './history.js';
+export * from './interaction-catalog.js';
 export * from './planning.js';
 export * from './prompt.js';
 export * from './provider.js';

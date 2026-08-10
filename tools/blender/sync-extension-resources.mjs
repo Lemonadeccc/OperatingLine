@@ -10,6 +10,10 @@ const resourceMappings = [
     resolve('adapters/blender/catalog/v1/action-catalog.json'),
     resolve('adapters/blender/extension/operating_line/resources/action-catalog.json'),
   ],
+  [
+    resolve('adapters/blender/catalog/v1/interaction-catalog.json'),
+    resolve('adapters/blender/extension/operating_line/resources/interaction-catalog.json'),
+  ],
   [resolve('LICENSE'), resolve('adapters/blender/extension/LICENSE')],
 ];
 

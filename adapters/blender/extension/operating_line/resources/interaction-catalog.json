@@ -1,0 +1,576 @@
+{
+  "protocolVersion": "1.1.0",
+  "catalogVersion": "1.0.0",
+  "adapterId": "blender",
+  "actionCatalogVersion": "1.3.0",
+  "adapterVersionRange": ">=0.1.0 <0.2.0",
+  "hostVersionRange": ">=4.5.0 <5.2.0",
+  "title": "OperatingLine Blender interaction catalog",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.3.0 action.",
+  "recipes": [
+    {
+      "id": "blender.mesh.create_uv_sphere.native",
+      "actionName": "blender.mesh.create_uv_sphere",
+      "title": "Add one UV sphere from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.uv_sphere",
+            "order": 4,
+            "label": "UV Sphere",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_uv_sphere_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.uv_sphere",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.mesh.create_plane.native",
+      "actionName": "blender.mesh.create_plane",
+      "title": "Add one plane from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.plane",
+            "order": 4,
+            "label": "Plane",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_plane_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.plane",
+          "operatorId": "mesh.primitive_plane_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.mesh.create_primitive_batch.semantic",
+      "actionName": "blender.mesh.create_primitive_batch",
+      "title": "Create a bounded primitive assembly",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "semantic.repeat_primitives",
+            "order": 4,
+            "label": "Planned parts",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.primitive_batch"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates multiple planned primitives atomically, so no single Blender menu item can represent the action honestly. Split meaningful parts into separate leaves for native teaching guidance.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.material.create_and_assign.semantic",
+      "actionName": "blender.material.create_and_assign",
+      "title": "Create and assign one Principled material",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.shading",
+            "order": 1,
+            "label": "Shading",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Shading"
+            }
+          },
+          {
+            "id": "panel.material_properties",
+            "order": 2,
+            "label": "Material",
+            "intent": "navigate",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MATERIAL"
+            }
+          },
+          {
+            "id": "control.new_material",
+            "order": 3,
+            "label": "New",
+            "intent": "configure",
+            "target": {
+              "kind": "control",
+              "hostId": "material.new"
+            }
+          },
+          {
+            "id": "semantic.principled_surface",
+            "order": 4,
+            "label": "Surface",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "ShaderNodeBsdfPrincipled"
+            }
+          }
+        ],
+        "reason": "The canonical action creates and assigns the exact material through Blender data APIs; stable native rectangles for the Properties controls are not exposed by the supported public UI API.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      }
+    },
+    {
+      "id": "blender.material.create_palette_and_assign.semantic",
+      "actionName": "blender.material.create_palette_and_assign",
+      "title": "Create and assign a Principled material palette",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.shading",
+            "order": 1,
+            "label": "Shading",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Shading"
+            }
+          },
+          {
+            "id": "panel.material_properties",
+            "order": 2,
+            "label": "Material",
+            "intent": "navigate",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MATERIAL"
+            }
+          },
+          {
+            "id": "semantic.palette_entries",
+            "order": 3,
+            "label": "Palette",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.material_palette"
+            }
+          },
+          {
+            "id": "semantic.assign_targets",
+            "order": 4,
+            "label": "Assign",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.material_assignments"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates several materials and assignments atomically; Blender does not expose one native control that represents the whole palette operation.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      }
+    },
+    {
+      "id": "blender.rig.create_armature.semantic",
+      "actionName": "blender.rig.create_armature",
+      "title": "Create and bind a rigid armature",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add_armature",
+            "order": 2,
+            "label": "Armature",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "object.armature_add"
+            }
+          },
+          {
+            "id": "mode.edit_bones",
+            "order": 3,
+            "label": "Edit Bones",
+            "intent": "configure",
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_ARMATURE"
+            }
+          },
+          {
+            "id": "semantic.rigid_parent",
+            "order": 4,
+            "label": "Parent Parts",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.rigid_bindings"
+            }
+          }
+        ],
+        "reason": "The accepted action creates several bones and rigid object bindings as one compensated transaction, not as one allowlisted native menu command.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/animation/armatures/introduction.html"
+      }
+    },
+    {
+      "id": "blender.animation.create_pose_keyframes.semantic",
+      "actionName": "blender.animation.create_pose_keyframes",
+      "title": "Create rigid pose keyframes",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.animation",
+            "order": 1,
+            "label": "Animation",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Animation"
+            }
+          },
+          {
+            "id": "editor.action",
+            "order": 2,
+            "label": "Dope Sheet",
+            "intent": "navigate",
+            "target": {
+              "kind": "editor",
+              "hostId": "DOPESHEET_EDITOR.ACTION"
+            }
+          },
+          {
+            "id": "mode.pose",
+            "order": 3,
+            "label": "Pose Bones",
+            "intent": "configure",
+            "target": {
+              "kind": "mode",
+              "hostId": "POSE"
+            }
+          },
+          {
+            "id": "operator.insert_keyframe",
+            "order": 4,
+            "label": "Keyframes",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "anim.keyframe_insert"
+            }
+          }
+        ],
+        "reason": "The accepted action writes a bounded set of exact frames and bone rotations atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/animation/keyframes/introduction.html"
+      }
+    },
+    {
+      "id": "blender.render_scene.create.semantic",
+      "actionName": "blender.render_scene.create",
+      "title": "Create an isolated render scene and world",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "control.scene_selector",
+            "order": 2,
+            "label": "Scene",
+            "intent": "navigate",
+            "target": {
+              "kind": "control",
+              "hostId": "window.scene"
+            }
+          },
+          {
+            "id": "semantic.new_scene",
+            "order": 3,
+            "label": "New Scene",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.render_scene"
+            }
+          },
+          {
+            "id": "panel.world",
+            "order": 4,
+            "label": "World",
+            "intent": "configure",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_WORLD"
+            }
+          }
+        ],
+        "reason": "The action creates an owned scene, world, and collection linkage together; Blender has no single allowlisted native control for the complete operation.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/scene_layout/scene/introduction.html"
+      }
+    },
+    {
+      "id": "blender.render_rig.create.semantic",
+      "actionName": "blender.render_rig.create",
+      "title": "Create Area lights and a camera",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "semantic.area_lights",
+            "order": 2,
+            "label": "Area Lights",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.area_lights"
+            }
+          },
+          {
+            "id": "operator.camera_add",
+            "order": 3,
+            "label": "Camera",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "object.camera_add"
+            }
+          },
+          {
+            "id": "semantic.aim_assign",
+            "order": 4,
+            "label": "Aim & Assign",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.render_rig"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates and configures multiple lights plus a camera; no single native menu item represents the complete action or rollback receipt.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/lights/light_object.html"
+      }
+    },
+    {
+      "id": "blender.render.execute_preview.semantic",
+      "actionName": "blender.render.execute_preview",
+      "title": "Render a managed PNG preview",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.rendering",
+            "order": 1,
+            "label": "Rendering",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Rendering"
+            }
+          },
+          {
+            "id": "menu.render",
+            "order": 2,
+            "label": "Render",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "TOPBAR_MT_render"
+            }
+          },
+          {
+            "id": "operator.render",
+            "order": 3,
+            "label": "Render Image",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "render.render"
+            }
+          },
+          {
+            "id": "semantic.managed_png",
+            "order": 4,
+            "label": "Managed PNG",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.preview_artifact"
+            }
+          }
+        ],
+        "reason": "The accepted action also applies bounded render settings and writes to an adapter-managed PNG destination, so the ordinary Render Image item is only a semantic reference.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/output/index.html"
+      }
+    }
+  ]
+}

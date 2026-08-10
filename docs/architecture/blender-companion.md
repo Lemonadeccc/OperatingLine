@@ -12,8 +12,9 @@
 - `Operator` / 原生 dialog：每次 Provider Run 的明确确认；不保存长期 consent、模型或 Provider 凭据。
 - `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
   因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
-- `Menu` / `UILayout` / `Operator`：在 Guidance 可见期间，为经过版本测试的真实
-  `Add → Mesh → Plane/UV Sphere` 菜单项显示序号与状态，并把最终项路由到同一个受控计划动作。
+- `Menu` / `UILayout` / `Operator`：从版本化 InteractionCatalog 读取活动叶节点配方；在 Guidance
+  可见期间，为经过版本测试的真实 `Add → Mesh → Plane/UV Sphere` 菜单项显示序号与状态，并把
+  最终项路由到同一个受控计划动作。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 步骤卡片、数字和引导线。
 - `gpu` / `blf`：形状与文字绘制。
 - `GizmoGroup`：后续需要可交互三维锚点时使用。
@@ -30,12 +31,15 @@
 事件阶段、需要 Blender 官方维护的持久异步运行时，或需要 Python 扩展无法实现的安全边界。
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
-和世界坐标；对内置操作保存 `operatorId` 与可选 `menuPath`。Blender 4.5/5.1 版本适配器只处理
-允许列表中的 `Add → Mesh → Plane/UV Sphere`：Guidance 可见时临时替换三个原生菜单类的 draw
-方法，隐藏或卸载时精确恢复；最终绿色菜单项与 `Next` 进入同一个 Session action 和 receipt。
-`Layout` 上下文显示在放大的视口卡片中，不猜测工作区页签坐标。其他路径仍显示语义路径与
-`UI target unavailable`，不会绘制猜测坐标或替换无关菜单项。未来只有新的版本专用适配器通过
-真实宿主测试后，才能扩展允许列表。
+和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
+`1.0.0` 与 ActionCatalog `1.3.0` 一一绑定 10 个 action，并由活动叶节点的 `actionName` 选择配方。
+Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/UV Sphere` 两条 `native_path` 接到
+真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
+菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
+三个身体球；不同 action 会切换自己的 recipe。批量几何、材质、骨骼、动画和渲染等八条
+`semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
+菜单项。未来只有新的版本专用 recipe 通过真实宿主测试后，才能升级为 `native_path`。见
+[ADR 0024](../adr/0024-versioned-interaction-catalog.md)。
 
 ## 视觉引导状态
 

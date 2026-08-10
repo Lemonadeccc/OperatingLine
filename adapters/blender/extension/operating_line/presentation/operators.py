@@ -12,6 +12,7 @@ from .native_menu_guidance import (
     disable_native_menu_guidance,
     enable_native_menu_guidance,
     guided_menu_action_matches,
+    interaction_guidance_snapshot,
     native_menu_snapshot,
     refresh_native_menu_guidance,
 )
@@ -117,7 +118,7 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
                 )
         context.window_manager.operating_line_overlay_enabled = True
         enable_native_menu_guidance(_session)
-        enable_overlay(_session, native_menu_snapshot)
+        enable_overlay(_session, interaction_guidance_snapshot)
         _companion().report("walkthrough_started")
         return {"FINISHED"}
 
@@ -540,7 +541,7 @@ class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):
             context.window_manager.operating_line_overlay_enabled = False
         else:
             enable_native_menu_guidance(_session)
-            enable_overlay(_session, native_menu_snapshot)
+            enable_overlay(_session, interaction_guidance_snapshot)
             context.window_manager.operating_line_overlay_enabled = True
         return {"FINISHED"}
 

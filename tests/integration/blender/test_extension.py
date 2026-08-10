@@ -44,6 +44,8 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
 from operating_line_extension.operating_line.application import (  # noqa: E402
     ActionReceipt,
     DemoSession,
+    InteractionPathKind,
+    MenuGuidanceTracker,
 )
 from operating_line_extension.operating_line.application.session import (  # noqa: E402
     _canonical_json_value_bytes,
@@ -63,6 +65,7 @@ from operating_line_extension.operating_line.presentation.operators import (  # 
     OPERATINGLINE_OT_start,
 )
 from operating_line_extension.operating_line.presentation.native_menu_guidance import (  # noqa: E402
+    interaction_guidance_snapshot,
     native_menu_guidance_enabled,
     native_menu_snapshot,
     reveal_native_menu,
@@ -76,6 +79,7 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
     RESOURCE_PATH,
     executable_steps,
     load_task_tree,
+    load_task_tree_data,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
     ALLOWED_ACTIONS,
@@ -88,6 +92,10 @@ with RESOURCE_PATH.open(encoding="utf-8") as resource:
     FULL_PLAN = json.load(resource)
 with (RESOURCE_PATH.parent / "action-catalog.json").open(encoding="utf-8") as resource:
     ACTION_CATALOG = json.load(resource)
+with (RESOURCE_PATH.parent / "interaction-catalog.json").open(
+    encoding="utf-8"
+) as resource:
+    INTERACTION_CATALOG = json.load(resource)
 
 
 def geometry_regression_plan(plan: dict) -> dict:
@@ -2482,12 +2490,44 @@ def main() -> None:
         name for name in ALLOWED_ACTIONS if name.startswith("blender.")
     }
     assert catalog_actions == implemented_catalog_actions
+    assert INTERACTION_CATALOG["actionCatalogVersion"] == ACTION_CATALOG["catalogVersion"]
+    assert {recipe["actionName"] for recipe in INTERACTION_CATALOG["recipes"]} == (
+        catalog_actions
+    )
+    assert sum(
+        recipe["guidance"]["kind"] == "native_path"
+        for recipe in INTERACTION_CATALOG["recipes"]
+    ) == 2
     assert (ADAPTER_ROOT / "LICENSE").read_text(encoding="utf-8") == (
         REPO_ROOT / "LICENSE"
     ).read_text(encoding="utf-8")
     canonical_path = REPO_ROOT / "protocol" / "fixtures" / "v1" / "snowman.plan.json"
     with canonical_path.open(encoding="utf-8") as canonical_resource:
         assert FULL_PLAN == json.load(canonical_resource)
+    canonical_interaction_path = (
+        REPO_ROOT / "adapters" / "blender" / "catalog" / "v1"
+        / "interaction-catalog.json"
+    )
+    with canonical_interaction_path.open(encoding="utf-8") as canonical_resource:
+        assert INTERACTION_CATALOG == json.load(canonical_resource)
+
+    # The active leaf selects its own catalog recipe. Repeated UV-sphere leaves
+    # correctly share a route, while Plane and composite Batch leaves do not.
+    full_steps = executable_steps(load_task_tree_data(FULL_PLAN))
+    recipe_tracker = MenuGuidanceTracker()
+    plane_path = recipe_tracker.snapshot(full_steps[0])
+    sphere_path = recipe_tracker.snapshot(full_steps[1])
+    batch_path = recipe_tracker.snapshot(full_steps[4])
+    assert plane_path is not None and plane_path.items[-1].label == "Plane"
+    assert sphere_path is not None and sphere_path.items[-1].label == "UV Sphere"
+    assert batch_path is not None
+    assert batch_path.path_kind is InteractionPathKind.SEMANTIC
+    assert tuple(item.label for item in batch_path.items) == (
+        "Layout",
+        "Add",
+        "Mesh",
+        "Planned parts",
+    )
 
     session_before_registration = operating_line.get_session()
     operating_line.register()
@@ -2931,6 +2971,8 @@ def main() -> None:
             "Mesh",
             "UV Sphere",
         )
+        assert menu_snapshot.recipe_id == "blender.mesh.create_uv_sphere.native"
+        assert interaction_guidance_snapshot() == menu_snapshot
 
         # Opening the real native menus only reveals the microstep path. The
         # exact guided final operator and the existing Next operator share the

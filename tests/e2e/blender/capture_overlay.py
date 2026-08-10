@@ -64,6 +64,9 @@ from operating_line_visual_smoke.operating_line.application import (  # noqa: E4
 from operating_line_visual_smoke.operating_line.infrastructure.overlay import (  # noqa: E402
     _semantic_hint,
 )
+from operating_line_visual_smoke.operating_line.presentation.native_menu_guidance import (  # noqa: E402
+    interaction_guidance_snapshot,
+)
 from operating_line_visual_smoke.operating_line.visual_theme import (  # noqa: E402
     color_for,
 )
@@ -466,6 +469,14 @@ def configure_state():
         assert next_step.id == "snowman.render.preview"
         assert _semantic_hint(next_step) == (
             "UI target unavailable | Reference: Render > Render Image"
+        )
+        reference_path = interaction_guidance_snapshot()
+        assert reference_path is not None and not reference_path.native
+        assert tuple(item.label for item in reference_path.items) == (
+            "Rendering",
+            "Render",
+            "Render Image",
+            "Managed PNG",
         )
         render_scene = bpy.data.scenes.get("OperatingLine.Scene.Snowman")
         assert render_scene is not None

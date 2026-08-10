@@ -38,6 +38,13 @@ ActionCatalog
   ├─ adapter-owned semantic capabilities + action membership
   └─ declared safety and host-version boundaries
 
+InteractionCatalog
+  ├─ adapterId + independent catalogVersion
+  ├─ exact ActionCatalog version binding
+  ├─ one ordered recipe per action
+  ├─ native_path → exact host target + accepted action binding
+  └─ semantic_path → explicit unavailable reason + manual reference
+
 PlanningQualityReport
   ├─ baselineVersion + exact catalog reference
   ├─ deterministic errors/warnings + phase coverage

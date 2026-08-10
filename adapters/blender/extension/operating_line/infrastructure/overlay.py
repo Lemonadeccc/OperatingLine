@@ -392,11 +392,16 @@ def _draw_overlay() -> None:
         semantic_step = next_step or active
         semantic_hint = _semantic_hint(semantic_step) if semantic_step is not None else None
         if menu_guidance is not None:
+            path_status = (
+                f"MENU PATH  Click green {menu_guidance.items[-1].ordinal:02d} or use Next"
+                if menu_guidance.native
+                else "REFERENCE PATH  UI target unavailable · use Next"
+            )
             _draw_text(
-                "MENU PATH  Click green 04 or use Next",
+                path_status,
                 (left + 20.0, semantic_y),
                 12,
-                TEXT,
+                TEXT if menu_guidance.native else MUTED_TEXT,
             )
             path_left = left + 66.0
             path_right = right - 66.0

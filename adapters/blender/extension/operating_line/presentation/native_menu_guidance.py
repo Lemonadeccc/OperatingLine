@@ -79,7 +79,14 @@ def _menu_item(
 
 
 def native_menu_snapshot() -> MenuGuidanceSnapshot | None:
-    """Return the current supported menu microsteps."""
+    """Return only a path wired to the supported real Blender menus."""
+
+    snapshot = interaction_guidance_snapshot()
+    return snapshot if snapshot is not None and snapshot.native else None
+
+
+def interaction_guidance_snapshot() -> MenuGuidanceSnapshot | None:
+    """Return the active leaf's catalog path, including semantic fallbacks."""
 
     if not native_menu_guidance_enabled():
         return None
@@ -111,7 +118,7 @@ def guided_menu_action_matches(step_id: str, operator_id: str) -> bool:
 
 def refresh_native_menu_guidance() -> None:
     if native_menu_guidance_enabled():
-        native_menu_snapshot()
+        interaction_guidance_snapshot()
 
 
 def reset_native_menu_guidance() -> None:
@@ -271,9 +278,10 @@ def _draw_guided_operator(
     operator_id: str,
     text: str,
 ) -> None:
+    item = next(item for item in snapshot.items if item.target_id == operator_id)
     action = layout.operator(
         "operating_line.guided_menu_action",
-        text=f"{text}    04 NEXT",
+        text=f"{text}    {item.ordinal:02d} NEXT",
         icon="COLLECTION_COLOR_04",
     )
     action.step_id = snapshot.step_id
@@ -286,9 +294,10 @@ def _draw_alternative_operator(
     operator_id: str,
     text: str,
 ) -> None:
+    final_ordinal = snapshot.items[-1].ordinal
     action = layout.operator(
         "operating_line.guided_menu_action",
-        text=f"{text}    04 ALT",
+        text=f"{text}    {final_ordinal:02d} ALT",
         icon="LOCKED",
     )
     action.step_id = snapshot.step_id
@@ -396,6 +405,7 @@ __all__ = (
     "disable_native_menu_guidance",
     "enable_native_menu_guidance",
     "guided_menu_action_matches",
+    "interaction_guidance_snapshot",
     "native_menu_guidance_enabled",
     "native_menu_snapshot",
     "refresh_native_menu_guidance",

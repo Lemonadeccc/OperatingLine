@@ -20,6 +20,7 @@ domain = import_module(f"{PACKAGE_NAME}.domain")
 GuidanceState = application.GuidanceState
 MenuGuidanceRole = application.MenuGuidanceRole
 MenuGuidanceTracker = application.MenuGuidanceTracker
+InteractionPathKind = application.InteractionPathKind
 ActionSpec = domain.ActionSpec
 TaskNode = domain.TaskNode
 
@@ -27,6 +28,7 @@ TaskNode = domain.TaskNode
 def action_step(
     *,
     step_id: str = "snowman.model.body_lower",
+    action_name: str = "blender.mesh.create_uv_sphere",
     operator_id: str = "mesh.primitive_uv_sphere_add",
     menu_path: tuple[str, ...] = ("Add", "Mesh", "UV Sphere"),
 ) -> TaskNode:
@@ -37,7 +39,7 @@ def action_step(
         order=1,
         action=ActionSpec(
             adapter_id="blender",
-            name="blender.mesh.create_uv_sphere",
+            name=action_name,
             arguments={},
         ),
         anchors=(
@@ -61,6 +63,13 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         self.assertIsNotNone(snapshot)
         assert snapshot is not None
         self.assertEqual(snapshot.step_id, self.step.id)
+        self.assertEqual(
+            snapshot.recipe_id,
+            "blender.mesh.create_uv_sphere.native",
+        )
+        self.assertEqual(snapshot.catalog_version, "1.0.0")
+        self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
+        self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
         self.assertEqual(
             tuple(item.label for item in snapshot.items),
@@ -123,24 +132,33 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         self.assertEqual(snapshot.items[0].role, MenuGuidanceRole.CURRENT)
         self.assertEqual(snapshot.items[1].role, MenuGuidanceRole.NEXT)
 
-    def test_rejects_stale_reveal_and_operator_path_mismatches(self) -> None:
+    def test_rejects_stale_reveal_but_uses_the_action_recipe_not_plan_anchor(self) -> None:
         stale = action_step(step_id="stale")
         self.tracker.snapshot(self.step)
 
         self.assertFalse(self.tracker.reveal(stale, "Add"))
-        self.assertIsNone(
-            self.tracker.snapshot(
-                action_step(operator_id="mesh.primitive_ico_sphere_add")
-            )
+        mismatched_anchor = self.tracker.snapshot(
+            action_step(operator_id="mesh.primitive_ico_sphere_add")
         )
+        assert mismatched_anchor is not None
+        self.assertEqual(
+            mismatched_anchor.operator_id,
+            "mesh.primitive_uv_sphere_add",
+        )
+        mismatched_path = self.tracker.snapshot(
+            action_step(menu_path=("Add", "Mesh", "Ico Sphere"))
+        )
+        assert mismatched_path is not None
+        self.assertEqual(mismatched_path.items[-1].label, "UV Sphere")
         self.assertIsNone(
             self.tracker.snapshot(
-                action_step(menu_path=("Add", "Mesh", "Ico Sphere"))
+                action_step(action_name="blender.unknown.action")
             )
         )
 
     def test_supports_the_allowlisted_plane_path_and_refuses_other_menus(self) -> None:
         plane = action_step(
+            action_name="blender.mesh.create_plane",
             operator_id="mesh.primitive_plane_add",
             menu_path=("Add", "Mesh", "Plane"),
         )
@@ -149,11 +167,27 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         self.assertEqual(plane_snapshot.items[-1].label, "Plane")
         self.assertTrue(plane_snapshot.accepts("mesh.primitive_plane_add"))
 
-        unsupported = action_step(
+        semantic = action_step(
+            action_name="blender.material.create_and_assign",
             operator_id="material.new",
             menu_path=("Material Properties", "New", "Surface"),
         )
-        self.assertIsNone(self.tracker.snapshot(unsupported))
+        semantic_snapshot = self.tracker.snapshot(semantic)
+        assert semantic_snapshot is not None
+        self.assertFalse(semantic_snapshot.native)
+        self.assertEqual(semantic_snapshot.path_kind, InteractionPathKind.SEMANTIC)
+        self.assertEqual(
+            tuple(item.label for item in semantic_snapshot.items),
+            ("Shading", "Material", "New", "Surface"),
+        )
+        self.assertTrue(
+            all(
+                item.role is MenuGuidanceRole.LOCKED
+                for item in semantic_snapshot.items
+            )
+        )
+        self.assertFalse(semantic_snapshot.accepts("material.new"))
+        self.assertFalse(self.tracker.reveal(semantic, "Material"))
 
 
 if __name__ == "__main__":

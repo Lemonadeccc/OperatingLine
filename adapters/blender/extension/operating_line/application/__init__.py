@@ -7,6 +7,15 @@ from .guidance import (
     relevant_steps,
     step_state,
 )
+from .interaction_catalog import (
+    BUNDLED_INTERACTION_CATALOG,
+    InteractionCatalog,
+    InteractionPathDefinition,
+    InteractionPathKind,
+    InteractionRecipe,
+    InteractionStepDefinition,
+    load_interaction_catalog,
+)
 from .menu_guidance import (
     MenuGuidanceItem,
     MenuGuidanceRole,
@@ -32,6 +41,12 @@ __all__ = (
     "GuidanceStep",
     "GoalRequestState",
     "InitialPlanRunState",
+    "BUNDLED_INTERACTION_CATALOG",
+    "InteractionCatalog",
+    "InteractionPathDefinition",
+    "InteractionPathKind",
+    "InteractionRecipe",
+    "InteractionStepDefinition",
     "MenuGuidanceItem",
     "MenuGuidanceRole",
     "MenuGuidanceSnapshot",
@@ -40,6 +55,7 @@ __all__ = (
     "RevisionLineage",
     "ReplanRunState",
     "lineage_from_proposal",
+    "load_interaction_catalog",
     "new_revision_thread",
     "node_state",
     "relevant_steps",

@@ -75,6 +75,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
+- **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.0.0` 精确绑定
+  ActionCatalog `1.3.0` 的 10 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  `menuPath`。Plane/UV Sphere 继续进入真实菜单；其余复合动作显示自己的灰色参考路径和
+  `UI target unavailable`，不会复用无关按钮。见 [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)。
 - **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.3.0` 把 10 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；七项目录语义能力进一步要求 provider
@@ -198,7 +203,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **Blender Extension**：在 3D View Sidebar 显示任务树，支持展开/折叠、Start/Next/Back 和
   Show/Hide Guidance；已完成节点为蓝色、Back 目标为红色、Next 目标为绿色、后续节点为灰色。
   放大的视口卡片同时显示最多四个全局序号、带深色描边的红/绿引导线与箭头。对经过 Blender
-  4.5/5.1 验证的 `Add → Mesh → Plane/UV Sphere` 路径，真实原生菜单还会显示微步骤序号、状态文字
+  InteractionCatalog 为每个活动叶节点提供不同的有序参考路径；对 4.5/5.1 验证的
+  `Add → Mesh → Plane/UV Sphere` `native_path`，真实原生菜单还会显示微步骤序号、状态文字
   和彩色图标；点击绿色最终项与点击 `Next` 执行同一个计划动作，并共享同一份回退回执。Extension
   也可显式连接回环地址上的
   Orchestrator，非阻塞拉取新计划或提案并回传步骤结果。提案会显示独立的只读任务树、

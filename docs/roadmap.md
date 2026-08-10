@@ -22,6 +22,11 @@
 ## 已完成的规划基础
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
+- [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
+      `1.0.0` 与 ActionCatalog `1.3.0` 一一覆盖 10 个动作。Plane/UV Sphere 使用经过 4.5/5.1 验证的
+      `native_path`，其他八个复合动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
+      [ADR 0024](adr/0024-versioned-interaction-catalog.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -103,6 +108,11 @@
       [ADR 0019](adr/0019-local-human-eval-capture-and-blind-review.md)。
 
 ## 后续里程碑
+
+- [ ] 教学粒度与 Blender 交互覆盖：把多部件 primitive batch 拆为可审查的一部件一叶节点；增加
+      Cube/Icosphere/Torus、Edit Mode 拓扑、Modifier 和首个 Geometry Nodes 垂直切片。每个新增 action
+      必须同时具备 InteractionCatalog recipe、观察、回退和 Blender 4.5/5.1 真实 UI/执行验证；
+      `semantic_path` 不得伪装为已支持的原生控件。
 
 - [ ] 更大的人工 Eval：把已完成的版本化采集基础设施推进为经过真实采集、独立盲审和数据审核的
       released 数据集。Capability trace 只证明 provider 声明可追溯到目录 action；确定性 packet、JSON

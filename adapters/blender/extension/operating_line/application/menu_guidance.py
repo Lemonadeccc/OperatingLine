@@ -1,22 +1,16 @@
-"""Deterministic microsteps for version-tested Blender native menu paths."""
+"""Deterministic microsteps resolved from the Blender InteractionCatalog."""
 
 from dataclasses import dataclass
 from enum import Enum
 
 from ..domain import TaskNode
 from .guidance import GuidanceState
-
-
-_ALLOWLISTED_MESH_PATHS: dict[tuple[str, tuple[str, ...]], str] = {
-    (
-        "mesh.primitive_plane_add",
-        ("Add", "Mesh", "Plane"),
-    ): "Plane",
-    (
-        "mesh.primitive_uv_sphere_add",
-        ("Add", "Mesh", "UV Sphere"),
-    ): "UV Sphere",
-}
+from .interaction_catalog import (
+    BUNDLED_INTERACTION_CATALOG,
+    InteractionCatalog,
+    InteractionPathKind,
+    InteractionRecipe,
+)
 
 
 class MenuGuidanceRole(str, Enum):
@@ -43,7 +37,11 @@ class MenuGuidanceItem:
     """One visible microstep inside an executable task-tree leaf."""
 
     ordinal: int
+    step_id: str
     label: str
+    intent: str
+    target_kind: str
+    target_id: str
     role: MenuGuidanceRole
 
     @property
@@ -55,12 +53,23 @@ class MenuGuidanceItem:
 
 @dataclass(frozen=True, slots=True)
 class MenuGuidanceSnapshot:
-    """Current state of one allowlisted native menu path."""
+    """Current state of one catalog-owned native or semantic path."""
 
     step_id: str
-    operator_id: str
+    recipe_id: str
+    catalog_version: str
+    path_kind: InteractionPathKind
+    title: str
+    operator_id: str | None
     revealed_depth: int
+    reason: str | None
     items: tuple[MenuGuidanceItem, ...]
+
+    @property
+    def native(self) -> bool:
+        """Whether the path is wired to a verified real host control."""
+
+        return self.path_kind is InteractionPathKind.NATIVE
 
     def collapsed_ordinals(self, label: str) -> tuple[int, ...]:
         """Return this label and all still-nested ordinals for a closed menu."""
@@ -76,63 +85,53 @@ class MenuGuidanceSnapshot:
     def accepts(self, operator_id: str) -> bool:
         """Whether a native final menu item matches the accepted leaf exactly."""
 
-        return operator_id == self.operator_id
+        return self.native and operator_id == self.operator_id
 
 
-def _operator_anchor(step: TaskNode) -> tuple[str, tuple[str, ...]] | None:
-    for anchor in step.anchors:
-        if anchor.get("kind") != "operator":
-            continue
-        operator_id = anchor.get("operatorId")
-        menu_path = anchor.get("menuPath")
-        if not isinstance(operator_id, str) or not operator_id:
-            continue
-        if not isinstance(menu_path, list) or not all(
-            isinstance(item, str) and item for item in menu_path
-        ):
-            continue
-        return operator_id, tuple(menu_path)
-    return None
-
-
-def _target_for_step(step: TaskNode) -> tuple[str, tuple[str, ...]] | None:
-    anchor = _operator_anchor(step)
-    if anchor is None or anchor not in _ALLOWLISTED_MESH_PATHS:
+def _recipe_for_step(
+    step: TaskNode,
+    catalog: InteractionCatalog,
+) -> InteractionRecipe | None:
+    action = step.action
+    if action is None or action.adapter_id != catalog.adapter_id:
         return None
-    operator_id, menu_path = anchor
-    expected_label = _ALLOWLISTED_MESH_PATHS[anchor]
-    if menu_path[-1] != expected_label:
-        return None
-    return operator_id, ("Layout", *menu_path)
+    return catalog.recipe_for(action.name)
 
 
 class MenuGuidanceTracker:
     """Keep transient menu reveal depth separate from executable plan state."""
 
-    def __init__(self) -> None:
-        self._step_id: str | None = None
+    def __init__(
+        self,
+        catalog: InteractionCatalog = BUNDLED_INTERACTION_CATALOG,
+    ) -> None:
+        self._catalog = catalog
+        self._step_key: tuple[str, str] | None = None
         self._revealed_depth = 1
 
     def reset(self) -> None:
-        self._step_id = None
+        self._step_key = None
         self._revealed_depth = 1
 
     def snapshot(self, step: TaskNode | None) -> MenuGuidanceSnapshot | None:
         if step is None:
             self.reset()
             return None
-        target = _target_for_step(step)
-        if target is None:
+        recipe = _recipe_for_step(step, self._catalog)
+        if recipe is None:
             self.reset()
             return None
-        if self._step_id != step.id:
-            self._step_id = step.id
+        step_key = (step.id, recipe.id)
+        if self._step_key != step_key:
+            self._step_key = step_key
             self._revealed_depth = 1
-        operator_id, labels = target
+        guidance = recipe.guidance
         items: list[MenuGuidanceItem] = []
         current_index = self._revealed_depth - 1
-        for index, label in enumerate(labels):
-            if index < current_index - 1:
+        for index, definition in enumerate(guidance.steps):
+            if guidance.kind is InteractionPathKind.SEMANTIC:
+                role = MenuGuidanceRole.LOCKED
+            elif index < current_index - 1:
                 role = MenuGuidanceRole.COMPLETED
             elif index == current_index - 1:
                 role = MenuGuidanceRole.PREVIOUS
@@ -142,28 +141,47 @@ class MenuGuidanceTracker:
                 role = MenuGuidanceRole.NEXT
             else:
                 role = MenuGuidanceRole.LOCKED
-            items.append(MenuGuidanceItem(index + 1, label, role))
+            items.append(
+                MenuGuidanceItem(
+                    ordinal=definition.order,
+                    step_id=definition.id,
+                    label=definition.label,
+                    intent=definition.intent,
+                    target_kind=definition.target_kind,
+                    target_id=definition.target_id,
+                    role=role,
+                )
+            )
         return MenuGuidanceSnapshot(
             step_id=step.id,
-            operator_id=operator_id,
-            revealed_depth=self._revealed_depth,
+            recipe_id=recipe.id,
+            catalog_version=self._catalog.catalog_version,
+            path_kind=guidance.kind,
+            title=recipe.title,
+            operator_id=guidance.operator_id,
+            revealed_depth=(
+                self._revealed_depth
+                if guidance.kind is InteractionPathKind.NATIVE
+                else 0
+            ),
+            reason=guidance.reason,
             items=tuple(items),
         )
 
     def reveal(self, step: TaskNode, label: str) -> bool:
-        target = _target_for_step(step)
-        if target is None:
+        recipe = _recipe_for_step(step, self._catalog)
+        if recipe is None or recipe.guidance.kind is not InteractionPathKind.NATIVE:
             return False
-        if self._step_id is None:
+        if self._step_key is None:
             self.snapshot(step)
-        if self._step_id != step.id:
+        if self._step_key != (step.id, recipe.id):
             return False
-        labels = target[1]
+        labels = tuple(item.label for item in recipe.guidance.steps)
         try:
             label_index = labels.index(label)
         except ValueError:
             return False
-        if label_index not in {1, 2}:
+        if label_index <= 0 or label_index >= len(labels) - 1:
             return False
         self._revealed_depth = max(self._revealed_depth, label_index + 1)
         return True
