@@ -18,6 +18,7 @@ application = import_module(f"{PACKAGE_NAME}.application")
 domain = import_module(f"{PACKAGE_NAME}.domain")
 
 GuidanceState = application.GuidanceState
+MenuGuidanceRole = application.MenuGuidanceRole
 MenuGuidanceTracker = application.MenuGuidanceTracker
 ActionSpec = domain.ActionSpec
 TaskNode = domain.TaskNode
@@ -66,14 +67,16 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             ("Layout", "Add", "Mesh", "UV Sphere"),
         )
         self.assertEqual(
-            tuple(item.state for item in snapshot.items),
+            tuple(item.role for item in snapshot.items),
             (
-                GuidanceState.BACK,
-                GuidanceState.NEXT,
-                GuidanceState.LOCKED,
-                GuidanceState.LOCKED,
+                MenuGuidanceRole.CURRENT,
+                MenuGuidanceRole.NEXT,
+                MenuGuidanceRole.LOCKED,
+                MenuGuidanceRole.LOCKED,
             ),
         )
+        self.assertEqual(snapshot.items[0].state, GuidanceState.COMPLETED)
+        self.assertEqual(snapshot.items[1].state, GuidanceState.NEXT)
         self.assertEqual(snapshot.collapsed_ordinals("Add"), (2, 3, 4))
         self.assertEqual(snapshot.collapsed_ordinals("Mesh"), (3, 4))
 
@@ -82,25 +85,27 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         add_snapshot = self.tracker.snapshot(self.step)
         assert add_snapshot is not None
         self.assertEqual(
-            tuple(item.state for item in add_snapshot.items),
+            tuple(item.role for item in add_snapshot.items),
             (
-                GuidanceState.COMPLETED,
-                GuidanceState.BACK,
-                GuidanceState.NEXT,
-                GuidanceState.LOCKED,
+                MenuGuidanceRole.PREVIOUS,
+                MenuGuidanceRole.CURRENT,
+                MenuGuidanceRole.NEXT,
+                MenuGuidanceRole.LOCKED,
             ),
         )
+        self.assertEqual(add_snapshot.items[0].state, GuidanceState.BACK)
+        self.assertEqual(add_snapshot.items[1].state, GuidanceState.COMPLETED)
 
         self.assertTrue(self.tracker.reveal(self.step, "Mesh"))
         mesh_snapshot = self.tracker.snapshot(self.step)
         assert mesh_snapshot is not None
         self.assertEqual(
-            tuple(item.state for item in mesh_snapshot.items),
+            tuple(item.role for item in mesh_snapshot.items),
             (
-                GuidanceState.COMPLETED,
-                GuidanceState.COMPLETED,
-                GuidanceState.BACK,
-                GuidanceState.NEXT,
+                MenuGuidanceRole.COMPLETED,
+                MenuGuidanceRole.PREVIOUS,
+                MenuGuidanceRole.CURRENT,
+                MenuGuidanceRole.NEXT,
             ),
         )
         self.assertTrue(mesh_snapshot.accepts("mesh.primitive_uv_sphere_add"))
@@ -115,7 +120,8 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         assert snapshot is not None
         self.assertEqual(snapshot.step_id, replacement.id)
         self.assertEqual(snapshot.revealed_depth, 1)
-        self.assertEqual(snapshot.items[1].state, GuidanceState.NEXT)
+        self.assertEqual(snapshot.items[0].role, MenuGuidanceRole.CURRENT)
+        self.assertEqual(snapshot.items[1].role, MenuGuidanceRole.NEXT)
 
     def test_rejects_stale_reveal_and_operator_path_mismatches(self) -> None:
         stale = action_step(step_id="stale")

@@ -9,6 +9,7 @@ from .guidance import (
 )
 from .menu_guidance import (
     MenuGuidanceItem,
+    MenuGuidanceRole,
     MenuGuidanceSnapshot,
     MenuGuidanceTracker,
 )
@@ -32,6 +33,7 @@ __all__ = (
     "GoalRequestState",
     "InitialPlanRunState",
     "MenuGuidanceItem",
+    "MenuGuidanceRole",
     "MenuGuidanceSnapshot",
     "MenuGuidanceTracker",
     "build_goal_request",

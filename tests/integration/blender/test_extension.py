@@ -3205,6 +3205,7 @@ def main() -> None:
         "operating_line_revision_workspace_expanded",
     )
     assert not hasattr(bpy.types, "OPERATINGLINE_OT_remove_revision_reference")
+    assert not hasattr(bpy.types, "OPERATINGLINE_OT_open_add_menu")
     assert not hasattr(bpy.types, "OPERATINGLINE_OT_guided_menu_action")
     assert not hasattr(bpy.types, "OPERATINGLINE_PT_sidebar")
     assert not registered_companion.timer_registered

@@ -5,7 +5,13 @@ from collections.abc import Callable
 import bpy
 from bpy.app.translations import contexts as i18n_contexts
 
-from ..application import GuidanceState, MenuGuidanceSnapshot, MenuGuidanceTracker
+from ..application import (
+    MenuGuidanceItem,
+    MenuGuidanceRole,
+    MenuGuidanceSnapshot,
+    MenuGuidanceTracker,
+)
+from ..visual_theme import STATE_ICONS
 
 
 _SUPPORTED_BLENDER_SERIES = {(4, 5), (5, 1)}
@@ -52,12 +58,24 @@ def _localized(value: str) -> str:
 
 def _menu_suffix(snapshot: MenuGuidanceSnapshot, item_label: str) -> str:
     item = next(item for item in snapshot.items if item.label == item_label)
-    if item.state is GuidanceState.BACK:
+    if item.role is MenuGuidanceRole.PREVIOUS:
         return f"{item.ordinal:02d} BACK"
-    return "·".join(
+    if item.role is MenuGuidanceRole.CURRENT:
+        return f"{item.ordinal:02d} CURRENT"
+    suffix = "·".join(
         f"{ordinal:02d}"
         for ordinal in snapshot.collapsed_ordinals(item_label)
     )
+    if item.role is MenuGuidanceRole.NEXT:
+        return f"{suffix} NEXT"
+    return suffix
+
+
+def _menu_item(
+    snapshot: MenuGuidanceSnapshot,
+    item_label: str,
+) -> MenuGuidanceItem:
+    return next(item for item in snapshot.items if item.label == item_label)
 
 
 def native_menu_snapshot() -> MenuGuidanceSnapshot | None:
@@ -122,10 +140,13 @@ def _draw_add_guided(self, context) -> None:
         layout.separator()
     layout.operator_context = "EXEC_REGION_WIN"
 
-    layout.menu(
+    mesh_item = _menu_item(snapshot, "Mesh")
+    mesh_row = layout.row(align=True)
+    mesh_row.alert = mesh_item.role is MenuGuidanceRole.PREVIOUS
+    mesh_row.menu(
         "VIEW3D_MT_mesh_add",
-        text=f"{_localized('Mesh')}    03·04 NEXT",
-        icon="COLLECTION_COLOR_04",
+        text=f"{_localized('Mesh')}    {_menu_suffix(snapshot, 'Mesh')}",
+        icon=STATE_ICONS[mesh_item.state],
     )
 
     layout.menu("VIEW3D_MT_curve_add", icon="OUTLINER_OB_CURVE")
@@ -227,9 +248,14 @@ def _draw_editor_guided(self, context) -> None:
     layout.menu("VIEW3D_MT_view")
     layout.menu("VIEW3D_MT_select_object")
     assert _original_add_label is not None
-    layout.menu(
-        "VIEW3D_MT_add",
+    add_item = _menu_item(snapshot, "Add")
+    add_row = layout.row(align=True)
+    add_row.alert = add_item.role is MenuGuidanceRole.PREVIOUS
+    add_row.operator(
+        "operating_line.open_add_menu",
         text=f"{_localized(_original_add_label)}   {_menu_suffix(snapshot, 'Add')}",
+        icon=STATE_ICONS[add_item.state],
+        depress=add_item.role is MenuGuidanceRole.CURRENT,
     )
     layout.menu("VIEW3D_MT_object")
     layout.template_node_operator_asset_root_items()

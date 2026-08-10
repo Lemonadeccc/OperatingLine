@@ -512,14 +512,20 @@ def prepare_view():
 
     if STATE in {"menu-add", "menu-mesh"}:
         bpy.context.preferences.view.show_tooltips = False
-        menu_name = (
-            "VIEW3D_MT_add" if STATE == "menu-add" else "VIEW3D_MT_mesh_add"
-        )
         bpy.context.window.cursor_warp(1400, 900)
         with bpy.context.temp_override(area=area, region=region, space_data=space):
-            result = bpy.ops.wm.call_menu("EXEC_DEFAULT", name=menu_name)
+            if STATE == "menu-add":
+                result = bpy.ops.operating_line.open_add_menu("EXEC_DEFAULT")
+            else:
+                result = bpy.ops.wm.call_menu(
+                    "EXEC_DEFAULT",
+                    name="VIEW3D_MT_mesh_add",
+                )
         print(f"OperatingLine menu invocation result: {sorted(result)}", flush=True)
-        assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
+        if STATE == "menu-add":
+            assert result == {"FINISHED"}
+        else:
+            assert result in ({"INTERFACE"}, {"RUNNING_MODAL"})
         bpy.app.timers.register(settle_menu_capture, first_interval=0.15)
         return None
 
@@ -638,10 +644,11 @@ def assert_guidance_pixels():
     }:
         assert next_step > 0.0003
         assert locked > 0.0001
-        assert completed < 0.00003
-        # The supported first leaf now includes the red current microstep
-        # `01 Layout`, while the global plan still has no completed/Back leaf.
-        assert 0.00003 < back < 0.0003
+        # Native-menu navigation starts at the blue current context
+        # `01 Layout`, with `02 Add` as the green next target. There is no
+        # red previous/BACK menu target until a nested menu has opened.
+        assert 0.00003 < completed < 0.0003
+        assert back < 0.00003
     elif STATE in {"forward", "back", "menu-add", "menu-mesh"}:
         assert completed > 0.00005
         assert back > 0.0003

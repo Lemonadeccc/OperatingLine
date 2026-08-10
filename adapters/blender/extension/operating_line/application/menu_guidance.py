@@ -1,6 +1,7 @@
 """Deterministic microsteps for version-tested Blender native menu paths."""
 
 from dataclasses import dataclass
+from enum import Enum
 
 from ..domain import TaskNode
 from .guidance import GuidanceState
@@ -18,13 +19,38 @@ _ALLOWLISTED_MESH_PATHS: dict[tuple[str, tuple[str, ...]], str] = {
 }
 
 
+class MenuGuidanceRole(str, Enum):
+    """Navigation role for a non-mutating native-menu microstep."""
+
+    COMPLETED = "completed"
+    PREVIOUS = "previous"
+    CURRENT = "current"
+    NEXT = "next"
+    LOCKED = "locked"
+
+
+_ROLE_STATES = {
+    MenuGuidanceRole.COMPLETED: GuidanceState.COMPLETED,
+    MenuGuidanceRole.PREVIOUS: GuidanceState.BACK,
+    MenuGuidanceRole.CURRENT: GuidanceState.COMPLETED,
+    MenuGuidanceRole.NEXT: GuidanceState.NEXT,
+    MenuGuidanceRole.LOCKED: GuidanceState.LOCKED,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class MenuGuidanceItem:
     """One visible microstep inside an executable task-tree leaf."""
 
     ordinal: int
     label: str
-    state: GuidanceState
+    role: MenuGuidanceRole
+
+    @property
+    def state(self) -> GuidanceState:
+        """Map the menu role onto the shared visual color tokens."""
+
+        return _ROLE_STATES[self.role]
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,16 +130,19 @@ class MenuGuidanceTracker:
             self._revealed_depth = 1
         operator_id, labels = target
         items: list[MenuGuidanceItem] = []
+        current_index = self._revealed_depth - 1
         for index, label in enumerate(labels):
-            if index < self._revealed_depth - 1:
-                state = GuidanceState.COMPLETED
-            elif index == self._revealed_depth - 1:
-                state = GuidanceState.BACK
-            elif index == self._revealed_depth:
-                state = GuidanceState.NEXT
+            if index < current_index - 1:
+                role = MenuGuidanceRole.COMPLETED
+            elif index == current_index - 1:
+                role = MenuGuidanceRole.PREVIOUS
+            elif index == current_index:
+                role = MenuGuidanceRole.CURRENT
+            elif index == current_index + 1:
+                role = MenuGuidanceRole.NEXT
             else:
-                state = GuidanceState.LOCKED
-            items.append(MenuGuidanceItem(index + 1, label, state))
+                role = MenuGuidanceRole.LOCKED
+            items.append(MenuGuidanceItem(index + 1, label, role))
         return MenuGuidanceSnapshot(
             step_id=step.id,
             operator_id=operator_id,
@@ -142,6 +171,7 @@ class MenuGuidanceTracker:
 
 __all__ = (
     "MenuGuidanceItem",
+    "MenuGuidanceRole",
     "MenuGuidanceSnapshot",
     "MenuGuidanceTracker",
 )

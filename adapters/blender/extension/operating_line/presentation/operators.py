@@ -132,6 +132,23 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
         return _execute_next(self)
 
 
+class OPERATINGLINE_OT_open_add_menu(bpy.types.Operator):
+    bl_idname = "operating_line.open_add_menu"
+    bl_label = "Open Guided Add Menu"
+    bl_description = "Open Blender's native Add menu without changing the scene"
+    bl_options = {"INTERNAL"}
+
+    def execute(self, _context):
+        result = bpy.ops.wm.call_menu("EXEC_DEFAULT", name="VIEW3D_MT_add")
+        if result not in ({"INTERFACE"}, {"RUNNING_MODAL"}):
+            self.report({"ERROR"}, "Blender could not open the native Add menu")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+    def invoke(self, context, _event):
+        return self.execute(context)
+
+
 class OPERATINGLINE_OT_guided_menu_action(bpy.types.Operator):
     bl_idname = "operating_line.guided_menu_action"
     bl_label = "Execute Guided Plan Step"
@@ -558,6 +575,7 @@ CLASSES = (
     OPERATINGLINE_OT_run_replan_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
+    OPERATINGLINE_OT_open_add_menu,
     OPERATINGLINE_OT_guided_menu_action,
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_toggle_overlay,

@@ -616,9 +616,11 @@ Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。
 真实目标线；版本适配器只在 Guidance 可见时替换经过 Blender 4.5/5.1 测试的
 `Add → Mesh → Plane/UV Sphere` 菜单绘制，并在隐藏 Guidance 或卸载 Extension 时恢复原始方法。
 `Layout` 工作区上下文保留在放大的视口卡片中，不猜测页签坐标；其他 `operator` 锚点继续显示操作 ID
-或 `menuPath` 语义路径并标记 `UI target unavailable`。原生菜单以彩色图标和 `BACK/NEXT/ALT` 文案
-表达状态，因为 `UILayout` 不支持任意文字或按钮背景色；不匹配当前计划的 `ALT` 项会拒绝执行，
-不会产生未跟踪对象。
+或 `menuPath` 语义路径并标记 `UI target unavailable`。原生菜单以红/蓝/绿状态块和
+`BACK/CURRENT/NEXT/ALT` 文案表达状态；顶部 Add 入口的上一步/BACK 使用原生红色警示背景，当前
+使用原生蓝色按下背景。Blender 没有逐按钮绿色背景 API，所以下一步使用绿色状态块和 NEXT 文案，
+视口步骤卡片继续显示完整的绿色填充徽标与连线，避免修改全局主题或猜测控件像素坐标。不匹配当前计划的
+`ALT` 项会拒绝执行，不会产生未跟踪对象。
 
 本地 Start/Next/Back/Show/Hide 操作会随 Blender UI 事件自然重绘。只由 Companion timer 更新的
 远端计划或连接文案，可能要等到 Blender 下一次正常界面重绘后显示；当前版本不调用 4.5/5.1
