@@ -150,6 +150,22 @@ pnpm eval:review \
   --repo-root <OperatingLine-repository-root>
 ```
 
+上述 `eval:manifest` 命令默认生成 `provider_only` manifest。若 snapshot 的精确 terminal host report 含
+Guide/Companion `1.5.0` artifact attestation，并且对应文件位于 manifest 输出目录内，在同一命令增加：
+
+```bash
+  --host-execution <exact-execution-id> \
+  --host-report <exact-terminal-report-id> \
+  --host-project <relative-scene.blend> \
+  --rendered-image <relative-render.png>
+```
+
+四个参数必须全部提供或全部省略；完整提供时生成
+`host_execution_with_runtime_attested_artifacts`。路径相对输出 manifest 目录解析，artifact ID、PNG 尺寸和
+渲染元数据从精确终态 attestation 派生。工具会在写入前核对实际文件哈希与 PNG 尺寸，并拒绝部分参数、
+重复或歧义报告、篡改文件以及绝对路径、`..` 或 symlink 路径逃逸。自动生成器不生成
+`host_execution_with_manual_artifacts`；该降级模式仍需人工编写并复核 manifest。
+
 `provider-aliases.json` 必须是完整审核过的 JSON string array，例如：
 
 ```json
@@ -167,7 +183,8 @@ service，不是 Electron 应用。
 
 Manifest derivation、capture、blind、review、check 和 report 默认不需要模型 Provider 凭据，不调用模型
 API，也不产生模型 API 费用。`eval:manifest` 只接受 runtime-attested frozen evidence，显式选择 case/request，
-自动派生 profile/settings，固定 provider-only `best_effort`，并拒绝 credential-like 参数。Snapshot 只从
+自动派生 profile/settings；默认生成 provider-only `best_effort`，成组提供四个宿主参数时则从精确终态
+证明派生 runtime-attested host artifact manifest，并拒绝 credential-like 参数。Snapshot 只从
 `--token-env` 指定的环境变量读取本地 OperatingLine Runtime access token，且
 不会把 token 写入文件；该 token 不是模型 Provider key。只有在上游生成新的真实 Provider 输出时才需要
 该 Provider 的凭据与预算。Blender render 在本机执行，只消耗本地计算资源。

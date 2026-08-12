@@ -1,5 +1,5 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -17,6 +17,12 @@ import {
 } from '@operatingline/protocol';
 
 import type { EvalCaptureManifestV1 } from './capture.js';
+import {
+  assertAvailableHostArtifactIds,
+  readLocalHostArtifactFiles,
+  resolveAuthorizedHostCapture,
+  verifyRuntimeHostArtifactFiles,
+} from './host-artifact-evidence.js';
 
 const maximumJsonBytes = 32 * 1024 * 1024;
 const maximumSnapshotBytes = 256 * 1024 * 1024;
@@ -47,6 +53,10 @@ export interface EvalManifestCliOptions {
   readonly vendorRequestId: string | null;
   readonly operatingLineVersion: string;
   readonly sourceCommit: string | null;
+  readonly hostExecutionId: string | null;
+  readonly terminalHostReportId: string | null;
+  readonly hostProjectPath: string | null;
+  readonly renderedImagePath: string | null;
   readonly outputRoot: string;
   readonly outputPath: string;
 }
@@ -244,6 +254,10 @@ export function parseEvalManifestCliOptions(arguments_: readonly string[]): Eval
     '--vendor-request',
     '--operating-line-version',
     '--source-commit',
+    '--host-execution',
+    '--host-report',
+    '--host-project',
+    '--rendered-image',
     '--out-root',
     '--out',
   ]);
@@ -265,6 +279,27 @@ export function parseEvalManifestCliOptions(arguments_: readonly string[]): Eval
   if (sourceCommit !== null && !/^[a-f0-9]{40}$/.test(sourceCommit)) {
     throw new Error('--source-commit must be 40 lowercase hexadecimal characters or none');
   }
+  const hostInputs = [
+    values.get('--host-execution'),
+    values.get('--host-report'),
+    values.get('--host-project'),
+    values.get('--rendered-image'),
+  ];
+  if (
+    hostInputs.some((value) => value !== undefined) &&
+    hostInputs.some((value) => value === undefined)
+  ) {
+    throw new Error(
+      '--host-execution, --host-report, --host-project, and --rendered-image must be provided together as one quartet',
+    );
+  }
+  if (
+    hostInputs.some(
+      (value) => value !== undefined && (value.trim() === '' || value.trim() === 'none'),
+    )
+  ) {
+    throw new Error('Runtime host manifest arguments must be non-empty');
+  }
   return {
     suitePath: required('--suite'),
     snapshotDirectory: required('--snapshot'),
@@ -278,6 +313,10 @@ export function parseEvalManifestCliOptions(arguments_: readonly string[]): Eval
     vendorRequestId: nullable(values.get('--vendor-request')),
     operatingLineVersion: required('--operating-line-version'),
     sourceCommit,
+    hostExecutionId: nullable(values.get('--host-execution')),
+    terminalHostReportId: nullable(values.get('--host-report')),
+    hostProjectPath: nullable(values.get('--host-project')),
+    renderedImagePath: nullable(values.get('--rendered-image')),
     outputRoot: required('--out-root'),
     outputPath: required('--out'),
   };
@@ -306,6 +345,11 @@ export async function runEvalManifestCli(
   arguments_: readonly string[],
 ): Promise<EvalCaptureManifestV1> {
   const options = parseEvalManifestCliOptions(arguments_);
+  const outputRoot = resolve(options.outputRoot);
+  const outputPath = resolve(options.outputPath);
+  if (!isWithin(outputRoot, outputPath)) {
+    throw new Error('--out escapes its configured root');
+  }
   const suiteBytes = await readRegularFile(options.suitePath, '--suite');
   const suite = humanEvalSuiteSchema.parse(JSON.parse(suiteBytes.toString('utf8')) as unknown);
   const exportPages = await loadSnapshotPages(options.snapshotDirectory);
@@ -331,9 +375,8 @@ export async function runEvalManifestCli(
     },
     dataHandling: localDataHandling,
   });
-  const manifest: EvalCaptureManifestV1 = {
+  const commonManifest = {
     formatVersion: '1.0.0',
-    captureMode: 'provider_only',
     suiteId: coreManifest.suiteId,
     suiteVersion: coreManifest.suiteVersion,
     caseId: coreManifest.caseId,
@@ -358,6 +401,51 @@ export async function runEvalManifestCli(
       sourceCommit: coreManifest.environment.sourceCommit,
     },
   };
+  let manifest: EvalCaptureManifestV1;
+  if (
+    options.hostExecutionId === null ||
+    options.terminalHostReportId === null ||
+    options.hostProjectPath === null ||
+    options.renderedImagePath === null
+  ) {
+    manifest = { ...commonManifest, captureMode: 'provider_only' };
+  } else {
+    const authorized = resolveAuthorizedHostCapture({
+      suite,
+      manifest: coreManifest,
+      pages: exportPages.map((page) => page.bundle as CurrentEvalExportBundle),
+      hostExecutionId: options.hostExecutionId,
+      terminalHostReportId: options.terminalHostReportId,
+    });
+    const files = await readLocalHostArtifactFiles({
+      root: dirname(outputPath),
+      hostProjectPath: options.hostProjectPath,
+      renderedImagePath: options.renderedImagePath,
+    });
+    const attestation = verifyRuntimeHostArtifactFiles({ authorized, files });
+    assertAvailableHostArtifactIds(
+      authorized.run,
+      attestation.hostProject.artifactId,
+      attestation.renderedImage.artifactId,
+      exportPages.map(
+        (_, index) => `eval.${coreManifest.runId}.page.${String(index + 1).padStart(4, '0')}`,
+      ),
+    );
+    manifest = {
+      ...commonManifest,
+      captureMode: 'host_execution_with_runtime_attested_artifacts',
+      hostExecutionId: options.hostExecutionId,
+      terminalHostReportId: options.terminalHostReportId,
+      hostProject: {
+        artifactId: attestation.hostProject.artifactId,
+        path: options.hostProjectPath,
+      },
+      renderedImage: {
+        artifactId: attestation.renderedImage.artifactId,
+        path: options.renderedImagePath,
+      },
+    };
+  }
   await writeEvalCaptureManifestAtomicExclusive(options.outputPath, manifest, options.outputRoot);
   return manifest;
 }

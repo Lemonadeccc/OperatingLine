@@ -545,8 +545,9 @@ Provider profile、补充 alias、私有 sign-off sidecar 或真实 Run ID；adj
 
 Manifest derivation、capture、blind preparation、review、check 与 report 默认完全离线：不需要模型
 Provider 凭据，不会调用模型 Provider，也不产生模型 API 费用。`eval:manifest` 从冻结的 runtime-attested
-requested/completed 事件派生 profile/settings，要求显式 case/request/run，拒绝 credential-like 参数并固定
-provider-only `best_effort`；不会猜测宿主构建身份。Snapshot 命令仅访问本机 OperatingLine Runtime；其 access token
+requested/completed 事件派生 profile/settings，要求显式 case/request/run 并拒绝 credential-like 参数；默认生成
+provider-only `best_effort`。只有当 execution/report/project/PNG 四个宿主参数完整提供时，它才从精确终态
+attestation 派生 runtime-attested host manifest，并在写入前核对文件哈希与 PNG 尺寸。Snapshot 命令仅访问本机 OperatingLine Runtime；其 access token
 通过命名环境变量传入且不写入 snapshot。只有在采集链上游选择生成一份新的真实 Provider 输出时，才由
 那个可选 Provider 的调用路径承担凭据、网络传输与费用边界。`host_execution_with_manual_artifacts` 所需 Blender 渲染在
 本机执行，仅消耗本地计算资源。
@@ -562,7 +563,8 @@ profile/settings。只有后一种 treatment 降级强制 Run 为 `not_reproduci
 
 Opt-in Provider 现在可在 requested/completed 事件中写入规范化 profile/settings、treatment hash、request
 fingerprint、packet hash 与严格 draft hash。Blender `1.5.0` 终态可保存工程副本并绑定 `.blend`/PNG hash、
-尺寸和渲染环境。`eval:manifest` 可离线生成精确的 runtime-attested provider-only 输入；Capture 仍只有在
+尺寸和渲染环境。`eval:manifest` 可离线生成精确的 runtime-attested provider-only 输入，也可在四个宿主
+参数完整提供时从精确终态证明派生 runtime-attested artifact 输入；Capture 仍只有在
 manifest 与这些事件逐字段一致时才保存 runtime attestation；released
 校验还会从冻结 Eval export 重新核对同一终态报告及两个实际 artifact 字节。见
 [ADR 0036](../adr/0036-runtime-attested-eval-evidence.md)。这仍不替代真实调用、双人盲审、数据审核或授权。

@@ -11,7 +11,7 @@ blind sign-off、0 个 annotation、0 个 adjudication。下列工具已经实�
 
 ```text
 versioned Eval snapshot
-  -> runtime-attested provider_only manifest (automatic), or reviewed manual manifest
+  -> runtime-attested provider_only or host-artifact manifest (automatic), or reviewed manual manifest
   -> capture: provider_only | host_execution_with_manual_artifacts
             | host_execution_with_runtime_attested_artifacts
   -> independent preparer provider-blind sign-off
@@ -89,7 +89,8 @@ pnpm eval:snapshot \
 ## 2. 生成或编写 capture manifest
 
 若 snapshot 的精确 requested/completed 事件包含 Runtime treatment/output attestation，优先让离线工具
-派生 `provider_only` manifest，避免手抄 Provider profile、generation settings 和版本身份：
+派生 manifest，避免手抄 Provider profile、generation settings 和版本身份。以下命令默认生成
+`provider_only`：
 
 ```bash
 pnpm eval:manifest \
@@ -107,14 +108,32 @@ pnpm eval:manifest \
   --out "$EVAL_CAPTURE_INPUT/capture.json"
 ```
 
+若同一 snapshot 还包含精确的 terminal host report 及 Guide/Companion `1.5.0`
+`artifactAttestation`，并且 `.blend` 与 PNG 已放在 manifest 输出目录内，可在同一命令增加四个成组参数：
+
+```bash
+  --host-execution '<exact-execution-id>' \
+  --host-report '<exact-terminal-report-id>' \
+  --host-project 'scene.blend' \
+  --rendered-image 'render.png'
+```
+
+四个参数必须全部提供或全部省略。完整提供时输出
+`host_execution_with_runtime_attested_artifacts`；只提供一部分会被拒绝。`--host-project` 和
+`--rendered-image` 相对输出 manifest 所在目录解析。工具按 execution/report ID 精确选择唯一终态报告，
+从其中的 attestation 取得并写入两个 artifact ID；frame、render engine、color management 和 PNG 尺寸用于
+写入前核对，随后由 Capture 从同一终态重新派生。工具会核对实际 `.blend`/PNG 的 SHA-256 与 PNG 尺寸。重复或歧义报告、文件篡改、绝对路径、目录逃逸
+和 symlink 逃逸都会被拒绝；同一 execution 存在多个 completed report 时必须显式选择与文件对应的 report。
+自动生成器不会生成 `host_execution_with_manual_artifacts`。
+
 需要 lineage 时增加 `--parent-run '<uuid>'`，已知供应商 request identity 时增加
 `--vendor-request '<public-request-id>'`；两者都可显式传 `none`。命令不会读取环境变量或访问网络，要求
 明确选择 case 和 generation request，验证完整冻结 page chain、suite/case/scope、request/terminal、
 packet/output hash 及 runtime attestation，并拒绝 `normalizedParameters` 中递归出现的明显 credential-like
 键。`--case`、`--request`、`--run`、replicate/lineage、recorder identity、OperatingLine version、source
-commit 与可选 vendor request 是操作者提供的数据，不是从 snapshot 推导的事实。输出固定为
+commit 与可选 vendor request 是操作者提供的数据，不是从 snapshot 推导的事实。默认输出为
 `provider_only`、`runtime_attested` 和保守的 `best_effort`：缺少精确宿主 build identity 时不会声明
-`reproducible`。`--out-root` 是显式私有写入边界，必须预先存在、不是 symlink；`--out` 必须位于其中。
+`reproducible`；成组提供宿主参数时，环境身份来自所选终态报告。`--out-root` 是显式私有写入边界，必须预先存在、不是 symlink；`--out` 必须位于其中。
 文件以私有权限原子创建且不覆盖已有路径，边界内的任何既存祖先都不得是 symlink。
 
 如果 runtime attestation 缺失，只能使用下面的人工降级模板。此路径的公开 descriptor/settings 必须由
@@ -252,7 +271,8 @@ output attestation，则也可将该证明与 manual artifacts 组合，输出 `
 仍保持 `manual_artifact_not_runtime_bound`。两种组合的 `releasedComparisonEligible` 都为 `false`：capture
 完成仍不等于满足运行时 artifact 证明、盲审、公开审核和整套 released readiness。
 
-若 Blender 终态报告包含 Guide/Companion `1.5.0` 的非空 `artifactAttestation`，可以改用：
+若 Blender 终态报告包含 Guide/Companion `1.5.0` 的非空 `artifactAttestation`，优先使用上面的四参数
+`eval:manifest` 命令自动生成。若必须人工编写，等价的增量片段为：
 
 ```json
 {
@@ -270,8 +290,8 @@ output attestation，则也可将该证明与 manual artifacts 组合，输出 `
 }
 ```
 
-此模式要求两个 artifact ID 与所选终态报告完全一致，并重新哈希 `.blend`/PNG、解码 PNG 尺寸，核对 frame、
-render engine、color management、Plan hash 与 execution。成功后才创建 `application/x-blender` 的
+人工 manifest 中的两个 artifact ID 也必须与所选终态报告完全一致。Capture 会重新哈希 `.blend`/PNG、
+解码 PNG 尺寸，核对 frame、render engine、color management、Plan hash 与 execution。成功后才创建 `application/x-blender` 的
 `host_project` 和带精确 `visualEnvironment` 的 `rendered_image`，可进入 released artifact 门禁。
 哈希证明不代表文件已脱敏、获得公开发布或训练授权。
 
@@ -438,7 +458,8 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 
 - [ ] Suite/case、catalog hash、operation、Plan ID/revision 与真实调用一致。
 - [ ] Snapshot 是完整冻结 `1.1.0` page chain，token 未写入任何文件。
-- [ ] Runtime-attested provider-only 路径优先使用 `eval:manifest`，并检查输出未含 credential-like 参数。
+- [ ] Runtime-attested provider-only 或 host-artifact 路径优先使用 `eval:manifest`，并检查输出未含
+      credential-like 参数；宿主路径的四个参数已完整成组提供。
 - [ ] Run 使用新的 UUID；generation request ID 与唯一 requested/terminal event 一致。
 - [ ] Capture mode 诚实：缺少精确宿主因果链时使用 `provider_only`。
 - [ ] 使用 runtime treatment 时，manifest 与 requested/completed attestation 完全匹配；未披露 resolved

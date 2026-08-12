@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFile, realpath, rm, stat } from 'node:fs/promises';
+import { readFile, realpath, rm } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
-  companionStateReportSchema,
   currentEvalExportBundleSchema,
   humanEvalSuiteSchema,
   type CurrentEvalExportBundle,
@@ -19,13 +18,21 @@ import {
   createProviderEvalRun,
   createProviderEvalRunFromCapture,
   computeHumanEvalContentSha256,
-  computePlanContentSha256,
   loadHumanEvalDatasetDirectory,
   preparePrivateHumanEvalDirectory,
   withHumanEvalDatasetWriteLock,
   writeHumanEvalFileAtomicExclusive,
   type ProviderEvalCaptureManifestV1,
 } from '@operatingline/eval-kit';
+
+import {
+  assertAvailableHostArtifactIds,
+  readConfinedRegularFile,
+  readLocalHostArtifactFiles,
+  resolveAuthorizedHostCapture,
+  verifyRuntimeHostArtifactFiles,
+  type AuthorizedHostCapture,
+} from './host-artifact-evidence.js';
 
 export const evalCaptureManifestVersion = '1.0.0' as const;
 
@@ -127,7 +134,6 @@ const localDataHandling: HumanEvalDataHandling = {
 const maximumSnapshotPageBytes = 32 * 1024 * 1024;
 const maximumSnapshotPages = 10_000;
 const maximumManifestBytes = 4 * 1024 * 1024;
-const maximumLocalArtifactBytes = 512 * 1024 * 1024;
 
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -138,36 +144,9 @@ function isWithin(root: string, candidate: string): boolean {
   return fromRoot === '' || (!fromRoot.startsWith('..') && !isAbsolute(fromRoot));
 }
 
-async function confinedFile(
-  rootInput: string,
-  relativePath: string,
-  label: string,
-  maximumBytes = maximumLocalArtifactBytes,
-): Promise<string> {
-  if (relativePath.length === 0 || isAbsolute(relativePath)) {
-    throw new Error(`${label} must be a non-empty relative path`);
-  }
-  const root = resolve(rootInput);
-  const candidate = resolve(root, relativePath);
-  if (!isWithin(root, candidate)) throw new Error(`${label} escapes its configured root`);
-  const [physicalRoot, physicalCandidate] = await Promise.all([
-    realpath(root),
-    realpath(candidate),
-  ]);
-  if (!isWithin(physicalRoot, physicalCandidate)) {
-    throw new Error(`${label} resolves outside its configured root`);
-  }
-  const metadata = await stat(physicalCandidate);
-  if (!metadata.isFile()) throw new Error(`${label} is not a regular file`);
-  if (metadata.size > maximumBytes) {
-    throw new Error(`${label} exceeds ${maximumBytes} bytes`);
-  }
-  return physicalCandidate;
-}
-
-async function readJson(path: string): Promise<unknown> {
+function readJsonBytes(bytes: Buffer, path: string): unknown {
   try {
-    return JSON.parse(await readFile(path, 'utf8')) as unknown;
+    return JSON.parse(bytes.toString('utf8')) as unknown;
   } catch (error) {
     throw new Error(
       `Cannot read JSON ${path}: ${error instanceof Error ? error.message : String(error)}`,
@@ -438,58 +417,6 @@ function parseCaptureManifest(value: unknown): EvalCaptureManifestV1 {
   };
 }
 
-function pngDimensions(bytes: Buffer): { width: number; height: number } {
-  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  if (
-    bytes.length < 24 ||
-    !bytes.subarray(0, 8).equals(signature) ||
-    bytes.toString('ascii', 12, 16) !== 'IHDR'
-  ) {
-    throw new Error('renderedImage is not a PNG with an IHDR header');
-  }
-  const width = bytes.readUInt32BE(16);
-  const height = bytes.readUInt32BE(20);
-  if (width === 0 || height === 0) throw new Error('renderedImage PNG dimensions must be positive');
-  return { width, height };
-}
-
-function matchingTerminalHostReports(
-  pages: readonly CurrentEvalExportBundle[],
-  run: ProviderEvalRun,
-  executionId: string,
-  reportId: string,
-) {
-  if (run.outcome.status !== 'completed' || run.outcome.result.status !== 'ready') return [];
-  const plan = run.outcome.result.draft.plan;
-  const planContentSha256 = computePlanContentSha256(plan);
-  const executableStepIds = plan.steps
-    .filter((step) => step.action !== null)
-    .map((step) => step.id);
-  const firstPage = pages[0]!;
-  return pages.flatMap((page) =>
-    page.events.flatMap((event) => {
-      if (event.eventType !== 'companion.state.reported') return [];
-      const parsed = companionStateReportSchema.safeParse(event.payload);
-      return parsed.success &&
-        parsed.data.executionId === executionId &&
-        parsed.data.reportId === reportId &&
-        parsed.data.protocolVersion === firstPage.protocolVersion &&
-        parsed.data.adapterId === run.environment.targetAdapterId &&
-        parsed.data.instanceId === firstPage.scope.instanceId &&
-        parsed.data.plan?.id === plan.id &&
-        parsed.data.plan.revision === plan.revision &&
-        parsed.data.planContentSha256 === planContentSha256 &&
-        parsed.data.phase === 'completed' &&
-        parsed.data.transition === 'step_succeeded' &&
-        parsed.data.stepId !== null &&
-        parsed.data.completedStepIds.length === executableStepIds.length &&
-        executableStepIds.every((stepId) => parsed.data.completedStepIds.includes(stepId))
-        ? [{ event, report: parsed.data }]
-        : [];
-    }),
-  );
-}
-
 async function privateDatasetDirectory(
   datasetDirectory: string,
   relativeDirectory: string,
@@ -546,31 +473,42 @@ export async function captureProviderEvalRun(
   const repositoryRoot = resolve(options.repositoryRoot ?? '.');
   const artifactOptions = { artifactRoots: { repo: repositoryRoot } } as const;
   const [suitePath, snapshotManifestPath, captureManifestPath] = await Promise.all([
-    confinedFile(datasetDirectory, 'suite.json', 'dataset suite', maximumManifestBytes),
-    confinedFile(snapshotDirectory, 'snapshot.json', 'snapshot manifest', maximumManifestBytes),
-    confinedFile(manifestRoot, basename(manifestPath), 'manifestPath', maximumManifestBytes),
+    readConfinedRegularFile(datasetDirectory, 'suite.json', 'dataset suite', maximumManifestBytes),
+    readConfinedRegularFile(
+      snapshotDirectory,
+      'snapshot.json',
+      'snapshot manifest',
+      maximumManifestBytes,
+    ),
+    readConfinedRegularFile(
+      manifestRoot,
+      basename(manifestPath),
+      'manifestPath',
+      maximumManifestBytes,
+    ),
   ]);
   const [suiteInput, snapshotInput, captureInput] = await Promise.all([
-    readJson(suitePath),
-    readJson(snapshotManifestPath),
-    readJson(captureManifestPath),
+    readJsonBytes(suitePath.bytes, suitePath.path),
+    readJsonBytes(snapshotManifestPath.bytes, snapshotManifestPath.path),
+    readJsonBytes(captureManifestPath.bytes, captureManifestPath.path),
   ]);
   const suite = humanEvalSuiteSchema.parse(suiteInput) as HumanEvalSuite;
   const snapshot = parseSnapshotManifest(snapshotInput);
   const manifest = parseCaptureManifest(captureInput);
   const pageInputs = await Promise.all(
     snapshot.pages.map(async (page, index) => {
-      const path = await confinedFile(
+      const file = await readConfinedRegularFile(
         snapshotDirectory,
         page.filename,
         `snapshot page ${index + 1}`,
         maximumSnapshotPageBytes,
       );
-      const bytes = await readFile(path);
       return {
-        path,
-        bytes,
-        bundle: currentEvalExportBundleSchema.parse(JSON.parse(bytes.toString('utf8')) as unknown),
+        path: file.path,
+        bytes: file.bytes,
+        bundle: currentEvalExportBundleSchema.parse(
+          JSON.parse(file.bytes.toString('utf8')) as unknown,
+        ),
       };
     }),
   );
@@ -689,102 +627,50 @@ export async function captureProviderEvalRun(
           'capture treatmentAttestation must match the frozen runtime Provider evidence',
         );
       }
-      let hostReport: ReturnType<typeof matchingTerminalHostReports>[number] | undefined;
+      let authorizedHost: AuthorizedHostCapture | undefined;
       if (manifest.captureMode !== 'provider_only') {
-        const matches = matchingTerminalHostReports(
-          pageInputs.map((page) => page.bundle),
-          run,
-          manifest.hostExecutionId,
-          manifest.terminalHostReportId,
-        );
-        if (matches.length !== 1) {
-          throw new Error(
-            'host-artifact capture requires one unique exact terminal host report for the selected execution',
-          );
-        }
-        hostReport = matches[0]!;
-        run = createProviderEvalRunFromCapture({
+        authorizedHost = resolveAuthorizedHostCapture({
           suite,
-          manifest: {
-            ...baseManifest,
-            hostExecutionId: manifest.hostExecutionId,
-            terminalHostReportId: manifest.terminalHostReportId,
-            environment: {
-              ...providerOnlyEnvironment,
-              adapterVersion: hostReport.report.companionVersion,
-              hostVersion: hostReport.report.hostVersion,
-            },
-          },
+          manifest: baseManifest,
+          pages: pageInputs.map((page) => page.bundle),
+          hostExecutionId: manifest.hostExecutionId,
+          terminalHostReportId: manifest.terminalHostReportId,
         });
-        const reservedArtifactIds = new Set(run.artifacts.map((artifact) => artifact.artifactId));
-        if (
-          manifest.hostProject.artifactId === manifest.renderedImage.artifactId ||
-          reservedArtifactIds.has(manifest.hostProject.artifactId) ||
-          reservedArtifactIds.has(manifest.renderedImage.artifactId)
-        ) {
-          throw new Error('host artifact ids must be unique');
-        }
-        const hostSource = run.sourceEvents.filter(
-          (event) => event.correlationKind === 'host_execution',
+        run = authorizedHost.run;
+        assertAvailableHostArtifactIds(
+          run,
+          manifest.hostProject.artifactId,
+          manifest.renderedImage.artifactId,
         );
-        if (
-          hostSource.length !== 1 ||
-          hostSource[0]!.executionId !== manifest.hostExecutionId ||
-          hostSource[0]!.reportId !== manifest.terminalHostReportId
-        ) {
-          throw new Error(
-            'host-artifact capture did not resolve to one authorized successful host execution',
-          );
-        }
-        const [projectPath, imagePath] = await Promise.all([
-          confinedFile(
-            manifestRoot,
-            manifest.hostProject.path,
-            'hostProject.path',
-            maximumLocalArtifactBytes,
-          ),
-          confinedFile(
-            manifestRoot,
-            manifest.renderedImage.path,
-            'renderedImage.path',
-            maximumLocalArtifactBytes,
-          ),
-        ]);
-        const [projectBytes, imageBytes] = await Promise.all([
-          readFile(projectPath),
-          readFile(imagePath),
-        ]);
-        const project = await copyContentAddressed(
-          datasetDirectory,
-          projectBytes,
-          extname(projectPath),
-          created,
-        );
-        const image = await copyContentAddressed(datasetDirectory, imageBytes, '.png', created);
-        const dimensions = pngDimensions(imageBytes);
-        const host = hostSource[0]!;
-        const runtimeAttestation = hostReport.report.artifactAttestation;
+        const files = await readLocalHostArtifactFiles({
+          root: manifestRoot,
+          hostProjectPath: manifest.hostProject.path,
+          renderedImagePath: manifest.renderedImage.path,
+        });
         const runtimeBound =
           manifest.captureMode === 'host_execution_with_runtime_attested_artifacts';
-        if (runtimeBound) {
-          if (
-            runtimeAttestation === undefined ||
-            runtimeAttestation === null ||
-            runtimeAttestation.executionId !== manifest.hostExecutionId ||
-            runtimeAttestation.planContentSha256 !== host.planContentSha256 ||
-            runtimeAttestation.hostProject.artifactId !== manifest.hostProject.artifactId ||
-            runtimeAttestation.hostProject.contentSha256 !== project.hash ||
-            runtimeAttestation.renderedImage.artifactId !== manifest.renderedImage.artifactId ||
-            runtimeAttestation.renderedImage.contentSha256 !== image.hash ||
-            runtimeAttestation.renderedImage.width !== dimensions.width ||
-            runtimeAttestation.renderedImage.height !== dimensions.height ||
-            runtimeAttestation.renderedImage.hostProjectSha256 !== project.hash
-          ) {
-            throw new Error(
-              'runtime host-artifact capture files do not match the terminal host attestation',
-            );
-          }
-        }
+        const runtimeAttestation = runtimeBound
+          ? verifyRuntimeHostArtifactFiles({
+              authorized: authorizedHost,
+              files,
+              expectedHostProjectArtifactId: manifest.hostProject.artifactId,
+              expectedRenderedImageArtifactId: manifest.renderedImage.artifactId,
+            })
+          : authorizedHost.report.artifactAttestation;
+        const project = await copyContentAddressed(
+          datasetDirectory,
+          files.projectBytes,
+          extname(files.projectPath),
+          created,
+        );
+        const image = await copyContentAddressed(
+          datasetDirectory,
+          files.imageBytes,
+          '.png',
+          created,
+        );
+        const dimensions = files.dimensions;
+        const host = authorizedHost.sourceEvent;
         const evidenceMetadata = runtimeBound
           ? {
               evidenceClass: 'runtime_attested_host_artifacts',
@@ -836,8 +722,8 @@ export async function captureProviderEvalRun(
                 (manifest.captureMode === 'host_execution_with_manual_artifacts'
                   ? manifest.renderedImage.colorManagement
                   : 'unknown'),
-              hostVersion: hostReport.report.hostVersion,
-              adapterVersion: hostReport.report.companionVersion,
+              hostVersion: authorizedHost.report.hostVersion,
+              adapterVersion: authorizedHost.report.companionVersion,
               hostProjectSha256: project.hash,
             },
             ...(runtimeBound && runtimeAttestation !== undefined && runtimeAttestation !== null
@@ -848,8 +734,8 @@ export async function captureProviderEvalRun(
                     frame: runtimeAttestation.renderedImage.frame,
                     renderEngine: runtimeAttestation.renderedImage.renderEngine,
                     colorManagement: runtimeAttestation.renderedImage.colorManagement,
-                    hostVersion: hostReport.report.hostVersion,
-                    adapterVersion: hostReport.report.companionVersion,
+                    hostVersion: authorizedHost.report.hostVersion,
+                    adapterVersion: authorizedHost.report.companionVersion,
                     planContentSha256: host.planContentSha256,
                     executionId: manifest.hostExecutionId,
                     terminalHostReportId: host.reportId,

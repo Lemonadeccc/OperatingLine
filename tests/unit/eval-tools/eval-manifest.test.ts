@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { computeHumanEvalContentSha256 } from '@operatingline/eval-kit';
+import { computeHumanEvalContentSha256, computePlanContentSha256 } from '@operatingline/eval-kit';
 import type { CurrentEvalExportBundle, EvalExecutionEvent } from '@operatingline/protocol';
 
 import { captureProviderEvalRun } from '../../../tools/eval/capture.js';
@@ -21,6 +22,8 @@ import {
 
 const roots: string[] = [];
 const snapshotId = '43000000-0000-4000-8000-000000000001';
+const hostExecutionId = '43000000-0000-4000-8000-000000000030';
+const hostReportId = '43000000-0000-4000-8000-000000000032';
 
 function argumentsFor(overrides: readonly string[] = []): string[] {
   return [
@@ -50,6 +53,14 @@ function argumentsFor(overrides: readonly string[] = []): string[] {
     'capture.json',
     ...overrides,
   ];
+}
+
+function replaceArgument(arguments_: readonly string[], name: string, value: string): string[] {
+  const next = [...arguments_];
+  const index = next.indexOf(name);
+  if (index === -1) throw new Error(`Missing test argument ${name}`);
+  next[index + 1] = value;
+  return next;
 }
 
 const manifest = {
@@ -195,6 +206,238 @@ function runtimeAttestedState() {
   return { suite, source, page };
 }
 
+function withEvents(
+  page: CurrentEvalExportBundle,
+  events: readonly EvalExecutionEvent[],
+  instanceId: string | null,
+): CurrentEvalExportBundle {
+  const { exportId, exportedAt } = page;
+  const originalContent = {
+    protocolVersion: page.protocolVersion,
+    formatVersion: page.formatVersion,
+    scope: page.scope,
+    catalogs: page.catalogs,
+    events: page.events,
+    page: page.page,
+    summary: page.summary,
+    dataHandling: page.dataHandling,
+  };
+  const eventTypeCounts: Record<string, number> = {};
+  const transitionCounts: Record<string, number> = {};
+  for (const event of events) {
+    eventTypeCounts[event.eventType] = (eventTypeCounts[event.eventType] ?? 0) + 1;
+    if (event.eventType === 'companion.state.reported') {
+      const transition = event.payload.transition;
+      transitionCounts[transition] = (transitionCounts[transition] ?? 0) + 1;
+    }
+  }
+  const content = {
+    ...originalContent,
+    protocolVersion: '1.5.0',
+    scope: { ...page.scope, instanceId },
+    events: [...events],
+    page: {
+      ...page.page,
+      snapshotUpperSequence: events.at(-1)!.sequence,
+      nextAfterSequence: events.at(-1)!.sequence,
+    },
+    summary: {
+      ...page.summary,
+      matchedEventCount: events.length,
+      eventTypeCounts,
+      transitionCounts,
+    },
+  };
+  return {
+    ...content,
+    exportId,
+    exportedAt,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: 'operatingline-json-sort-v1',
+      contentSha256: computeHumanEvalContentSha256(content),
+    },
+  };
+}
+
+async function setupRuntimeAttestedHostManifestWorkspace() {
+  const root = await mkdtemp(join(tmpdir(), 'operatingline-eval-manifest-host-'));
+  roots.push(root);
+  const datasetDirectory = join(root, 'dataset');
+  const snapshotDirectory = join(root, 'snapshot');
+  const inputDirectory = join(root, 'capture-input');
+  await Promise.all([mkdir(datasetDirectory), mkdir(snapshotDirectory), mkdir(inputDirectory)]);
+
+  const state = runtimeAttestedState();
+  state.source.environment.protocolVersion = '1.5.0';
+  if (state.source.outcome.status !== 'completed') throw new Error('Expected completed fixture');
+  const plan = state.source.outcome.result.draft.plan;
+  const planContentSha256 = computePlanContentSha256(plan);
+  const instanceId = '43000000-0000-4000-8000-000000000031';
+  const executableStepIds = plan.steps
+    .filter((step) => step.action !== null)
+    .map((step) => step.id);
+  const finalStepId = executableStepIds.at(-1)!;
+  const projectBytes = Buffer.from('runtime-attested manifest project bytes');
+  const imageBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const projectSha256 = createHash('sha256').update(projectBytes).digest('hex');
+  const imageSha256 = createHash('sha256').update(imageBytes).digest('hex');
+  const terminalEvent: Extract<
+    EvalExecutionEvent,
+    { readonly eventType: 'companion.state.reported' }
+  > = {
+    sequence: 5,
+    id: 'manifest.runtime.host.completed',
+    eventType: 'companion.state.reported',
+    payload: {
+      protocolVersion: '1.5.0',
+      reportId: hostReportId,
+      sequence: 1,
+      adapterId: state.source.environment.targetAdapterId,
+      instanceId,
+      companionVersion: state.source.environment.adapterVersion,
+      hostVersion: state.source.environment.hostVersion,
+      plan: { id: plan.id, revision: plan.revision },
+      planContentSha256,
+      executionId: hostExecutionId,
+      phase: 'completed',
+      activeStepId: finalStepId,
+      completedStepIds: executableStepIds,
+      transition: 'step_succeeded',
+      stepId: finalStepId,
+      observations: [],
+      observationGate: null,
+      artifactAttestation: {
+        formatVersion: '1.0.0',
+        evidenceClass: 'runtime_attested_host_artifacts',
+        planContentSha256,
+        executionId: hostExecutionId,
+        hostProject: {
+          artifactId: `host.project.${hostReportId}`,
+          kind: 'host_project',
+          mediaType: 'application/x-blender',
+          contentSha256: projectSha256,
+        },
+        renderedImage: {
+          artifactId: `host.render.${hostReportId}`,
+          kind: 'rendered_image',
+          mediaType: 'image/png',
+          contentSha256: imageSha256,
+          width: 1,
+          height: 1,
+          frame: 1,
+          renderEngine: 'TEST',
+          colorManagement: 'test',
+          hostProjectSha256: projectSha256,
+        },
+      },
+      error: null,
+      occurredAt: '2026-08-05T00:00:02.000Z',
+    },
+    createdAt: '2026-08-05T00:00:02.000Z',
+  };
+  const publishedEvent: EvalExecutionEvent = {
+    sequence: 4,
+    id: 'manifest.runtime.published',
+    eventType: 'guide.plan.published',
+    payload: { plan },
+    createdAt: '2026-08-05T00:00:01.500Z',
+  };
+  const suitePath = join(datasetDirectory, 'suite.json');
+  const pagePath = join(snapshotDirectory, 'page-0001.eval-export.json');
+  const outputPath = join(inputDirectory, 'capture.json');
+
+  async function writeSnapshot(hostEvents: readonly EvalExecutionEvent[] = [terminalEvent]) {
+    const page = withEvents(
+      state.page,
+      [...state.page.events, publishedEvent, ...hostEvents],
+      instanceId,
+    );
+    await Promise.all([
+      writeFile(pagePath, JSON.stringify(page)),
+      writeFile(
+        join(snapshotDirectory, 'snapshot.json'),
+        JSON.stringify({
+          formatVersion: '1.0.0',
+          scope: page.scope,
+          snapshotId: page.page.snapshotId,
+          snapshotUpperSequence: page.page.snapshotUpperSequence,
+          pages: [
+            {
+              filename: 'page-0001.eval-export.json',
+              exportId: page.exportId,
+              contentSha256: page.integrity.contentSha256,
+            },
+          ],
+          dataHandling: {
+            containsPotentiallySensitiveContent: true,
+            credentialsStored: false,
+            warning: 'Synthetic local snapshot.',
+          },
+        }),
+      ),
+    ]);
+  }
+
+  await Promise.all([
+    writeFile(suitePath, JSON.stringify(state.suite)),
+    writeFile(join(inputDirectory, 'project.blend'), projectBytes),
+    writeFile(join(inputDirectory, 'render.png'), imageBytes),
+  ]);
+  await writeSnapshot();
+
+  const cliArguments = [
+    '--suite',
+    suitePath,
+    '--snapshot',
+    snapshotDirectory,
+    '--case',
+    state.suite.cases[0]!.id,
+    '--request',
+    state.source.invocation.request.requestId,
+    '--run',
+    '43000000-0000-4000-8000-000000000040',
+    '--replicate',
+    '1',
+    '--recorder-name',
+    'offline-host-manifest-e2e',
+    '--recorder-version',
+    state.source.provenance.recorderVersion,
+    '--operating-line-version',
+    state.source.environment.operatingLineVersion,
+    '--source-commit',
+    'none',
+    '--host-execution',
+    hostExecutionId,
+    '--host-report',
+    hostReportId,
+    '--host-project',
+    'project.blend',
+    '--rendered-image',
+    'render.png',
+    '--out-root',
+    inputDirectory,
+    '--out',
+    outputPath,
+  ];
+  return {
+    ...state,
+    root,
+    datasetDirectory,
+    snapshotDirectory,
+    inputDirectory,
+    outputPath,
+    projectSha256,
+    imageSha256,
+    terminalEvent,
+    writeSnapshot,
+    cliArguments,
+  };
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -244,6 +487,34 @@ describe('Eval manifest CLI', () => {
       all[index - 1] === '--source-commit' ? 'BAD' : value,
     );
     expect(() => parseEvalManifestCliOptions(invalidCommit)).toThrow(/source-commit/);
+  });
+
+  it('requires the runtime host selector and local artifact arguments as one quartet', () => {
+    const quartet = [
+      '--host-execution',
+      hostExecutionId,
+      '--host-report',
+      hostReportId,
+      '--host-project',
+      'project.blend',
+      '--rendered-image',
+      'render.png',
+    ];
+    for (let omitted = 0; omitted < quartet.length; omitted += 2) {
+      expect(() =>
+        parseEvalManifestCliOptions([
+          ...argumentsFor(),
+          ...quartet.filter((_, index) => index !== omitted && index !== omitted + 1),
+        ]),
+      ).toThrow(/provided together|all four|one quartet/i);
+    }
+    for (let replaced = 1; replaced < quartet.length; replaced += 2) {
+      const withNone = [...quartet];
+      withNone[replaced] = 'none';
+      expect(() => parseEvalManifestCliOptions([...argumentsFor(), ...withNone])).toThrow(
+        /non-empty/i,
+      );
+    }
   });
 
   it('writes a complete private file atomically and never overwrites', async () => {
@@ -534,5 +805,204 @@ describe('Eval manifest CLI', () => {
       if (previousSecret === undefined) delete process.env['OPERATINGLINE_TEST_PROVIDER_TOKEN'];
       else process.env['OPERATINGLINE_TEST_PROVIDER_TOKEN'] = previousSecret;
     }
+  });
+
+  it('derives a runtime-attested host manifest that capture accepts end to end', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+
+    const created = await runEvalManifestCli(workspace.cliArguments);
+
+    expect(created).toMatchObject({
+      captureMode: 'host_execution_with_runtime_attested_artifacts',
+      hostExecutionId,
+      terminalHostReportId: hostReportId,
+      hostProject: {
+        artifactId: `host.project.${hostReportId}`,
+        path: 'project.blend',
+      },
+      renderedImage: {
+        artifactId: `host.render.${hostReportId}`,
+        path: 'render.png',
+      },
+    });
+    const captured = await captureProviderEvalRun({
+      datasetDirectory: workspace.datasetDirectory,
+      snapshotDirectory: workspace.snapshotDirectory,
+      manifestPath: workspace.outputPath,
+      repositoryRoot: workspace.root,
+    });
+    expect(captured.artifacts.find((artifact) => artifact.kind === 'host_project')).toMatchObject({
+      artifactId: `host.project.${hostReportId}`,
+      contentSha256: workspace.projectSha256,
+    });
+    expect(captured.artifacts.find((artifact) => artifact.kind === 'rendered_image')).toMatchObject(
+      {
+        artifactId: `host.render.${hostReportId}`,
+        contentSha256: workspace.imageSha256,
+        visualEnvironment: {
+          executionId: hostExecutionId,
+          terminalHostReportId: hostReportId,
+        },
+      },
+    );
+  });
+
+  it('selects the exact report id when one execution has multiple terminal reports', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const earlier = structuredClone(workspace.terminalEvent);
+    earlier.id = 'manifest.runtime.host.completed.earlier';
+    earlier.payload.reportId = '43000000-0000-4000-8000-000000000033';
+    earlier.payload.artifactAttestation = null;
+    const selected = structuredClone(workspace.terminalEvent);
+    selected.sequence = 6;
+    selected.id = 'manifest.runtime.host.completed.selected';
+    selected.payload.sequence = 2;
+    selected.payload.occurredAt = '2026-08-05T00:00:03.000Z';
+    selected.createdAt = '2026-08-05T00:00:03.000Z';
+    await workspace.writeSnapshot([earlier, selected]);
+
+    const created = await runEvalManifestCli(workspace.cliArguments);
+
+    expect(created).toMatchObject({
+      captureMode: 'host_execution_with_runtime_attested_artifacts',
+      terminalHostReportId: hostReportId,
+      hostProject: { artifactId: `host.project.${hostReportId}` },
+      renderedImage: { artifactId: `host.render.${hostReportId}` },
+    });
+  });
+
+  it('rejects a tampered local host artifact before writing the manifest', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    await writeFile(join(workspace.inputDirectory, 'project.blend'), 'tampered project bytes');
+
+    await expect(runEvalManifestCli(workspace.cliArguments)).rejects.toThrow(
+      /attestation|content|hash|match/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects an attested host artifact id that collides with the final capture page id', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const terminalEvent = structuredClone(workspace.terminalEvent);
+    terminalEvent.payload.artifactAttestation!.hostProject.artifactId =
+      'eval.43000000-0000-4000-8000-000000000040.page.0001';
+    await workspace.writeSnapshot([terminalEvent]);
+
+    await expect(runEvalManifestCli(workspace.cliArguments)).rejects.toThrow(
+      /artifact ids must be unique|artifact id.*collid|reserved artifact/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects duplicate exact terminal reports with different event identities', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const duplicate = structuredClone(workspace.terminalEvent);
+    duplicate.sequence = 6;
+    duplicate.id = 'manifest.runtime.host.completed.duplicate';
+    duplicate.payload.sequence = 2;
+    duplicate.payload.occurredAt = '2026-08-05T00:00:03.000Z';
+    duplicate.createdAt = '2026-08-05T00:00:03.000Z';
+    await workspace.writeSnapshot([workspace.terminalEvent, duplicate]);
+
+    await expect(runEvalManifestCli(workspace.cliArguments)).rejects.toThrow(
+      /one unique exact terminal host report/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a selected terminal report without an artifact attestation', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const terminalEvent = structuredClone(workspace.terminalEvent);
+    terminalEvent.payload.artifactAttestation = null;
+    await workspace.writeSnapshot([terminalEvent]);
+
+    await expect(runEvalManifestCli(workspace.cliArguments)).rejects.toThrow(
+      /terminal host attestation|artifact.*attestation|do not match/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects attested PNG dimensions that do not match the selected local image', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const terminalEvent = structuredClone(workspace.terminalEvent);
+    terminalEvent.payload.artifactAttestation!.renderedImage.width = 2;
+    terminalEvent.payload.artifactAttestation!.renderedImage.height = 2;
+    await workspace.writeSnapshot([terminalEvent]);
+
+    await expect(runEvalManifestCli(workspace.cliArguments)).rejects.toThrow(
+      /terminal host attestation|dimensions|do not match/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects an absolute host project path before writing the manifest', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const arguments_ = replaceArgument(
+      workspace.cliArguments,
+      '--host-project',
+      join(workspace.inputDirectory, 'project.blend'),
+    );
+
+    await expect(runEvalManifestCli(arguments_)).rejects.toThrow(/relative path/i);
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a host project parent-directory escape before writing the manifest', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const arguments_ = replaceArgument(
+      workspace.cliArguments,
+      '--host-project',
+      '../project.blend',
+    );
+
+    await expect(runEvalManifestCli(arguments_)).rejects.toThrow(/escapes its configured root/i);
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a host project symlink that resolves outside the manifest directory', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const outsideProject = join(workspace.root, 'outside-project.blend');
+    const linkedProject = join(workspace.inputDirectory, 'linked-project.blend');
+    await writeFile(
+      outsideProject,
+      await readFile(join(workspace.inputDirectory, 'project.blend')),
+    );
+    await symlink(outsideProject, linkedProject);
+    const arguments_ = replaceArgument(
+      workspace.cliArguments,
+      '--host-project',
+      'linked-project.blend',
+    );
+
+    await expect(runEvalManifestCli(arguments_)).rejects.toThrow(
+      /resolves outside its configured root/i,
+    );
+    await expect(readFile(workspace.outputPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a manifest output ancestor that physically escapes out-root through a symlink', async () => {
+    const workspace = await setupRuntimeAttestedHostManifestWorkspace();
+    const outsideDirectory = join(workspace.root, 'outside-output');
+    const linkedDirectory = join(workspace.inputDirectory, 'linked-output');
+    await mkdir(outsideDirectory);
+    await Promise.all([
+      writeFile(
+        join(outsideDirectory, 'project.blend'),
+        await readFile(join(workspace.inputDirectory, 'project.blend')),
+      ),
+      writeFile(
+        join(outsideDirectory, 'render.png'),
+        await readFile(join(workspace.inputDirectory, 'render.png')),
+      ),
+    ]);
+    await symlink(outsideDirectory, linkedDirectory, 'dir');
+    const escapedOutput = join(linkedDirectory, 'capture.json');
+    const arguments_ = replaceArgument(workspace.cliArguments, '--out', escapedOutput);
+
+    await expect(runEvalManifestCli(arguments_)).rejects.toThrow(
+      /non-directory link|resolves outside|escapes/i,
+    );
+    await expect(readFile(escapedOutput, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readdir(outsideDirectory)).toEqual(['project.blend', 'render.png']);
   });
 });

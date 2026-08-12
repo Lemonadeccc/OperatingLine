@@ -206,9 +206,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   检查每个精确哈希对应的像素，再由 blind sign-off 绑定该逐图声明。项目和 PNG metadata 都标记
   `manual_artifact_not_runtime_bound`。Capture 中的 Provider
   profile/settings 可保留 operator-attested 降级并强制 `not_reproducible`；opt-in Provider 也可把规范化
-  profile/settings、request/packet/output hash 写成运行时证明。离线 `eval:manifest` 可从冻结证明自动派生
-  精确的 `provider_only` capture manifest，要求显式 case/request/run，并固定保守的 `best_effort`；它不读取
-  凭据或调用 Provider。Capture 和 released 门禁仍会独立精确复核。
+  profile/settings、request/packet/output hash 写成运行时证明。离线 `eval:manifest` 默认从冻结证明派生
+  精确的 `provider_only` capture manifest；四个宿主参数完整提供时，也可从精确终态证明派生 runtime-attested
+  artifact manifest。两种路径都要求显式 case/request/run，且不读取凭据或调用 Provider；Capture 和 released
+  门禁仍会独立精确复核。
   每个 Run 必须先由独立 preparer 检查
   provider-blind 投影并写入 sign-off sidecar，才能在回环 headless service 提供的浏览器工作台中由两名
   独立 reviewer 审核；只有保留的分歧才交给第三个独立 adjudicator。浏览器只收到 opaque Run ID 和
