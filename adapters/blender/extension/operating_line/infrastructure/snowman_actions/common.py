@@ -145,6 +145,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.create_primitive_batch",
         "blender.mesh.create_plane",
         "blender.mesh.edit_subdivide",
+        "blender.mesh.edit_triangulate",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.geometry_nodes.create_transform",
@@ -1196,7 +1197,8 @@ def _restore_mutation(mutation: MutationRecord) -> None:
 
 
 def ensure_receipts_intact(receipts: Mapping[str, ActionReceipt]) -> None:
-    """Fail closed when a completed step no longer matches its receipt."""
+    """Fail closed unless each tracked attribute matches its latest managed write."""
+    terminal_mutations: dict[tuple[str, str, str], MutationRecord] = {}
     for receipt in receipts.values():
         for identity in receipt.created:
             if resolve_resource(identity) is None:
@@ -1204,11 +1206,13 @@ def ensure_receipts_intact(receipts: Mapping[str, ActionReceipt]) -> None:
                     f"Completed resource is no longer available: {identity.logical_id}"
                 )
         for mutation in receipt.mutations:
-            if not _mutation_matches_after(mutation):
-                raise RuntimeError(
-                    "Completed resource was modified: "
-                    f"{mutation.resource.logical_id}.{mutation.attribute}"
+            terminal_mutations[
+                (
+                    mutation.resource.resource_type,
+                    mutation.resource.logical_id,
+                    mutation.attribute,
                 )
+            ] = mutation
         for artifact in receipt.artifacts:
             path = Path(artifact.path)
             if (
@@ -1218,6 +1222,12 @@ def ensure_receipts_intact(receipts: Mapping[str, ActionReceipt]) -> None:
                 raise RuntimeError(
                     f"Completed artifact is no longer available: {artifact.logical_id}"
                 )
+    for mutation in terminal_mutations.values():
+        if not _mutation_matches_after(mutation):
+            raise RuntimeError(
+                "Completed resource was modified: "
+                f"{mutation.resource.logical_id}.{mutation.attribute}"
+            )
 
 
 def _created_objects(receipt: ActionReceipt) -> tuple[bpy.types.Object, ...]:

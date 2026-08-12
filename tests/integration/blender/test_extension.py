@@ -94,12 +94,15 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     ALLOWED_ACTIONS,
     COLLECTION_NAME,
     OWNER_VALUE,
+    ensure_receipts_intact,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
+    _ensure_triangulate_topology_is_bounded,
     validate_bevel,
     validate_geometry_nodes_transform,
     validate_solidify,
     validate_subdivide,
+    validate_triangulate,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.model import (  # noqa: E402
     validate_cube,
@@ -465,6 +468,407 @@ def assert_edit_modifier_geometry_nodes_round_trip() -> None:
     assert bpy.data.meshes.get("OperatingLine.EditPipelineCube.SubdividedMesh") is None
     assert session.back() is not None
     assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def triangulate_steps(
+    *,
+    object_name: str = "OperatingLine.TriangulateCube",
+    result_mesh_id: str = "triangulate.cube.result_mesh",
+    result_mesh_name: str = "OperatingLine.TriangulateCube.ResultMesh",
+) -> list[dict]:
+    return [
+        step("root", None, 0),
+        step(
+            "triangulate.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "triangulate.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "triangulate.mesh",
+            "root",
+            2,
+            depends_on=["triangulate.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_triangulate",
+                "arguments": {
+                    "targetId": "triangulate.cube",
+                    "resultMeshId": result_mesh_id,
+                    "resultMeshName": result_mesh_name,
+                },
+            },
+        ),
+    ]
+
+
+def assert_triangulate_round_trip_and_guards() -> None:
+    object_name = "OperatingLine.TriangulateCube"
+    result_mesh_name = "OperatingLine.TriangulateCube.ResultMesh"
+    root = load_temporary_plan(triangulate_steps())
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    cube = bpy.data.objects[object_name]
+    source_mesh = cube.data
+    assert (
+        len(source_mesh.vertices),
+        len(source_mesh.edges),
+        len(source_mesh.polygons),
+    ) == (8, 12, 6)
+
+    assert session.next() is not None
+    result_mesh = cube.data
+    assert result_mesh is not source_mesh
+    assert result_mesh.name == result_mesh_name
+    assert (
+        len(result_mesh.vertices),
+        len(result_mesh.edges),
+        len(result_mesh.polygons),
+    ) == (8, 18, 12)
+    assert all(len(polygon.vertices) == 3 for polygon in result_mesh.polygons)
+    receipt = session.receipts["triangulate.mesh"]
+    assert len(receipt.created) == 1
+    assert tuple(mutation.attribute for mutation in receipt.mutations) == (
+        "data",
+        "mesh_content",
+    )
+    ensure_receipts_intact(session.receipts)
+    cube.data = source_mesh
+    try:
+        ensure_receipts_intact(session.receipts)
+    except RuntimeError as error:
+        assert "triangulate.cube.data" in str(error)
+    else:
+        raise AssertionError(
+            "The latest owned data mutation must reject an earlier managed value"
+        )
+    cube.data = result_mesh
+
+    observation_parameters = {
+        "targetId": "triangulate.cube",
+        "resultMeshId": "triangulate.cube.result_mesh",
+    }
+    observations = observation_module.evaluate_observations(
+        (
+            {"kind": "mesh_triangulated", "parameters": observation_parameters},
+            {
+                "kind": "mesh_triangulated",
+                "parameters": {**observation_parameters, "unexpected": True},
+            },
+            {
+                "kind": "mesh_triangulated",
+                "parameters": {**observation_parameters, "targetId": 7},
+            },
+        ),
+        session.receipts,
+    )
+    assert tuple(item["satisfied"] for item in observations) == (
+        True,
+        False,
+        False,
+    )
+
+    original_vertex = result_mesh.vertices[0].co.copy()
+    result_mesh.vertices[0].co.x += 0.25
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited triangulated meshes must block rollback")
+    result_mesh.vertices[0].co = original_vertex
+
+    external_user = cube.copy()
+    external_user.data = result_mesh
+    external_user.name = "ExternalTriangulateResultUser"
+    bpy.context.scene.collection.objects.link(external_user)
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "externally used data" in str(error).lower()
+    else:
+        raise AssertionError("Externally used triangulated meshes must block rollback")
+    bpy.data.objects.remove(external_user, do_unlink=True)
+
+    assert session.back() is not None
+    assert cube.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+    modifier_root = load_temporary_plan(triangulate_steps())
+    modifier_session = DemoSession(modifier_root, action_registry(modifier_root))
+    modifier_session.start()
+    assert modifier_session.next() is not None
+    modifier_cube = bpy.data.objects[object_name]
+    source_mesh = modifier_cube.data
+    external_modifier = modifier_cube.modifiers.new("External", "BEVEL")
+    try:
+        modifier_session.next()
+    except RuntimeError as error:
+        assert "must not have modifiers" in str(error)
+    else:
+        raise AssertionError("Triangulate must reject modifier-bearing targets")
+    assert modifier_cube.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    modifier_cube.modifiers.remove(external_modifier)
+
+    bpy.context.view_layer.objects.active = modifier_cube
+    modifier_cube.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        modifier_session.next()
+    except RuntimeError as error:
+        assert "Object Mode" in str(error)
+    else:
+        raise AssertionError("Triangulate must reject Edit Mode targets")
+    assert modifier_cube.data is source_mesh
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    modifier_cube.shape_key_add(name="Basis")
+    try:
+        modifier_session.next()
+    except RuntimeError as error:
+        assert "receipt" in str(error).lower() or "shape" in str(error).lower()
+    else:
+        raise AssertionError("Triangulate must reject shape-key targets")
+    assert modifier_cube.data is source_mesh
+    modifier_cube.shape_key_clear()
+    assert modifier_session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_triangulate_ngon_conflicts_and_boundaries() -> None:
+    cylinder_name = "OperatingLine.TriangulateCylinder"
+    result_mesh_name = "OperatingLine.TriangulateCylinder.ResultMesh"
+    steps = [
+        step("root", None, 0),
+        step(
+            "triangulate.ngon.cylinder",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cylinder",
+                "arguments": {
+                    "resourceId": "triangulate.ngon.cylinder",
+                    "objectName": cylinder_name,
+                    "radius": 1.0,
+                    "start": [0.0, 0.0, -1.0],
+                    "end": [0.0, 0.0, 1.0],
+                },
+            },
+        ),
+        step(
+            "triangulate.ngon.mesh",
+            "root",
+            2,
+            depends_on=["triangulate.ngon.cylinder"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_triangulate",
+                "arguments": {
+                    "targetId": "triangulate.ngon.cylinder",
+                    "resultMeshId": "triangulate.ngon.result_mesh",
+                    "resultMeshName": result_mesh_name,
+                },
+            },
+        ),
+    ]
+    root = load_temporary_plan(steps)
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    cylinder = bpy.data.objects[cylinder_name]
+    source_face_count = len(cylinder.data.polygons)
+    assert any(len(polygon.vertices) > 4 for polygon in cylinder.data.polygons)
+    assert session.next() is not None
+    assert len(cylinder.data.polygons) > source_face_count
+    assert all(len(polygon.vertices) == 3 for polygon in cylinder.data.polygons)
+    assert session.back() is not None
+    assert session.back() is not None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+    _ensure_triangulate_topology_is_bounded((8192, 16384, 8192), "boundary")
+    for topology in ((8193, 0, 0), (0, 16385, 0), (0, 0, 8193)):
+        try:
+            _ensure_triangulate_topology_is_bounded(topology, "boundary")
+        except ValueError as error:
+            assert "topology limits" in str(error)
+        else:
+            raise AssertionError(f"Triangulate must reject topology {topology}")
+
+    result_mesh_name = "OperatingLine.TriangulateConflict.ResultMesh"
+    conflict_steps = triangulate_steps(
+        object_name="OperatingLine.TriangulateConflict",
+        result_mesh_name=result_mesh_name,
+    )
+    conflict_root = load_temporary_plan(conflict_steps)
+    conflict_session = DemoSession(conflict_root, action_registry(conflict_root))
+    conflict_session.start()
+    assert conflict_session.next() is not None
+    conflict_cube = bpy.data.objects["OperatingLine.TriangulateConflict"]
+    source_mesh = conflict_cube.data
+    conflicting_mesh = bpy.data.meshes.new(result_mesh_name)
+    try:
+        conflict_session.next()
+    except RuntimeError as error:
+        assert "Cannot replace existing mesh" in str(error)
+    else:
+        raise AssertionError("Triangulate must reject a result mesh name conflict")
+    assert conflict_cube.data is source_mesh
+    assert len(conflict_session.receipts) == 1
+    bpy.data.meshes.remove(conflicting_mesh)
+    assert conflict_session.back() is not None
+
+    duplicate_steps = triangulate_steps()
+    duplicate_steps.append(
+        step(
+            "triangulate.duplicate",
+            "root",
+            3,
+            depends_on=["triangulate.mesh"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_triangulate",
+                "arguments": {
+                    "targetId": "triangulate.cube",
+                    "resultMeshId": "triangulate.cube.result_mesh",
+                    "resultMeshName": "OperatingLine.TriangulateCube.DuplicateMesh",
+                },
+            },
+        )
+    )
+    duplicate_root = load_temporary_plan(duplicate_steps)
+    try:
+        action_registry(duplicate_root)
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Triangulate must reject duplicate planned result IDs")
+
+    triangle_steps = triangulate_steps(
+        object_name="OperatingLine.TriangulateTwice",
+        result_mesh_name="OperatingLine.TriangulateTwice.FirstMesh",
+    )
+    triangle_steps.append(
+        step(
+            "triangulate.twice",
+            "root",
+            3,
+            depends_on=["triangulate.mesh"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_triangulate",
+                "arguments": {
+                    "targetId": "triangulate.cube",
+                    "resultMeshId": "triangulate.cube.second_mesh",
+                    "resultMeshName": "OperatingLine.TriangulateTwice.SecondMesh",
+                },
+            },
+        )
+    )
+    triangle_root = load_temporary_plan(triangle_steps)
+    triangle_session = DemoSession(triangle_root, action_registry(triangle_root))
+    triangle_session.start()
+    assert triangle_session.next() is not None
+    assert triangle_session.next() is not None
+    triangle_cube = bpy.data.objects["OperatingLine.TriangulateTwice"]
+    first_result = triangle_cube.data
+    try:
+        triangle_session.next()
+    except ValueError as error:
+        assert "non-triangle" in str(error)
+    else:
+        raise AssertionError("Triangulate must reject an already triangular mesh")
+    assert triangle_cube.data is first_result
+    assert bpy.data.meshes.get("OperatingLine.TriangulateTwice.SecondMesh") is None
+    assert triangle_session.back() is not None
+    assert triangle_session.back() is not None
+
+
+def assert_triangulate_observation_success_gate() -> None:
+    object_name = "OperatingLine.TriangulateGateCube"
+
+    def gated_steps(*, result_mesh_id: str) -> list[dict]:
+        result = triangulate_steps(
+            object_name=object_name,
+            result_mesh_id="triangulate.gate.result_mesh",
+            result_mesh_name="OperatingLine.TriangulateGateCube.ResultMesh",
+        )
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "mesh_triangulated",
+                "parameters": {
+                    "targetId": "triangulate.cube",
+                    "resultMeshId": result_mesh_id,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    passing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(result_mesh_id="triangulate.gate.result_mesh"),
+        }
+    )
+    passing_session = DemoSession(
+        passing_root,
+        action_registry(passing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    passing_session.start()
+    assert passing_session.next() is not None
+    assert passing_session.next() is not None
+    assert passing_session.active_index == 1
+    assert passing_session.back() is not None
+    assert passing_session.back() is not None
+
+    failing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(result_mesh_id="triangulate.gate.wrong_mesh"),
+        }
+    )
+    failing_session = DemoSession(
+        failing_root,
+        action_registry(failing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    failing_session.start()
+    assert failing_session.next() is not None
+    source_mesh = bpy.data.objects[object_name].data
+    try:
+        failing_session.next()
+    except RuntimeError as error:
+        assert "Observation gate failed" in str(error)
+    else:
+        raise AssertionError("A wrong triangulated mesh ID must fail the success gate")
+    assert failing_session.active_index == 0
+    assert "triangulate.mesh" not in failing_session.receipts
+    assert bpy.data.objects[object_name].data is source_mesh
+    assert bpy.data.meshes.get("OperatingLine.TriangulateGateCube.ResultMesh") is None
+    assert failing_session.back() is not None
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
@@ -987,6 +1391,14 @@ def assert_solidify_observation_success_gate() -> None:
 
 
 def assert_editing_argument_boundaries() -> None:
+    triangulate = validate_triangulate(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.triangulated.mesh",
+            "resultMeshName": "OperatingLine.TriangulatedMesh",
+        }
+    )
+    assert triangulate.result_mesh_id == "edit.triangulated.mesh"
     assert validate_subdivide(
         {
             "targetId": "edit.target",
@@ -1041,6 +1453,16 @@ def assert_editing_argument_boundaries() -> None:
     assert geometry_nodes.scale == (0.0001, 1000.0, 1.0)
 
     invalid_cases = (
+        (
+            validate_triangulate,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.triangulated.mesh",
+                "resultMeshName": "OperatingLine.TriangulatedMesh",
+                "unexpected": True,
+            },
+            "unsupported fields",
+        ),
         (
             validate_subdivide,
             {
@@ -4608,6 +5030,9 @@ def main() -> None:
     assert_cube_action_round_trip()
     assert_editing_argument_boundaries()
     assert_edit_modifier_geometry_nodes_round_trip()
+    assert_triangulate_round_trip_and_guards()
+    assert_triangulate_ngon_conflicts_and_boundaries()
+    assert_triangulate_observation_success_gate()
     assert_solidify_round_trip_and_conflicts()
     assert_solidify_evaluated_topology_and_untracked_modifier_guards()
     assert_solidify_observation_success_gate()

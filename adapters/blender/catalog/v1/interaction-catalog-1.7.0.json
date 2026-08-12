@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.8.0",
+  "catalogVersion": "1.7.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.11.0",
+  "actionCatalogVersion": "1.10.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.11.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.10.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -616,46 +616,6 @@
         ],
         "reason": "The accepted action subdivides every edge into a new owned mesh datablock and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/edge/subdivide.html"
-      }
-    },
-    {
-      "id": "blender.mesh.edit_triangulate.semantic",
-      "actionName": "blender.mesh.edit_triangulate",
-      "title": "Triangulate an owned mesh through a bounded Edit Mode operation",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "semantic.select_owned_mesh",
-            "order": 2,
-            "label": "Owned Mesh",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
-          },
-          {
-            "id": "mode.edit_mesh",
-            "order": 3,
-            "label": "Edit Mode",
-            "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
-          },
-          {
-            "id": "operator.triangulate_faces",
-            "order": 4,
-            "label": "Triangulate Faces",
-            "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.quads_convert_to_tris" }
-          }
-        ],
-        "reason": "The accepted action triangulates the complete bounded mesh into a new owned datablock with fixed FIXED/EAR_CLIP methods and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/triangulate_faces.html"
       }
     },
     {

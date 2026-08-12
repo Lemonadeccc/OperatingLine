@@ -11,7 +11,7 @@
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.10.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> Orchestrator 现在可以查询 Blender `1.11.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
 > `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:review` →
@@ -19,7 +19,7 @@
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.10.0` 目录提供十二项 `semanticCapabilities`，要求
+> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.11.0` 目录提供十三项 `semanticCapabilities`，要求
 > provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
@@ -32,7 +32,7 @@
 > 本机 Codex/Claude CLI Provider 和各自独立的 opt-in composition root；默认 standalone 仍不加载这些
 > Provider 或凭据。MCP HTTP 与 stdio bridge 已自动协商稳定版 `2026-07-28`，同时兼容旧客户端。Blender 内已有可折叠的
 > Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；ActionCatalog 还新增了
-> 有界整网格 Subdivide、非应用 Bevel/Solidify Modifier、首个 Transform Geometry Nodes、显式归一化蒙皮权重和
+> 有界整网格 Subdivide/Triangulate、非应用 Bevel/Solidify Modifier、首个 Transform Geometry Nodes、显式归一化蒙皮权重和
 > pose location/rotation/scale 动画切片。完成真实采集与独立盲审的任意目标语义数据集、
 > 自动评分/训练治理和第二宿主仍在路线图中。
 
@@ -78,8 +78,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.7.0` 精确绑定
-  ActionCatalog `1.10.0` 的 20 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.8.0` 精确绑定
+  ActionCatalog `1.11.0` 的 21 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
   `UI target unavailable`，不会复用无关按钮。见 [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
@@ -88,10 +88,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0028](docs/adr/0028-native-torus-action-slice.md) 与
   [ADR 0029](docs/adr/0029-bounded-edit-modifier-geometry-nodes.md)、
   [ADR 0032](docs/adr/0032-bounded-skin-weights-and-pose-transforms.md) 与
-  [ADR 0037](docs/adr/0037-bounded-solidify-modifier.md)。
-- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.10.0` 把 20 个动作划分为 Geometry、Materials、
+  [ADR 0037](docs/adr/0037-bounded-solidify-modifier.md) 与
+  [ADR 0038](docs/adr/0038-bounded-edit-triangulate.md)。
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.11.0` 把 21 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
-  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十二项目录语义能力进一步要求 provider
+  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十三项目录语义能力进一步要求 provider
   声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的
   映射会产生 error，使生成结果成为 `needs_revision`，不会创建 Proposal。Proposal 会再次执行同一
   确定性门禁。当前目录使用 quality baseline `1.1.0`；历史目录仍以 `1.0.0` 回放。报告只有可追溯的
@@ -267,8 +268,8 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先选择
 > `operatingline.plan_and_propose` Prompt 或调用 `operatingline.planning.prompt.get` Tool 取得统一规划
 > packet；也可继续直接调用 `operatingline.planning.context`。客户端依据阶段画像生成候选计划，再调用
-> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录覆盖 20 个已验证动作和
-> 十二项适配器声明的语义能力，
+> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录覆盖 21 个已验证动作和
+> 十三项适配器声明的语义能力，
 > 阶段选择仍由外部模型或显式注入的 provider 根据目标声明，因此这不等于已经内置“任意任务自动
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
@@ -311,7 +312,7 @@ native extension      native companion
 任务树的 `parentId + order` 负责展示和编号，`dependsOn` 形成实际执行 DAG。每个叶子节点
 可包含动作名、经校验的参数、语义锚点、预期观察和回退方式。
 
-Blender 当前允许 20 个版本化 action，覆盖七种单体 Mesh、原子基础体批次、Subdivide、Bevel、Solidify、
+Blender 当前允许 21 个版本化 action，覆盖七种单体 Mesh、原子基础体批次、Subdivide、Triangulate、Bevel、Solidify、
 Transform Geometry Nodes、两种材质赋值、Armature、显式蒙皮权重、pose transform 动画、隔离渲染
 场景、灯光相机组与受限临时 PNG。动作注册表按步骤 ID 绑定执行器；同一种 action 可以安全地出现在
 多个步骤中。

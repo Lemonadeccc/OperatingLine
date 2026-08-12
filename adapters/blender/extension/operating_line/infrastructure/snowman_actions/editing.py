@@ -37,6 +37,9 @@ from .common import (
 MAX_SOLIDIFY_VERTICES = 8192
 MAX_SOLIDIFY_EDGES = 16384
 MAX_SOLIDIFY_POLYGONS = 8192
+MAX_TRIANGULATE_VERTICES = 8192
+MAX_TRIANGULATE_EDGES = 16384
+MAX_TRIANGULATE_POLYGONS = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,13 @@ class SubdivideDefinition:
     result_mesh_name: str
     cuts: int
     smooth: float
+
+
+@dataclass(frozen=True, slots=True)
+class TriangulateDefinition:
+    target_id: str
+    result_mesh_id: str
+    result_mesh_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +108,22 @@ def validate_subdivide(arguments: Mapping[str, Any]) -> SubdivideDefinition:
             "arguments.smooth",
             minimum=0.0,
             maximum=1.0,
+        ),
+    )
+
+
+def validate_triangulate(arguments: Mapping[str, Any]) -> TriangulateDefinition:
+    fields = {"targetId", "resultMeshId", "resultMeshName"}
+    require_keys(arguments, fields, fields, "arguments")
+    return TriangulateDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        result_mesh_id=logical_id(
+            arguments["resultMeshId"], "arguments.resultMeshId"
+        ),
+        result_mesh_name=text(
+            arguments["resultMeshName"],
+            "arguments.resultMeshName",
+            prefix="OperatingLine.",
         ),
     )
 
@@ -355,6 +381,123 @@ def execute_subdivide(
         finally:
             bm.free()
         result_mesh.update()
+        target.data = result_mesh
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                source_mesh_identity,
+                result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                result_identity,
+                "mesh_content",
+                None,
+                mesh_content_signature(result_mesh),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
+
+
+def _ensure_triangulate_topology_is_bounded(
+    topology: tuple[int, int, int], label: str
+) -> None:
+    limits = (
+        MAX_TRIANGULATE_VERTICES,
+        MAX_TRIANGULATE_EDGES,
+        MAX_TRIANGULATE_POLYGONS,
+    )
+    if any(actual > limit for actual, limit in zip(topology, limits)):
+        raise ValueError(
+            f"Triangulate {label} exceeds the supported topology limits: "
+            f"vertices <= {MAX_TRIANGULATE_VERTICES}, "
+            f"edges <= {MAX_TRIANGULATE_EDGES}, "
+            f"polygons <= {MAX_TRIANGULATE_POLYGONS}"
+        )
+
+
+def execute_triangulate(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: TriangulateDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, source_mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    if target.mode != "OBJECT":
+        raise RuntimeError("Triangulate target must be in Object Mode")
+    if target.modifiers:
+        raise RuntimeError("Triangulate target must not have modifiers")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Triangulate target must not have shape keys")
+    source_topology = (
+        len(target.data.vertices),
+        len(target.data.edges),
+        len(target.data.polygons),
+    )
+    _ensure_triangulate_topology_is_bounded(source_topology, "source")
+    if not any(len(polygon.vertices) != 3 for polygon in target.data.polygons):
+        raise ValueError("Triangulate target must contain at least one non-triangle face")
+    ensure_logical_ids_available(registry, (definition.result_mesh_id,))
+    ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    try:
+        result_mesh = target.data.copy()
+        result_mesh.name = definition.result_mesh_name
+        result_identity = tag_resource(
+            result_mesh,
+            definition.result_mesh_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        created.append(result_identity)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(result_mesh)
+            bmesh.ops.triangulate(
+                bm,
+                faces=tuple(bm.faces),
+                quad_method="FIXED",
+                ngon_method="EAR_CLIP",
+            )
+            predicted_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+            _ensure_triangulate_topology_is_bounded(predicted_topology, "result")
+            if not bm.faces or any(len(face.verts) != 3 for face in bm.faces):
+                raise RuntimeError("Triangulate did not produce only triangle faces")
+            bm.to_mesh(result_mesh)
+        finally:
+            bm.free()
+        result_mesh.update()
+        actual_topology = (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        _ensure_triangulate_topology_is_bounded(actual_topology, "actual result")
+        if not result_mesh.polygons or any(
+            len(polygon.vertices) != 3 for polygon in result_mesh.polygons
+        ):
+            raise RuntimeError("Triangulate actual result is not fully triangular")
         target.data = result_mesh
         mutations.append(
             MutationRecord(

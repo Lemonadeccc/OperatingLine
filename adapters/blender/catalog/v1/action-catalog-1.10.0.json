@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.11.0",
+  "catalogVersion": "1.10.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide and Triangulate edits; add owned Bevel and Solidify modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate requires Object Mode, no modifiers or shape keys, at least one non-triangle polygon, and source topology within 8192 vertices, 16384 edges, and 8192 polygons; quad_method=FIXED and ngon_method=EAR_CLIP are fixed implementation behavior. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make one bounded whole-mesh Subdivide edit; add owned Bevel and Solidify modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to 8192 vertices, 16384 edges, and 8192 polygons; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -32,7 +32,6 @@
         "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch",
         "blender.mesh.edit_subdivide",
-        "blender.mesh.edit_triangulate",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.geometry_nodes.create_transform"
@@ -107,13 +106,6 @@
       "description": "Replace an owned object's mesh data with one deterministic whole-mesh subdivision result.",
       "selectionGuidance": "Select when the goal needs uniformly denser topology before later modifiers or deformation.",
       "actionNames": ["blender.mesh.edit_subdivide"]
-    },
-    {
-      "id": "geometry.edit_triangulate",
-      "title": "Bounded Edit Mode triangulation",
-      "description": "Replace an owned object's mesh data with one deterministic whole-mesh triangulation result.",
-      "selectionGuidance": "Select when the goal requires explicit triangle topology before later export, deformation, or rendering work.",
-      "actionNames": ["blender.mesh.edit_triangulate"]
     },
     {
       "id": "geometry.bevel_modifier",
@@ -860,58 +852,6 @@
       ],
       "supportedAnchorKinds": ["object", "operator", "unavailable"],
       "supportedObservationKinds": ["resource_exists", "mesh_topology_matches"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.mesh.edit_triangulate",
-      "title": "Triangulate one owned mesh",
-      "description": "Creates a bounded whole-mesh triangulation result with fixed FIXED/EAR_CLIP methods and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, contain at least one non-triangle polygon, and remain within 8192 vertices, 16384 edges, and 8192 polygons.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["targetId", "resultMeshId", "resultMeshName"],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "description": "Logical ID of an owned mesh object created by an earlier action."
-          },
-          "resultMeshId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "description": "Plan-unique logical ID for the replacement triangulated mesh datablock."
-          },
-          "resultMeshName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Swaps the owned object's mesh link to the generated triangulation result."
-        },
-        {
-          "access": "create",
-          "resourceType": "MESH",
-          "argumentPath": "resultMeshId",
-          "derivedResourceTypes": [],
-          "description": "Creates the bounded triangulated mesh while retaining the source for compensation."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists", "mesh_triangulated"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",

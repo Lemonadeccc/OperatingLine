@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.10.0');
+    expect(catalog.catalogVersion).toBe('1.11.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -31,6 +31,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.create_torus',
       'blender.mesh.create_primitive_batch',
       'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_triangulate',
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
       'blender.geometry_nodes.create_transform',
@@ -57,6 +58,7 @@ describe('action catalog protocol', () => {
       'geometry.ground_plane',
       'geometry.primitive_assembly',
       'geometry.edit_subdivide',
+      'geometry.edit_triangulate',
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
       'geometry_nodes.transform',
@@ -81,6 +83,7 @@ describe('action catalog protocol', () => {
       '1.8.0',
       '1.9.0',
       '1.10.0',
+      '1.11.0',
     ]);
   });
 
@@ -346,6 +349,35 @@ describe('action catalog protocol', () => {
         schemaFor('blender.mesh.edit_subdivide'),
       ),
     ).toEqual(['cuts must be at most 8', 'smooth must be at most 1']);
+    const triangulateSchema = schemaFor('blender.mesh.edit_triangulate');
+    expect(triangulateSchema.additionalProperties).toBe(false);
+    expect(triangulateSchema.required).toEqual(['targetId', 'resultMeshId', 'resultMeshName']);
+    expect(Object.keys(triangulateSchema.properties)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.triangulated_mesh',
+          resultMeshName: 'OperatingLine.Body.TriangulatedMesh',
+        },
+        triangulateSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.triangulated_mesh',
+          resultMeshName: 'Body.TriangulatedMesh',
+          unexpected: true,
+        },
+        triangulateSchema,
+      ),
+    ).toEqual(['resultMeshName must match pattern ^OperatingLine\\.', 'unknown unexpected']);
     expect(
       validateActionArguments(
         {

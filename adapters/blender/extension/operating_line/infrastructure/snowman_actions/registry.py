@@ -11,10 +11,12 @@ from .editing import (
     execute_geometry_nodes_transform,
     execute_solidify,
     execute_subdivide,
+    execute_triangulate,
     validate_bevel,
     validate_geometry_nodes_transform,
     validate_solidify,
     validate_subdivide,
+    validate_triangulate,
 )
 from .material import execute_materials, validate_palette, validate_single
 from .model import (
@@ -136,6 +138,10 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definition = validate_subdivide(arguments)
             reserve(step.id, (definition.result_mesh_id,))
             execute = _bind_action(execute_subdivide, step.id, action, definition)
+        elif action.name == "blender.mesh.edit_triangulate":
+            definition = validate_triangulate(arguments)
+            reserve(step.id, (definition.result_mesh_id,))
+            execute = _bind_action(execute_triangulate, step.id, action, definition)
         elif action.name == "blender.modifier.add_bevel":
             definition = validate_bevel(arguments)
             reserve(step.id, (definition.modifier_id,))

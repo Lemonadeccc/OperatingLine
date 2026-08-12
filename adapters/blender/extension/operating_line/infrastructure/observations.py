@@ -568,6 +568,73 @@ def _mesh_topology_matches(
     }
 
 
+def _mesh_triangulated(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    allowed_parameters = {"targetId", "resultMeshId"}
+    target_id = parameters.get("targetId")
+    result_mesh_id = parameters.get("resultMeshId")
+    parameters_valid = bool(
+        set(parameters) == allowed_parameters
+        and isinstance(target_id, str)
+        and target_id
+        and isinstance(result_mesh_id, str)
+        and result_mesh_id
+    )
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if parameters_valid else None
+    result_identity = registry.get(result_mesh_id) if parameters_valid else None
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    result_mesh = (
+        resolve_resource(result_identity) if result_identity is not None else None
+    )
+    counts = (
+        (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        if isinstance(result_mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    nonempty = all(count > 0 for count in counts)
+    all_triangles = bool(
+        isinstance(result_mesh, bpy.types.Mesh)
+        and result_mesh.polygons
+        and all(len(polygon.vertices) == 3 for polygon in result_mesh.polygons)
+    )
+    within_limits = bool(
+        counts[0] <= 8192 and counts[1] <= 16384 and counts[2] <= 8192
+    )
+    assigned = bool(
+        isinstance(target, bpy.types.Object)
+        and target.type == "MESH"
+        and isinstance(result_mesh, bpy.types.Mesh)
+        and target.data is result_mesh
+    )
+    satisfied = bool(
+        parameters_valid
+        and assigned
+        and nonempty
+        and all_triangles
+        and within_limits
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "resultMeshId": (
+            result_mesh_id if isinstance(result_mesh_id, str) else None
+        ),
+        "parametersValid": parameters_valid,
+        "assigned": assigned,
+        "nonempty": nonempty,
+        "allTriangles": all_triangles,
+        "withinLimits": within_limits,
+        "vertexCount": counts[0],
+        "edgeCount": counts[1],
+        "faceCount": counts[2],
+    }
+
+
 def _modifier_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
@@ -736,6 +803,7 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "render_rig_ready": _render_rig_ready,
     "render_artifact_exists": _render_artifact_exists,
     "mesh_topology_matches": _mesh_topology_matches,
+    "mesh_triangulated": _mesh_triangulated,
     "modifier_ready": _modifier_ready,
     "geometry_nodes_ready": _geometry_nodes_ready,
 }
