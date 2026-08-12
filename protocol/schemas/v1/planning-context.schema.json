@@ -9,7 +9,8 @@
         "1.1.0",
         "1.2.0",
         "1.3.0",
-        "1.4.0"
+        "1.4.0",
+        "1.5.0"
       ]
     },
     "targetAdapterId": {
@@ -60,7 +61,8 @@
             "1.1.0",
             "1.2.0",
             "1.3.0",
-            "1.4.0"
+            "1.4.0",
+            "1.5.0"
           ]
         },
         "catalogVersion": {
@@ -420,7 +422,8 @@
               "1.1.0",
               "1.2.0",
               "1.3.0",
-              "1.4.0"
+              "1.4.0",
+              "1.5.0"
             ]
           },
           "reportId": {
@@ -667,6 +670,142 @@
               }
             ]
           },
+          "artifactAttestation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "formatVersion": {
+                    "type": "string",
+                    "const": "1.0.0"
+                  },
+                  "evidenceClass": {
+                    "type": "string",
+                    "const": "runtime_attested_host_artifacts"
+                  },
+                  "planContentSha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "executionId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "hostProject": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "host_project"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "const": "application/x-blender"
+                      },
+                      "contentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "kind",
+                      "mediaType",
+                      "contentSha256"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "renderedImage": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "const": "rendered_image"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "const": "image/png"
+                      },
+                      "contentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "width": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 65536
+                      },
+                      "height": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 65536
+                      },
+                      "frame": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "renderEngine": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180
+                      },
+                      "colorManagement": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "hostProjectSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "kind",
+                      "mediaType",
+                      "contentSha256",
+                      "width",
+                      "height",
+                      "frame",
+                      "renderEngine",
+                      "colorManagement",
+                      "hostProjectSha256"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "formatVersion",
+                  "evidenceClass",
+                  "planContentSha256",
+                  "executionId",
+                  "hostProject",
+                  "renderedImage"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "error": {
             "anyOf": [
               {
@@ -843,7 +982,8 @@
                   "enum": [
                     "1.2.0",
                     "1.3.0",
-                    "1.4.0"
+                    "1.4.0",
+                    "1.5.0"
                   ]
                 }
               },
@@ -861,6 +1001,58 @@
                 "required": [
                   "observationGate"
                 ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "protocolVersion": {
+                  "const": "1.5.0"
+                }
+              },
+              "required": [
+                "protocolVersion"
+              ]
+            },
+            "then": {
+              "required": [
+                "artifactAttestation"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "artifactAttestation"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "artifactAttestation": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "artifactAttestation"
+              ]
+            },
+            "then": {
+              "properties": {
+                "phase": {
+                  "enum": [
+                    "completed",
+                    "error"
+                  ]
+                },
+                "executionId": {
+                  "type": "string"
+                },
+                "planContentSha256": {
+                  "type": "string"
+                }
               }
             }
           },

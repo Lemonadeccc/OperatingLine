@@ -664,6 +664,16 @@ def execute_render(
             hashlib.sha256(output.read_bytes()).hexdigest(),
             width,
             height,
+            "image/png",
+            definition.frame,
+            scene.render.engine,
+            (
+                f"display={scene.display_settings.display_device};"
+                f"view={scene.view_settings.view_transform};"
+                f"look={scene.view_settings.look};"
+                f"exposure={scene.view_settings.exposure:g};"
+                f"gamma={scene.view_settings.gamma:g}"
+            ),
         )
         artifacts.append(artifact)
         return make_receipt(

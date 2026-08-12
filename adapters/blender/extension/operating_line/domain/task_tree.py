@@ -174,7 +174,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         observation_policy_raw = raw.get("observationPolicy")
         observation_policy = None
         if observation_policy_present:
-            if protocol_version not in {"1.2.0", "1.3.0", "1.4.0"}:
+            if protocol_version not in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
                 raise ValueError("Observation policies require guide protocol 1.2+")
             if action is None:
                 raise ValueError(

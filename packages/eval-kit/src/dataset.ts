@@ -154,6 +154,14 @@ function checkRun(
   if (run.invocation.packetSha256 !== computeHumanEvalContentSha256(run.invocation.packet)) {
     issues.push(`${label} packet hash mismatch`);
   }
+  const expectedRequestFingerprint = computeHumanEvalContentSha256(
+    run.invocation.operation === 'initial_plan' && run.invocation.goalProvenance !== null
+      ? { request: run.invocation.request, ...run.invocation.goalProvenance }
+      : run.invocation.request,
+  );
+  if (run.invocation.requestFingerprint !== expectedRequestFingerprint) {
+    issues.push(`${label} request fingerprint mismatch`);
+  }
   if (
     run.outcome.status === 'completed' &&
     run.outcome.resultSha256 !== computeHumanEvalContentSha256(run.outcome.result)
@@ -199,6 +207,38 @@ function checkRun(
     const providerTerminalSequence = providerEvents.find(
       (event) => event.eventType === expectedTerminal,
     )?.sequence;
+    if (run.runtimeAttestation !== null) {
+      const outputAttestation =
+        run.runtimeAttestation.evidenceClass === 'runtime_attested_provider_output'
+          ? run.runtimeAttestation
+          : null;
+      const treatmentAttestation =
+        run.runtimeAttestation.evidenceClass === 'runtime_attested_provider_output'
+          ? run.runtimeAttestation.treatment
+          : run.runtimeAttestation;
+      const treatment = treatmentAttestation.treatment;
+      if (
+        treatmentAttestation.operation !== run.invocation.operation ||
+        treatmentAttestation.treatmentSha256 !== computeHumanEvalContentSha256(treatment) ||
+        computeHumanEvalContentSha256(treatment.profile) !==
+          computeHumanEvalContentSha256(run.profile) ||
+        computeHumanEvalContentSha256(treatment.generationSettings) !==
+          computeHumanEvalContentSha256(run.generationSettings) ||
+        (outputAttestation !== null &&
+          (run.outcome.status !== 'completed' ||
+            outputAttestation.operation !== run.invocation.operation ||
+            outputAttestation.requestId !== run.invocation.request.requestId ||
+            outputAttestation.requestFingerprint !== run.invocation.requestFingerprint)) ||
+        (run.outcome.status === 'completed' &&
+          (outputAttestation === null ||
+            outputAttestation.requestId !== run.invocation.request.requestId ||
+            outputAttestation.packetSha256 !== run.invocation.packetSha256 ||
+            outputAttestation.outputSha256 !==
+              computeHumanEvalContentSha256(run.outcome.result.draft)))
+      ) {
+        issues.push(`${label} runtime Provider attestation does not match the sealed Run`);
+      }
+    }
     const expectedPlanContentSha256 =
       run.outcome.status === 'completed' && run.outcome.result.status === 'ready'
         ? computePlanContentSha256(run.outcome.result.draft.plan)
@@ -801,6 +841,17 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
         issues.push(
           `Released run ${run.runId} requires runtime-attested Provider profile and generation settings`,
         );
+      }
+      if (run.runtimeAttestation === null) {
+        issues.push(
+          `Released run ${run.runId} requires runtime-attested Provider profile and generation settings`,
+        );
+      }
+      if (
+        run.outcome.status === 'completed' &&
+        run.runtimeAttestation?.evidenceClass !== 'runtime_attested_provider_output'
+      ) {
+        issues.push(`Released run ${run.runId} requires runtime-attested Provider output`);
       }
     }
     for (const evalCase of suite.cases) {

@@ -36,8 +36,51 @@ function stateReport() {
 function currentStateReport() {
   return {
     ...stateReport(),
-    protocolVersion: '1.3.0',
+    protocolVersion: '1.5.0',
     observationGate: null,
+    artifactAttestation: null,
+  };
+}
+
+function completedStateReport() {
+  const executionId = randomUUID();
+  const reportId = randomUUID();
+  const projectSha256 = 'b'.repeat(64);
+  return {
+    ...currentStateReport(),
+    reportId,
+    plan: { id: 'snowman', revision: 6 },
+    planContentSha256: 'a'.repeat(64),
+    executionId,
+    phase: 'completed',
+    activeStepId: 'snowman.render.preview',
+    completedStepIds: ['snowman.render.preview'],
+    transition: 'step_succeeded',
+    stepId: 'snowman.render.preview',
+    artifactAttestation: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_host_artifacts',
+      planContentSha256: 'a'.repeat(64),
+      executionId,
+      hostProject: {
+        artifactId: `host.project.${executionId}.${reportId}`,
+        kind: 'host_project',
+        mediaType: 'application/x-blender',
+        contentSha256: projectSha256,
+      },
+      renderedImage: {
+        artifactId: `render.preview.${executionId}.${reportId}`,
+        kind: 'rendered_image',
+        mediaType: 'image/png',
+        contentSha256: 'c'.repeat(64),
+        width: 512,
+        height: 512,
+        frame: 1,
+        renderEngine: 'BLENDER_EEVEE_NEXT',
+        colorManagement: 'display=sRGB;view=AgX;look=Medium High Contrast',
+        hostProjectSha256: projectSha256,
+      },
+    },
   };
 }
 
@@ -91,6 +134,58 @@ describe('companion protocol', () => {
         }).success,
       ).toBe(false);
     }
+  });
+
+  it('binds host project and rendered image hashes to the completed execution', () => {
+    const report = completedStateReport();
+    expect(companionStateReportSchema.safeParse(report).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        phase: 'running',
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        phase: 'error',
+        transition: 'error',
+        error: 'The host failed after producing the attested render.',
+      }).success,
+    ).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        artifactAttestation: {
+          ...report.artifactAttestation,
+          executionId: randomUUID(),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        artifactAttestation: {
+          ...report.artifactAttestation,
+          renderedImage: {
+            ...report.artifactAttestation.renderedImage,
+            hostProjectSha256: 'd'.repeat(64),
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires an explicit artifact attestation field only from protocol 1.5', () => {
+    const legacy = { ...currentStateReport(), protocolVersion: '1.4.0' };
+    delete (legacy as { artifactAttestation?: unknown }).artifactAttestation;
+    expect(companionStateReportSchema.safeParse(legacy).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({ ...legacy, artifactAttestation: null }).success,
+    ).toBe(false);
+    const current = currentStateReport();
+    delete (current as { artifactAttestation?: unknown }).artifactAttestation;
+    expect(companionStateReportSchema.safeParse(current).success).toBe(false);
   });
 
   it('accepts a standalone known proposal watermark', () => {

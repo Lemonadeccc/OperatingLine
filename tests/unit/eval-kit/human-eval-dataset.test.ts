@@ -63,6 +63,27 @@ function makeStructurallyLiveRun(
   const planContentSha256 = computePlanContentSha256(live.outcome.result.draft.plan);
   const executionId = '40000000-0000-4000-8000-000000000002';
   const reportId = '40000000-0000-4000-8000-000000000003';
+  const treatment = {
+    profile: live.profile,
+    generationSettings: live.generationSettings,
+  };
+  live.runtimeAttestation = {
+    formatVersion: '1.0.0',
+    evidenceClass: 'runtime_attested_provider_output',
+    operation: live.invocation.operation,
+    requestId,
+    requestFingerprint: live.invocation.requestFingerprint,
+    packetSha256: live.invocation.packetSha256,
+    outputSha256: computeHumanEvalContentSha256(live.outcome.result.draft),
+    treatment: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_treatment',
+      operation: live.invocation.operation,
+      treatment,
+      treatmentSha256: computeHumanEvalContentSha256(treatment),
+    },
+    occurredAt: live.outcome.result.generatedAt,
+  };
   live.sourceKind = 'live_provider_invocation';
   live.sourceEvidence = {
     kind: 'eval_export_snapshot',
@@ -416,6 +437,38 @@ describe('human eval dataset', () => {
     );
   });
 
+  it('rejects a failed run carrying runtime-attested provider output', () => {
+    const suite = buildHumanEvalSuiteFixture();
+    const failed = structuredClone(makeStructurallyLiveRun(buildProviderEvalRunFixture(suite)));
+    const error = {
+      error: 'planner_provider_failed' as const,
+      requestId: failed.invocation.request.requestId,
+      message: 'Synthetic provider failure after runtime output attestation.',
+      retryMode: 'never' as const,
+    };
+    failed.outcome = {
+      status: 'failed',
+      operation: 'initial_plan',
+      error,
+      errorSha256: computeHumanEvalContentSha256(error),
+    };
+    failed.sourceEvidence = { ...failed.sourceEvidence, snapshotUpperSequence: 2 };
+    failed.sourceEvents = failed.sourceEvents
+      .filter((event) => event.correlationKind === 'provider_request')
+      .map((event) =>
+        event.eventType === 'planning.provider.generation.completed'
+          ? { ...event, eventType: 'planning.provider.generation.failed' as const }
+          : event,
+      );
+    failed.artifacts = failed.artifacts.filter((artifact) => artifact.kind === 'eval_export');
+
+    expect(issuesFrom(() => validateHumanEvalDataset({ suite, runs: [reseal(failed)] }))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Provider output attestation must match a completed invocation'),
+      ]),
+    );
+  });
+
   it('requires complete, independent, exact-rubric human annotations', () => {
     const suite = buildHumanEvalSuiteFixture();
     const run = buildProviderEvalRunFixture(suite);
@@ -605,6 +658,11 @@ describe('human eval dataset', () => {
     const second = structuredClone(first);
     second.runId = '10000000-0000-4000-8000-000000000099';
     second.invocation.request.requestId = '10000000-0000-4000-8000-000000000098';
+    second.invocation.requestFingerprint = computeHumanEvalContentSha256(
+      second.invocation.goalProvenance === null
+        ? second.invocation.request
+        : { request: second.invocation.request, ...second.invocation.goalProvenance },
+    );
     if (second.outcome.status === 'completed') {
       second.outcome.result.requestId = second.invocation.request.requestId;
       second.outcome.resultSha256 = computeHumanEvalContentSha256(second.outcome.result);
@@ -617,6 +675,13 @@ describe('human eval dataset', () => {
     second.generationSettings.normalizedParameters['temperature'] = 0.25;
     second.generationSettings.parametersSha256 = computeHumanEvalContentSha256(
       second.generationSettings.normalizedParameters,
+    );
+    if (second.runtimeAttestation === null) throw new Error('Expected runtime attestation');
+    second.runtimeAttestation.requestId = second.invocation.request.requestId;
+    second.runtimeAttestation.requestFingerprint = second.invocation.requestFingerprint;
+    second.runtimeAttestation.treatment.treatment.generationSettings = second.generationSettings;
+    second.runtimeAttestation.treatment.treatmentSha256 = computeHumanEvalContentSha256(
+      second.runtimeAttestation.treatment.treatment,
     );
     second.comparability.treatmentSha256 = computeProviderEvalTreatmentSha256(second);
     const secondSealed = reseal(second);

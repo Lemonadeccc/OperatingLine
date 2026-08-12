@@ -14,7 +14,7 @@ from ..domain import PROTOCOL_VERSION
 NODE_NUMBER_PATTERN = re.compile(r"^[1-9]\d*(?:\.[1-9]\d*)*$")
 ARGUMENT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 REVISION_PROTOCOL_VERSIONS = frozenset(
-    {"1.1.0", "1.2.0", "1.3.0", PROTOCOL_VERSION}
+    {"1.1.0", "1.2.0", "1.3.0", "1.4.0", PROTOCOL_VERSION}
 )
 PLAN_FIELDS = frozenset({"title", "rootStepId"})
 STEP_FIELDS = frozenset(
@@ -385,7 +385,10 @@ def _validate_history_request(
     )
     if set(value) != expected_fields:
         raise ValueError("Revision history request does not match the protocol")
-    if protocol_version not in {"1.3.0", PROTOCOL_VERSION} and "parameterEdits" in value:
+    if (
+        protocol_version not in {"1.3.0", "1.4.0", PROTOCOL_VERSION}
+        and "parameterEdits" in value
+    ):
         raise ValueError("Structured revision edits require protocol 1.3+")
     request_id = _require_uuid(value.get("requestId"), "Revision history request id")
     if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
@@ -394,10 +397,10 @@ def _validate_history_request(
     if thread["threadId"] != thread_id or thread["turn"] != turn:
         raise ValueError("Revision history request uses the wrong thread turn")
     operation = value.get("revisionOperation")
-    if protocol_version == PROTOCOL_VERSION:
+    if protocol_version in {"1.4.0", PROTOCOL_VERSION}:
         validate_revision_operation(operation, thread=thread)
     elif operation is not None:
-        raise ValueError("Explicit revision operations require protocol 1.4")
+        raise ValueError("Explicit revision operations require protocol 1.4+")
     if (
         isinstance(operation, dict)
         and operation.get("kind") == "merge"
@@ -733,7 +736,7 @@ def validate_revision_branch_list(
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ValueError("Revision branch list does not match the protocol")
     if value.get("protocolVersion") != PROTOCOL_VERSION:
-        raise ValueError("Revision branches require protocol 1.4")
+        raise ValueError("Revision branches require the current protocol")
     if (
         value.get("targetAdapterId") != "blender"
         or value.get("instanceId") != instance_id

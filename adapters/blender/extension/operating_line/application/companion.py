@@ -92,6 +92,8 @@ class CompanionController:
         self._last_rejected_proposal: tuple[Any, ...] | None = None
         self._delivered_proposal_plan_content_sha256: str | None = None
         self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
+        self._artifact_attestation_execution_id: str | None = None
+        self._artifact_attestation: dict[str, Any] | None = None
 
     @property
     def connected(self) -> bool:
@@ -1244,19 +1246,19 @@ class CompanionController:
         revision_operation = proposal.get("revisionOperation")
         if (
             revision_request_id is not None
-            and proposal_protocol_version == PROTOCOL_VERSION
+            and proposal_protocol_version in {"1.4.0", PROTOCOL_VERSION}
             and revision_operation is None
         ):
             raise ValueError(
-                "Protocol 1.4 request-linked proposals require a revision operation"
+                "Protocol 1.4+ request-linked proposals require a revision operation"
             )
         if revision_operation is not None:
             if revision_request_id is None or validated_revision_thread is None:
                 raise ValueError(
                     "A standalone proposal cannot declare a revision operation"
                 )
-            if proposal_protocol_version != PROTOCOL_VERSION:
-                raise ValueError("Explicit revision operations require protocol 1.4")
+            if proposal_protocol_version not in {"1.4.0", PROTOCOL_VERSION}:
+                raise ValueError("Explicit revision operations require protocol 1.4+")
             validate_revision_operation(
                 revision_operation,
                 thread=validated_revision_thread,
@@ -2249,9 +2251,24 @@ class CompanionController:
                 )
             )
         self._sequence += 1
+        report_id = str(uuid.uuid4())
+        if phase == "completed" and session.execution_id is not None:
+            if self._artifact_attestation_execution_id != session.execution_id:
+                from ..infrastructure.artifact_attestation import (
+                    build_terminal_artifact_attestation,
+                )
+
+                self._artifact_attestation = build_terminal_artifact_attestation(
+                    session,
+                    report_id,
+                )
+                self._artifact_attestation_execution_id = session.execution_id
+        else:
+            self._artifact_attestation_execution_id = None
+            self._artifact_attestation = None
         report = {
             "protocolVersion": PROTOCOL_VERSION,
-            "reportId": str(uuid.uuid4()),
+            "reportId": report_id,
             "sequence": self._sequence,
             "adapterId": "blender",
             "instanceId": self.instance_id,
@@ -2277,6 +2294,11 @@ class CompanionController:
             ),
             "observations": observations,
             "observationGate": gate.report_data() if gate is not None else None,
+            "artifactAttestation": (
+                deepcopy(self._artifact_attestation)
+                if phase == "completed"
+                else None
+            ),
             "error": error,
             "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }

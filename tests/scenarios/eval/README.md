@@ -154,15 +154,17 @@ API 费用。Snapshot 只从 `--token-env` 指定的环境变量读取本地 Ope
 不会把 token 写入文件；该 token 不是模型 Provider key。只有在上游生成新的真实 Provider 输出时才需要
 该 Provider 的凭据与预算。Blender render 在本机执行，只消耗本地计算资源。
 
-`host_execution_with_manual_artifacts` 会验证 terminal host event，但工程与 PNG 是 operator-provided；当前
-Runtime event 没有记录它们的哈希，因此两者不存在运行时绑定。PNG 可供本地 reviewer 查看，但不能满足
+`host_execution_with_manual_artifacts` 会验证 terminal host event，但工程与 PNG 是 operator-provided；
+该降级模式不使用终态文件哈希，因此两者不存在运行时绑定。PNG 可供本地 reviewer 查看，但不能满足
 released visual artifact evidence。它以 `manual_review_image` 保存并由 blind sign-off 绑定哈希，但不能
 携带 `visualEnvironment`；工程 `host_project` 与 PNG metadata 都标记
-`manual_artifact_not_runtime_bound`。Capture 中的 Provider profile/settings 也是 operator-attested、不是
-Runtime-attested，Run 必须保持 `not_reproducible`；发布级 treatment comparison 仍需后续 Runtime
-attestation。
+`manual_artifact_not_runtime_bound`。Capture 中的 Provider profile/settings 也可走 operator-attested
+降级，Run 必须保持 `not_reproducible`。若 frozen events 含 runtime treatment/output proof，可使用
+`runtime_attested` treatment；若 Companion `1.5.0` terminal report 含文件证明，可使用
+`host_execution_with_runtime_attested_artifacts`，由 capture 重新核对 `.blend`/PNG 字节后进入 released
+证据门。两条路径都不替代真实双人盲审和数据审核。
 
-完整 manifest 字段、两种 capture mode、锁恢复和审计步骤见
+完整 manifest 字段、三种 capture mode、锁恢复和审计步骤见
 [Human Eval 本地采集与盲审指南](../../../docs/guides/human-eval-collection.md)。
 
 数据集报告 busy 且 writer 已异常退出时，只使用安全恢复命令；不要手工删除锁：

@@ -19,6 +19,10 @@ import {
   type PlanningQualityReport,
 } from '@operatingline/protocol';
 
+import {
+  createPlannerProviderRuntimeOutputAttestation,
+  snapshotPlannerProviderRuntimeTreatment,
+} from './planner-provider-attestation.js';
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
 import {
   createPlannerProviderInvocationManager,
@@ -227,6 +231,11 @@ export function createPlannerGenerationCoordinator(
         },
         'same_request_id',
       );
+      const runtimeTreatment = snapshotPlannerProviderRuntimeTreatment(
+        attemptContext.registered.provider,
+        attemptContext.registered.descriptor,
+        'initial_plan',
+      );
       const requestedPayload = plannerGenerationRequestedEventSchema.parse({
         requestId: request.requestId,
         requestFingerprint,
@@ -236,6 +245,7 @@ export function createPlannerGenerationCoordinator(
         catalogVersion: packet.context.catalog.catalogVersion,
         planId: packet.context.requestedPlanId,
         packetFormatVersion: packet.formatVersion,
+        ...(runtimeTreatment === undefined ? {} : { runtimeTreatment }),
         occurredAt: new Date().toISOString(),
         ...provenance,
       });
@@ -307,6 +317,15 @@ export function createPlannerGenerationCoordinator(
         generatedAt: new Date().toISOString(),
         durationMs: Math.max(0, Date.now() - startedAt),
       });
+      const runtimeAttestation = createPlannerProviderRuntimeOutputAttestation({
+        operation: 'initial_plan',
+        requestId: request.requestId,
+        requestFingerprint,
+        packet,
+        output: draft,
+        treatment: runtimeTreatment,
+        occurredAt: result.generatedAt,
+      });
       const completedPayload = plannerGenerationCompletedEventSchema.parse({
         request,
         requestFingerprint,
@@ -314,6 +333,7 @@ export function createPlannerGenerationCoordinator(
         catalogVersion: result.draft.catalogVersion,
         planId: result.draft.plan.id,
         result,
+        ...(runtimeAttestation === undefined ? {} : { runtimeAttestation }),
         ...provenance,
       });
       appendEvidence(

@@ -56,6 +56,39 @@ describe('local AI CLI planner providers', () => {
         runner,
       });
 
+      expect(provider.describeRuntimeTreatment?.('initial_plan')).toMatchObject({
+        profile: {
+          descriptor: provider.descriptor,
+          vendor: 'OpenAI',
+          model: {
+            requested: 'gpt-explicit',
+            resolvedRevision: null,
+            resolution: 'provider_did_not_disclose',
+          },
+          api: {
+            surface: 'codex-cli',
+            version: 'cli-managed',
+            sdkName: 'codex',
+            sdkVersion: 'provider_did_not_disclose',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters: {
+            executable: '/opt/tools/codex',
+            interface: 'exec',
+            ephemeral: true,
+            sandbox: 'read-only',
+            ignoreUserConfig: true,
+            model: 'gpt-explicit',
+          },
+          seed: null,
+          determinism: 'unknown',
+        },
+      });
+
       await expect(provider.generate(generateInput())).resolves.toEqual({
         plan: { id: 'snowman' },
       });

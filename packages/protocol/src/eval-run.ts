@@ -12,9 +12,12 @@ import { guideProtocolVersionSchema } from './guide.js';
 import { planningPromptPacketSchema } from './prompt.js';
 import {
   plannerGenerateRequestSchema,
+  plannerProviderGenerationSettingsSchema,
   plannerGenerationErrorSchema,
   plannerGenerationResultSchema,
-  plannerProviderDescriptorSchema,
+  plannerProviderRuntimeOutputAttestationSchema,
+  plannerProviderRuntimeProfileSchema,
+  plannerProviderRuntimeTreatmentAttestationSchema,
 } from './provider.js';
 import {
   plannerReplanGenerateRequestSchema,
@@ -49,28 +52,7 @@ export const providerEvalSourceEvidenceSchema = z.discriminatedUnion('kind', [
 ]);
 export type ProviderEvalSourceEvidence = z.infer<typeof providerEvalSourceEvidenceSchema>;
 
-export const providerEvalProfileSchema = z.strictObject({
-  descriptor: plannerProviderDescriptorSchema,
-  vendor: z.string().trim().min(1).max(180),
-  implementation: z.strictObject({
-    name: z.string().trim().min(1).max(180),
-    version: catalogVersionSchema,
-  }),
-  model: z.strictObject({
-    requested: z.string().trim().min(1).max(500),
-    resolvedRevision: z.string().trim().min(1).max(500).nullable(),
-    resolution: z.enum(['resolved', 'provider_did_not_disclose']),
-  }),
-  api: z.strictObject({
-    surface: z.string().trim().min(1).max(180),
-    version: z.string().trim().min(1).max(180),
-    sdkName: z.string().trim().min(1).max(180),
-    sdkVersion: z.string().trim().min(1).max(180),
-    endpointClass: z.enum(['vendor_public', 'self_hosted', 'local']),
-    serviceTier: z.string().trim().min(1).max(180).nullable(),
-    region: z.string().trim().min(1).max(180).nullable(),
-  }),
-});
+export const providerEvalProfileSchema = plannerProviderRuntimeProfileSchema;
 export type ProviderEvalProfile = z.infer<typeof providerEvalProfileSchema>;
 
 export const providerEvalEnvironmentSchema = z.strictObject({
@@ -87,33 +69,7 @@ export const providerEvalEnvironmentSchema = z.strictObject({
 });
 export type ProviderEvalEnvironment = z.infer<typeof providerEvalEnvironmentSchema>;
 
-export const providerEvalGenerationSettingsSchema = z
-  .strictObject({
-    normalizedParameters: z.record(z.string().min(1), z.json()),
-    parametersSha256: evalContentSha256Schema,
-    seed: z.number().int().safe().nullable(),
-    determinism: z.enum(['deterministic', 'seeded_best_effort', 'non_deterministic', 'unknown']),
-  })
-  .superRefine((settings, context) => {
-    if (settings.determinism === 'seeded_best_effort' && settings.seed === null) {
-      context.addIssue({
-        code: 'custom',
-        path: ['seed'],
-        message: 'Seeded best-effort generation requires an explicit seed',
-      });
-    }
-  })
-  .meta({
-    allOf: [
-      {
-        if: {
-          properties: { determinism: { const: 'seeded_best_effort' } },
-          required: ['determinism'],
-        },
-        then: { properties: { seed: { type: 'number' } }, required: ['seed'] },
-      },
-    ],
-  });
+export const providerEvalGenerationSettingsSchema = plannerProviderGenerationSettingsSchema;
 export type ProviderEvalGenerationSettings = z.infer<typeof providerEvalGenerationSettingsSchema>;
 
 const providerEvalSourceEventCommon = {
@@ -144,6 +100,13 @@ export type ProviderEvalSourceEvent = z.infer<typeof providerEvalSourceEventSche
 const providerEvalInitialInvocationSchema = z.strictObject({
   operation: z.literal('initial_plan'),
   request: plannerGenerateRequestSchema,
+  requestFingerprint: evalContentSha256Schema,
+  goalProvenance: z
+    .strictObject({
+      goalRequestId: z.uuid(),
+      targetInstanceId: z.uuid(),
+    })
+    .nullable(),
   packet: planningPromptPacketSchema,
   packetSha256: evalContentSha256Schema,
 });
@@ -151,6 +114,8 @@ const providerEvalInitialInvocationSchema = z.strictObject({
 const providerEvalReplanInvocationSchema = z.strictObject({
   operation: z.literal('local_replan'),
   request: plannerReplanGenerateRequestSchema,
+  requestFingerprint: evalContentSha256Schema,
+  goalProvenance: z.null(),
   packet: replanningPromptPacketSchema,
   packetSha256: evalContentSha256Schema,
 });
@@ -202,6 +167,13 @@ export const providerEvalRunSchema = z
     environment: providerEvalEnvironmentSchema,
     invocation: providerEvalInvocationSchema,
     generationSettings: providerEvalGenerationSettingsSchema,
+    runtimeAttestation: z
+      .union([
+        plannerProviderRuntimeTreatmentAttestationSchema,
+        plannerProviderRuntimeOutputAttestationSchema,
+      ])
+      .nullable()
+      .default(null),
     timing: z.strictObject({
       startedAt: z.iso.datetime({ offset: true }),
       completedAt: z.iso.datetime({ offset: true }),
@@ -245,6 +217,19 @@ export const providerEvalRunSchema = z
         code: 'custom',
         path: ['outcome', 'operation'],
         message: 'Outcome operation must match the invocation operation',
+      });
+    }
+    if (
+      run.runtimeAttestation?.evidenceClass === 'runtime_attested_provider_output' &&
+      (outcome.status !== 'completed' ||
+        run.runtimeAttestation.operation !== invocation.operation ||
+        run.runtimeAttestation.requestId !== invocation.request.requestId ||
+        run.runtimeAttestation.requestFingerprint !== invocation.requestFingerprint)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeAttestation'],
+        message: 'Provider output attestation must match a completed invocation',
       });
     }
     if (invocation.request.providerId !== provider.id) {

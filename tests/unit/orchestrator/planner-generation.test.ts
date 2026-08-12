@@ -234,6 +234,120 @@ describe('planner generation coordinator', () => {
     expect(provider.closeCalls).toBe(1);
   });
 
+  it('binds an immutable runtime treatment to the exact prompt and provider output', async () => {
+    const provider = new FakePlannerProvider(
+      ({ packet }) => validDraft(packet),
+      undefined,
+      undefined,
+      undefined,
+      () => ({
+        profile: {
+          descriptor: provider.descriptor,
+          vendor: 'OperatingLine tests',
+          implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+          model: {
+            requested: 'deterministic-fixture-v1',
+            resolvedRevision: 'deterministic-fixture-v1',
+            resolution: 'resolved',
+          },
+          api: {
+            surface: 'in-process-test',
+            version: '1.0.0',
+            sdkName: '@operatingline/test-kit',
+            sdkVersion: '0.1.0',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters: { temperature: 0 },
+          seed: null,
+          determinism: 'deterministic',
+        },
+      }),
+    );
+    const { coordinator, events } = harness(provider);
+    const input = request();
+
+    await coordinator.generate(input);
+
+    const requested = events.find(
+      (event) => event.eventType === 'planning.provider.generation.requested',
+    )?.payload as Record<string, unknown>;
+    const completed = events.find(
+      (event) => event.eventType === 'planning.provider.generation.completed',
+    )?.payload as Record<string, unknown>;
+    expect(requested['runtimeTreatment']).toMatchObject({
+      evidenceClass: 'runtime_attested_provider_treatment',
+      operation: 'initial_plan',
+      treatment: {
+        profile: { descriptor: provider.descriptor },
+        generationSettings: { determinism: 'deterministic' },
+      },
+    });
+    expect(completed['runtimeAttestation']).toMatchObject({
+      evidenceClass: 'runtime_attested_provider_output',
+      operation: 'initial_plan',
+      requestId: input.requestId,
+      treatment: requested['runtimeTreatment'],
+    });
+    expect((completed['runtimeAttestation'] as Record<string, unknown>)['packetSha256']).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    expect((completed['runtimeAttestation'] as Record<string, unknown>)['outputSha256']).toMatch(
+      /^[a-f0-9]{64}$/,
+    );
+    await coordinator.close();
+  });
+
+  it('fails closed when a provider runtime treatment is not JSON serializable', async () => {
+    const normalizedParameters: Record<string, unknown> = {};
+    normalizedParameters['self'] = normalizedParameters;
+    const provider = new FakePlannerProvider(
+      ({ packet }) => validDraft(packet),
+      undefined,
+      undefined,
+      undefined,
+      () => ({
+        profile: {
+          descriptor: provider.descriptor,
+          vendor: 'OperatingLine tests',
+          implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+          model: {
+            requested: 'cyclic-fixture',
+            resolvedRevision: 'cyclic-fixture',
+            resolution: 'resolved',
+          },
+          api: {
+            surface: 'in-process-test',
+            version: '1.0.0',
+            sdkName: '@operatingline/test-kit',
+            sdkVersion: '0.1.0',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters,
+          seed: null,
+          determinism: 'deterministic',
+        },
+      }),
+    );
+    const { coordinator, events } = harness(provider);
+
+    await expect(coordinator.generate(request())).rejects.toMatchObject({
+      code: 'planner_identity_mismatch',
+    });
+    expect(
+      events.some((event) => event.eventType === 'planning.provider.generation.requested'),
+    ).toBe(false);
+    expect(provider.inputs).toHaveLength(0);
+    await coordinator.close();
+  });
+
   it('returns needs_revision for a schema-valid capability draft missing coverage', async () => {
     const provider = new FakePlannerProvider(({ packet }) => {
       const draft = validDraft(packet);

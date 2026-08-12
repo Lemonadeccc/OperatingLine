@@ -477,7 +477,8 @@ function validateProviderEventPayload(
     const request = run.invocation.request;
     const packet = run.invocation.packet;
     const outcome = run.outcome;
-    const expectedRequestHash = computeHumanEvalContentSha256(request);
+    const expectedRequestHash = run.invocation.requestFingerprint;
+    const expectedGoalProvenance = run.invocation.goalProvenance;
     if (event.eventType === 'planning.provider.generation.requested') {
       const parsed = plannerGenerationRequestedEventSchema.safeParse(event.payload);
       if (!parsed.success) {
@@ -497,6 +498,23 @@ function validateProviderEventPayload(
       ) {
         reject('does not match the exact planning invocation');
       }
+      if (
+        payload.goalRequestId !== expectedGoalProvenance?.goalRequestId ||
+        payload.targetInstanceId !== expectedGoalProvenance?.targetInstanceId
+      ) {
+        reject('does not match the exact goal-scoped planning provenance');
+      }
+      if (
+        run.runtimeAttestation !== null &&
+        computeHumanEvalContentSha256(payload.runtimeTreatment ?? null) !==
+          computeHumanEvalContentSha256(
+            run.runtimeAttestation.evidenceClass === 'runtime_attested_provider_output'
+              ? run.runtimeAttestation.treatment
+              : run.runtimeAttestation,
+          )
+      ) {
+        reject('does not contain the exact runtime-attested treatment');
+      }
       return;
     }
     if (event.eventType === 'planning.provider.generation.completed') {
@@ -509,10 +527,23 @@ function validateProviderEventPayload(
         outcome.status !== 'completed' ||
         outcome.operation !== 'initial_plan' ||
         parsed.data.requestFingerprint !== expectedRequestHash ||
-        computeHumanEvalContentSha256(parsed.data.request) !== expectedRequestHash ||
-        computeHumanEvalContentSha256(parsed.data.result) !== outcome.resultSha256
+        computeHumanEvalContentSha256(parsed.data.request) !==
+          computeHumanEvalContentSha256(request) ||
+        computeHumanEvalContentSha256(parsed.data.result) !== outcome.resultSha256 ||
+        computeHumanEvalContentSha256(parsed.data.runtimeAttestation ?? null) !==
+          computeHumanEvalContentSha256(
+            run.runtimeAttestation?.evidenceClass === 'runtime_attested_provider_output'
+              ? run.runtimeAttestation
+              : null,
+          )
       ) {
         reject('does not match the exact completed run outcome');
+      }
+      if (
+        parsed.data.goalRequestId !== expectedGoalProvenance?.goalRequestId ||
+        parsed.data.targetInstanceId !== expectedGoalProvenance?.targetInstanceId
+      ) {
+        reject('does not match the exact goal-scoped planning provenance');
       }
       return;
     }
@@ -536,13 +567,19 @@ function validateProviderEventPayload(
       ) {
         reject('does not match the exact failed run outcome');
       }
+      if (
+        payload.goalRequestId !== expectedGoalProvenance?.goalRequestId ||
+        payload.targetInstanceId !== expectedGoalProvenance?.targetInstanceId
+      ) {
+        reject('does not match the exact goal-scoped planning provenance');
+      }
       return;
     }
   } else {
     const request = run.invocation.request;
     const packet = run.invocation.packet;
     const outcome = run.outcome;
-    const expectedRequestHash = computeHumanEvalContentSha256(request);
+    const expectedRequestHash = run.invocation.requestFingerprint;
     const revisionRequest = packet.context.revisionRequest;
     if (event.eventType === 'planning.provider.replan.requested') {
       const parsed = plannerReplanRequestedEventSchema.safeParse(event.payload);
@@ -566,6 +603,17 @@ function validateProviderEventPayload(
       ) {
         reject('does not match the exact replanning invocation');
       }
+      if (
+        run.runtimeAttestation !== null &&
+        computeHumanEvalContentSha256(payload.runtimeTreatment ?? null) !==
+          computeHumanEvalContentSha256(
+            run.runtimeAttestation.evidenceClass === 'runtime_attested_provider_output'
+              ? run.runtimeAttestation.treatment
+              : run.runtimeAttestation,
+          )
+      ) {
+        reject('does not contain the exact runtime-attested treatment');
+      }
       return;
     }
     if (event.eventType === 'planning.provider.replan.completed') {
@@ -578,8 +626,15 @@ function validateProviderEventPayload(
         outcome.status !== 'completed' ||
         outcome.operation !== 'local_replan' ||
         parsed.data.requestFingerprint !== expectedRequestHash ||
-        computeHumanEvalContentSha256(parsed.data.request) !== expectedRequestHash ||
-        computeHumanEvalContentSha256(parsed.data.result) !== outcome.resultSha256
+        computeHumanEvalContentSha256(parsed.data.request) !==
+          computeHumanEvalContentSha256(request) ||
+        computeHumanEvalContentSha256(parsed.data.result) !== outcome.resultSha256 ||
+        computeHumanEvalContentSha256(parsed.data.runtimeAttestation ?? null) !==
+          computeHumanEvalContentSha256(
+            run.runtimeAttestation?.evidenceClass === 'runtime_attested_provider_output'
+              ? run.runtimeAttestation
+              : null,
+          )
       ) {
         reject('does not match the exact completed replan outcome');
       }
@@ -636,6 +691,35 @@ function expectedPlanContentSha256(run: ProviderEvalRun): string | null {
     : null;
 }
 
+function expectedInvocationInstanceId(run: ProviderEvalRun): string | null {
+  if (run.invocation.operation === 'initial_plan') {
+    return run.invocation.goalProvenance?.targetInstanceId ?? null;
+  }
+  return run.invocation.packet.context.revisionRequest.instanceId;
+}
+
+function proposalMatchesInvocation(
+  run: ProviderEvalRun,
+  proposal: ReturnType<typeof guideProposalSchema.parse>,
+): boolean {
+  if (run.invocation.operation === 'initial_plan') {
+    const provenance = run.invocation.goalProvenance;
+    return provenance === null
+      ? proposal.goalRequestId === undefined && proposal.revisionRequestId === undefined
+      : proposal.goalRequestId === provenance.goalRequestId &&
+          proposal.targetInstanceId === provenance.targetInstanceId &&
+          proposal.revisionRequestId === undefined &&
+          proposal.catalogVersion === run.environment.catalogVersion;
+  }
+  const revision = run.invocation.packet.context.revisionRequest;
+  return (
+    proposal.goalRequestId === undefined &&
+    proposal.revisionRequestId === revision.requestId &&
+    proposal.targetInstanceId === revision.instanceId &&
+    proposal.catalogVersion === run.environment.catalogVersion
+  );
+}
+
 function validateLiveEvalExportEvidence(
   run: ProviderEvalRun,
   loadedArtifacts: ReadonlyMap<string, LoadedArtifact>,
@@ -683,16 +767,25 @@ function validateLiveEvalExportEvidence(
     ) {
       issues.push(`Run ${run.runId} Eval export ${artifactId} does not match its frozen snapshot`);
     }
+    const expectedInstanceId = expectedInvocationInstanceId(run);
     if (
       bundle.protocolVersion !== run.environment.protocolVersion ||
       bundle.scope.targetAdapterId !== run.environment.targetAdapterId ||
       bundle.scope.planId !== expectedPlanId(run) ||
-      (run.invocation.operation === 'local_replan' &&
-        bundle.scope.instanceId !== run.invocation.packet.context.revisionRequest.instanceId)
+      (expectedInstanceId !== null && bundle.scope.instanceId !== expectedInstanceId)
     ) {
       issues.push(
         `Run ${run.runId} Eval export ${artifactId} scope does not match its protocol, adapter, plan, and instance`,
       );
+      if (
+        run.invocation.operation === 'initial_plan' &&
+        run.invocation.goalProvenance !== null &&
+        bundle.scope.instanceId !== run.invocation.goalProvenance.targetInstanceId
+      ) {
+        issues.push(
+          `Run ${run.runId} Eval export ${artifactId} does not match the exact goal-scoped planning provenance`,
+        );
+      }
     }
     if (
       !bundle.catalogs.some(
@@ -806,7 +899,9 @@ function validateLiveEvalExportEvidence(
         hostReport.data.executionId !== correlation.executionId ||
         hostReport.data.reportId !== correlation.reportId ||
         correlation.planId !== expectedPlanId(run) ||
-        correlation.instanceId !== evidenceEvent.bundle.scope.instanceId
+        correlation.instanceId !== evidenceEvent.bundle.scope.instanceId ||
+        (expectedInvocationInstanceId(run) !== null &&
+          correlation.instanceId !== expectedInvocationInstanceId(run))
       ) {
         issues.push(
           `Run ${run.runId} source event ${summary.eventId} is not correlated to its exact host plan revision, instance, and environment`,
@@ -878,7 +973,11 @@ function validateLiveEvalExportEvidence(
       if (event.sequence <= providerTerminalSequence) {
         continue;
       }
-      if (event.eventType === 'guide.plan.published') {
+      if (
+        event.eventType === 'guide.plan.published' &&
+        run.invocation.operation === 'initial_plan' &&
+        run.invocation.goalProvenance === null
+      ) {
         const publishedPlan = guidePlanSchema.safeParse(recordAt(event.payload, 'plan'));
         if (
           publishedPlan.success &&
@@ -902,6 +1001,7 @@ function validateLiveEvalExportEvidence(
       const proposal = guideProposalSchema.safeParse(event.payload);
       if (
         proposal.success &&
+        proposalMatchesInvocation(run, proposal.data) &&
         proposal.data.targetAdapterId === run.environment.targetAdapterId &&
         computePlanContentSha256(proposal.data.plan) === planContentSha256
       ) {
@@ -922,14 +1022,25 @@ function validateLiveEvalExportEvidence(
           decision.data.proposalId === proposal.proposal.proposalId &&
           decision.data.adapterId === run.environment.targetAdapterId &&
           decision.data.decision === 'accepted' &&
-          (proposal.proposal.targetInstanceId === undefined ||
-            decision.data.instanceId === proposal.proposal.targetInstanceId)
+          (proposal.proposal.targetInstanceId === undefined
+            ? expectedInvocationInstanceId(run) === null
+            : decision.data.instanceId === proposal.proposal.targetInstanceId)
         );
       });
       if (accepted !== undefined) {
         planAuthorizationSequences.push(accepted.sequence);
       }
     }
+  }
+  if (
+    run.invocation.operation === 'initial_plan' &&
+    run.invocation.goalProvenance !== null &&
+    run.sourceEvents.some((event) => event.correlationKind === 'host_execution') &&
+    planAuthorizationSequences.length === 0
+  ) {
+    issues.push(
+      `Run ${run.runId} host execution does not match the exact goal-scoped planning provenance`,
+    );
   }
   return {
     hostReportsBySequence,
@@ -1086,22 +1197,45 @@ function validateReleasedEvidenceClaims(
               return false;
             }
             const visual = artifact.visualEnvironment;
+            const hostProject = run.artifacts.find(
+              (candidate) =>
+                candidate.kind === 'host_project' &&
+                candidate.contentSha256 === visual.hostProjectSha256,
+            );
             const terminalSequence = String(visual.terminalHostEventSequence);
             const terminalReport = verified.ledger.hostReportsBySequence.get(terminalSequence);
+            const attestation = terminalReport?.artifactAttestation;
             return (
+              hostProject !== undefined &&
+              hostProject.mediaType === 'application/x-blender' &&
               visual.hostVersion === run.environment.hostVersion &&
               visual.adapterVersion === run.environment.adapterVersion &&
               visual.planContentSha256 === expectedPlanContentSha256(run) &&
               terminalReport?.planContentSha256 === visual.planContentSha256 &&
               terminalReport?.executionId === visual.executionId &&
               terminalReport?.reportId === visual.terminalHostReportId &&
+              attestation !== undefined &&
+              attestation !== null &&
+              attestation.executionId === visual.executionId &&
+              attestation.planContentSha256 === visual.planContentSha256 &&
+              attestation.hostProject.artifactId === hostProject.artifactId &&
+              attestation.hostProject.contentSha256 === hostProject.contentSha256 &&
+              attestation.renderedImage.artifactId === artifact.artifactId &&
+              attestation.renderedImage.contentSha256 === artifact.contentSha256 &&
+              attestation.renderedImage.width === visual.width &&
+              attestation.renderedImage.height === visual.height &&
+              attestation.renderedImage.frame === visual.frame &&
+              attestation.renderedImage.renderEngine === visual.renderEngine &&
+              attestation.renderedImage.colorManagement === visual.colorManagement &&
+              attestation.renderedImage.hostProjectSha256 === visual.hostProjectSha256 &&
               isExactTerminalHostExecution(
                 run,
                 verified.ledger,
                 terminalSequence,
                 judgment.judgment,
               ) &&
-              verified.loadedArtifacts.has(artifact.artifactId)
+              verified.loadedArtifacts.has(artifact.artifactId) &&
+              verified.loadedArtifacts.has(hostProject.artifactId)
             );
           });
           const exactArtifact =

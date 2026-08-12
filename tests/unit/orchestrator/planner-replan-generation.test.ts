@@ -6,6 +6,7 @@ import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
 import {
   guideRevisionRequestSchema,
+  plannerReplanCompletedEventSchema,
   plannerReplanGenerationResultSchema,
   type GuidePlan,
   type PlannerReplanDraft,
@@ -17,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 
 import { createLocalReplanScope } from '../../../services/orchestrator/src/local-replan-scope.js';
 import { evaluatePlanningQuality } from '../../../services/orchestrator/src/planning-quality.js';
+import { computePlannerProviderAttestationSha256 } from '../../../services/orchestrator/src/planner-provider-attestation.js';
 import {
   createPlannerProviderInvocationManager,
   plannerProviderRequestFingerprint,
@@ -105,6 +107,7 @@ function validDraft(packet: ReplanningPromptPacket): PlannerReplanDraft {
 function providerWithReplan(
   replan: ConstructorParameters<typeof FakePlannerProvider>[2],
   maxConcurrency = 1,
+  describeRuntimeTreatment?: ConstructorParameters<typeof FakePlannerProvider>[4],
 ): FakePlannerProvider {
   return new FakePlannerProvider(
     () => {
@@ -125,6 +128,8 @@ function providerWithReplan(
       },
     },
     replan,
+    undefined,
+    describeRuntimeTreatment,
   );
 }
 
@@ -245,6 +250,122 @@ describe('planner replan generation coordinator', () => {
         packetFormatVersion: '1.0.0',
       }).success,
     ).toBe(false);
+    await coordinator.close();
+  });
+
+  it('binds the local-replan runtime treatment to the exact request, prompt, and output', async () => {
+    const revision = revisionRequest();
+    const normalizedParameters = { temperature: 0, responseFormat: 'strict_json' };
+    const describedOperations: string[] = [];
+    const provider = providerWithReplan(
+      ({ packet }) => validDraft(packet),
+      1,
+      (operation) => {
+        describedOperations.push(operation);
+        return {
+          profile: {
+            descriptor: provider.descriptor,
+            vendor: 'OperatingLine tests',
+            implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+            model: {
+              requested: 'deterministic-replan-fixture-v1',
+              resolvedRevision: 'deterministic-replan-fixture-v1',
+              resolution: 'resolved',
+            },
+            api: {
+              surface: 'in-process-test',
+              version: '1.0.0',
+              sdkName: '@operatingline/test-kit',
+              sdkVersion: '0.1.0',
+              endpointClass: 'local',
+              serviceTier: null,
+              region: null,
+            },
+          },
+          generationSettings: {
+            normalizedParameters,
+            seed: 17,
+            determinism: 'seeded_best_effort',
+          },
+        };
+      },
+    );
+    const { coordinator, events } = harness(provider, revision);
+    const input = generationRequest(revision);
+
+    const result = await coordinator.generate(input);
+
+    expect(describedOperations).toEqual(['local_replan']);
+    const expectedTreatment = {
+      profile: {
+        descriptor: provider.descriptor,
+        vendor: 'OperatingLine tests',
+        implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+        model: {
+          requested: 'deterministic-replan-fixture-v1',
+          resolvedRevision: 'deterministic-replan-fixture-v1',
+          resolution: 'resolved' as const,
+        },
+        api: {
+          surface: 'in-process-test',
+          version: '1.0.0',
+          sdkName: '@operatingline/test-kit',
+          sdkVersion: '0.1.0',
+          endpointClass: 'local' as const,
+          serviceTier: null,
+          region: null,
+        },
+      },
+      generationSettings: {
+        normalizedParameters,
+        parametersSha256: computePlannerProviderAttestationSha256(normalizedParameters),
+        seed: 17,
+        determinism: 'seeded_best_effort' as const,
+      },
+    };
+    const expectedRuntimeTreatment = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_treatment',
+      operation: 'local_replan',
+      treatment: expectedTreatment,
+      treatmentSha256: computePlannerProviderAttestationSha256(expectedTreatment),
+    };
+    const requested = events.find(
+      (event) => event.eventType === 'planning.provider.replan.requested',
+    )?.payload as Record<string, unknown>;
+    const completed = events.find(
+      (event) => event.eventType === 'planning.provider.replan.completed',
+    )?.payload as Record<string, unknown>;
+    const requestFingerprint = plannerProviderRequestFingerprint(input);
+    const packet = provider.replanInputs[0]?.packet;
+    if (packet === undefined) throw new Error('Expected the provider to receive a replan packet');
+
+    expect(requested['requestFingerprint']).toBe(requestFingerprint);
+    expect(requested['runtimeTreatment']).toEqual(expectedRuntimeTreatment);
+    expect(completed['runtimeAttestation']).toEqual({
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_output',
+      operation: 'local_replan',
+      requestId: input.requestId,
+      requestFingerprint,
+      packetSha256: computePlannerProviderAttestationSha256(packet),
+      outputSha256: computePlannerProviderAttestationSha256(result.draft),
+      treatment: expectedRuntimeTreatment,
+      occurredAt: result.generatedAt,
+    });
+
+    for (const runtimeAttestation of [
+      { ...(completed['runtimeAttestation'] as object), operation: 'initial_plan' },
+      { ...(completed['runtimeAttestation'] as object), requestId: randomUUID() },
+      { ...(completed['runtimeAttestation'] as object), requestFingerprint: 'f'.repeat(64) },
+    ]) {
+      expect(
+        plannerReplanCompletedEventSchema.safeParse({
+          ...completed,
+          runtimeAttestation,
+        }).success,
+      ).toBe(false);
+    }
     await coordinator.close();
   });
 

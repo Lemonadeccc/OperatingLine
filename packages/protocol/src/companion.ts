@@ -156,6 +156,49 @@ export const companionObservationGateSchema = z
   });
 export type CompanionObservationGate = z.infer<typeof companionObservationGateSchema>;
 
+export const companionArtifactAttestationSchema = z
+  .strictObject({
+    formatVersion: z.literal('1.0.0'),
+    evidenceClass: z.literal('runtime_attested_host_artifacts'),
+    planContentSha256: companionContentSha256Schema,
+    executionId: z.uuid(),
+    hostProject: z.strictObject({
+      artifactId: guideStepIdSchema,
+      kind: z.literal('host_project'),
+      mediaType: z.literal('application/x-blender'),
+      contentSha256: companionContentSha256Schema,
+    }),
+    renderedImage: z.strictObject({
+      artifactId: guideStepIdSchema,
+      kind: z.literal('rendered_image'),
+      mediaType: z.literal('image/png'),
+      contentSha256: companionContentSha256Schema,
+      width: z.number().int().positive().max(65_536),
+      height: z.number().int().positive().max(65_536),
+      frame: z.number().int().safe().nullable(),
+      renderEngine: z.string().trim().min(1).max(180),
+      colorManagement: z.string().trim().min(1).max(500),
+      hostProjectSha256: companionContentSha256Schema,
+    }),
+  })
+  .superRefine((attestation, context) => {
+    if (attestation.renderedImage.hostProjectSha256 !== attestation.hostProject.contentSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['renderedImage', 'hostProjectSha256'],
+        message: 'Rendered image must reference the exact attested host project',
+      });
+    }
+    if (attestation.hostProject.artifactId === attestation.renderedImage.artifactId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['renderedImage', 'artifactId'],
+        message: 'Host artifact ids must be unique',
+      });
+    }
+  });
+export type CompanionArtifactAttestation = z.infer<typeof companionArtifactAttestationSchema>;
+
 const companionPlanReferenceSchema = z.strictObject({
   id: z.string().min(1),
   revision: z.number().int().positive(),
@@ -185,6 +228,7 @@ export const companionStateReportSchema = z
     stepId: guideStepIdSchema.nullable(),
     observations: z.array(companionObservationSchema),
     observationGate: companionObservationGateSchema.nullable().optional(),
+    artifactAttestation: companionArtifactAttestationSchema.nullable().optional(),
     error: z.string().min(1).nullable(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -257,11 +301,34 @@ export const companionStateReportSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0'] } },
+          properties: {
+            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+          },
           required: ['protocolVersion'],
         },
         then: { required: ['observationGate'] },
         else: { not: { required: ['observationGate'] } },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.5.0' } },
+          required: ['protocolVersion'],
+        },
+        then: { required: ['artifactAttestation'] },
+        else: { not: { required: ['artifactAttestation'] } },
+      },
+      {
+        if: {
+          properties: { artifactAttestation: { type: 'object' } },
+          required: ['artifactAttestation'],
+        },
+        then: {
+          properties: {
+            phase: { enum: ['completed', 'error'] },
+            executionId: { type: 'string' },
+            planContentSha256: { type: 'string' },
+          },
+        },
       },
       {
         if: { properties: { phase: { const: 'blocked' } }, required: ['phase'] },
@@ -420,7 +487,8 @@ export const companionStateReportSchema = z
     if (
       (report.protocolVersion === '1.2.0' ||
         report.protocolVersion === '1.3.0' ||
-        report.protocolVersion === '1.4.0') &&
+        report.protocolVersion === '1.4.0' ||
+        report.protocolVersion === '1.5.0') &&
       report.observationGate === undefined
     ) {
       context.addIssue({
@@ -433,6 +501,7 @@ export const companionStateReportSchema = z
       report.protocolVersion !== '1.2.0' &&
       report.protocolVersion !== '1.3.0' &&
       report.protocolVersion !== '1.4.0' &&
+      report.protocolVersion !== '1.5.0' &&
       report.observationGate !== undefined
     ) {
       context.addIssue({
@@ -440,6 +509,35 @@ export const companionStateReportSchema = z
         path: ['observationGate'],
         message: 'Observation gate reports require protocol 1.2+',
       });
+    }
+    if (report.protocolVersion === '1.5.0' && report.artifactAttestation === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['artifactAttestation'],
+        message: 'Protocol 1.5 reports require an explicit artifactAttestation field',
+      });
+    }
+    if (report.protocolVersion !== '1.5.0' && report.artifactAttestation !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['artifactAttestation'],
+        message: 'Artifact attestation reports require protocol 1.5',
+      });
+    }
+    if (report.artifactAttestation !== undefined && report.artifactAttestation !== null) {
+      if (
+        (report.phase !== 'completed' && report.phase !== 'error') ||
+        report.executionId === null ||
+        report.planContentSha256 === null ||
+        report.artifactAttestation.executionId !== report.executionId ||
+        report.artifactAttestation.planContentSha256 !== report.planContentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['artifactAttestation'],
+          message: 'Artifact attestation requires and must match a terminal execution',
+        });
+      }
     }
     const gate = report.observationGate;
     if (report.phase === 'blocked') {

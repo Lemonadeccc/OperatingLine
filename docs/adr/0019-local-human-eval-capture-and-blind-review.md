@@ -3,6 +3,9 @@
 - 状态：已接受
 - 日期：2026-08-09
 
+> 后续状态：ADR 0036 已增加运行时 Provider treatment/output 与 Blender artifact attestation；本文保留
+> operator/manual 降级路径的历史决策和安全边界。
+
 ## 背景
 
 ADR 0018 定义了版本化 suite、Run、annotation、adjudication 与无分数 comparison，但当时仓库只有
@@ -183,4 +186,5 @@ visual/treatment comparison；这是证据边界的显式保守选择，不是�
 
 完整操作步骤与审计清单见
 [Human Eval 本地采集与盲审指南](../guides/human-eval-collection.md)。基础协议、comparison 与 released
-readiness 继续由 [ADR 0018](0018-versioned-human-eval-evidence.md) 定义。
+readiness 继续由 [ADR 0018](0018-versioned-human-eval-evidence.md) 定义；运行时证明路径见
+[ADR 0036](0036-runtime-attested-eval-evidence.md)。

@@ -35,6 +35,7 @@ const guideRevisionHistoryProtocolVersions = [
   '1.1.0',
   '1.2.0',
   '1.3.0',
+  '1.4.0',
   guideProtocolVersion,
 ] as const;
 const guideRevisionHistoryProtocolVersionSet = new Set<string>(

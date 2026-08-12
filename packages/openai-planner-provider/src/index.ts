@@ -3,6 +3,8 @@ import type {
   PlannerProviderDialogueInput,
   PlannerProviderGenerateInput,
   PlannerProviderReplanInput,
+  PlannerProviderRuntimeOperation,
+  PlannerProviderRuntimeTreatmentDescription,
 } from '@operatingline/planner-provider-sdk';
 import {
   plannerDialogueProviderResultSchema,
@@ -180,6 +182,47 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
 
   async generate(input: PlannerProviderGenerateInput): Promise<unknown> {
     return this.requestJson(input.packet.renderedPrompt, input.signal);
+  }
+
+  describeRuntimeTreatment(
+    _operation: PlannerProviderRuntimeOperation,
+  ): PlannerProviderRuntimeTreatmentDescription {
+    const endpoint = normalizeOptional(this.options.baseURL) ?? officialOpenAIBaseURL;
+    return {
+      profile: {
+        descriptor: this.descriptor,
+        vendor: 'OpenAI',
+        implementation: {
+          name: '@operatingline/openai-planner-provider',
+          version: providerVersion,
+        },
+        model: {
+          requested: this.model,
+          resolvedRevision: null,
+          resolution: 'provider_did_not_disclose',
+        },
+        api: {
+          surface: 'responses',
+          version: 'v1',
+          sdkName: 'openai',
+          sdkVersion: '7.4.0',
+          endpointClass: endpoint === officialOpenAIBaseURL ? 'vendor_public' : 'self_hosted',
+          serviceTier: null,
+          region: null,
+        },
+      },
+      generationSettings: {
+        normalizedParameters: {
+          model: this.model,
+          max_output_tokens: openAIPlannerMaximumOutputTokens,
+          store: false,
+          stream: false,
+          text: { format: { type: 'json_object' } },
+        },
+        seed: null,
+        determinism: 'non_deterministic',
+      },
+    };
   }
 
   async replan(input: PlannerProviderReplanInput): Promise<unknown> {

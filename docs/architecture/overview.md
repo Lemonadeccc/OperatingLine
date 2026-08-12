@@ -528,8 +528,9 @@ Human Eval 是原始 Eval export 之上的独立、离线数据集层，不是 O
 `treatmentSha256` 隔离 Provider profile 与 generation settings，防止把不同 catalog、模型参数或宿主
 版本伪装成同一对照。
 
-本地采集按固定顺序推进：从回环 Runtime 冻结版本化 snapshot；将其捕获为 `provider_only` 或包含已验证
-宿主终态及人工提供工程/PNG 的 `host_execution_with_manual_artifacts` Run；由独立 preparer 对盲审投影与补充 alias 清单
+本地采集按固定顺序推进：从回环 Runtime 冻结版本化 snapshot；将其捕获为 `provider_only`、包含已验证
+宿主终态及人工提供工程/PNG 的 `host_execution_with_manual_artifacts`，或逐字绑定 Guide/Companion
+`1.5.0` 终态哈希的 `host_execution_with_runtime_attested_artifacts` Run；由独立 preparer 对盲审投影与补充 alias 清单
 执行 `no_provider_identity_visible` 检查，并对每个精确 PNG 哈希人工确认像素中没有 Provider 标记后写入
 不可覆盖的 sign-off sidecar；再由两名独立 reviewer 在
 浏览器工作台提交 annotation；若当前 annotation 存在逐 criterion 分歧，才由既不是 preparer 也不是
@@ -549,13 +550,18 @@ Capture、blind preparation、review、check 与 report 默认完全离线：不
 本机执行，仅消耗本地计算资源。
 
 `host_execution_with_manual_artifacts` 只把已验证的 terminal host event 与人工提供的工程/PNG 一起保存。
-当前 Runtime event 不携带这两个文件的内容哈希，因此它们没有运行时来源绑定：PNG 可以出现在本地盲审
+该降级路径不使用终态文件哈希，因此它们没有运行时来源绑定：PNG 可以出现在本地盲审
 界面，并由 blind sign-off 绑定内容哈希，但作为 `manual_review_image` 不允许携带 `visualEnvironment`，
 不能满足 `released` artifact criterion。工程 `host_project` 与 PNG metadata 都标记
 `manual_artifact_not_runtime_bound`。Capture manifest 的 Provider profile 与 generation
 settings 也来自 operator attestation，不是 Runtime attestation；此类 Run 固定为 `not_reproducible`，不能
-形成发布级 treatment comparison。后续必须由 Runtime 记录不可变 Provider/model/settings 与 artifact
-内容哈希，才能提升这两类证据声明。
+形成发布级 treatment comparison。
+
+Opt-in Provider 现在可在 requested/completed 事件中写入规范化 profile/settings、treatment hash、request
+fingerprint、packet hash 与严格 draft hash。Blender `1.5.0` 终态可保存工程副本并绑定 `.blend`/PNG hash、
+尺寸和渲染环境。Capture 只有在 manifest 与这些事件逐字段一致时才保存 runtime attestation；released
+校验还会从冻结 Eval export 重新核对同一终态报告及两个实际 artifact 字节。见
+[ADR 0036](../adr/0036-runtime-attested-eval-evidence.md)。这仍不替代真实调用、双人盲审、数据审核或授权。
 
 Capture、blind、review 写入通过数据集根目录 `.human-eval-write.lock/` 中的唯一 UUID ticket 串行化，
 并以同目录原子、禁止覆盖的文件提交保护历史。Stale ticket 只能通过

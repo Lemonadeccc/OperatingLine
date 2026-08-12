@@ -2,9 +2,21 @@ import type {
   PlannerDialoguePromptPacket,
   PlannerDialogueProviderResult,
   PlannerProviderDescriptor,
+  PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';
+
+export type PlannerProviderRuntimeOperation = 'initial_plan' | 'local_replan';
+
+export interface PlannerProviderRuntimeTreatmentDescription {
+  readonly profile: PlannerProviderRuntimeProfile;
+  readonly generationSettings: {
+    readonly normalizedParameters: Readonly<Record<string, unknown>>;
+    readonly seed: number | null;
+    readonly determinism: 'deterministic' | 'seeded_best_effort' | 'non_deterministic' | 'unknown';
+  };
+}
 
 export interface PlannerProviderGenerateInput {
   readonly requestId: string;
@@ -32,6 +44,9 @@ export interface PlannerProviderDialogueInput {
 
 export interface PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
+  describeRuntimeTreatment?(
+    operation: PlannerProviderRuntimeOperation,
+  ): PlannerProviderRuntimeTreatmentDescription;
   generate(input: PlannerProviderGenerateInput): Promise<unknown>;
   replan?(input: PlannerProviderReplanInput): Promise<unknown>;
   dialogue?(input: PlannerProviderDialogueInput): Promise<PlannerDialogueProviderResult>;
@@ -42,6 +57,7 @@ export type {
   PlannerDialoguePromptPacket,
   PlannerDialogueProviderResult,
   PlannerProviderDescriptor,
+  PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';

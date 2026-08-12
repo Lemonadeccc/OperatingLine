@@ -427,7 +427,8 @@
             "1.1.0",
             "1.2.0",
             "1.3.0",
-            "1.4.0"
+            "1.4.0",
+            "1.5.0"
           ]
         },
         "targetAdapterId": {
@@ -524,6 +525,37 @@
               ],
               "additionalProperties": false
             },
+            "requestFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "goalProvenance": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "goalRequestId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "targetInstanceId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "goalRequestId",
+                    "targetInstanceId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "packet": {
               "type": "object",
               "properties": {
@@ -544,7 +576,8 @@
                         "1.1.0",
                         "1.2.0",
                         "1.3.0",
-                        "1.4.0"
+                        "1.4.0",
+                        "1.5.0"
                       ]
                     },
                     "targetAdapterId": {
@@ -576,7 +609,8 @@
                             "1.1.0",
                             "1.2.0",
                             "1.3.0",
-                            "1.4.0"
+                            "1.4.0",
+                            "1.5.0"
                           ]
                         },
                         "catalogVersion": {
@@ -937,7 +971,8 @@
                               "1.1.0",
                               "1.2.0",
                               "1.3.0",
-                              "1.4.0"
+                              "1.4.0",
+                              "1.5.0"
                             ]
                           },
                           "reportId": {
@@ -1184,6 +1219,142 @@
                               }
                             ]
                           },
+                          "artifactAttestation": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "formatVersion": {
+                                    "type": "string",
+                                    "const": "1.0.0"
+                                  },
+                                  "evidenceClass": {
+                                    "type": "string",
+                                    "const": "runtime_attested_host_artifacts"
+                                  },
+                                  "planContentSha256": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "executionId": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                  },
+                                  "hostProject": {
+                                    "type": "object",
+                                    "properties": {
+                                      "artifactId": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "host_project"
+                                      },
+                                      "mediaType": {
+                                        "type": "string",
+                                        "const": "application/x-blender"
+                                      },
+                                      "contentSha256": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      }
+                                    },
+                                    "required": [
+                                      "artifactId",
+                                      "kind",
+                                      "mediaType",
+                                      "contentSha256"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "renderedImage": {
+                                    "type": "object",
+                                    "properties": {
+                                      "artifactId": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "rendered_image"
+                                      },
+                                      "mediaType": {
+                                        "type": "string",
+                                        "const": "image/png"
+                                      },
+                                      "contentSha256": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      },
+                                      "width": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 65536
+                                      },
+                                      "height": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 65536
+                                      },
+                                      "frame": {
+                                        "anyOf": [
+                                          {
+                                            "type": "integer",
+                                            "minimum": -9007199254740991,
+                                            "maximum": 9007199254740991
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "renderEngine": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 180
+                                      },
+                                      "colorManagement": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 500
+                                      },
+                                      "hostProjectSha256": {
+                                        "type": "string",
+                                        "pattern": "^[a-f0-9]{64}$"
+                                      }
+                                    },
+                                    "required": [
+                                      "artifactId",
+                                      "kind",
+                                      "mediaType",
+                                      "contentSha256",
+                                      "width",
+                                      "height",
+                                      "frame",
+                                      "renderEngine",
+                                      "colorManagement",
+                                      "hostProjectSha256"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "formatVersion",
+                                  "evidenceClass",
+                                  "planContentSha256",
+                                  "executionId",
+                                  "hostProject",
+                                  "renderedImage"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "error": {
                             "anyOf": [
                               {
@@ -1360,7 +1531,8 @@
                                   "enum": [
                                     "1.2.0",
                                     "1.3.0",
-                                    "1.4.0"
+                                    "1.4.0",
+                                    "1.5.0"
                                   ]
                                 }
                               },
@@ -1378,6 +1550,58 @@
                                 "required": [
                                   "observationGate"
                                 ]
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "properties": {
+                                "protocolVersion": {
+                                  "const": "1.5.0"
+                                }
+                              },
+                              "required": [
+                                "protocolVersion"
+                              ]
+                            },
+                            "then": {
+                              "required": [
+                                "artifactAttestation"
+                              ]
+                            },
+                            "else": {
+                              "not": {
+                                "required": [
+                                  "artifactAttestation"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "if": {
+                              "properties": {
+                                "artifactAttestation": {
+                                  "type": "object"
+                                }
+                              },
+                              "required": [
+                                "artifactAttestation"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "phase": {
+                                  "enum": [
+                                    "completed",
+                                    "error"
+                                  ]
+                                },
+                                "executionId": {
+                                  "type": "string"
+                                },
+                                "planContentSha256": {
+                                  "type": "string"
+                                }
                               }
                             }
                           },
@@ -1877,6 +2101,8 @@
           "required": [
             "operation",
             "request",
+            "requestFingerprint",
+            "goalProvenance",
             "packet",
             "packetSha256"
           ],
@@ -1914,6 +2140,13 @@
               ],
               "additionalProperties": false
             },
+            "requestFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "goalProvenance": {
+              "type": "null"
+            },
             "packet": {
               "type": "object",
               "properties": {
@@ -1941,7 +2174,8 @@
                             "1.1.0",
                             "1.2.0",
                             "1.3.0",
-                            "1.4.0"
+                            "1.4.0",
+                            "1.5.0"
                           ]
                         },
                         "requestId": {
@@ -1972,7 +2206,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -2359,7 +2594,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -2610,7 +2846,8 @@
                                   "1.1.0",
                                   "1.2.0",
                                   "1.3.0",
-                                  "1.4.0"
+                                  "1.4.0",
+                                  "1.5.0"
                                 ]
                               }
                             },
@@ -2630,7 +2867,8 @@
                               "protocolVersion": {
                                 "enum": [
                                   "1.3.0",
-                                  "1.4.0"
+                                  "1.4.0",
+                                  "1.5.0"
                                 ]
                               }
                             },
@@ -2674,7 +2912,10 @@
                           "if": {
                             "properties": {
                               "protocolVersion": {
-                                "const": "1.4.0"
+                                "enum": [
+                                  "1.4.0",
+                                  "1.5.0"
+                                ]
                               }
                             },
                             "required": [
@@ -2711,7 +2952,8 @@
                             "1.1.0",
                             "1.2.0",
                             "1.3.0",
-                            "1.4.0"
+                            "1.4.0",
+                            "1.5.0"
                           ]
                         },
                         "catalogVersion": {
@@ -3071,7 +3313,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "reportId": {
@@ -3318,6 +3561,142 @@
                                 }
                               ]
                             },
+                            "artifactAttestation": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "formatVersion": {
+                                      "type": "string",
+                                      "const": "1.0.0"
+                                    },
+                                    "evidenceClass": {
+                                      "type": "string",
+                                      "const": "runtime_attested_host_artifacts"
+                                    },
+                                    "planContentSha256": {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "executionId": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                    },
+                                    "hostProject": {
+                                      "type": "object",
+                                      "properties": {
+                                        "artifactId": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "host_project"
+                                        },
+                                        "mediaType": {
+                                          "type": "string",
+                                          "const": "application/x-blender"
+                                        },
+                                        "contentSha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        }
+                                      },
+                                      "required": [
+                                        "artifactId",
+                                        "kind",
+                                        "mediaType",
+                                        "contentSha256"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "renderedImage": {
+                                      "type": "object",
+                                      "properties": {
+                                        "artifactId": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "rendered_image"
+                                        },
+                                        "mediaType": {
+                                          "type": "string",
+                                          "const": "image/png"
+                                        },
+                                        "contentSha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "width": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 65536
+                                        },
+                                        "height": {
+                                          "type": "integer",
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 65536
+                                        },
+                                        "frame": {
+                                          "anyOf": [
+                                            {
+                                              "type": "integer",
+                                              "minimum": -9007199254740991,
+                                              "maximum": 9007199254740991
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "renderEngine": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 180
+                                        },
+                                        "colorManagement": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 500
+                                        },
+                                        "hostProjectSha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        }
+                                      },
+                                      "required": [
+                                        "artifactId",
+                                        "kind",
+                                        "mediaType",
+                                        "contentSha256",
+                                        "width",
+                                        "height",
+                                        "frame",
+                                        "renderEngine",
+                                        "colorManagement",
+                                        "hostProjectSha256"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "formatVersion",
+                                    "evidenceClass",
+                                    "planContentSha256",
+                                    "executionId",
+                                    "hostProject",
+                                    "renderedImage"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
                             "error": {
                               "anyOf": [
                                 {
@@ -3494,7 +3873,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -3512,6 +3892,58 @@
                                   "required": [
                                     "observationGate"
                                   ]
+                                }
+                              }
+                            },
+                            {
+                              "if": {
+                                "properties": {
+                                  "protocolVersion": {
+                                    "const": "1.5.0"
+                                  }
+                                },
+                                "required": [
+                                  "protocolVersion"
+                                ]
+                              },
+                              "then": {
+                                "required": [
+                                  "artifactAttestation"
+                                ]
+                              },
+                              "else": {
+                                "not": {
+                                  "required": [
+                                    "artifactAttestation"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "if": {
+                                "properties": {
+                                  "artifactAttestation": {
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "artifactAttestation"
+                                ]
+                              },
+                              "then": {
+                                "properties": {
+                                  "phase": {
+                                    "enum": [
+                                      "completed",
+                                      "error"
+                                    ]
+                                  },
+                                  "executionId": {
+                                    "type": "string"
+                                  },
+                                  "planContentSha256": {
+                                    "type": "string"
+                                  }
                                 }
                               }
                             },
@@ -3808,7 +4240,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -4195,7 +4628,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -4229,7 +4663,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -4616,7 +5051,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -4650,7 +5086,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -5037,7 +5474,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -5197,6 +5635,8 @@
           "required": [
             "operation",
             "request",
+            "requestFingerprint",
+            "goalProvenance",
             "packet",
             "packetSha256"
           ],
@@ -5272,6 +5712,870 @@
               "seed"
             ]
           }
+        }
+      ]
+    },
+    "runtimeAttestation": {
+      "default": null,
+      "anyOf": [
+        {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "evidenceClass": {
+                  "type": "string",
+                  "const": "runtime_attested_provider_treatment"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "initial_plan",
+                    "local_replan"
+                  ]
+                },
+                "treatment": {
+                  "type": "object",
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "descriptor": {
+                          "type": "object",
+                          "properties": {
+                            "contractVersion": {
+                              "type": "string",
+                              "const": "1.0.0"
+                            },
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "version": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                            },
+                            "displayName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "description": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            },
+                            "availability": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "available": {
+                                      "type": "boolean",
+                                      "const": true
+                                    }
+                                  },
+                                  "required": [
+                                    "available"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "available": {
+                                      "type": "boolean",
+                                      "const": false
+                                    },
+                                    "reason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "not_configured",
+                                        "disabled",
+                                        "temporarily_unavailable"
+                                      ]
+                                    },
+                                    "message": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "available",
+                                    "reason",
+                                    "message"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "limits": {
+                              "type": "object",
+                              "properties": {
+                                "maxConcurrency": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 8
+                                }
+                              },
+                              "required": [
+                                "maxConcurrency"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "dataHandling": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "executionLocation": {
+                                      "type": "string",
+                                      "const": "local"
+                                    },
+                                    "dataTransmission": {
+                                      "type": "string",
+                                      "const": "none"
+                                    },
+                                    "credentialManagement": {
+                                      "type": "string",
+                                      "const": "provider_managed"
+                                    }
+                                  },
+                                  "required": [
+                                    "executionLocation",
+                                    "dataTransmission",
+                                    "credentialManagement"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "executionLocation": {
+                                      "type": "string",
+                                      "const": "remote"
+                                    },
+                                    "dataTransmission": {
+                                      "type": "string",
+                                      "const": "provider_managed"
+                                    },
+                                    "credentialManagement": {
+                                      "type": "string",
+                                      "const": "provider_managed"
+                                    }
+                                  },
+                                  "required": [
+                                    "executionLocation",
+                                    "dataTransmission",
+                                    "credentialManagement"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "contractVersion",
+                            "id",
+                            "version",
+                            "displayName",
+                            "description",
+                            "availability",
+                            "limits",
+                            "dataHandling"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "vendor": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 180
+                        },
+                        "implementation": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "version": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "version"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "model": {
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "resolvedRevision": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "resolution": {
+                              "type": "string",
+                              "enum": [
+                                "resolved",
+                                "provider_did_not_disclose"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "resolvedRevision",
+                            "resolution"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "api": {
+                          "type": "object",
+                          "properties": {
+                            "surface": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "version": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "sdkName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "sdkVersion": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "endpointClass": {
+                              "type": "string",
+                              "enum": [
+                                "vendor_public",
+                                "self_hosted",
+                                "local"
+                              ]
+                            },
+                            "serviceTier": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "region": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "surface",
+                            "version",
+                            "sdkName",
+                            "sdkVersion",
+                            "endpointClass",
+                            "serviceTier",
+                            "region"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "descriptor",
+                        "vendor",
+                        "implementation",
+                        "model",
+                        "api"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "generationSettings": {
+                      "type": "object",
+                      "properties": {
+                        "normalizedParameters": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/$defs/__schema4"
+                          }
+                        },
+                        "parametersSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "seed": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "determinism": {
+                          "type": "string",
+                          "enum": [
+                            "deterministic",
+                            "seeded_best_effort",
+                            "non_deterministic",
+                            "unknown"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "normalizedParameters",
+                        "parametersSha256",
+                        "seed",
+                        "determinism"
+                      ],
+                      "additionalProperties": false,
+                      "allOf": [
+                        {
+                          "if": {
+                            "properties": {
+                              "determinism": {
+                                "const": "seeded_best_effort"
+                              }
+                            },
+                            "required": [
+                              "determinism"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "seed": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "seed"
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "profile",
+                    "generationSettings"
+                  ],
+                  "additionalProperties": false
+                },
+                "treatmentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "formatVersion",
+                "evidenceClass",
+                "operation",
+                "treatment",
+                "treatmentSha256"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "evidenceClass": {
+                  "type": "string",
+                  "const": "runtime_attested_provider_output"
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "initial_plan",
+                    "local_replan"
+                  ]
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "requestFingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "packetSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "outputSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "treatment": {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "evidenceClass": {
+                      "type": "string",
+                      "const": "runtime_attested_provider_treatment"
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": [
+                        "initial_plan",
+                        "local_replan"
+                      ]
+                    },
+                    "treatment": {
+                      "type": "object",
+                      "properties": {
+                        "profile": {
+                          "type": "object",
+                          "properties": {
+                            "descriptor": {
+                              "type": "object",
+                              "properties": {
+                                "contractVersion": {
+                                  "type": "string",
+                                  "const": "1.0.0"
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "version": {
+                                  "type": "string",
+                                  "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                                },
+                                "displayName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                },
+                                "availability": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "available": {
+                                          "type": "boolean",
+                                          "const": true
+                                        }
+                                      },
+                                      "required": [
+                                        "available"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "available": {
+                                          "type": "boolean",
+                                          "const": false
+                                        },
+                                        "reason": {
+                                          "type": "string",
+                                          "enum": [
+                                            "not_configured",
+                                            "disabled",
+                                            "temporarily_unavailable"
+                                          ]
+                                        },
+                                        "message": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "available",
+                                        "reason",
+                                        "message"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                },
+                                "limits": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxConcurrency": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 8
+                                    }
+                                  },
+                                  "required": [
+                                    "maxConcurrency"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "dataHandling": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executionLocation": {
+                                          "type": "string",
+                                          "const": "local"
+                                        },
+                                        "dataTransmission": {
+                                          "type": "string",
+                                          "const": "none"
+                                        },
+                                        "credentialManagement": {
+                                          "type": "string",
+                                          "const": "provider_managed"
+                                        }
+                                      },
+                                      "required": [
+                                        "executionLocation",
+                                        "dataTransmission",
+                                        "credentialManagement"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "executionLocation": {
+                                          "type": "string",
+                                          "const": "remote"
+                                        },
+                                        "dataTransmission": {
+                                          "type": "string",
+                                          "const": "provider_managed"
+                                        },
+                                        "credentialManagement": {
+                                          "type": "string",
+                                          "const": "provider_managed"
+                                        }
+                                      },
+                                      "required": [
+                                        "executionLocation",
+                                        "dataTransmission",
+                                        "credentialManagement"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "contractVersion",
+                                "id",
+                                "version",
+                                "displayName",
+                                "description",
+                                "availability",
+                                "limits",
+                                "dataHandling"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "vendor": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 180
+                            },
+                            "implementation": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "version": {
+                                  "type": "string",
+                                  "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "version"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "model": {
+                              "type": "object",
+                              "properties": {
+                                "requested": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                "resolvedRevision": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "resolution": {
+                                  "type": "string",
+                                  "enum": [
+                                    "resolved",
+                                    "provider_did_not_disclose"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "requested",
+                                "resolvedRevision",
+                                "resolution"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "api": {
+                              "type": "object",
+                              "properties": {
+                                "surface": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "version": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "sdkName": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "sdkVersion": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 180
+                                },
+                                "endpointClass": {
+                                  "type": "string",
+                                  "enum": [
+                                    "vendor_public",
+                                    "self_hosted",
+                                    "local"
+                                  ]
+                                },
+                                "serviceTier": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "region": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 180
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "surface",
+                                "version",
+                                "sdkName",
+                                "sdkVersion",
+                                "endpointClass",
+                                "serviceTier",
+                                "region"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "descriptor",
+                            "vendor",
+                            "implementation",
+                            "model",
+                            "api"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "generationSettings": {
+                          "type": "object",
+                          "properties": {
+                            "normalizedParameters": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "additionalProperties": {
+                                "$ref": "#/$defs/__schema4"
+                              }
+                            },
+                            "parametersSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "seed": {
+                              "anyOf": [
+                                {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "determinism": {
+                              "type": "string",
+                              "enum": [
+                                "deterministic",
+                                "seeded_best_effort",
+                                "non_deterministic",
+                                "unknown"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "normalizedParameters",
+                            "parametersSha256",
+                            "seed",
+                            "determinism"
+                          ],
+                          "additionalProperties": false,
+                          "allOf": [
+                            {
+                              "if": {
+                                "properties": {
+                                  "determinism": {
+                                    "const": "seeded_best_effort"
+                                  }
+                                },
+                                "required": [
+                                  "determinism"
+                                ]
+                              },
+                              "then": {
+                                "properties": {
+                                  "seed": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "seed"
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "profile",
+                        "generationSettings"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "treatmentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "evidenceClass",
+                    "operation",
+                    "treatment",
+                    "treatmentSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                "occurredAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "formatVersion",
+                "evidenceClass",
+                "operation",
+                "requestId",
+                "requestFingerprint",
+                "packetSha256",
+                "outputSha256",
+                "treatment",
+                "occurredAt"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        {
+          "type": "null"
         }
       ]
     },
@@ -5469,7 +6773,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -5856,7 +7161,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -5899,7 +7205,8 @@
                             "1.1.0",
                             "1.2.0",
                             "1.3.0",
-                            "1.4.0"
+                            "1.4.0",
+                            "1.5.0"
                           ]
                         },
                         "baselineVersion": {
@@ -6628,7 +7935,8 @@
                                 "1.1.0",
                                 "1.2.0",
                                 "1.3.0",
-                                "1.4.0"
+                                "1.4.0",
+                                "1.5.0"
                               ]
                             },
                             "id": {
@@ -7015,7 +8323,8 @@
                                     "enum": [
                                       "1.2.0",
                                       "1.3.0",
-                                      "1.4.0"
+                                      "1.4.0",
+                                      "1.5.0"
                                     ]
                                   }
                                 },
@@ -7449,7 +8758,8 @@
                             "1.1.0",
                             "1.2.0",
                             "1.3.0",
-                            "1.4.0"
+                            "1.4.0",
+                            "1.5.0"
                           ]
                         },
                         "baselineVersion": {
@@ -8726,6 +10036,7 @@
     "environment",
     "invocation",
     "generationSettings",
+    "runtimeAttestation",
     "timing",
     "outcome",
     "sourceEvents",

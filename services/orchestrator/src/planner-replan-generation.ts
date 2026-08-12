@@ -20,6 +20,10 @@ import {
 } from '@operatingline/protocol';
 
 import { evaluateLocalReplanScope } from './local-replan-scope.js';
+import {
+  createPlannerProviderRuntimeOutputAttestation,
+  snapshotPlannerProviderRuntimeTreatment,
+} from './planner-provider-attestation.js';
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
 import {
   createPlannerProviderInvocationManager,
@@ -190,6 +194,11 @@ export function createPlannerReplanGenerationCoordinator(
         },
         'same_request_id',
       );
+      const runtimeTreatment = snapshotPlannerProviderRuntimeTreatment(
+        attemptContext.registered.provider,
+        attemptContext.registered.descriptor,
+        'local_replan',
+      );
       const requestedPayload = plannerReplanRequestedEventSchema.parse({
         requestId: request.requestId,
         requestFingerprint,
@@ -202,6 +211,7 @@ export function createPlannerReplanGenerationCoordinator(
         planId: immutableRequest.basePlan.id,
         baseRevision: immutableRequest.basePlan.revision,
         packetFormatVersion: packet.formatVersion,
+        ...(runtimeTreatment === undefined ? {} : { runtimeTreatment }),
         occurredAt: new Date().toISOString(),
       });
       appendEvidence(
@@ -291,10 +301,20 @@ export function createPlannerReplanGenerationCoordinator(
         generatedAt: new Date().toISOString(),
         durationMs: Math.max(0, Date.now() - startedAt),
       });
+      const runtimeAttestation = createPlannerProviderRuntimeOutputAttestation({
+        operation: 'local_replan',
+        requestId: request.requestId,
+        requestFingerprint,
+        packet,
+        output: draft,
+        treatment: runtimeTreatment,
+        occurredAt: result.generatedAt,
+      });
       const completedPayload = plannerReplanCompletedEventSchema.parse({
         request,
         requestFingerprint,
         result,
+        ...(runtimeAttestation === undefined ? {} : { runtimeAttestation }),
       });
       appendEvidence(
         {

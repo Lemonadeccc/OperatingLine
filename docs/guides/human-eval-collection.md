@@ -12,6 +12,7 @@ blind sign-off、0 个 annotation、0 个 adjudication。下列工具已经实�
 ```text
 versioned Eval snapshot
   -> capture: provider_only | host_execution_with_manual_artifacts
+            | host_execution_with_runtime_attested_artifacts
   -> independent preparer provider-blind sign-off
   -> reviewer A annotation
   -> reviewer B annotation
@@ -163,13 +164,28 @@ credential、原始 Provider response 或 private reasoning。下面是字段模
 将文件保存为 `$EVAL_CAPTURE_INPUT/capture.json`。`provider_only` 保存 Provider request/outcome 的冻结证据，
 不会假装 execution 或 visual criterion 可判断。
 
-若 snapshot 还包含同一输出 Plan 的精确授权及唯一宿主 terminal report，并且已经在本机保存对应 Blender
+如果 snapshot 的 requested/completed 事件带有 Orchestrator 运行时证明，应把 `reproducibility` 设为
+`best_effort`（只有 resolved revision 与确定性设置均满足协议时才可用 `reproducible`），并用：
+
+```json
+"treatmentAttestation": {
+  "evidenceClass": "runtime_attested",
+  "assertion": "profile_and_settings_match_runtime_evidence"
+}
+```
+
+Capture 不会信任这句声明本身：它会逐字段核对 manifest profile/settings、requested treatment、completed
+output、request fingerprint、packet hash 和 draft hash。任一处缺失或漂移都会拒绝采集。旧式
+`operator_attested_not_runtime_verified` 路径继续可用于本地审阅，且必须保持 `not_reproducible`。
+
+若 snapshot 还包含同一输出 Plan 的精确授权及目标宿主 terminal report，并且已经在本机保存对应 Blender
 工程与真实 PNG，把 mode 改为 `host_execution_with_manual_artifacts` 并增加：
 
 ```json
 {
   "captureMode": "host_execution_with_manual_artifacts",
   "hostExecutionId": "REPLACE_EXACT_EXECUTION_ID",
+  "terminalHostReportId": "REPLACE_EXACT_TERMINAL_REPORT_ID",
   "hostProject": {
     "artifactId": "blender.host-project",
     "path": "scene.blend"
@@ -185,8 +201,11 @@ credential、原始 Provider response 或 private reasoning。下面是字段模
 ```
 
 这是增量片段，不是独立 manifest；把这些字段合并到完整对象。`path` 相对 manifest 所在目录解析。
-Capture 会验证唯一 terminal host report、Plan 内容哈希、execution ID、host/adapter 版本，以及人工提供的
+Capture 会用成对必填的 `hostExecutionId` 与 `terminalHostReportId` 精确选择一个 terminal host report，
+并验证该 report 晚于相应 Plan 授权、Plan 内容哈希、host/adapter 版本，以及人工提供的
 artifact 字节、PNG 解码结果和尺寸；缺少精确宿主事件链时使用 `provider_only`，不要补写推断值。
+同一 execution 在 `Back` 后再次 `Next` 可以产生多个 completed report；此时必须填写与所选工程/PNG
+对应的那个 report ID，不能只靠 execution ID 猜测。
 
 这不是 Runtime-attested artifact capture。当前 host event 不记录 Blender 工程或 PNG 的内容哈希，因此
 系统无法证明人工提供的文件就是该 execution 产生的文件。项目保存为 `host_project`；PNG 保存为
@@ -196,9 +215,33 @@ artifact 字节、PNG 解码结果和尺寸；缺少精确宿主事件链时使�
 填写，不是 Runtime-attested；manifest 必须使用精确
 `operator_attested_not_runtime_verified` evidence class 与
 `profile_and_settings_reviewed_no_credentials` assertion，并记录 attestor pseudonym/time。Capture 强制 Run
-为 `not_reproducible`，输出 `releasedComparisonEligible: false`，并把这份 attestation 保存为内容寻址的
-`provider_output` artifact。发布级 treatment comparison 仍需后续 Runtime 对 Provider/model/settings 与
-artifact hash 的不可变 attestation。
+为 `not_reproducible`，输出 `runtimeTreatmentEligible: false` 与
+`releasedComparisonEligible: false`，并把这份 attestation 保存为内容寻址的 `provider_output`
+artifact。Runtime-attested 路径会输出 `runtimeTreatmentEligible: true`；capture 完成仍不等于满足盲审、
+公开审核和整套 released readiness，因此 `releasedComparisonEligible` 仍为 `false`。
+
+若 Blender 终态报告包含 Guide/Companion `1.5.0` 的非空 `artifactAttestation`，可以改用：
+
+```json
+{
+  "captureMode": "host_execution_with_runtime_attested_artifacts",
+  "hostExecutionId": "REPLACE_EXACT_EXECUTION_ID",
+  "terminalHostReportId": "REPLACE_EXACT_TERMINAL_REPORT_ID",
+  "hostProject": {
+    "artifactId": "REPLACE_ATTESTED_PROJECT_ARTIFACT_ID",
+    "path": "scene.blend"
+  },
+  "renderedImage": {
+    "artifactId": "REPLACE_ATTESTED_IMAGE_ARTIFACT_ID",
+    "path": "render.png"
+  }
+}
+```
+
+此模式要求两个 artifact ID 与所选终态报告完全一致，并重新哈希 `.blend`/PNG、解码 PNG 尺寸，核对 frame、
+render engine、color management、Plan hash 与 execution。成功后才创建 `application/x-blender` 的
+`host_project` 和带精确 `visualEnvironment` 的 `rendered_image`，可进入 released artifact 门禁。
+哈希证明不代表文件已脱敏、获得公开发布或训练授权。
 
 ## 3. 捕获 Run
 
@@ -351,6 +394,11 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 - [ ] Snapshot 是完整冻结 `1.1.0` page chain，token 未写入任何文件。
 - [ ] Run 使用新的 UUID；generation request ID 与唯一 requested/terminal event 一致。
 - [ ] Capture mode 诚实：缺少精确宿主因果链时使用 `provider_only`。
+- [ ] 使用 runtime treatment 时，manifest 与 requested/completed attestation 完全匹配；未披露 resolved
+      revision 时没有声明 `reproducible`。
+- [ ] 使用 `host_execution_with_runtime_attested_artifacts` 时，project/PNG 的 ID、字节哈希、尺寸和渲染
+      环境均与唯一 terminal report 完全一致。
+- [ ] 已将终态 `.blend` 副本纳入本地敏感数据保留策略；capture 完成或放弃后清理不再需要的副本。
 - [ ] `host_execution_with_manual_artifacts` 的 terminal host event 已验证；project/PNG 明确标记为人工
       提供、无 Runtime hash 绑定，未用作 released visual evidence。
 - [ ] PNG 是无 `visualEnvironment` 的 `manual_review_image`，已由 blind sign-off 绑定哈希，仅用于本地
@@ -373,4 +421,5 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 
 协议记录与 release readiness 见
 [ADR 0018](../adr/0018-versioned-human-eval-evidence.md)；本地采集、盲审 sidecar、browser surface 与写入
-边界见 [ADR 0019](../adr/0019-local-human-eval-capture-and-blind-review.md)。
+边界见 [ADR 0019](../adr/0019-local-human-eval-capture-and-blind-review.md)；运行时证明见
+[ADR 0036](../adr/0036-runtime-attested-eval-evidence.md)。

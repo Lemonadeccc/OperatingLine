@@ -119,6 +119,7 @@ export const guideRevisionRequestSchema = z
     if (
       request.protocolVersion !== '1.3.0' &&
       request.protocolVersion !== '1.4.0' &&
+      request.protocolVersion !== '1.5.0' &&
       request.parameterEdits !== undefined
     ) {
       context.addIssue({
@@ -127,18 +128,25 @@ export const guideRevisionRequestSchema = z
         message: 'Structured parameter edits require guide protocol 1.3+',
       });
     }
-    if (request.protocolVersion === '1.4.0' && request.revisionOperation === undefined) {
+    if (
+      (request.protocolVersion === '1.4.0' || request.protocolVersion === '1.5.0') &&
+      request.revisionOperation === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['revisionOperation'],
-        message: 'Protocol 1.4 revision requests require an explicit operation',
+        message: 'Protocol 1.4+ revision requests require an explicit operation',
       });
     }
-    if (request.protocolVersion !== '1.4.0' && request.revisionOperation !== undefined) {
+    if (
+      request.protocolVersion !== '1.4.0' &&
+      request.protocolVersion !== '1.5.0' &&
+      request.revisionOperation !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['revisionOperation'],
-        message: 'Explicit revision operations require guide protocol 1.4',
+        message: 'Explicit revision operations require guide protocol 1.4+',
       });
     }
     const operation = request.revisionOperation;
@@ -221,7 +229,7 @@ export const guideRevisionRequestSchema = z
       {
         if: {
           properties: {
-            protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0'] },
+            protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
           },
           required: ['protocolVersion'],
         },
@@ -229,7 +237,7 @@ export const guideRevisionRequestSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.3.0', '1.4.0'] } },
+          properties: { protocolVersion: { enum: ['1.3.0', '1.4.0', '1.5.0'] } },
           required: ['protocolVersion'],
         },
         then: {
@@ -245,7 +253,7 @@ export const guideRevisionRequestSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.4.0' } },
+          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionOperation'] },

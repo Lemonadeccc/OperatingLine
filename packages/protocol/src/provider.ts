@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { evalContentSha256Schema } from './eval-common.js';
 import { guideStepIdSchema } from './guide.js';
 import { planningProposalDraftSchema, planningQualityReportSchema } from './planning.js';
 import { planningPromptFormatVersionSchema, planningPromptRequestSchema } from './prompt.js';
@@ -45,6 +46,114 @@ export const plannerProviderDescriptorSchema = z.strictObject({
   dataHandling: plannerProviderDataHandlingSchema,
 });
 export type PlannerProviderDescriptor = z.infer<typeof plannerProviderDescriptorSchema>;
+
+export const plannerProviderRuntimeProfileSchema = z
+  .strictObject({
+    descriptor: plannerProviderDescriptorSchema,
+    vendor: z.string().trim().min(1).max(180),
+    implementation: z.strictObject({
+      name: z.string().trim().min(1).max(180),
+      version: catalogVersionSchema,
+    }),
+    model: z.strictObject({
+      requested: z.string().trim().min(1).max(500),
+      resolvedRevision: z.string().trim().min(1).max(500).nullable(),
+      resolution: z.enum(['resolved', 'provider_did_not_disclose']),
+    }),
+    api: z.strictObject({
+      surface: z.string().trim().min(1).max(180),
+      version: z.string().trim().min(1).max(180),
+      sdkName: z.string().trim().min(1).max(180),
+      sdkVersion: z.string().trim().min(1).max(180),
+      endpointClass: z.enum(['vendor_public', 'self_hosted', 'local']),
+      serviceTier: z.string().trim().min(1).max(180).nullable(),
+      region: z.string().trim().min(1).max(180).nullable(),
+    }),
+  })
+  .superRefine((profile, context) => {
+    if ((profile.model.resolution === 'resolved') !== (profile.model.resolvedRevision !== null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['model', 'resolvedRevision'],
+        message: 'Resolved model status must match the resolved revision field',
+      });
+    }
+  });
+export type PlannerProviderRuntimeProfile = z.infer<typeof plannerProviderRuntimeProfileSchema>;
+
+export const plannerProviderGenerationSettingsSchema = z
+  .strictObject({
+    normalizedParameters: z.record(z.string().min(1), z.json()),
+    parametersSha256: evalContentSha256Schema,
+    seed: z.number().int().safe().nullable(),
+    determinism: z.enum(['deterministic', 'seeded_best_effort', 'non_deterministic', 'unknown']),
+  })
+  .superRefine((settings, context) => {
+    if (settings.determinism === 'seeded_best_effort' && settings.seed === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['seed'],
+        message: 'Seeded best-effort generation requires an explicit seed',
+      });
+    }
+  })
+  .meta({
+    allOf: [
+      {
+        if: {
+          properties: { determinism: { const: 'seeded_best_effort' } },
+          required: ['determinism'],
+        },
+        then: { properties: { seed: { type: 'number' } }, required: ['seed'] },
+      },
+    ],
+  });
+export type PlannerProviderGenerationSettings = z.infer<
+  typeof plannerProviderGenerationSettingsSchema
+>;
+
+export const plannerProviderRuntimeTreatmentSchema = z.strictObject({
+  profile: plannerProviderRuntimeProfileSchema,
+  generationSettings: plannerProviderGenerationSettingsSchema,
+});
+export type PlannerProviderRuntimeTreatment = z.infer<typeof plannerProviderRuntimeTreatmentSchema>;
+
+export const plannerProviderRuntimeTreatmentAttestationVersion = '1.0.0' as const;
+export const plannerProviderRuntimeTreatmentAttestationSchema = z.strictObject({
+  formatVersion: z.literal(plannerProviderRuntimeTreatmentAttestationVersion),
+  evidenceClass: z.literal('runtime_attested_provider_treatment'),
+  operation: z.enum(['initial_plan', 'local_replan']),
+  treatment: plannerProviderRuntimeTreatmentSchema,
+  treatmentSha256: evalContentSha256Schema,
+});
+export type PlannerProviderRuntimeTreatmentAttestation = z.infer<
+  typeof plannerProviderRuntimeTreatmentAttestationSchema
+>;
+
+export const plannerProviderRuntimeOutputAttestationSchema = z
+  .strictObject({
+    formatVersion: z.literal(plannerProviderRuntimeTreatmentAttestationVersion),
+    evidenceClass: z.literal('runtime_attested_provider_output'),
+    operation: z.enum(['initial_plan', 'local_replan']),
+    requestId: z.uuid(),
+    requestFingerprint: evalContentSha256Schema,
+    packetSha256: evalContentSha256Schema,
+    outputSha256: evalContentSha256Schema,
+    treatment: plannerProviderRuntimeTreatmentAttestationSchema,
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((attestation, context) => {
+    if (attestation.operation !== attestation.treatment.operation) {
+      context.addIssue({
+        code: 'custom',
+        path: ['treatment', 'operation'],
+        message: 'Output and treatment attestations must describe the same operation',
+      });
+    }
+  });
+export type PlannerProviderRuntimeOutputAttestation = z.infer<
+  typeof plannerProviderRuntimeOutputAttestationSchema
+>;
 
 export const plannerProviderListSchema = z
   .strictObject({
@@ -287,6 +396,7 @@ function requirePairedGoalRunScope(
 export const plannerGenerationRequestedEventSchema = plannerGenerationEventScopeSchema
   .extend({
     packetFormatVersion: planningPromptFormatVersionSchema,
+    runtimeTreatment: plannerProviderRuntimeTreatmentAttestationSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
   .superRefine(requirePairedGoalRunScope);
@@ -302,6 +412,7 @@ export const plannerGenerationCompletedEventSchema = z
     goalRequestId: z.uuid().optional(),
     targetInstanceId: z.uuid().optional(),
     result: plannerGenerationResultSchema,
+    runtimeAttestation: plannerProviderRuntimeOutputAttestationSchema.optional(),
   })
   .superRefine((event, context) => {
     requirePairedGoalRunScope(event, context);
@@ -320,6 +431,18 @@ export const plannerGenerationCompletedEventSchema = z
       context.addIssue({
         code: 'custom',
         message: 'Completed generation evidence must match its exact request',
+      });
+    }
+    if (
+      event.runtimeAttestation !== undefined &&
+      (event.runtimeAttestation.operation !== 'initial_plan' ||
+        event.runtimeAttestation.requestId !== event.request.requestId ||
+        event.runtimeAttestation.requestFingerprint !== event.requestFingerprint)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeAttestation'],
+        message: 'Runtime attestation must match the exact initial-plan request',
       });
     }
   });

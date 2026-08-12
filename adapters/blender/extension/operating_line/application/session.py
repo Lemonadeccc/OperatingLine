@@ -139,6 +139,10 @@ class ArtifactIdentity:
     sha256: str
     width: int
     height: int
+    media_type: str = "application/octet-stream"
+    frame: int | None = None
+    render_engine: str | None = None
+    color_management: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

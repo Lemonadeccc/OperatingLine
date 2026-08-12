@@ -49,8 +49,10 @@ export interface ProviderEvalCaptureManifestV1 {
   readonly suiteVersion: string;
   readonly caseId: string;
   readonly generationRequestId: string;
-  /** Optional fail-closed selector when the frozen chain contains multiple host executions. */
+  /** Optional paired fail-closed selector for one exact host execution. */
   readonly hostExecutionId?: string;
+  /** Paired with hostExecutionId to select one exact terminal report within an execution. */
+  readonly terminalHostReportId?: string;
   readonly runId: string;
   readonly replicateIndex: number;
   readonly parentRunId: string | null;
@@ -266,15 +268,23 @@ function eventRequestId(event: EvalExecutionEvent): string | null {
   return null;
 }
 
-function promptPayload(
-  event: EvalExecutionEvent,
-): { readonly request: unknown; readonly packet: unknown } | null {
+function promptPayload(event: EvalExecutionEvent): {
+  readonly request: unknown;
+  readonly packet: unknown;
+  readonly goalRequestId?: unknown;
+  readonly targetInstanceId?: unknown;
+} | null {
   if (event.payload === null || typeof event.payload !== 'object' || Array.isArray(event.payload)) {
     return null;
   }
   const payload = event.payload as Record<string, unknown>;
   return 'request' in payload && 'packet' in payload
-    ? { request: payload['request'], packet: payload['packet'] }
+    ? {
+        request: payload['request'],
+        packet: payload['packet'],
+        ...('goalRequestId' in payload ? { goalRequestId: payload['goalRequestId'] } : {}),
+        ...('targetInstanceId' in payload ? { targetInstanceId: payload['targetInstanceId'] } : {}),
+      }
     : null;
 }
 
@@ -329,6 +339,9 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
   }
 
   const operation = evalCase.operation;
+  if ((manifest.hostExecutionId === undefined) !== (manifest.terminalHostReportId === undefined)) {
+    throw captureError('hostExecutionId and terminalHostReportId must be provided together');
+  }
   const prefix =
     operation === 'initial_plan' ? 'planning.provider.generation' : 'planning.provider.replan';
   const correlated = events.filter(
@@ -363,17 +376,55 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
     throw captureError('failed provider terminals are not supported by capture manifest v1');
   }
 
-  const requested =
+  const initialRequested =
     operation === 'initial_plan'
       ? plannerGenerationRequestedEventSchema.parse(requestedEvent.payload)
-      : plannerReplanRequestedEventSchema.parse(requestedEvent.payload);
-  const terminal =
+      : null;
+  const initialTerminal =
     operation === 'initial_plan'
       ? plannerGenerationCompletedEventSchema.parse(terminalEvent.payload)
-      : plannerReplanCompletedEventSchema.parse(terminalEvent.payload);
+      : null;
+  const replanRequested =
+    operation === 'local_replan'
+      ? plannerReplanRequestedEventSchema.parse(requestedEvent.payload)
+      : null;
+  const replanTerminal =
+    operation === 'local_replan'
+      ? plannerReplanCompletedEventSchema.parse(terminalEvent.payload)
+      : null;
+  const requested = initialRequested ?? replanRequested!;
+  const terminal = initialTerminal ?? replanTerminal!;
+  const goalProvenance =
+    initialRequested !== null &&
+    initialTerminal !== null &&
+    initialRequested.goalRequestId !== undefined &&
+    initialRequested.targetInstanceId !== undefined &&
+    initialTerminal.goalRequestId === initialRequested.goalRequestId &&
+    initialTerminal.targetInstanceId === initialRequested.targetInstanceId
+      ? {
+          goalRequestId: initialRequested.goalRequestId,
+          targetInstanceId: initialRequested.targetInstanceId,
+        }
+      : null;
+  if (
+    initialRequested !== null &&
+    initialTerminal !== null &&
+    ((initialRequested.goalRequestId === undefined) !==
+      (initialTerminal.goalRequestId === undefined) ||
+      (initialRequested.targetInstanceId === undefined) !==
+        (initialTerminal.targetInstanceId === undefined) ||
+      (initialRequested.goalRequestId !== undefined && goalProvenance === null))
+  ) {
+    throw captureError('initial-plan goal provenance is missing or inconsistent');
+  }
+  const expectedRequestFingerprint = computeHumanEvalContentSha256(
+    operation === 'initial_plan' && goalProvenance !== null
+      ? { request: terminal.request, ...goalProvenance }
+      : terminal.request,
+  );
   if (
     terminal.request.requestId !== manifest.generationRequestId ||
-    requested.requestFingerprint !== computeHumanEvalContentSha256(terminal.request) ||
+    requested.requestFingerprint !== expectedRequestFingerprint ||
     terminal.requestFingerprint !== requested.requestFingerprint
   ) {
     throw captureError(
@@ -401,11 +452,54 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
   if (prompt === null) {
     throw captureError('no exact preceding planning prompt packet matches the provider request');
   }
+  if (
+    operation === 'initial_plan' &&
+    (prompt.goalRequestId !== goalProvenance?.goalRequestId ||
+      prompt.targetInstanceId !== goalProvenance?.targetInstanceId)
+  ) {
+    throw captureError('planning prompt goal provenance does not match the provider invocation');
+  }
 
   const packet =
     operation === 'initial_plan'
       ? planningPromptPacketSchema.parse(prompt.packet)
       : replanningPromptPacketSchema.parse(prompt.packet);
+
+  const runtimeTreatment = requested.runtimeTreatment;
+  const runtimeAttestation = terminal.runtimeAttestation;
+  if ((runtimeTreatment === undefined) !== (runtimeAttestation === undefined)) {
+    throw captureError(
+      'provider runtime treatment and output attestation must be present together',
+    );
+  }
+  if (runtimeTreatment !== undefined && runtimeAttestation !== undefined) {
+    const exactTreatmentSha256 = computeHumanEvalContentSha256(runtimeTreatment.treatment);
+    if (
+      runtimeTreatment.operation !== operation ||
+      runtimeTreatment.treatmentSha256 !== exactTreatmentSha256 ||
+      runtimeAttestation.operation !== operation ||
+      runtimeAttestation.requestId !== manifest.generationRequestId ||
+      runtimeAttestation.requestFingerprint !== requested.requestFingerprint ||
+      runtimeAttestation.packetSha256 !== computeHumanEvalContentSha256(packet) ||
+      runtimeAttestation.outputSha256 !== computeHumanEvalContentSha256(terminal.result.draft) ||
+      computeHumanEvalContentSha256(runtimeAttestation.treatment) !==
+        computeHumanEvalContentSha256(runtimeTreatment)
+    ) {
+      throw captureError('provider runtime attestation does not match exact treatment or output');
+    }
+    if (
+      computeHumanEvalContentSha256(manifest.profile) !==
+        computeHumanEvalContentSha256(runtimeTreatment.treatment.profile) ||
+      computeHumanEvalContentSha256({
+        ...manifest.generationSettings,
+        parametersSha256: computeHumanEvalContentSha256(
+          manifest.generationSettings.normalizedParameters,
+        ),
+      }) !== computeHumanEvalContentSha256(runtimeTreatment.treatment.generationSettings)
+    ) {
+      throw captureError('manifest profile or settings do not match runtime-attested treatment');
+    }
+  }
   if (
     computeHumanEvalContentSha256(packet.context.catalog) !== evalCase.catalogContentSha256 ||
     packet.context.catalog.adapterId !== manifest.environment.targetAdapterId ||
@@ -423,11 +517,13 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
         computeHumanEvalContentSha256(evalCase.request) ||
       firstBundle.scope.targetAdapterId !== evalCase.request.targetAdapterId ||
       firstBundle.scope.planId !== evalCase.request.planId ||
+      (goalProvenance !== null &&
+        firstBundle.scope.instanceId !== goalProvenance.targetInstanceId) ||
       initialPacket.context.targetAdapterId !== evalCase.request.targetAdapterId ||
       initialPacket.context.requestedPlanId !== evalCase.request.planId
     ) {
       throw captureError(
-        'provider request and Eval export scope do not exactly match the selected initial-plan case',
+        'provider request, goal provenance, and Eval export scope do not exactly match the selected initial-plan case',
       );
     }
   } else {
@@ -500,6 +596,10 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
   if (result.status === 'ready') {
     const planHash = computePlanContentSha256(result.draft.plan);
     const authorizationSequences: number[] = [];
+    const replanRevision =
+      operation === 'local_replan'
+        ? replanningPromptPacketSchema.parse(packet).context.revisionRequest
+        : null;
     const proposals = events.flatMap((event) => {
       if (
         event.sequence <= terminalEvent.sequence ||
@@ -508,7 +608,21 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
         return [];
       }
       const proposal = guideProposalSchema.safeParse(event.payload);
+      const exactInvocationLink =
+        operation === 'initial_plan'
+          ? goalProvenance === null
+            ? proposal.success &&
+              proposal.data.goalRequestId === undefined &&
+              proposal.data.revisionRequestId === undefined
+            : proposal.success &&
+              proposal.data.goalRequestId === goalProvenance.goalRequestId &&
+              proposal.data.targetInstanceId === goalProvenance.targetInstanceId
+          : proposal.success &&
+            replanRevision !== null &&
+            proposal.data.revisionRequestId === replanRevision?.requestId &&
+            proposal.data.targetInstanceId === replanRevision.instanceId;
       return proposal.success &&
+        exactInvocationLink &&
         proposal.data.targetAdapterId === manifest.environment.targetAdapterId &&
         computePlanContentSha256(proposal.data.plan) === planHash
         ? [{ event, proposal: proposal.data }]
@@ -516,7 +630,11 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
     });
     for (const event of events) {
       if (event.sequence <= terminalEvent.sequence) continue;
-      if (event.eventType === 'guide.plan.published') {
+      if (
+        event.eventType === 'guide.plan.published' &&
+        operation === 'initial_plan' &&
+        goalProvenance === null
+      ) {
         const payload = event.payload as { readonly plan?: unknown };
         const published = guidePlanSchema.safeParse(payload?.plan);
         if (published.success && computePlanContentSha256(published.data) === planHash) {
@@ -530,8 +648,9 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
             candidate.event.sequence < event.sequence &&
             candidate.proposal.proposalId === decision.data.proposalId &&
             candidate.proposal.targetAdapterId === decision.data.adapterId &&
-            (candidate.proposal.targetInstanceId === undefined ||
-              candidate.proposal.targetInstanceId === decision.data.instanceId),
+            (candidate.proposal.targetInstanceId === undefined
+              ? goalProvenance === null && replanRevision === null
+              : candidate.proposal.targetInstanceId === decision.data.instanceId),
         );
         if (proposal !== undefined) authorizationSequences.push(event.sequence);
       }
@@ -556,6 +675,8 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
         report.data.protocolVersion === manifest.environment.protocolVersion &&
         report.data.adapterId === manifest.environment.targetAdapterId &&
         report.data.instanceId === firstBundle.scope.instanceId &&
+        (goalProvenance === null || report.data.instanceId === goalProvenance.targetInstanceId) &&
+        (replanRevision === null || report.data.instanceId === replanRevision.instanceId) &&
         report.data.hostVersion === manifest.environment.hostVersion &&
         report.data.companionVersion === manifest.environment.adapterVersion &&
         report.data.plan?.id === result.draft.plan.id &&
@@ -564,6 +685,8 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
         report.data.executionId !== null &&
         (manifest.hostExecutionId === undefined ||
           report.data.executionId === manifest.hostExecutionId) &&
+        (manifest.terminalHostReportId === undefined ||
+          report.data.reportId === manifest.terminalHostReportId) &&
         report.data.phase === 'completed' &&
         report.data.transition === 'step_succeeded' &&
         report.data.stepId !== null &&
@@ -578,15 +701,12 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
     }
     if (reports.length > 1) {
       throw captureError(
-        'ready evidence contains multiple exact terminal host reports; provide hostExecutionId to select one',
+        'ready evidence contains multiple exact terminal host reports; provide hostExecutionId and terminalHostReportId to select one',
       );
     }
-    if (
-      manifest.hostExecutionId !== undefined &&
-      (reports.length !== 1 || authorizationSequences.length !== 1)
-    ) {
+    if (manifest.hostExecutionId !== undefined && reports.length !== 1) {
       throw captureError(
-        'hostExecutionId requires exactly one matching authorization and terminal successful host report',
+        'hostExecutionId and terminalHostReportId require one exact authorized terminal successful host report',
       );
     }
     const terminalHost = reports[0];
@@ -643,10 +763,15 @@ export function createProviderEvalRunFromCapture(input: ProviderEvalCaptureInput
     parentRunId: manifest.parentRunId,
     profile: manifest.profile,
     environment: manifest.environment,
-    invocation: { operation, request: terminal.request, packet } as Parameters<
-      typeof createProviderEvalRun
-    >[0]['invocation'],
+    invocation: {
+      operation,
+      request: terminal.request,
+      requestFingerprint: expectedRequestFingerprint,
+      goalProvenance,
+      packet,
+    } as Parameters<typeof createProviderEvalRun>[0]['invocation'],
     generationSettings: manifest.generationSettings,
+    runtimeAttestation: runtimeAttestation ?? null,
     timing: { startedAt: requested.occurredAt, completedAt: result.generatedAt },
     outcome: { status: 'completed', operation, result } as Parameters<
       typeof createProviderEvalRun

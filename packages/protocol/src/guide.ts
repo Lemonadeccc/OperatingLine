@@ -6,8 +6,9 @@ export const supportedGuideProtocolVersions = [
   '1.2.0',
   '1.3.0',
   '1.4.0',
+  '1.5.0',
 ] as const;
-export const guideProtocolVersion = '1.4.0' as const;
+export const guideProtocolVersion = '1.5.0' as const;
 export const guideProtocolVersionSchema = z.enum(supportedGuideProtocolVersions);
 
 export const guideStepIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -157,7 +158,8 @@ export const guidePlanSchema = z
     if (
       plan.protocolVersion === '1.2.0' ||
       plan.protocolVersion === '1.3.0' ||
-      plan.protocolVersion === '1.4.0'
+      plan.protocolVersion === '1.4.0' ||
+      plan.protocolVersion === '1.5.0'
     ) {
       return;
     }
@@ -175,7 +177,9 @@ export const guidePlanSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0'] } },
+          properties: {
+            protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+          },
           required: ['protocolVersion'],
         },
         else: {

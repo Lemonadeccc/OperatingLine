@@ -249,6 +249,89 @@ describe('planner provider protocol', () => {
     }
   });
 
+  it('rejects initial-plan runtime attestations bound to another operation or request', () => {
+    const result = generationResult();
+    const request = {
+      requestId: result.requestId,
+      providerId: descriptor.id,
+      targetAdapterId: result.draft.targetAdapterId,
+      catalogVersion: result.draft.catalogVersion,
+      goal: result.draft.planning.goal,
+      planId: result.draft.plan.id,
+    };
+    const requestFingerprint = 'a'.repeat(64);
+    const runtimeTreatment = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_treatment',
+      operation: 'initial_plan',
+      treatment: {
+        profile: {
+          descriptor,
+          vendor: 'OperatingLine tests',
+          implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+          model: {
+            requested: 'deterministic-fixture-v1',
+            resolvedRevision: 'deterministic-fixture-v1',
+            resolution: 'resolved',
+          },
+          api: {
+            surface: 'in-process-test',
+            version: '1.0.0',
+            sdkName: '@operatingline/test-kit',
+            sdkVersion: '0.1.0',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters: { temperature: 0 },
+          parametersSha256: 'b'.repeat(64),
+          seed: null,
+          determinism: 'deterministic',
+        },
+      },
+      treatmentSha256: 'c'.repeat(64),
+    };
+    const completed = {
+      request,
+      requestFingerprint,
+      targetAdapterId: request.targetAdapterId,
+      catalogVersion: request.catalogVersion,
+      planId: request.planId,
+      result,
+      runtimeAttestation: {
+        formatVersion: '1.0.0',
+        evidenceClass: 'runtime_attested_provider_output',
+        operation: 'initial_plan',
+        requestId: request.requestId,
+        requestFingerprint,
+        packetSha256: 'd'.repeat(64),
+        outputSha256: 'e'.repeat(64),
+        treatment: runtimeTreatment,
+        occurredAt: result.generatedAt,
+      },
+    };
+
+    expect(plannerGenerationCompletedEventSchema.safeParse(completed).success).toBe(true);
+    for (const runtimeAttestation of [
+      { ...completed.runtimeAttestation, operation: 'local_replan' },
+      {
+        ...completed.runtimeAttestation,
+        treatment: { ...runtimeTreatment, operation: 'local_replan' },
+      },
+      { ...completed.runtimeAttestation, requestId: '00000000-0000-4000-8000-000000000099' },
+      { ...completed.runtimeAttestation, requestFingerprint: 'f'.repeat(64) },
+    ]) {
+      expect(
+        plannerGenerationCompletedEventSchema.safeParse({
+          ...completed,
+          runtimeAttestation,
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   it('generates strict public provider schemas', () => {
     for (const filename of [
       'planner-provider-descriptor.schema.json',

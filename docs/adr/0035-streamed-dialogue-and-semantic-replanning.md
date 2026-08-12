@@ -94,4 +94,5 @@ lineage 发起下一轮 Dialogue，而是把同一 durable request 交给普通 
 - `0.8` 是版本化工作流阈值，不是经过 Human Eval 校准的通用语义准确率，也不证明模型理解任意请求。
 - 自动化只发生在一次明确授权内部，并只把通过确定性门禁的结果推进到待审 Proposal。
 - 对话文本和严格生成证据会进入本地持久状态，可能包含敏感项目信息；当前没有跨设备同步或多人聊天。
-- 真实 Provider Human Eval、双人盲审、运行时 treatment/artifact attestation 与 released dataset 仍未完成。
+- 运行时 treatment/artifact attestation 已由 ADR 0036 完成；真实 Provider Human Eval、双人盲审和
+  released dataset 仍未完成。

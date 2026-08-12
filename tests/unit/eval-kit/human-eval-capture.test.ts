@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   computeHumanEvalContentSha256,
+  computePlanContentSha256,
   createProviderEvalRunFromCapture,
   type ProviderEvalCaptureManifestV1,
 } from '@operatingline/eval-kit';
@@ -17,6 +18,8 @@ import {
 } from '../../support/human-eval-fixtures.js';
 
 const snapshotId = '40000000-0000-4000-8000-000000000001';
+const goalRequestId = '40000000-0000-4000-8000-000000000020';
+const targetInstanceId = '40000000-0000-4000-8000-000000000021';
 
 function providerEvents(source: ProviderEvalRun): EvalExecutionEvent[] {
   if (source.invocation.operation !== 'initial_plan' || source.outcome.status !== 'completed') {
@@ -85,11 +88,24 @@ function bundle(
     hasMore: false,
   },
   summaryEvents: readonly EvalExecutionEvent[] = events,
+  instanceId: string | null = null,
 ): CurrentEvalExportBundle {
   if (source.invocation.operation !== 'initial_plan') throw new Error('Expected initial fixture');
   const eventTypeCounts: Record<string, number> = {};
+  const transitionCounts: Record<string, number> = {};
   for (const event of summaryEvents) {
     eventTypeCounts[event.eventType] = (eventTypeCounts[event.eventType] ?? 0) + 1;
+    if (
+      event.eventType === 'companion.state.reported' &&
+      event.payload !== null &&
+      typeof event.payload === 'object' &&
+      !Array.isArray(event.payload)
+    ) {
+      const transition = (event.payload as Record<string, unknown>)['transition'];
+      if (typeof transition === 'string') {
+        transitionCounts[transition] = (transitionCounts[transition] ?? 0) + 1;
+      }
+    }
   }
   const content = {
     protocolVersion: source.environment.protocolVersion,
@@ -97,7 +113,7 @@ function bundle(
     scope: {
       targetAdapterId: source.environment.targetAdapterId,
       planId: source.invocation.packet.context.requestedPlanId,
-      instanceId: null,
+      instanceId,
     },
     catalogs: [source.invocation.packet.context.catalog],
     events: [...events],
@@ -105,7 +121,7 @@ function bundle(
     summary: {
       matchedEventCount: summaryEvents.length,
       eventTypeCounts,
-      transitionCounts: {},
+      transitionCounts,
       decisionCounts: {},
     },
     dataHandling: {
@@ -174,6 +190,44 @@ function setup() {
   return { suite, source, events, exportBundle, manifest };
 }
 
+function goalScopedSetup() {
+  const state = setup();
+  if (state.source.invocation.operation !== 'initial_plan') {
+    throw new Error('Expected initial fixture');
+  }
+  const goalProvenance = { goalRequestId, targetInstanceId };
+  const requestFingerprint = computeHumanEvalContentSha256({
+    request: state.source.invocation.request,
+    ...goalProvenance,
+  });
+  for (const index of [0, 1, 2] as const) {
+    const event = state.events[index]!;
+    if (event.payload === null || typeof event.payload !== 'object') {
+      throw new Error('Expected object event payload');
+    }
+    state.events[index] = {
+      ...event,
+      payload: {
+        ...event.payload,
+        ...goalProvenance,
+        ...(index === 0 ? {} : { requestFingerprint }),
+      },
+    };
+  }
+  const exportBundle = bundle(state.source, state.events, undefined, undefined, targetInstanceId);
+  const manifest = {
+    ...state.manifest,
+    exportPages: [
+      {
+        ...state.manifest.exportPages[0]!,
+        bytes: JSON.stringify(exportBundle),
+        bundle: exportBundle,
+      },
+    ],
+  };
+  return { ...state, goalProvenance, requestFingerprint, exportBundle, manifest };
+}
+
 describe('offline Provider Eval capture', () => {
   it('builds a sealed initial-plan run and preserves reviewed no-secret fields', () => {
     const { suite, source, manifest } = setup();
@@ -211,6 +265,168 @@ describe('offline Provider Eval capture', () => {
       uri: 'repo://captures/page-1.json',
     });
     expect(run.integrity.contentSha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('preserves exact goal provenance and its scoped request fingerprint', () => {
+    const state = goalScopedSetup();
+    const run = createProviderEvalRunFromCapture({ suite: state.suite, manifest: state.manifest });
+
+    expect(run.invocation).toMatchObject({
+      operation: 'initial_plan',
+      requestFingerprint: state.requestFingerprint,
+      goalProvenance: state.goalProvenance,
+    });
+    expect(run.invocation.requestFingerprint).toBe(
+      computeHumanEvalContentSha256({
+        request: state.source.invocation.request,
+        ...state.goalProvenance,
+      }),
+    );
+    expect(state.exportBundle.scope.instanceId).toBe(state.goalProvenance.targetInstanceId);
+  });
+
+  it('rejects a goal-scoped capture whose Eval-export scope names another instance', () => {
+    const state = goalScopedSetup();
+    const crossInstanceBundle = bundle(
+      state.source,
+      state.events,
+      undefined,
+      undefined,
+      '40000000-0000-4000-8000-000000000022',
+    );
+
+    expect(() =>
+      createProviderEvalRunFromCapture({
+        suite: state.suite,
+        manifest: {
+          ...state.manifest,
+          exportPages: [
+            {
+              artifactId: 'cross-instance.page',
+              uri: 'cross-instance.json',
+              bundle: crossInstanceBundle,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/goal provenance.*Eval export scope/i);
+  });
+
+  it.each([
+    [
+      'mismatched terminal provenance',
+      (state: ReturnType<typeof goalScopedSetup>) => {
+        const completed = state.events[2]!;
+        state.events[2] = {
+          ...completed,
+          payload: {
+            ...(completed.payload as Record<string, unknown>),
+            targetInstanceId: '40000000-0000-4000-8000-000000000022',
+          },
+        };
+      },
+    ],
+    [
+      'missing terminal provenance',
+      (state: ReturnType<typeof goalScopedSetup>) => {
+        const completed = structuredClone(state.events[2]!);
+        delete (completed.payload as Record<string, unknown>)['goalRequestId'];
+        delete (completed.payload as Record<string, unknown>)['targetInstanceId'];
+        state.events[2] = completed;
+      },
+    ],
+    [
+      'missing prompt provenance',
+      (state: ReturnType<typeof goalScopedSetup>) => {
+        const prompt = structuredClone(state.events[0]!);
+        delete (prompt.payload as Record<string, unknown>)['goalRequestId'];
+        delete (prompt.payload as Record<string, unknown>)['targetInstanceId'];
+        state.events[0] = prompt;
+      },
+    ],
+  ])('rejects %s', (_label, mutate) => {
+    const state = goalScopedSetup();
+    mutate(state);
+    const exportBundle = bundle(state.source, state.events);
+
+    expect(() =>
+      createProviderEvalRunFromCapture({
+        suite: state.suite,
+        manifest: {
+          ...state.manifest,
+          exportPages: [
+            {
+              artifactId: 'goal-scoped.page',
+              uri: 'goal-scoped.json',
+              bundle: exportBundle,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/goal provenance/);
+  });
+
+  it('accepts exact runtime-attested treatment and rejects manifest drift', () => {
+    const state = setup();
+    if (state.source.outcome.status !== 'completed') throw new Error('Expected completed fixture');
+    const treatment = {
+      profile: state.source.profile,
+      generationSettings: state.source.generationSettings,
+    };
+    const runtimeTreatment = {
+      formatVersion: '1.0.0' as const,
+      evidenceClass: 'runtime_attested_provider_treatment' as const,
+      operation: 'initial_plan' as const,
+      treatment,
+      treatmentSha256: computeHumanEvalContentSha256(treatment),
+    };
+    const requested = state.exportBundle.events.find((event) =>
+      event.eventType.endsWith('.requested'),
+    )!;
+    const completed = state.exportBundle.events.find((event) =>
+      event.eventType.endsWith('.completed'),
+    )!;
+    (requested.payload as Record<string, unknown>)['runtimeTreatment'] = runtimeTreatment;
+    (completed.payload as Record<string, unknown>)['runtimeAttestation'] = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_output',
+      operation: 'initial_plan',
+      requestId: state.source.invocation.request.requestId,
+      requestFingerprint: computeHumanEvalContentSha256(state.source.invocation.request),
+      packetSha256: computeHumanEvalContentSha256(state.source.invocation.packet),
+      outputSha256: computeHumanEvalContentSha256(state.source.outcome.result.draft),
+      treatment: runtimeTreatment,
+      occurredAt: state.source.outcome.result.generatedAt,
+    };
+    const sealedBundle = bundle(state.source, state.exportBundle.events);
+    const exactManifest = {
+      ...state.manifest,
+      exportPages: [
+        {
+          ...state.manifest.exportPages[0]!,
+          bytes: JSON.stringify(sealedBundle),
+          bundle: sealedBundle,
+        },
+      ],
+    };
+
+    const run = createProviderEvalRunFromCapture({ suite: state.suite, manifest: exactManifest });
+    expect(run.runtimeAttestation).toMatchObject({
+      evidenceClass: 'runtime_attested_provider_output',
+      treatment: runtimeTreatment,
+    });
+    expect(() =>
+      createProviderEvalRunFromCapture({
+        suite: state.suite,
+        manifest: {
+          ...exactManifest,
+          generationSettings: {
+            ...exactManifest.generationSettings,
+            normalizedParameters: { temperature: 0.75 },
+          },
+        },
+      }),
+    ).toThrow('manifest profile or settings do not match runtime-attested treatment');
   });
 
   it('captures needs_revision without inventing host source evidence', () => {
@@ -409,5 +625,94 @@ describe('offline Provider Eval capture', () => {
         },
       }),
     ).toThrow(/requested initial-plan scope/);
+  });
+
+  it('selects one exact later terminal report after Back and Next reuse an execution id', () => {
+    const state = setup();
+    if (state.source.outcome.status !== 'completed') throw new Error('Expected completed fixture');
+    const plan = state.source.outcome.result.draft.plan;
+    const planContentSha256 = computePlanContentSha256(plan);
+    const executionId = '40000000-0000-4000-8000-000000000030';
+    const earlierReportId = '40000000-0000-4000-8000-000000000031';
+    const selectedReportId = '40000000-0000-4000-8000-000000000032';
+    const hostInstanceId = '40000000-0000-4000-8000-000000000033';
+    const executableStepIds = plan.steps
+      .filter((step) => step.action !== null)
+      .map((step) => step.id);
+    const finalStepId = executableStepIds.at(-1)!;
+    const terminalReport = (sequence: number, reportId: string): EvalExecutionEvent => ({
+      sequence,
+      id: `capture.host.completed.${sequence}`,
+      eventType: 'companion.state.reported',
+      payload: {
+        protocolVersion: state.source.environment.protocolVersion,
+        reportId,
+        sequence: sequence - 4,
+        adapterId: state.source.environment.targetAdapterId,
+        instanceId: hostInstanceId,
+        companionVersion: state.source.environment.adapterVersion,
+        hostVersion: state.source.environment.hostVersion,
+        plan: { id: plan.id, revision: plan.revision },
+        planContentSha256,
+        executionId,
+        phase: 'completed',
+        activeStepId: finalStepId,
+        completedStepIds: executableStepIds,
+        transition: 'step_succeeded',
+        stepId: finalStepId,
+        observations: [],
+        error: null,
+        occurredAt: `2026-08-05T00:00:0${sequence}.000Z`,
+      },
+      createdAt: `2026-08-05T00:00:0${sequence}.000Z`,
+    });
+    const capturedEvents = [
+      ...state.events,
+      {
+        sequence: 4,
+        id: 'capture.plan.published',
+        eventType: 'guide.plan.published',
+        payload: { plan },
+        createdAt: '2026-08-05T00:00:04.000Z',
+      } satisfies EvalExecutionEvent,
+      terminalReport(5, earlierReportId),
+      terminalReport(6, selectedReportId),
+    ];
+    const selectedBundle = bundle(
+      state.source,
+      capturedEvents,
+      undefined,
+      undefined,
+      hostInstanceId,
+    );
+    const selectedManifest = {
+      ...state.manifest,
+      hostExecutionId: executionId,
+      terminalHostReportId: selectedReportId,
+      exportPages: [{ artifactId: 'host.page', uri: 'host.json', bundle: selectedBundle }],
+    };
+
+    const run = createProviderEvalRunFromCapture({
+      suite: state.suite,
+      manifest: selectedManifest,
+    });
+    expect(
+      run.sourceEvents.find((event) => event.correlationKind === 'host_execution'),
+    ).toMatchObject({ sequence: 6, executionId, reportId: selectedReportId });
+    expect(() =>
+      createProviderEvalRunFromCapture({
+        suite: state.suite,
+        manifest: {
+          ...selectedManifest,
+          terminalHostReportId: '40000000-0000-4000-8000-000000000099',
+        },
+      }),
+    ).toThrow(/one exact authorized terminal successful host report/);
+    expect(() =>
+      createProviderEvalRunFromCapture({
+        suite: state.suite,
+        manifest: { ...selectedManifest, terminalHostReportId: undefined },
+      }),
+    ).toThrow(/must be provided together/);
   });
 });

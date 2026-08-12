@@ -154,7 +154,7 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 `Confirm New Provider Run`。Provider、
 request 改变、断开、终态或 Retry 都不会沿用先前确认。
 
-Protocol `1.4.0` 下，后台还按当前 Plan 拉取每条 revision thread 的 durable head。只有带已接受 Proposal
+Protocol `1.4.0+` 下，后台还按当前 Plan 拉取每条 revision thread 的 durable head。只有带已接受 Proposal
 和精确 `planContentSha256` 的 head 可以 `Switch`；切换要求当前 walkthrough 无 receipt、无待审 Proposal
 或活动 Run，只替换 idle Session 并跟随对应历史，不执行 action。`Fork` 把活动已接受 lineage 固定为
 source 并创建 turn 1；`Merge` 自动清空普通草稿、只引用目标 Plan root，并把选中的另一条已接受 head

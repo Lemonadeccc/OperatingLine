@@ -10,6 +10,7 @@ import {
   HumanEvalDatasetError,
   computeHumanEvalContentSha256,
   computePlanContentSha256,
+  computeProviderEvalConditionSha256,
   computeProviderEvalTreatmentSha256,
   contentWithoutIntegrity,
   createHumanEvalIntegrity,
@@ -175,9 +176,11 @@ function buildLiveEvidence(
     !Array.isArray(hostInstanceId) &&
     typeof (hostInstanceId as Record<string, unknown>)['instanceId'] === 'string'
       ? ((hostInstanceId as Record<string, unknown>)['instanceId'] as string)
-      : null;
+      : sourceRun.invocation.operation === 'initial_plan'
+        ? (sourceRun.invocation.goalProvenance?.targetInstanceId ?? null)
+        : sourceRun.invocation.packet.context.revisionRequest.instanceId;
   const exportContent = {
-    protocolVersion: '1.1.0' as const,
+    protocolVersion: sourceRun.environment.protocolVersion,
     formatVersion: '1.1.0' as const,
     scope: {
       targetAdapterId: sourceRun.environment.targetAdapterId,
@@ -536,7 +539,7 @@ describe('human eval filesystem evidence', () => {
     }
   });
 
-  it('requires exact terminal host evidence without excluding failed provider treatments', async () => {
+  it('validates goal-scoped released evidence without excluding failed provider treatments', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'operatingline-eval-released-host-'));
     try {
       const suiteContent = contentWithoutIntegrity(buildHumanEvalSuiteFixture());
@@ -572,10 +575,24 @@ describe('human eval filesystem evidence', () => {
       ) {
         throw new Error('Expected completed initial-plan fixture');
       }
+      firstSource.environment.protocolVersion = '1.5.0';
+      firstSource.invocation.goalProvenance = {
+        goalRequestId: '31000000-0000-4000-8000-000000000012',
+        targetInstanceId: '31000000-0000-4000-8000-000000000021',
+      };
+      firstSource.invocation.requestFingerprint = computeHumanEvalContentSha256({
+        request: firstSource.invocation.request,
+        ...firstSource.invocation.goalProvenance,
+      });
+      firstSource.comparability.conditionSha256 = computeProviderEvalConditionSha256(firstSource);
 
       const secondContent = structuredClone(firstSource);
       secondContent.runId = '31000000-0000-4000-8000-000000000010';
       secondContent.invocation.request.requestId = '31000000-0000-4000-8000-000000000011';
+      secondContent.invocation.requestFingerprint = computeHumanEvalContentSha256({
+        request: secondContent.invocation.request,
+        ...secondContent.invocation.goalProvenance!,
+      });
       const failedError = {
         error: 'planner_provider_failed' as const,
         requestId: secondContent.invocation.request.requestId,
@@ -600,7 +617,34 @@ describe('human eval filesystem evidence', () => {
         if (run.invocation.operation !== 'initial_plan') {
           throw new Error('Expected initial-plan run');
         }
-        const requestFingerprint = computeHumanEvalContentSha256(run.invocation.request);
+        const requestFingerprint = run.invocation.requestFingerprint;
+        const goalProvenance = run.invocation.goalProvenance;
+        const treatment = {
+          profile: run.profile,
+          generationSettings: run.generationSettings,
+        };
+        const runtimeTreatment = {
+          formatVersion: '1.0.0' as const,
+          evidenceClass: 'runtime_attested_provider_treatment' as const,
+          operation: 'initial_plan' as const,
+          treatment,
+          treatmentSha256: computeHumanEvalContentSha256(treatment),
+        };
+        const runtimeAttestation =
+          run.outcome.status === 'completed'
+            ? {
+                formatVersion: '1.0.0' as const,
+                evidenceClass: 'runtime_attested_provider_output' as const,
+                operation: 'initial_plan' as const,
+                requestId: run.invocation.request.requestId,
+                requestFingerprint,
+                packetSha256: run.invocation.packetSha256,
+                outputSha256: computeHumanEvalContentSha256(run.outcome.result.draft),
+                treatment: runtimeTreatment,
+                occurredAt: run.outcome.result.generatedAt,
+              }
+            : null;
+        run.runtimeAttestation = runtimeAttestation ?? runtimeTreatment;
         const requested: EvalExecutionEvent = {
           sequence: 1,
           id: `${run.runId}.requested`,
@@ -613,7 +657,9 @@ describe('human eval filesystem evidence', () => {
             targetAdapterId: run.environment.targetAdapterId,
             catalogVersion: run.environment.catalogVersion,
             planId: run.invocation.packet.context.requestedPlanId,
+            ...(goalProvenance ?? {}),
             packetFormatVersion: run.invocation.packet.formatVersion,
+            runtimeTreatment,
             occurredAt: '2026-08-05T00:00:00.000Z',
           },
           createdAt: '2026-08-05T00:00:00.000Z',
@@ -630,7 +676,9 @@ describe('human eval filesystem evidence', () => {
                   targetAdapterId: run.environment.targetAdapterId,
                   catalogVersion: run.environment.catalogVersion,
                   planId: run.invocation.packet.context.requestedPlanId,
+                  ...(goalProvenance ?? {}),
                   result: run.outcome.result,
+                  runtimeAttestation,
                 },
                 createdAt: '2026-08-05T00:00:01.000Z',
               }
@@ -646,6 +694,7 @@ describe('human eval filesystem evidence', () => {
                   targetAdapterId: run.environment.targetAdapterId,
                   catalogVersion: run.environment.catalogVersion,
                   planId: run.invocation.packet.context.requestedPlanId,
+                  ...(goalProvenance ?? {}),
                   error: run.outcome.error.error,
                   durationMs: 1_000,
                   occurredAt: '2026-08-05T00:00:01.000Z',
@@ -676,6 +725,7 @@ describe('human eval filesystem evidence', () => {
           proposalId,
           targetAdapterId: firstSource.environment.targetAdapterId,
           targetInstanceId: hostInstanceId,
+          goalRequestId: firstSource.invocation.goalProvenance.goalRequestId,
           plan: firstSource.outcome.result.draft.plan,
           planDiff: null,
           catalogVersion: firstSource.environment.catalogVersion,
@@ -722,10 +772,52 @@ describe('human eval filesystem evidence', () => {
           transition: 'step_succeeded',
           stepId: finalStepId,
           observations: [],
+          observationGate: null,
           error: null,
           occurredAt: '2026-08-05T00:00:02.000Z',
         },
         createdAt: '2026-08-05T00:00:02.000Z',
+      };
+      if (
+        firstSource.environment.hostVersion === null ||
+        firstSource.environment.adapterVersion === null
+      ) {
+        throw new Error('Expected exact host and adapter fixture versions');
+      }
+      const hostProjectBytes = 'released host project bytes';
+      const renderedImageBytes = onePixelPng;
+      const hostProjectSha256 = bytesSha256(hostProjectBytes);
+      const renderedImageSha256 = bytesSha256(renderedImageBytes);
+      if (
+        completedHostEvent.payload === null ||
+        typeof completedHostEvent.payload !== 'object' ||
+        Array.isArray(completedHostEvent.payload)
+      ) {
+        throw new Error('Expected a companion report payload');
+      }
+      (completedHostEvent.payload as Record<string, unknown>)['artifactAttestation'] = {
+        formatVersion: '1.0.0',
+        evidenceClass: 'runtime_attested_host_artifacts',
+        planContentSha256,
+        executionId,
+        hostProject: {
+          artifactId: 'host.project.first',
+          kind: 'host_project',
+          mediaType: 'application/x-blender',
+          contentSha256: hostProjectSha256,
+        },
+        renderedImage: {
+          artifactId: 'render.preview.first',
+          kind: 'rendered_image',
+          mediaType: 'image/png',
+          contentSha256: renderedImageSha256,
+          width: 1,
+          height: 1,
+          frame: 1,
+          renderEngine: 'TEST_RENDERER',
+          colorManagement: 'test',
+          hostProjectSha256,
+        },
       };
       const firstLive = buildLiveEvidence(
         firstSource,
@@ -737,15 +829,6 @@ describe('human eval filesystem evidence', () => {
           exportId: '31000000-0000-4000-8000-000000000023',
         },
       );
-      if (
-        firstSource.environment.hostVersion === null ||
-        firstSource.environment.adapterVersion === null
-      ) {
-        throw new Error('Expected exact host and adapter fixture versions');
-      }
-      const hostProjectBytes = 'released host project bytes';
-      const renderedImageBytes = onePixelPng;
-      const hostProjectSha256 = bytesSha256(hostProjectBytes);
       const firstEvidence = {
         bundleJson: firstLive.bundleJson,
         run: resealRun({
@@ -755,7 +838,7 @@ describe('human eval filesystem evidence', () => {
             {
               artifactId: 'host.project.first',
               kind: 'host_project',
-              mediaType: 'application/octet-stream',
+              mediaType: 'application/x-blender',
               uri: 'host-project-first.bin',
               contentSha256: hostProjectSha256,
               metadata: {},
@@ -765,7 +848,7 @@ describe('human eval filesystem evidence', () => {
               kind: 'rendered_image',
               mediaType: 'image/png',
               uri: 'render-first.png',
-              contentSha256: bytesSha256(renderedImageBytes),
+              contentSha256: renderedImageSha256,
               metadata: {},
               visualEnvironment: {
                 width: 1,
@@ -907,6 +990,59 @@ describe('human eval filesystem evidence', () => {
         verificationLevel: 'artifact_verified',
       });
 
+      const exactBundle = JSON.parse(firstEvidence.bundleJson) as CurrentEvalExportBundle;
+      expect(exactBundle.scope.instanceId).toBe(
+        firstSource.invocation.goalProvenance.targetInstanceId,
+      );
+      expect(
+        exactBundle.events.find((event) => event.eventType === 'guide.proposal.created')?.payload,
+      ).toMatchObject(firstSource.invocation.goalProvenance);
+
+      const alteredGoalRun = structuredClone(firstEvidence.run);
+      if (
+        alteredGoalRun.invocation.operation !== 'initial_plan' ||
+        alteredGoalRun.invocation.goalProvenance === null ||
+        alteredGoalRun.runtimeAttestation?.evidenceClass !== 'runtime_attested_provider_output'
+      ) {
+        throw new Error('Expected goal-scoped runtime-attested initial-plan evidence');
+      }
+      alteredGoalRun.invocation.goalProvenance.targetInstanceId =
+        '31000000-0000-4000-8000-000000000099';
+      alteredGoalRun.invocation.requestFingerprint = computeHumanEvalContentSha256({
+        request: alteredGoalRun.invocation.request,
+        ...alteredGoalRun.invocation.goalProvenance,
+      });
+      alteredGoalRun.runtimeAttestation.requestFingerprint =
+        alteredGoalRun.invocation.requestFingerprint;
+      alteredGoalRun.comparability.conditionSha256 =
+        computeProviderEvalConditionSha256(alteredGoalRun);
+      await writeReleasedEvidence(
+        { run: resealRun(alteredGoalRun), bundleJson: firstEvidence.bundleJson },
+        'met',
+      );
+      expect(await artifactIssues(() => loadHumanEvalDatasetDirectory(directory))).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('does not match the exact goal-scoped planning provenance'),
+        ]),
+      );
+
+      const alteredFingerprintRun = structuredClone(firstEvidence.run);
+      alteredFingerprintRun.invocation.requestFingerprint = '0'.repeat(64);
+      if (
+        alteredFingerprintRun.runtimeAttestation?.evidenceClass !==
+        'runtime_attested_provider_output'
+      ) {
+        throw new Error('Expected runtime-attested provider output');
+      }
+      alteredFingerprintRun.runtimeAttestation.requestFingerprint = '0'.repeat(64);
+      await writeReleasedEvidence(
+        { run: resealRun(alteredFingerprintRun), bundleJson: firstEvidence.bundleJson },
+        'met',
+      );
+      expect(await artifactIssues(() => loadHumanEvalDatasetDirectory(directory))).toEqual(
+        expect.arrayContaining([expect.stringContaining('request fingerprint mismatch')]),
+      );
+
       const mutateFirstBundle = (
         mutate: (bundle: CurrentEvalExportBundle) => void,
       ): { readonly run: ProviderEvalRun; readonly bundleJson: string } => {
@@ -937,6 +1073,49 @@ describe('human eval filesystem evidence', () => {
           }),
         };
       };
+
+      const crossInstanceScope = mutateFirstBundle((bundle) => {
+        bundle.scope.instanceId = '31000000-0000-4000-8000-000000000099';
+      });
+      await writeReleasedEvidence(crossInstanceScope, 'met');
+      expect(await artifactIssues(() => loadHumanEvalDatasetDirectory(directory))).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('does not match the exact goal-scoped planning provenance'),
+        ]),
+      );
+
+      for (const [label, goalRequestId] of [
+        ['missing', undefined],
+        ['mismatched', '31000000-0000-4000-8000-000000000099'],
+      ] as const) {
+        const invalidProposalProvenance = mutateFirstBundle((bundle) => {
+          const proposal = bundle.events.find(
+            (event) => event.eventType === 'guide.proposal.created',
+          );
+          if (
+            proposal === undefined ||
+            proposal.payload === null ||
+            typeof proposal.payload !== 'object' ||
+            Array.isArray(proposal.payload)
+          ) {
+            throw new Error('Expected goal-linked proposal event');
+          }
+          if (goalRequestId === undefined) {
+            delete (proposal.payload as Record<string, unknown>)['goalRequestId'];
+          } else {
+            (proposal.payload as Record<string, unknown>)['goalRequestId'] = goalRequestId;
+          }
+        });
+        await writeReleasedEvidence(invalidProposalProvenance, 'met');
+        expect(
+          await artifactIssues(() => loadHumanEvalDatasetDirectory(directory)),
+          `${label} goal proposal provenance`,
+        ).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('does not match the exact goal-scoped planning provenance'),
+          ]),
+        );
+      }
 
       const nonExactProposal = mutateFirstBundle((bundle) => {
         const proposal = bundle.events.find(
@@ -1061,6 +1240,10 @@ describe('human eval filesystem evidence', () => {
       }
       reusedContent.runId = '31000000-0000-4000-8000-000000000040';
       reusedContent.invocation.request.requestId = '31000000-0000-4000-8000-000000000041';
+      reusedContent.invocation.requestFingerprint = computeHumanEvalContentSha256({
+        request: reusedContent.invocation.request,
+        ...reusedContent.invocation.goalProvenance!,
+      });
       reusedContent.outcome.result.requestId = reusedContent.invocation.request.requestId;
       reusedContent.outcome.result.generationId = '31000000-0000-4000-8000-000000000042';
       const changedActionStep = reusedContent.outcome.result.draft.plan.steps.find(
@@ -1108,6 +1291,7 @@ describe('human eval filesystem evidence', () => {
           proposalId: reusedProposalId,
           targetAdapterId: reusedSource.environment.targetAdapterId,
           targetInstanceId: hostInstanceId,
+          goalRequestId: reusedSource.invocation.goalProvenance?.goalRequestId,
           plan: reusedSource.outcome.result.draft.plan,
           planDiff: null,
           catalogVersion: reusedSource.environment.catalogVersion,
@@ -1154,6 +1338,31 @@ describe('human eval filesystem evidence', () => {
           transition: 'step_succeeded',
           stepId: finalStepId,
           observations: [],
+          observationGate: null,
+          artifactAttestation: {
+            formatVersion: '1.0.0',
+            evidenceClass: 'runtime_attested_host_artifacts',
+            planContentSha256: reusedPlanContentSha256,
+            executionId,
+            hostProject: {
+              artifactId: 'host.project.reused',
+              kind: 'host_project',
+              mediaType: 'application/x-blender',
+              contentSha256: hostProjectSha256,
+            },
+            renderedImage: {
+              artifactId: 'render.preview.reused',
+              kind: 'rendered_image',
+              mediaType: 'image/png',
+              contentSha256: renderedImageSha256,
+              width: 1,
+              height: 1,
+              frame: 1,
+              renderEngine: 'TEST_RENDERER',
+              colorManagement: 'test',
+              hostProjectSha256,
+            },
+          },
           error: null,
           occurredAt: '2026-08-05T00:00:02.000Z',
         },
@@ -1183,7 +1392,7 @@ describe('human eval filesystem evidence', () => {
             {
               artifactId: 'host.project.reused',
               kind: 'host_project',
-              mediaType: 'application/octet-stream',
+              mediaType: 'application/x-blender',
               uri: 'host-project-first.bin',
               contentSha256: hostProjectSha256,
               metadata: {},

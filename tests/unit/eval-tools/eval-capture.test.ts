@@ -274,6 +274,190 @@ async function directoryEntries(path: string): Promise<string[]> {
   }
 }
 
+async function writeProviderSnapshot(
+  workspace: Awaited<ReturnType<typeof setupWorkspace>>,
+  capturedEvents: readonly EvalExecutionEvent[],
+): Promise<void> {
+  const page = bundle(workspace.source, capturedEvents);
+  await Promise.all([
+    writeFile(join(workspace.snapshotDirectory, 'page.json'), JSON.stringify(page)),
+    writeFile(
+      join(workspace.snapshotDirectory, 'snapshot.json'),
+      JSON.stringify({
+        ...workspace.snapshotManifest,
+        scope: page.scope,
+        snapshotId: page.page.snapshotId,
+        snapshotUpperSequence: page.page.snapshotUpperSequence,
+        pages: [
+          {
+            filename: 'page.json',
+            exportId: page.exportId,
+            contentSha256: page.integrity.contentSha256,
+          },
+        ],
+      }),
+    ),
+  ]);
+}
+
+type CompanionStateEvent = Extract<
+  EvalExecutionEvent,
+  { readonly eventType: 'companion.state.reported' }
+>;
+
+async function setupRuntimeAttestedWorkspace() {
+  const workspace = await setupWorkspace();
+  if (workspace.source.outcome.status !== 'completed') {
+    throw new Error('Expected completed fixture');
+  }
+  workspace.source.environment.protocolVersion = '1.5.0';
+  const captured = events(workspace.source);
+  const plan = workspace.source.outcome.result.draft.plan;
+  const planHash = computePlanContentSha256(plan);
+  const executionId = '42000000-0000-4000-8000-000000000030';
+  const instanceId = '42000000-0000-4000-8000-000000000031';
+  const reportId = '42000000-0000-4000-8000-000000000032';
+  const executableStepIds = plan.steps
+    .filter((step) => step.action !== null)
+    .map((step) => step.id);
+  const finalStepId = executableStepIds.at(-1)!;
+  const projectBytes = Buffer.from('runtime-attested project bytes');
+  const imageBytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const projectSha256 = createHash('sha256').update(projectBytes).digest('hex');
+  const imageSha256 = createHash('sha256').update(imageBytes).digest('hex');
+  const terminalEvent: CompanionStateEvent = {
+    sequence: 5,
+    id: 'capture.runtime.host.completed',
+    eventType: 'companion.state.reported',
+    payload: {
+      protocolVersion: workspace.source.environment.protocolVersion,
+      reportId,
+      sequence: 1,
+      adapterId: workspace.source.environment.targetAdapterId,
+      instanceId,
+      companionVersion: workspace.source.environment.adapterVersion,
+      hostVersion: workspace.source.environment.hostVersion,
+      plan: { id: plan.id, revision: plan.revision },
+      planContentSha256: planHash,
+      executionId,
+      phase: 'completed',
+      activeStepId: finalStepId,
+      completedStepIds: executableStepIds,
+      transition: 'step_succeeded',
+      stepId: finalStepId,
+      observations: [],
+      observationGate: null,
+      artifactAttestation: {
+        formatVersion: '1.0.0',
+        evidenceClass: 'runtime_attested_host_artifacts',
+        planContentSha256: planHash,
+        executionId,
+        hostProject: {
+          artifactId: `host.project.${reportId}`,
+          kind: 'host_project',
+          mediaType: 'application/x-blender',
+          contentSha256: projectSha256,
+        },
+        renderedImage: {
+          artifactId: `host.render.${reportId}`,
+          kind: 'rendered_image',
+          mediaType: 'image/png',
+          contentSha256: imageSha256,
+          width: 1,
+          height: 1,
+          frame: 1,
+          renderEngine: 'TEST',
+          colorManagement: 'test',
+          hostProjectSha256: projectSha256,
+        },
+      },
+      error: null,
+      occurredAt: '2026-08-05T00:00:02.000Z',
+    },
+    createdAt: '2026-08-05T00:00:02.000Z',
+  };
+  captured.push(
+    {
+      sequence: 4,
+      id: 'capture.runtime.published',
+      eventType: 'guide.plan.published',
+      payload: { plan },
+      createdAt: '2026-08-05T00:00:01.500Z',
+    },
+    terminalEvent,
+  );
+  const manifest: EvalCaptureManifestV1 = {
+    ...workspace.manifest,
+    captureMode: 'host_execution_with_runtime_attested_artifacts',
+    hostExecutionId: executionId,
+    terminalHostReportId: reportId,
+    hostProject: { artifactId: `host.project.${reportId}`, path: 'project.blend' },
+    renderedImage: { artifactId: `host.render.${reportId}`, path: 'render.png' },
+  };
+
+  async function writeInputs(
+    nextTerminalEvent: CompanionStateEvent = terminalEvent,
+    nextManifest: EvalCaptureManifestV1 = manifest,
+  ): Promise<void> {
+    const nextCaptured = captured.map((event) =>
+      event.id === terminalEvent.id ? nextTerminalEvent : event,
+    );
+    const page = bundle(workspace.source, nextCaptured);
+    await Promise.all([
+      writeFile(join(workspace.snapshotDirectory, 'page.json'), JSON.stringify(page)),
+      writeFile(
+        join(workspace.snapshotDirectory, 'snapshot.json'),
+        JSON.stringify({
+          ...workspace.snapshotManifest,
+          scope: page.scope,
+          snapshotId: page.page.snapshotId,
+          snapshotUpperSequence: page.page.snapshotUpperSequence,
+          pages: [
+            {
+              filename: 'page.json',
+              exportId: page.exportId,
+              contentSha256: page.integrity.contentSha256,
+            },
+          ],
+        }),
+      ),
+      writeFile(workspace.manifestPath, JSON.stringify(nextManifest)),
+    ]);
+  }
+
+  await Promise.all([
+    writeFile(join(workspace.inputDirectory, 'project.blend'), projectBytes),
+    writeFile(join(workspace.inputDirectory, 'render.png'), imageBytes),
+  ]);
+  await writeInputs();
+  return {
+    ...workspace,
+    executionId,
+    reportId,
+    planHash,
+    projectBytes,
+    imageBytes,
+    projectSha256,
+    imageSha256,
+    terminalEvent,
+    runtimeManifest: manifest,
+    writeInputs,
+  };
+}
+
+async function expectRuntimeCaptureRejectedWithoutPromotion(
+  workspace: Awaited<ReturnType<typeof setupRuntimeAttestedWorkspace>>,
+): Promise<void> {
+  await expect(captureProviderEvalRun(workspace)).rejects.toThrow();
+  await expect(directoryEntries(join(workspace.datasetDirectory, 'runs'))).resolves.toEqual([]);
+  await expect(
+    directoryEntries(join(workspace.datasetDirectory, 'artifacts', 'sha256')),
+  ).resolves.toEqual([]);
+}
+
 describe('offline Human Eval capture CLI', () => {
   it('captures provider-only evidence into content-addressed artifacts with fixed local handling', async () => {
     const workspace = await setupWorkspace();
@@ -321,6 +505,94 @@ describe('offline Human Eval capture CLI', () => {
           (await stat(join(workspace.datasetDirectory, run.artifacts[0]!.uri))).mode & 0o777,
         ).toBe(0o600);
       }
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a runtime-attested manifest when frozen provider events lack runtime proof', async () => {
+    const workspace = await setupWorkspace();
+    try {
+      const manifest: EvalCaptureManifestV1 = {
+        ...workspace.manifest,
+        reproducibility: 'best_effort',
+        treatmentAttestation: {
+          evidenceClass: 'runtime_attested',
+          assertion: 'profile_and_settings_match_runtime_evidence',
+        },
+      };
+      await writeFile(workspace.manifestPath, JSON.stringify(manifest));
+
+      await expect(captureProviderEvalRun(workspace)).rejects.toThrow(
+        'capture treatmentAttestation must match the frozen runtime Provider evidence',
+      );
+      await expect(directoryEntries(join(workspace.datasetDirectory, 'runs'))).resolves.toEqual([]);
+      await expect(
+        directoryEntries(join(workspace.datasetDirectory, 'artifacts', 'sha256')),
+      ).resolves.toEqual([]);
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an operator-attested manifest when frozen provider events contain runtime proof', async () => {
+    const workspace = await setupWorkspace();
+    try {
+      if (workspace.source.outcome.status !== 'completed') {
+        throw new Error('Expected completed fixture');
+      }
+      const runtimeTreatment = {
+        formatVersion: '1.0.0' as const,
+        evidenceClass: 'runtime_attested_provider_treatment' as const,
+        operation: 'initial_plan' as const,
+        treatment: {
+          profile: workspace.source.profile,
+          generationSettings: workspace.source.generationSettings,
+        },
+        treatmentSha256: computeHumanEvalContentSha256({
+          profile: workspace.source.profile,
+          generationSettings: workspace.source.generationSettings,
+        }),
+      };
+      const capturedEvents = events(workspace.source).map((event): EvalExecutionEvent => {
+        if (event.eventType === 'planning.provider.generation.requested') {
+          return {
+            ...event,
+            payload: { ...event.payload, runtimeTreatment },
+          };
+        }
+        if (event.eventType === 'planning.provider.generation.completed') {
+          return {
+            ...event,
+            payload: {
+              ...event.payload,
+              runtimeAttestation: {
+                formatVersion: '1.0.0',
+                evidenceClass: 'runtime_attested_provider_output',
+                operation: 'initial_plan',
+                requestId: workspace.source.invocation.request.requestId,
+                requestFingerprint: computeHumanEvalContentSha256(
+                  workspace.source.invocation.request,
+                ),
+                packetSha256: computeHumanEvalContentSha256(workspace.source.invocation.packet),
+                outputSha256: computeHumanEvalContentSha256(workspace.source.outcome.result.draft),
+                treatment: runtimeTreatment,
+                occurredAt: workspace.source.outcome.result.generatedAt,
+              },
+            },
+          };
+        }
+        return event;
+      });
+      await writeProviderSnapshot(workspace, capturedEvents);
+
+      await expect(captureProviderEvalRun(workspace)).rejects.toThrow(
+        'capture treatmentAttestation must match the frozen runtime Provider evidence',
+      );
+      await expect(directoryEntries(join(workspace.datasetDirectory, 'runs'))).resolves.toEqual([]);
+      await expect(
+        directoryEntries(join(workspace.datasetDirectory, 'artifacts', 'sha256')),
+      ).resolves.toEqual([]);
     } finally {
       await rm(workspace.root, { recursive: true, force: true });
     }
@@ -581,6 +853,7 @@ describe('offline Human Eval capture CLI', () => {
         ...workspace.manifest,
         captureMode: 'host_execution_with_manual_artifacts',
         hostExecutionId: executionId,
+        terminalHostReportId: reportId,
         hostProject: { artifactId: 'host.project', path: 'project.bin' },
         renderedImage: {
           artifactId: 'host.render',
@@ -618,6 +891,205 @@ describe('offline Human Eval capture CLI', () => {
         run.artifacts.find((artifact) => artifact.kind === 'manual_review_image')
           ?.visualEnvironment,
       ).toBeUndefined();
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('promotes exact host files only when the terminal report attests their hashes', async () => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      const run = await captureProviderEvalRun(workspace);
+
+      expect(run.artifacts.find((artifact) => artifact.kind === 'host_project')).toMatchObject({
+        contentSha256: workspace.projectSha256,
+        metadata: { evidenceClass: 'runtime_attested_host_artifacts' },
+      });
+      expect(run.artifacts.find((artifact) => artifact.kind === 'rendered_image')).toMatchObject({
+        contentSha256: workspace.imageSha256,
+        visualEnvironment: {
+          width: 1,
+          height: 1,
+          executionId: workspace.executionId,
+          terminalHostReportId: workspace.reportId,
+          hostProjectSha256: workspace.projectSha256,
+        },
+      });
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('selects the later terminal report when Back and Next reuse one execution id', async () => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      if (workspace.source.outcome.status !== 'completed') {
+        throw new Error('Expected completed fixture');
+      }
+      const plan = workspace.source.outcome.result.draft.plan;
+      const earlierReport = structuredClone(workspace.terminalEvent);
+      earlierReport.id = 'capture.runtime.host.completed.earlier';
+      earlierReport.payload.reportId = '42000000-0000-4000-8000-000000000033';
+      earlierReport.payload.artifactAttestation = null;
+      const selectedReport = structuredClone(workspace.terminalEvent);
+      selectedReport.sequence = 6;
+      selectedReport.id = 'capture.runtime.host.completed.selected';
+      selectedReport.payload.sequence = 2;
+      selectedReport.payload.occurredAt = '2026-08-05T00:00:03.000Z';
+      selectedReport.createdAt = '2026-08-05T00:00:03.000Z';
+      await writeProviderSnapshot(workspace, [
+        ...events(workspace.source),
+        {
+          sequence: 4,
+          id: 'capture.runtime.published',
+          eventType: 'guide.plan.published',
+          payload: { plan },
+          createdAt: '2026-08-05T00:00:01.500Z',
+        },
+        earlierReport,
+        selectedReport,
+      ]);
+
+      const run = await captureProviderEvalRun(workspace);
+
+      expect(
+        run.sourceEvents.find((event) => event.correlationKind === 'host_execution'),
+      ).toMatchObject({
+        sequence: 6,
+        executionId: workspace.executionId,
+        reportId: workspace.reportId,
+      });
+      expect(
+        run.artifacts.find((artifact) => artifact.kind === 'rendered_image')?.visualEnvironment,
+      ).toMatchObject({
+        executionId: workspace.executionId,
+        terminalHostReportId: workspace.reportId,
+        terminalHostEventSequence: 6,
+      });
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires an exact paired terminal report selector for host-artifact capture', async () => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      const missingSelector = structuredClone(workspace.runtimeManifest) as Record<string, unknown>;
+      delete missingSelector['terminalHostReportId'];
+      await writeFile(workspace.manifestPath, JSON.stringify(missingSelector));
+      await expect(captureProviderEvalRun(workspace)).rejects.toThrow(
+        'host-artifact capture requires terminalHostReportId',
+      );
+
+      await workspace.writeInputs(workspace.terminalEvent, {
+        ...workspace.runtimeManifest,
+        terminalHostReportId: '42000000-0000-4000-8000-000000000099',
+      });
+      await expect(captureProviderEvalRun(workspace)).rejects.toThrow(
+        'one unique exact terminal host report',
+      );
+      await expect(directoryEntries(join(workspace.datasetDirectory, 'runs'))).resolves.toEqual([]);
+      await expect(
+        directoryEntries(join(workspace.datasetDirectory, 'artifacts', 'sha256')),
+      ).resolves.toEqual([]);
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['project', 'project.blend', Buffer.from('tampered project bytes')],
+    ['PNG', 'render.png', Buffer.from('tampered PNG bytes')],
+  ])(
+    'rejects tampered runtime-attested %s bytes without promoting files',
+    async (_, path, bytes) => {
+      const workspace = await setupRuntimeAttestedWorkspace();
+      try {
+        await writeFile(join(workspace.inputDirectory, path), bytes);
+        await expectRuntimeCaptureRejectedWithoutPromotion(workspace);
+      } finally {
+        await rm(workspace.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('rejects runtime-attested PNG dimension drift without promoting files', async () => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      const attestation = workspace.terminalEvent.payload.artifactAttestation!;
+      await workspace.writeInputs({
+        ...workspace.terminalEvent,
+        payload: {
+          ...workspace.terminalEvent.payload,
+          artifactAttestation: {
+            ...attestation,
+            renderedImage: { ...attestation.renderedImage, width: 2 },
+          },
+        },
+      });
+      await expectRuntimeCaptureRejectedWithoutPromotion(workspace);
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['project', { hostProject: { artifactId: 'host.project.tampered', path: 'project.blend' } }],
+    ['image', { renderedImage: { artifactId: 'host.render.tampered', path: 'render.png' } }],
+  ])(
+    'rejects a runtime-attested %s artifact id mismatch without promoting files',
+    async (_, edit) => {
+      const workspace = await setupRuntimeAttestedWorkspace();
+      try {
+        await workspace.writeInputs(workspace.terminalEvent, {
+          ...workspace.runtimeManifest,
+          ...edit,
+        });
+        await expectRuntimeCaptureRejectedWithoutPromotion(workspace);
+      } finally {
+        await rm(workspace.root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    ['execution', { executionId: '42000000-0000-4000-8000-000000000039' }],
+    ['plan', { planContentSha256: 'a'.repeat(64) }],
+  ])('rejects a runtime-attested %s mismatch without promoting files', async (_, edit) => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      const attestation = workspace.terminalEvent.payload.artifactAttestation!;
+      await workspace.writeInputs({
+        ...workspace.terminalEvent,
+        payload: {
+          ...workspace.terminalEvent.payload,
+          artifactAttestation: { ...attestation, ...edit },
+        },
+      });
+      await expectRuntimeCaptureRejectedWithoutPromotion(workspace);
+    } finally {
+      await rm(workspace.root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a rendered-image host project hash mismatch without promoting files', async () => {
+    const workspace = await setupRuntimeAttestedWorkspace();
+    try {
+      const attestation = workspace.terminalEvent.payload.artifactAttestation!;
+      await workspace.writeInputs({
+        ...workspace.terminalEvent,
+        payload: {
+          ...workspace.terminalEvent.payload,
+          artifactAttestation: {
+            ...attestation,
+            renderedImage: {
+              ...attestation.renderedImage,
+              hostProjectSha256: 'b'.repeat(64),
+            },
+          },
+        },
+      });
+      await expectRuntimeCaptureRejectedWithoutPromotion(workspace);
     } finally {
       await rm(workspace.root, { recursive: true, force: true });
     }

@@ -72,6 +72,40 @@ describe('OpenAI Responses planner provider', () => {
     });
     const signal = new AbortController().signal;
 
+    expect(provider.describeRuntimeTreatment?.('initial_plan')).toEqual({
+      profile: expect.objectContaining({
+        descriptor: provider.descriptor,
+        vendor: 'OpenAI',
+        implementation: {
+          name: '@operatingline/openai-planner-provider',
+          version: '0.1.0',
+        },
+        model: {
+          requested: 'gpt-5.4',
+          resolvedRevision: null,
+          resolution: 'provider_did_not_disclose',
+        },
+        api: expect.objectContaining({
+          surface: 'responses',
+          version: 'v1',
+          sdkName: 'openai',
+          sdkVersion: '7.4.0',
+          endpointClass: 'vendor_public',
+        }),
+      }),
+      generationSettings: {
+        normalizedParameters: {
+          model: 'gpt-5.4',
+          max_output_tokens: 32_768,
+          store: false,
+          stream: false,
+          text: { format: { type: 'json_object' } },
+        },
+        seed: null,
+        determinism: 'non_deterministic',
+      },
+    });
+
     await expect(provider.generate(input(signal))).resolves.toEqual({
       plan: { id: 'snowman' },
     });

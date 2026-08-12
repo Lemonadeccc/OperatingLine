@@ -52,13 +52,18 @@ interface CaptureManifestCommon {
   readonly parentRunId: string | null;
   readonly profile: ProviderEvalProfile;
   readonly generationSettings: Omit<ProviderEvalGenerationSettings, 'parametersSha256'>;
-  readonly reproducibility: 'not_reproducible';
-  readonly treatmentAttestation: {
-    readonly evidenceClass: 'operator_attested_not_runtime_verified';
-    readonly assertion: 'profile_and_settings_reviewed_no_credentials';
-    readonly preparedBy: string;
-    readonly reviewedAt: string;
-  };
+  readonly reproducibility: ProviderEvalRun['comparability']['reproducibility'];
+  readonly treatmentAttestation:
+    | {
+        readonly evidenceClass: 'operator_attested_not_runtime_verified';
+        readonly assertion: 'profile_and_settings_reviewed_no_credentials';
+        readonly preparedBy: string;
+        readonly reviewedAt: string;
+      }
+    | {
+        readonly evidenceClass: 'runtime_attested';
+        readonly assertion: 'profile_and_settings_match_runtime_evidence';
+      };
   readonly provenance: Pick<
     ProviderEvalRun['provenance'],
     'recorderName' | 'recorderVersion' | 'vendorRequestId'
@@ -77,8 +82,16 @@ export type EvalCaptureManifestV1 = CaptureManifestCommon &
     | {
         readonly captureMode: 'host_execution_with_manual_artifacts';
         readonly hostExecutionId: string;
+        readonly terminalHostReportId: string;
         readonly hostProject: LocalCaptureArtifactInput;
         readonly renderedImage: LocalRenderedImageInput;
+      }
+    | {
+        readonly captureMode: 'host_execution_with_runtime_attested_artifacts';
+        readonly hostExecutionId: string;
+        readonly terminalHostReportId: string;
+        readonly hostProject: LocalCaptureArtifactInput;
+        readonly renderedImage: LocalCaptureArtifactInput;
       }
   );
 
@@ -288,50 +301,75 @@ function parseCaptureManifest(value: unknown): EvalCaptureManifestV1 {
     'environment',
   ];
   const hasManualHostArtifacts = input['captureMode'] === 'host_execution_with_manual_artifacts';
+  const hasRuntimeHostArtifacts =
+    input['captureMode'] === 'host_execution_with_runtime_attested_artifacts';
+  const hasHostArtifacts = hasManualHostArtifacts || hasRuntimeHostArtifacts;
   requireKeys(
     input,
-    hasManualHostArtifacts
-      ? [...common, 'hostExecutionId', 'hostProject', 'renderedImage']
+    hasHostArtifacts
+      ? [...common, 'hostExecutionId', 'terminalHostReportId', 'hostProject', 'renderedImage']
       : common,
     'capture manifest',
   );
   if (input['formatVersion'] !== evalCaptureManifestVersion) {
     throw new Error(`Unsupported Eval capture manifest version ${String(input['formatVersion'])}`);
   }
-  if (input['captureMode'] !== 'provider_only' && !hasManualHostArtifacts) {
-    throw new Error('captureMode must be provider_only or host_execution_with_manual_artifacts');
+  if (input['captureMode'] !== 'provider_only' && !hasHostArtifacts) {
+    throw new Error(
+      'captureMode must be provider_only, host_execution_with_manual_artifacts, or host_execution_with_runtime_attested_artifacts',
+    );
   }
   for (const key of ['suiteId', 'suiteVersion', 'caseId', 'generationRequestId', 'runId']) {
     if (typeof input[key] !== 'string') throw new Error(`capture manifest ${key} is required`);
   }
   if (!Number.isInteger(input['replicateIndex']))
     throw new Error('capture manifest replicateIndex is required');
-  if (input['reproducibility'] !== 'not_reproducible') {
+  if (
+    input['reproducibility'] !== 'not_reproducible' &&
+    input['reproducibility'] !== 'best_effort' &&
+    input['reproducibility'] !== 'reproducible'
+  ) {
     throw new Error(
-      'offline capture requires reproducibility=not_reproducible until runtime treatment attestation exists',
+      'capture manifest reproducibility must be not_reproducible, best_effort, or reproducible',
     );
   }
   const treatmentAttestation = object(
     input['treatmentAttestation'],
     'capture manifest treatmentAttestation',
   );
-  requireKeys(
-    treatmentAttestation,
-    ['evidenceClass', 'assertion', 'preparedBy', 'reviewedAt'],
-    'capture manifest treatmentAttestation',
-  );
-  if (
-    treatmentAttestation['evidenceClass'] !== 'operator_attested_not_runtime_verified' ||
-    treatmentAttestation['assertion'] !== 'profile_and_settings_reviewed_no_credentials' ||
-    typeof treatmentAttestation['preparedBy'] !== 'string' ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(treatmentAttestation['preparedBy']) ||
-    typeof treatmentAttestation['reviewedAt'] !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
-      treatmentAttestation['reviewedAt'],
-    ) ||
-    !Number.isFinite(Date.parse(treatmentAttestation['reviewedAt']))
-  ) {
-    throw new Error('capture manifest treatmentAttestation is invalid');
+  const runtimeAttested = treatmentAttestation['evidenceClass'] === 'runtime_attested';
+  if (runtimeAttested) {
+    requireKeys(
+      treatmentAttestation,
+      ['evidenceClass', 'assertion'],
+      'capture manifest treatmentAttestation',
+    );
+    if (
+      treatmentAttestation['assertion'] !== 'profile_and_settings_match_runtime_evidence' ||
+      input['reproducibility'] === 'not_reproducible'
+    ) {
+      throw new Error('runtime-attested capture must declare best_effort or reproducible');
+    }
+  } else {
+    requireKeys(
+      treatmentAttestation,
+      ['evidenceClass', 'assertion', 'preparedBy', 'reviewedAt'],
+      'capture manifest treatmentAttestation',
+    );
+    if (
+      treatmentAttestation['evidenceClass'] !== 'operator_attested_not_runtime_verified' ||
+      treatmentAttestation['assertion'] !== 'profile_and_settings_reviewed_no_credentials' ||
+      typeof treatmentAttestation['preparedBy'] !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(treatmentAttestation['preparedBy']) ||
+      typeof treatmentAttestation['reviewedAt'] !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+        treatmentAttestation['reviewedAt'],
+      ) ||
+      !Number.isFinite(Date.parse(treatmentAttestation['reviewedAt'])) ||
+      input['reproducibility'] !== 'not_reproducible'
+    ) {
+      throw new Error('operator-attested capture must declare not_reproducible');
+    }
   }
   const base = {
     formatVersion: evalCaptureManifestVersion,
@@ -347,7 +385,9 @@ function parseCaptureManifest(value: unknown): EvalCaptureManifestV1 {
       ProviderEvalGenerationSettings,
       'parametersSha256'
     >,
-    reproducibility: input['reproducibility'] as 'not_reproducible',
+    reproducibility: input[
+      'reproducibility'
+    ] as ProviderEvalRun['comparability']['reproducibility'],
     treatmentAttestation:
       treatmentAttestation as unknown as CaptureManifestCommon['treatmentAttestation'],
     provenance: (() => {
@@ -369,13 +409,26 @@ function parseCaptureManifest(value: unknown): EvalCaptureManifestV1 {
       return environment as unknown as CaptureManifestCommon['environment'];
     })(),
   };
-  if (!hasManualHostArtifacts) return { ...base, captureMode: 'provider_only' };
+  if (!hasHostArtifacts) return { ...base, captureMode: 'provider_only' };
   if (typeof input['hostExecutionId'] !== 'string')
-    throw new Error('manual host-artifact capture requires hostExecutionId');
+    throw new Error('host-artifact capture requires hostExecutionId');
+  if (typeof input['terminalHostReportId'] !== 'string')
+    throw new Error('host-artifact capture requires terminalHostReportId');
+  if (hasRuntimeHostArtifacts) {
+    return {
+      ...base,
+      captureMode: 'host_execution_with_runtime_attested_artifacts',
+      hostExecutionId: input['hostExecutionId'],
+      terminalHostReportId: input['terminalHostReportId'],
+      hostProject: parseLocalArtifact(input['hostProject'], 'hostProject', false),
+      renderedImage: parseLocalArtifact(input['renderedImage'], 'renderedImage', false),
+    };
+  }
   return {
     ...base,
     captureMode: 'host_execution_with_manual_artifacts',
     hostExecutionId: input['hostExecutionId'],
+    terminalHostReportId: input['terminalHostReportId'],
     hostProject: parseLocalArtifact(input['hostProject'], 'hostProject', false),
     renderedImage: parseLocalArtifact(
       input['renderedImage'],
@@ -404,6 +457,7 @@ function matchingTerminalHostReports(
   pages: readonly CurrentEvalExportBundle[],
   run: ProviderEvalRun,
   executionId: string,
+  reportId: string,
 ) {
   if (run.outcome.status !== 'completed' || run.outcome.result.status !== 'ready') return [];
   const plan = run.outcome.result.draft.plan;
@@ -418,6 +472,7 @@ function matchingTerminalHostReports(
       const parsed = companionStateReportSchema.safeParse(event.payload);
       return parsed.success &&
         parsed.data.executionId === executionId &&
+        parsed.data.reportId === reportId &&
         parsed.data.protocolVersion === firstPage.protocolVersion &&
         parsed.data.adapterId === run.environment.targetAdapterId &&
         parsed.data.instanceId === firstPage.scope.instanceId &&
@@ -562,35 +617,35 @@ export async function captureProviderEvalRun(
     }
     const created: string[] = [];
     try {
-      const treatmentAttestationBytes = Buffer.from(
-        `${JSON.stringify(
-          {
-            formatVersion: '1.0.0',
-            ...manifest.treatmentAttestation,
-            profile: manifest.profile,
-            generationSettings: manifest.generationSettings,
-            environment: manifest.environment,
-            provenance: manifest.provenance,
-          },
-          null,
-          2,
-        )}\n`,
-        'utf8',
-      );
-      const treatmentAttestation = await copyContentAddressed(
-        datasetDirectory,
-        treatmentAttestationBytes,
-        '.json',
-        created,
-      );
-      const treatmentAttestationArtifact: EvalArtifactReference = {
-        artifactId: `eval.${manifest.runId}.operator-treatment-attestation`,
-        kind: 'provider_output',
-        mediaType: 'application/json',
-        uri: treatmentAttestation.uri,
-        contentSha256: treatmentAttestation.hash,
-        metadata: manifest.treatmentAttestation,
-      };
+      const treatmentAttestationArtifact =
+        manifest.treatmentAttestation.evidenceClass === 'operator_attested_not_runtime_verified'
+          ? await (async (): Promise<EvalArtifactReference> => {
+              const bytes = Buffer.from(
+                `${JSON.stringify(
+                  {
+                    formatVersion: '1.0.0',
+                    ...manifest.treatmentAttestation,
+                    profile: manifest.profile,
+                    generationSettings: manifest.generationSettings,
+                    environment: manifest.environment,
+                    provenance: manifest.provenance,
+                  },
+                  null,
+                  2,
+                )}\n`,
+                'utf8',
+              );
+              const stored = await copyContentAddressed(datasetDirectory, bytes, '.json', created);
+              return {
+                artifactId: `eval.${manifest.runId}.operator-treatment-attestation`,
+                kind: 'provider_output',
+                mediaType: 'application/json',
+                uri: stored.uri,
+                contentSha256: stored.hash,
+                metadata: manifest.treatmentAttestation,
+              };
+            })()
+          : null;
       const exportPages = await Promise.all(
         pageInputs.map(async (page, index) => {
           const stored = await copyContentAddressed(datasetDirectory, page.bytes, '.json', created);
@@ -623,19 +678,28 @@ export async function captureProviderEvalRun(
         },
         dataHandling: localDataHandling,
         exportPages,
-        supplementalArtifacts: [treatmentAttestationArtifact],
+        supplementalArtifacts:
+          treatmentAttestationArtifact === null ? [] : [treatmentAttestationArtifact],
       };
       let run = createProviderEvalRunFromCapture({ suite, manifest: baseManifest });
+      const manifestClaimsRuntimeTreatment =
+        manifest.treatmentAttestation.evidenceClass === 'runtime_attested';
+      if (manifestClaimsRuntimeTreatment !== (run.runtimeAttestation !== null)) {
+        throw new Error(
+          'capture treatmentAttestation must match the frozen runtime Provider evidence',
+        );
+      }
       let hostReport: ReturnType<typeof matchingTerminalHostReports>[number] | undefined;
-      if (manifest.captureMode === 'host_execution_with_manual_artifacts') {
+      if (manifest.captureMode !== 'provider_only') {
         const matches = matchingTerminalHostReports(
           pageInputs.map((page) => page.bundle),
           run,
           manifest.hostExecutionId,
+          manifest.terminalHostReportId,
         );
         if (matches.length !== 1) {
           throw new Error(
-            'manual host-artifact capture requires one unique exact terminal host report for the selected execution',
+            'host-artifact capture requires one unique exact terminal host report for the selected execution',
           );
         }
         hostReport = matches[0]!;
@@ -644,6 +708,7 @@ export async function captureProviderEvalRun(
           manifest: {
             ...baseManifest,
             hostExecutionId: manifest.hostExecutionId,
+            terminalHostReportId: manifest.terminalHostReportId,
             environment: {
               ...providerOnlyEnvironment,
               adapterVersion: hostReport.report.companionVersion,
@@ -657,14 +722,18 @@ export async function captureProviderEvalRun(
           reservedArtifactIds.has(manifest.hostProject.artifactId) ||
           reservedArtifactIds.has(manifest.renderedImage.artifactId)
         ) {
-          throw new Error('manual host artifact ids must be unique');
+          throw new Error('host artifact ids must be unique');
         }
         const hostSource = run.sourceEvents.filter(
           (event) => event.correlationKind === 'host_execution',
         );
-        if (hostSource.length !== 1 || hostSource[0]!.executionId !== manifest.hostExecutionId) {
+        if (
+          hostSource.length !== 1 ||
+          hostSource[0]!.executionId !== manifest.hostExecutionId ||
+          hostSource[0]!.reportId !== manifest.terminalHostReportId
+        ) {
           throw new Error(
-            'manual host-artifact capture did not resolve to one authorized successful host execution',
+            'host-artifact capture did not resolve to one authorized successful host execution',
           );
         }
         const [projectPath, imagePath] = await Promise.all([
@@ -694,41 +763,101 @@ export async function captureProviderEvalRun(
         const image = await copyContentAddressed(datasetDirectory, imageBytes, '.png', created);
         const dimensions = pngDimensions(imageBytes);
         const host = hostSource[0]!;
-        const manualEvidenceMetadata = {
-          evidenceClass: 'manual_artifact_not_runtime_bound',
-          warning:
-            'The file was supplied by the capture operator and is not hash-attested by the terminal host report.',
-          executionId: manifest.hostExecutionId,
-          terminalHostReportId: host.reportId,
-          terminalHostEventSequence: host.sequence,
-          planContentSha256: host.planContentSha256,
-        } as const;
+        const runtimeAttestation = hostReport.report.artifactAttestation;
+        const runtimeBound =
+          manifest.captureMode === 'host_execution_with_runtime_attested_artifacts';
+        if (runtimeBound) {
+          if (
+            runtimeAttestation === undefined ||
+            runtimeAttestation === null ||
+            runtimeAttestation.executionId !== manifest.hostExecutionId ||
+            runtimeAttestation.planContentSha256 !== host.planContentSha256 ||
+            runtimeAttestation.hostProject.artifactId !== manifest.hostProject.artifactId ||
+            runtimeAttestation.hostProject.contentSha256 !== project.hash ||
+            runtimeAttestation.renderedImage.artifactId !== manifest.renderedImage.artifactId ||
+            runtimeAttestation.renderedImage.contentSha256 !== image.hash ||
+            runtimeAttestation.renderedImage.width !== dimensions.width ||
+            runtimeAttestation.renderedImage.height !== dimensions.height ||
+            runtimeAttestation.renderedImage.hostProjectSha256 !== project.hash
+          ) {
+            throw new Error(
+              'runtime host-artifact capture files do not match the terminal host attestation',
+            );
+          }
+        }
+        const evidenceMetadata = runtimeBound
+          ? {
+              evidenceClass: 'runtime_attested_host_artifacts',
+              executionId: manifest.hostExecutionId,
+              terminalHostReportId: host.reportId,
+              terminalHostEventSequence: host.sequence,
+              planContentSha256: host.planContentSha256,
+            }
+          : {
+              evidenceClass: 'manual_artifact_not_runtime_bound',
+              warning:
+                'The file was supplied by the capture operator and is not hash-attested by the terminal host report.',
+              executionId: manifest.hostExecutionId,
+              terminalHostReportId: host.reportId,
+              terminalHostEventSequence: host.sequence,
+              planContentSha256: host.planContentSha256,
+            };
         const artifacts: EvalArtifactReference[] = [
           ...run.artifacts,
           {
             artifactId: manifest.hostProject.artifactId,
             kind: 'host_project',
-            mediaType: 'application/octet-stream',
+            mediaType: runtimeBound ? 'application/x-blender' : 'application/octet-stream',
             uri: project.uri,
             contentSha256: project.hash,
-            metadata: manualEvidenceMetadata,
+            metadata: evidenceMetadata,
           },
           {
             artifactId: manifest.renderedImage.artifactId,
-            kind: 'manual_review_image',
+            kind: runtimeBound ? 'rendered_image' : 'manual_review_image',
             mediaType: 'image/png',
             uri: image.uri,
             contentSha256: image.hash,
             metadata: {
-              ...manualEvidenceMetadata,
+              ...evidenceMetadata,
               ...dimensions,
-              frame: manifest.renderedImage.frame,
-              renderEngine: manifest.renderedImage.renderEngine,
-              colorManagement: manifest.renderedImage.colorManagement,
+              frame:
+                runtimeAttestation?.renderedImage.frame ??
+                (manifest.captureMode === 'host_execution_with_manual_artifacts'
+                  ? manifest.renderedImage.frame
+                  : null),
+              renderEngine:
+                runtimeAttestation?.renderedImage.renderEngine ??
+                (manifest.captureMode === 'host_execution_with_manual_artifacts'
+                  ? manifest.renderedImage.renderEngine
+                  : 'unknown'),
+              colorManagement:
+                runtimeAttestation?.renderedImage.colorManagement ??
+                (manifest.captureMode === 'host_execution_with_manual_artifacts'
+                  ? manifest.renderedImage.colorManagement
+                  : 'unknown'),
               hostVersion: hostReport.report.hostVersion,
               adapterVersion: hostReport.report.companionVersion,
               hostProjectSha256: project.hash,
             },
+            ...(runtimeBound && runtimeAttestation !== undefined && runtimeAttestation !== null
+              ? {
+                  visualEnvironment: {
+                    width: dimensions.width,
+                    height: dimensions.height,
+                    frame: runtimeAttestation.renderedImage.frame,
+                    renderEngine: runtimeAttestation.renderedImage.renderEngine,
+                    colorManagement: runtimeAttestation.renderedImage.colorManagement,
+                    hostVersion: hostReport.report.hostVersion,
+                    adapterVersion: hostReport.report.companionVersion,
+                    planContentSha256: host.planContentSha256,
+                    executionId: manifest.hostExecutionId,
+                    terminalHostReportId: host.reportId,
+                    terminalHostEventSequence: host.sequence,
+                    hostProjectSha256: project.hash,
+                  },
+                }
+              : {}),
           },
         ];
         run = createProviderEvalRun({
@@ -808,7 +937,11 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
           credentialsStored: false,
           providerCredentialsRequired: false,
           providerCallsEnabled: false,
-          treatmentEvidence: 'operator_attested_not_runtime_verified',
+          treatmentEvidence:
+            run.runtimeAttestation === null
+              ? 'operator_attested_not_runtime_verified'
+              : 'runtime_attested',
+          runtimeTreatmentEligible: run.runtimeAttestation !== null,
           releasedComparisonEligible: false,
           providerBlindSignoffRequiredBeforeReview: true,
         },

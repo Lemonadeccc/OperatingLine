@@ -53,7 +53,10 @@ type CompletedReplanOutcome = Extract<
 type FailedOutcome = Extract<ProviderEvalOutcome, { status: 'failed' }>;
 
 export type ProviderEvalInvocationInput =
-  Omit<InitialInvocation, 'packetSha256'> | Omit<ReplanInvocation, 'packetSha256'>;
+  | (Omit<InitialInvocation, 'packetSha256' | 'requestFingerprint' | 'goalProvenance'> & {
+      readonly goalProvenance?: InitialInvocation['goalProvenance'];
+    })
+  | Omit<ReplanInvocation, 'packetSha256' | 'requestFingerprint' | 'goalProvenance'>;
 
 export type ProviderEvalOutcomeInput =
   | Omit<CompletedInitialOutcome, 'resultSha256'>
@@ -62,10 +65,16 @@ export type ProviderEvalOutcomeInput =
 
 export type ProviderEvalRunInput = Omit<
   ProviderEvalRun,
-  'invocation' | 'generationSettings' | 'outcome' | 'comparability' | 'integrity'
+  | 'invocation'
+  | 'generationSettings'
+  | 'runtimeAttestation'
+  | 'outcome'
+  | 'comparability'
+  | 'integrity'
 > & {
   readonly invocation: ProviderEvalInvocationInput;
   readonly generationSettings: Omit<ProviderEvalRun['generationSettings'], 'parametersSha256'>;
+  readonly runtimeAttestation?: ProviderEvalRun['runtimeAttestation'];
   readonly outcome: ProviderEvalOutcomeInput;
   readonly reproducibility: ProviderEvalRun['comparability']['reproducibility'];
 };
@@ -74,8 +83,18 @@ export function createProviderEvalRun(input: ProviderEvalRunInput): ProviderEval
   const baseInput = Object.fromEntries(
     Object.entries(input).filter(([key]) => key !== 'reproducibility'),
   );
+  const goalProvenance =
+    input.invocation.operation === 'initial_plan'
+      ? (input.invocation.goalProvenance ?? null)
+      : null;
   const invocation = {
     ...input.invocation,
+    requestFingerprint: computeHumanEvalContentSha256(
+      goalProvenance === null
+        ? input.invocation.request
+        : { request: input.invocation.request, ...goalProvenance },
+    ),
+    goalProvenance,
     packetSha256: computeHumanEvalContentSha256(input.invocation.packet),
   } as ProviderEvalInvocation;
   const generationSettings = {

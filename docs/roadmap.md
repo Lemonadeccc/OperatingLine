@@ -152,9 +152,15 @@
       adjudicator 也不能是该 Run 的 reviewer。默认 capture/blind/review/check/report 不调用模型 Provider
       或产生 API 费用；snapshot 只使用且不保存本地 Runtime access token。人工 artifact 模式只验证宿主
       terminal event；工程/PNG 没有 Runtime hash 绑定，只可供本地盲审，不能满足 released visual artifact
-      evidence。Provider profile/settings 也只是 operator-attested，Run 强制 `not_reproducible`；发布级
-      treatment comparison 仍等待 Runtime attestation。见
+      evidence。该手工路径的 Provider profile/settings 也只是 operator-attested，Run 强制
+      `not_reproducible`；运行时证明由下一个已完成里程碑补充。见
       [ADR 0019](adr/0019-local-human-eval-capture-and-blind-review.md)。
+- [x] Runtime-attested Eval 证据链：opt-in Provider 在 requested/completed 事件中封存规范化
+      profile/settings、treatment、request/packet/output hash；Guide/Companion `1.5.0` 终态保存 Blender
+      工程副本并绑定 `.blend`/PNG hash、尺寸与渲染环境。Capture 新增
+      `host_execution_with_runtime_attested_artifacts`，released 校验会从冻结事件重新核对 Run、终态报告和
+      实际 artifact 字节。operator/manual 路径继续诚实降级；这不代表已经调用真实 Provider、完成人工
+      盲审或发布数据集。见 [ADR 0036](adr/0036-runtime-attested-eval-evidence.md)。
 - [x] Observation 成功门与恢复策略：Guide/Companion protocol `1.2.0` 为可执行叶节点增加显式
       `telemetry | success_gate` policy；失败可自动补偿并原位重试，或保留现场、锁住 Next 后通过
       `Recheck Observations`/`Back` 恢复。blocked step 不进入 completed evidence，成功报告复用放行时
@@ -191,8 +197,8 @@
         分歧；当前 `blindSignoffCount`、`annotationCount` 与 `adjudicationCount` 均为 0。
   - [ ] 附加真实 Blender 执行事件与内容哈希渲染 artifact，完成人工数据审核后再把 suite 从
         `collecting` 推进到 `released` 并发布 comparison。
-  - [ ] 让 Runtime 对 Provider/model/settings 与生成 artifact hash 提供不可变 attestation；在此之前，
-        operator-attested capture 固定 `not_reproducible`，手工附加 PNG 不能满足 released visual evidence。
+  - [x] Runtime 对 Provider/model/settings 与生成 artifact hash 提供不可变 attestation；未提供证明时，
+        operator-attested capture 仍固定 `not_reproducible`，手工附加 PNG 仍不能满足 released visual evidence。
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。

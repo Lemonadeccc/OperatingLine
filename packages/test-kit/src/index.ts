@@ -65,6 +65,9 @@ export class FakePlannerProvider implements PlannerProvider {
   readonly dialogueInputs: PlannerProviderDialogueInput[] = [];
   readonly replan?: (input: PlannerProviderReplanInput) => Promise<unknown>;
   readonly dialogue?: NonNullable<PlannerProvider['dialogue']>;
+  declare readonly describeRuntimeTreatment?: NonNullable<
+    PlannerProvider['describeRuntimeTreatment']
+  >;
   closeCalls = 0;
   private readonly handler: FakePlannerProviderHandler;
 
@@ -86,9 +89,18 @@ export class FakePlannerProvider implements PlannerProvider {
     },
     replanHandler?: FakePlannerProviderReplanHandler,
     dialogueHandler?: FakePlannerProviderDialogueHandler,
+    describeRuntimeTreatment?: NonNullable<PlannerProvider['describeRuntimeTreatment']>,
   ) {
     this.handler = handler;
     this.descriptor = descriptor;
+    if (describeRuntimeTreatment !== undefined) {
+      Object.defineProperty(this, 'describeRuntimeTreatment', {
+        value: describeRuntimeTreatment,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+    }
     if (replanHandler !== undefined) {
       this.replan = async (input) => {
         this.replanInputs.push(input);

@@ -1228,7 +1228,7 @@ def assert_companion_and_plan_semantics() -> None:
                 assert query["limit"] == ["20"]
                 self._reply(
                     {
-                        "protocolVersion": "1.4.0",
+                        "protocolVersion": "1.5.0",
                         "targetAdapterId": "blender",
                         "instanceId": companion.instance_id,
                         "planId": query["planId"][0],
@@ -1560,7 +1560,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(revision_requests) == 1
         revision_request = revision_requests[0]
         uuid.UUID(revision_request["requestId"])
-        assert revision_request["protocolVersion"] == "1.4.0"
+        assert revision_request["protocolVersion"] == "1.5.0"
         assert revision_request["adapterId"] == "blender"
         assert revision_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
         assert revision_request["instanceId"] == companion.instance_id
@@ -1725,7 +1725,7 @@ def assert_companion_and_plan_semantics() -> None:
         provider_plan["revision"] = DYNAMIC_REVISION + 1
         provider_plan_content_sha256 = canonical_plan_content_sha256(provider_plan)
         provider_proposal = {
-            "protocolVersion": "1.4.0",
+            "protocolVersion": "1.5.0",
             "proposalId": provider_proposal_id,
             "targetAdapterId": "blender",
             "targetInstanceId": companion.instance_id,
@@ -2499,6 +2499,7 @@ def assert_companion_and_plan_semantics() -> None:
             "stepId",
             "observations",
             "observationGate",
+            "artifactAttestation",
             "error",
             "occurredAt",
         }
@@ -2511,6 +2512,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(report["planContentSha256"]) == 64
         assert report["executionId"] is None
         assert report["phase"] == "ready" and report["error"] is None
+        assert report["artifactAttestation"] is None
 
         # A stale/unknown acknowledgement is an error and cannot advance the
         # delivery watermark. Once accepted, the same pending report can flush.
@@ -2722,7 +2724,7 @@ def assert_companion_and_plan_semantics() -> None:
     )
     branch_controller.set_revision_branches(
         {
-            "protocolVersion": "1.4.0",
+            "protocolVersion": "1.5.0",
             "targetAdapterId": "blender",
             "instanceId": branch_controller.instance_id,
             "planId": branch_target_plan["id"],
@@ -2787,7 +2789,7 @@ def assert_companion_and_plan_semantics() -> None:
     branch_controller.begin_revision_fork()
     branch_controller.add_revision_reference("active", "snowman.model.head")
     fork_request = branch_controller.submit_revision_request("Make a forked head edit")
-    assert fork_request["protocolVersion"] == "1.4.0"
+    assert fork_request["protocolVersion"] == "1.5.0"
     assert fork_request["revisionThread"] == {
         "threadId": fork_request["requestId"],
         "turn": 1,

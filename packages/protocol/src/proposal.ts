@@ -91,16 +91,23 @@ export const guideProposalSchema = z
     if (proposal.protocolVersion !== '1.0.0' && proposal.planDiff == null) {
       context.addIssue({ code: 'custom', message: 'A request-linked proposal requires planDiff' });
     }
-    if (proposal.protocolVersion === '1.4.0' && proposal.revisionOperation === undefined) {
+    if (
+      (proposal.protocolVersion === '1.4.0' || proposal.protocolVersion === '1.5.0') &&
+      proposal.revisionOperation === undefined
+    ) {
       context.addIssue({
         code: 'custom',
-        message: 'Protocol 1.4 request-linked proposals require revisionOperation',
+        message: 'Protocol 1.4+ request-linked proposals require revisionOperation',
       });
     }
-    if (proposal.protocolVersion !== '1.4.0' && proposal.revisionOperation !== undefined) {
+    if (
+      proposal.protocolVersion !== '1.4.0' &&
+      proposal.protocolVersion !== '1.5.0' &&
+      proposal.revisionOperation !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
-        message: 'Proposal revisionOperation requires protocol 1.4',
+        message: 'Proposal revisionOperation requires protocol 1.4+',
       });
     }
     if (proposal.revisionOperation?.kind === 'merge') {
@@ -129,7 +136,9 @@ export const guideProposalSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0'] } },
+          properties: {
+            protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0'] },
+          },
           required: ['protocolVersion'],
         },
         then: { required: ['planDiff'] },
@@ -157,7 +166,7 @@ export const guideProposalSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.4.0' } },
+          properties: { protocolVersion: { enum: ['1.4.0', '1.5.0'] } },
           required: ['protocolVersion', 'revisionRequestId'],
         },
         then: { required: ['revisionOperation'] },

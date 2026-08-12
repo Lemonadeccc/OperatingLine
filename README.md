@@ -198,13 +198,15 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `needs_revision` 或缺少授权/下游证据的 treatment 以
   `unable_to_judge` 保留；具备精确授权链的宿主 error 可保留 `not_met` 或 `partially_met`。两类失败都
   不从对照中选择性删除。仓库已实现本地采集与盲审链：冻结版本化 Eval snapshot 后，按
-  `provider_only` 或 `host_execution_with_manual_artifacts` 捕获 Run；后者验证宿主 terminal event，但工程与
-  PNG 由操作者手工附加，没有 Runtime artifact hash 绑定，只供本地盲审查看，不能满足 released visual
-  artifact evidence。PNG 以无 `visualEnvironment` 的 `manual_review_image` 保存；preparer 必须人工
+  `provider_only`、`host_execution_with_manual_artifacts` 或
+  `host_execution_with_runtime_attested_artifacts` 捕获 Run；手工模式验证宿主 terminal event，但工程与
+  PNG 由操作者附加，只供本地盲审查看，不能满足 released visual artifact evidence。运行时模式要求
+  Guide/Companion `1.5.0` 终态逐字段证明 `.blend`/PNG 的 ID、哈希、尺寸与渲染环境，并在 released 校验时
+  再从冻结事件和实际字节交叉核对。手工 PNG 以无 `visualEnvironment` 的 `manual_review_image` 保存；preparer 必须人工
   检查每个精确哈希对应的像素，再由 blind sign-off 绑定该逐图声明。项目和 PNG metadata 都标记
   `manual_artifact_not_runtime_bound`。Capture 中的 Provider
-  profile/settings 同样是 operator-attested、不是
-  Runtime-attested，并强制 `not_reproducible`；发布级 treatment comparison 仍需后续 Runtime attestation。
+  profile/settings 可保留 operator-attested 降级并强制 `not_reproducible`；opt-in Provider 也可把规范化
+  profile/settings、request/packet/output hash 写成运行时证明，供 capture 和 released 门禁精确复核。
   每个 Run 必须先由独立 preparer 检查
   provider-blind 投影并写入 sign-off sidecar，才能在回环 headless service 提供的浏览器工作台中由两名
   独立 reviewer 审核；只有保留的分歧才交给第三个独立 adjudicator。浏览器只收到 opaque Run ID 和
@@ -876,7 +878,8 @@ Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
    每个 Run 仍需至少两名独立 reviewer 盲审，并附加真实宿主执行与渲染 artifact。首个可选 OpenAI
-   Responses 插件、类型化局部重规划后端、原生 Revision Workspace 和逐轮授权的流式语义重规划已经
+   Responses 插件、类型化局部重规划后端、原生 Revision Workspace、逐轮授权的流式语义重规划，以及
+   Provider/Blender 运行时 treatment/artifact attestation 已经
    完成，但它们不证明任意目标语义规划可靠；系统仍不自动选择 Provider、后台调用、接受或执行。
    OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与

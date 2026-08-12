@@ -10,6 +10,8 @@ import {
   plannerGenerationFormatVersionSchema,
   plannerGenerationStatusSchema,
   plannerProviderIdSchema,
+  plannerProviderRuntimeOutputAttestationSchema,
+  plannerProviderRuntimeTreatmentAttestationSchema,
 } from './provider.js';
 import { guideReplanSubmissionSchema, guideRevisionRequestSchema } from './revision.js';
 import { catalogVersionSchema } from './version.js';
@@ -484,6 +486,7 @@ const plannerReplanEventScopeSchema = z.strictObject({
 
 export const plannerReplanRequestedEventSchema = plannerReplanEventScopeSchema.extend({
   packetFormatVersion: replanningPromptFormatVersionSchema,
+  runtimeTreatment: plannerProviderRuntimeTreatmentAttestationSchema.optional(),
   occurredAt: z.iso.datetime({ offset: true }),
 });
 export type PlannerReplanRequestedEvent = z.infer<typeof plannerReplanRequestedEventSchema>;
@@ -493,6 +496,7 @@ export const plannerReplanCompletedEventSchema = z
     request: plannerReplanGenerateRequestSchema,
     requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     result: plannerReplanGenerationResultSchema,
+    runtimeAttestation: plannerProviderRuntimeOutputAttestationSchema.optional(),
   })
   .superRefine((event, context) => {
     if (
@@ -503,6 +507,18 @@ export const plannerReplanCompletedEventSchema = z
       context.addIssue({
         code: 'custom',
         message: 'Completed replan evidence must match its exact provider request',
+      });
+    }
+    if (
+      event.runtimeAttestation !== undefined &&
+      (event.runtimeAttestation.operation !== 'local_replan' ||
+        event.runtimeAttestation.requestId !== event.request.requestId ||
+        event.runtimeAttestation.requestFingerprint !== event.requestFingerprint)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeAttestation'],
+        message: 'Runtime attestation must match the exact replan request',
       });
     }
   });

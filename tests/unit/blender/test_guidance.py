@@ -1655,7 +1655,7 @@ class RevisionContractTests(unittest.TestCase):
         instance_id = str(uuid.uuid4())
         accepted_plan = {"id": "snowman", "revision": 4}
         branches = {
-            "protocolVersion": "1.4.0",
+            "protocolVersion": "1.5.0",
             "targetAdapterId": "blender",
             "instanceId": instance_id,
             "planId": "snowman",

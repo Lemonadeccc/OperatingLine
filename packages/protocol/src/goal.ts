@@ -5,7 +5,7 @@ import { planningPromptRequestSchema } from './prompt.js';
 import { catalogVersionSchema } from './version.js';
 
 export const guideGoalRequestSchema = z.strictObject({
-  protocolVersion: z.enum(['1.1.0', '1.2.0', '1.3.0', guideProtocolVersion]),
+  protocolVersion: z.enum(['1.1.0', '1.2.0', '1.3.0', '1.4.0', guideProtocolVersion]),
   requestId: z.uuid(),
   adapterId: planningPromptRequestSchema.shape.targetAdapterId,
   catalogVersion: catalogVersionSchema,

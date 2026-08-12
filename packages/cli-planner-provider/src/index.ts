@@ -7,6 +7,8 @@ import type {
   PlannerProvider,
   PlannerProviderGenerateInput,
   PlannerProviderReplanInput,
+  PlannerProviderRuntimeOperation,
+  PlannerProviderRuntimeTreatmentDescription,
 } from '@operatingline/planner-provider-sdk';
 import {
   plannerProviderContractVersion,
@@ -132,6 +134,61 @@ class CliPlannerProvider implements PlannerProvider {
 
   async generate(input: PlannerProviderGenerateInput): Promise<unknown> {
     return this.requestJson(input.packet.renderedPrompt, input.signal);
+  }
+
+  describeRuntimeTreatment(
+    _operation: PlannerProviderRuntimeOperation,
+  ): PlannerProviderRuntimeTreatmentDescription {
+    const isCodex = this.definition.kind === 'codex';
+    const requestedModel = this.definition.model ?? 'cli-configured-default';
+    const normalizedParameters = isCodex
+      ? {
+          executable: this.definition.executable,
+          interface: 'exec',
+          ephemeral: true,
+          sandbox: 'read-only',
+          ignoreUserConfig: true,
+          model: requestedModel,
+        }
+      : {
+          executable: this.definition.executable,
+          interface: 'print',
+          safeMode: true,
+          tools: 'disabled',
+          permissionMode: 'dontAsk',
+          sessionPersistence: false,
+          maximumBudgetUsd: this.definition.maximumBudgetUsd,
+          model: requestedModel,
+        };
+    return {
+      profile: {
+        descriptor: this.descriptor,
+        vendor: isCodex ? 'OpenAI' : 'Anthropic',
+        implementation: {
+          name: '@operatingline/cli-planner-provider',
+          version: providerVersion,
+        },
+        model: {
+          requested: requestedModel,
+          resolvedRevision: null,
+          resolution: 'provider_did_not_disclose',
+        },
+        api: {
+          surface: isCodex ? 'codex-cli' : 'claude-code-cli',
+          version: 'cli-managed',
+          sdkName: isCodex ? 'codex' : 'claude',
+          sdkVersion: 'provider_did_not_disclose',
+          endpointClass: 'local',
+          serviceTier: null,
+          region: null,
+        },
+      },
+      generationSettings: {
+        normalizedParameters,
+        seed: null,
+        determinism: 'unknown',
+      },
+    };
   }
 
   async replan(input: PlannerProviderReplanInput): Promise<unknown> {

@@ -1,6 +1,7 @@
 """Headless end-to-end Blender test for the complete renderable snowman plan."""
 
 import importlib.util
+import hashlib
 import json
 import math
 import os
@@ -668,7 +669,43 @@ def main() -> None:
         execute_through(session, ACTION_STEPS[-1]["id"])
 
         assert len(session.receipts) == len(ACTION_STEPS)
-        assert operating_line.get_companion().last_report["phase"] == "completed"
+        initial_final_report = operating_line.get_companion().last_report
+        assert initial_final_report["phase"] == "completed"
+        assert initial_final_report["artifactAttestation"] is not None
+        initial_artifact_attestation = initial_final_report["artifactAttestation"]
+        initial_project_path = Path(
+            os.environ["OPERATINGLINE_RENDER_OUTPUT_DIR"]
+        ) / (
+            f"host-project-{session.execution_id}-"
+            f"{initial_final_report['reportId']}.blend"
+        )
+        assert initial_project_path.is_file()
+
+        assert bpy.ops.operating_line.back() == {"FINISHED"}
+        assert session.active_index == len(ACTION_STEPS) - 2
+        assert len(session.receipts) == len(ACTION_STEPS) - 1
+        assert (
+            operating_line.get_companion().last_report["artifactAttestation"] is None
+        )
+
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        assert session.active_index == len(ACTION_STEPS) - 1
+        assert len(session.receipts) == len(ACTION_STEPS)
+        final_report = operating_line.get_companion().last_report
+        assert final_report["phase"] == "completed"
+        assert final_report["reportId"] != initial_final_report["reportId"]
+        assert final_report["artifactAttestation"] is not None
+        assert final_report["artifactAttestation"]["hostProject"]["artifactId"] != (
+            initial_artifact_attestation["hostProject"]["artifactId"]
+        )
+        assert final_report["artifactAttestation"]["renderedImage"]["artifactId"] != (
+            initial_artifact_attestation["renderedImage"]["artifactId"]
+        )
+        project_path = Path(os.environ["OPERATINGLINE_RENDER_OUTPUT_DIR"]) / (
+            f"host-project-{session.execution_id}-{final_report['reportId']}.blend"
+        )
+        assert project_path.is_file()
+        assert project_path != initial_project_path
         registry = build_resource_registry(session.receipts)
 
         render_arguments = ACTION_BY_ID["snowman.render.preview"]["action"]["arguments"]
@@ -685,6 +722,44 @@ def main() -> None:
         assert (artifact.width, artifact.height) == (
             render_arguments["resolutionX"],
             render_arguments["resolutionY"],
+        )
+        artifact_attestation = final_report["artifactAttestation"]
+        assert artifact_attestation["evidenceClass"] == (
+            "runtime_attested_host_artifacts"
+        )
+        assert artifact_attestation["executionId"] == session.execution_id
+        assert artifact_attestation["planContentSha256"] == (
+            session.plan_content_sha256
+        )
+        assert artifact_attestation["renderedImage"] == {
+            "artifactId": (
+                f"render.{artifact.logical_id}.{session.execution_id}."
+                f"{final_report['reportId']}"
+            ),
+            "kind": "rendered_image",
+            "mediaType": "image/png",
+            "contentSha256": artifact.sha256,
+            "width": artifact.width,
+            "height": artifact.height,
+            "frame": artifact.frame,
+            "renderEngine": artifact.render_engine,
+            "colorManagement": artifact.color_management,
+            "hostProjectSha256": artifact_attestation["hostProject"][
+                "contentSha256"
+            ],
+        }
+        assert artifact_attestation["hostProject"]["artifactId"] == (
+            f"host.project.{session.execution_id}.{final_report['reportId']}"
+        )
+        project_files = tuple(
+            Path(os.environ["OPERATINGLINE_RENDER_OUTPUT_DIR"]).glob(
+                f"host-project-{session.execution_id}-*.blend"
+            )
+        )
+        assert set(project_files) == {initial_project_path, project_path}
+        assert (
+            hashlib.sha256(project_path.read_bytes()).hexdigest()
+            == artifact_attestation["hostProject"]["contentSha256"]
         )
 
         render_scene = resolve_resource(registry["snowman.render.scene"])
