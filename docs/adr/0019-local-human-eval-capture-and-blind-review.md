@@ -113,9 +113,9 @@ artifact 都显式失败。
 角色以 pseudonym 隔离：
 
 - blind-surface preparer 不能创建 reviewer 或 adjudicator session；
-- 同一 Run 的 released policy 至少要求两名不同 reviewer；
+- 同一 Run 的 released policy 要求达到 suite 配置的最低独立 reviewer 人数（协议允许 2–10 人）；
 - adjudicator 不能是被引用 annotation 的 reviewer；
-- adjudication 只对至少两名当前 reviewer 的真实逐 criterion 分歧开放；
+- adjudication 只在当前 reviewer 达到 suite 最低人数且存在真实逐 criterion 分歧时开放；
 - 原 annotation 永久保留，不做平均或多数表决。
 
 Reviewer 更正通过新 annotation supersede 自己的旧记录，不能覆盖历史文件。

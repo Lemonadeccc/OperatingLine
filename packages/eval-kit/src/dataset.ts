@@ -29,6 +29,11 @@ import {
   computeHumanEvalContentSha256,
   computePlanContentSha256,
 } from './integrity.js';
+import {
+  evaluateHumanEvalRunReviewPolicy,
+  resolveActiveHumanEvalAnnotations,
+} from './review-policy.js';
+import { evaluateHumanEvalCaseCapturePolicy } from './collection-policy.js';
 
 export interface HumanEvalDatasetInput {
   readonly suite: unknown;
@@ -375,18 +380,6 @@ function checkJudgmentEvidence(
   }
 }
 
-function judgmentsDisagree(annotations: readonly HumanEvalAnnotation[]): boolean {
-  const judgmentsByCriterion = new Map<string, Set<string>>();
-  for (const annotation of annotations) {
-    for (const judgment of annotation.review.judgments) {
-      const values = judgmentsByCriterion.get(judgment.criterionId) ?? new Set<string>();
-      values.add(judgment.judgment);
-      judgmentsByCriterion.set(judgment.criterionId, values);
-    }
-  }
-  return [...judgmentsByCriterion.values()].some((judgments) => judgments.size > 1);
-}
-
 function isJudgeableJudgment(
   judgment: HumanEvalAnnotation['review']['judgments'][number],
 ): boolean {
@@ -473,52 +466,6 @@ function checkReleasedStageEvidence(
       );
     }
   }
-}
-
-function activeAnnotations(
-  annotations: readonly HumanEvalAnnotation[],
-  issues: string[],
-): readonly HumanEvalAnnotation[] {
-  const byId = new Map(annotations.map((annotation) => [annotation.annotationId, annotation]));
-  const superseded = new Set<string>();
-  for (const annotation of annotations) {
-    const targetId = annotation.supersedesAnnotationId;
-    if (targetId === null) {
-      continue;
-    }
-    const target = byId.get(targetId);
-    if (target === undefined) {
-      issues.push(
-        `Annotation ${annotation.annotationId} supersedes unknown annotation ${targetId}`,
-      );
-      continue;
-    }
-    if (
-      target.runId !== annotation.runId ||
-      target.reviewer.pseudonym !== annotation.reviewer.pseudonym
-    ) {
-      issues.push(
-        `Annotation ${annotation.annotationId} may only supersede the same reviewer's run`,
-      );
-    }
-    if (superseded.has(targetId)) {
-      issues.push(`Annotation ${targetId} has more than one successor`);
-    }
-    superseded.add(targetId);
-  }
-  for (const annotation of annotations) {
-    const visited = new Set<string>([annotation.annotationId]);
-    let parentId = annotation.supersedesAnnotationId;
-    while (parentId !== null) {
-      if (visited.has(parentId)) {
-        issues.push(`Annotation supersession cycle includes ${annotation.annotationId}`);
-        break;
-      }
-      visited.add(parentId);
-      parentId = byId.get(parentId)?.supersedesAnnotationId ?? null;
-    }
-  }
-  return annotations.filter((annotation) => !superseded.has(annotation.annotationId));
 }
 
 export function validateHumanEvalDataset(input: HumanEvalDatasetInput): ValidatedHumanEvalDataset {
@@ -696,7 +643,9 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
     }
   }
 
-  const currentAnnotations = activeAnnotations(annotations, issues);
+  const currentAnnotationResolution = resolveActiveHumanEvalAnnotations(annotations);
+  issues.push(...currentAnnotationResolution.issues);
+  const currentAnnotations = currentAnnotationResolution.activeAnnotations;
   const currentReviewerKeys = new Set<string>();
   for (const annotation of currentAnnotations) {
     const key = `${annotation.runId}\u0000${annotation.reviewer.pseudonym}`;
@@ -779,10 +728,19 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
     ) {
       issues.push(`${label} must reference every current annotation for its run`);
     }
-    if (new Set(referenced.map((annotation) => annotation.reviewer.pseudonym)).size < 2) {
-      issues.push(`${label} requires at least two independent reviewers`);
+    const adjudicationPolicy = evaluateHumanEvalRunReviewPolicy(referenced, {
+      minimumIndependentAnnotationsPerRun: suite.policy.minimumIndependentAnnotationsPerRun,
+      hasAdjudication: false,
+    });
+    if (!adjudicationPolicy.meetsIndependentReviewerMinimum) {
+      issues.push(
+        `${label} requires ${suite.policy.minimumIndependentAnnotationsPerRun} independent reviewers`,
+      );
     }
-    if (referenced.length >= 2 && !judgmentsDisagree(referenced)) {
+    if (
+      adjudicationPolicy.meetsIndependentReviewerMinimum &&
+      !adjudicationPolicy.hasCriterionDisagreement
+    ) {
       issues.push(`${label} may only resolve a preserved reviewer disagreement`);
     }
     if (
@@ -855,22 +813,12 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
       }
     }
     for (const evalCase of suite.cases) {
-      const caseRuns = runs.filter(
-        (run) =>
-          run.caseRef.caseId === evalCase.id && run.sourceKind === 'live_provider_invocation',
+      const capturePolicy = evaluateHumanEvalCaseCapturePolicy(
+        evalCase.id,
+        runs,
+        suite.policy.minimumDistinctTreatmentsPerCase,
       );
-      const treatmentsByCondition = new Map<string, Set<string>>();
-      for (const run of caseRuns) {
-        const treatments =
-          treatmentsByCondition.get(run.comparability.conditionSha256) ?? new Set<string>();
-        treatments.add(run.comparability.treatmentSha256);
-        treatmentsByCondition.set(run.comparability.conditionSha256, treatments);
-      }
-      if (
-        ![...treatmentsByCondition.values()].some(
-          (treatments) => treatments.size >= suite.policy.minimumDistinctTreatmentsPerCase,
-        )
-      ) {
+      if (capturePolicy.remainingDistinctTreatments > 0) {
         issues.push(
           `Released case ${evalCase.id} lacks ${suite.policy.minimumDistinctTreatmentsPerCase} live treatments under one condition`,
         );
@@ -880,15 +828,16 @@ export function validateHumanEvalDataset(input: HumanEvalDatasetInput): Validate
       const runAnnotations = currentAnnotations.filter(
         (annotation) => annotation.runId === run.runId,
       );
-      const reviewerCount = new Set(
-        runAnnotations.map((annotation) => annotation.reviewer.pseudonym),
-      ).size;
-      if (reviewerCount < suite.policy.minimumIndependentAnnotationsPerRun) {
+      const reviewPolicy = evaluateHumanEvalRunReviewPolicy(runAnnotations, {
+        minimumIndependentAnnotationsPerRun: suite.policy.minimumIndependentAnnotationsPerRun,
+        hasAdjudication: adjudicationsByRun.has(run.runId),
+      });
+      if (!reviewPolicy.meetsIndependentReviewerMinimum) {
         issues.push(
-          `Released run ${run.runId} has ${reviewerCount} independent annotations; ${suite.policy.minimumIndependentAnnotationsPerRun} required`,
+          `Released run ${run.runId} has ${reviewPolicy.currentIndependentReviewerCount} independent annotations; ${suite.policy.minimumIndependentAnnotationsPerRun} required`,
         );
       }
-      if (judgmentsDisagree(runAnnotations) && !adjudicationsByRun.has(run.runId)) {
+      if (reviewPolicy.adjudicationEligible) {
         issues.push(`Released run ${run.runId} has unresolved reviewer disagreement`);
       }
       const evalCase = casesById.get(run.caseRef.caseId);

@@ -1,13 +1,15 @@
 import {
   humanEvalComparisonReportSchema,
-  type HumanEvalAdjudication,
-  type HumanEvalAnnotation,
   type HumanEvalComparisonReport,
   type ProviderEvalRun,
 } from '@operatingline/protocol';
 
 import { HumanEvalDatasetError, type ValidatedHumanEvalDataset } from './dataset.js';
 import { computeHumanEvalRecordSha256, createHumanEvalIntegrity } from './integrity.js';
+import {
+  evaluateHumanEvalRunReviewPolicy,
+  resolveActiveHumanEvalAnnotations,
+} from './review-policy.js';
 import { isArtifactVerifiedDataset } from './verification.js';
 
 export function validateHumanEvalComparisonReport(input: unknown): HumanEvalComparisonReport {
@@ -28,58 +30,6 @@ export function validateHumanEvalComparisonReport(input: unknown): HumanEvalComp
   return report;
 }
 
-function currentAnnotationsByRun(
-  annotations: readonly HumanEvalAnnotation[],
-): ReadonlyMap<string, readonly HumanEvalAnnotation[]> {
-  const superseded = new Set(
-    annotations.flatMap((annotation) =>
-      annotation.supersedesAnnotationId === null ? [] : [annotation.supersedesAnnotationId],
-    ),
-  );
-  const byRun = new Map<string, HumanEvalAnnotation[]>();
-  for (const annotation of annotations) {
-    if (superseded.has(annotation.annotationId)) {
-      continue;
-    }
-    const existing = byRun.get(annotation.runId) ?? [];
-    existing.push(annotation);
-    byRun.set(annotation.runId, existing);
-  }
-  for (const entries of byRun.values()) {
-    entries.sort((left, right) => left.annotationId.localeCompare(right.annotationId));
-  }
-  return byRun;
-}
-
-function annotationState(
-  annotations: readonly HumanEvalAnnotation[],
-  adjudication: HumanEvalAdjudication | undefined,
-  minimum: number,
-): 'missing' | 'incomplete' | 'complete' | 'disagreement_preserved' | 'adjudicated' {
-  if (annotations.length === 0) {
-    return 'missing';
-  }
-  const reviewerCount = new Set(annotations.map((annotation) => annotation.reviewer.pseudonym))
-    .size;
-  if (reviewerCount < minimum) {
-    return 'incomplete';
-  }
-  if (adjudication !== undefined) {
-    return 'adjudicated';
-  }
-  const judgmentsByCriterion = new Map<string, Set<string>>();
-  for (const annotation of annotations) {
-    for (const judgment of annotation.review.judgments) {
-      const values = judgmentsByCriterion.get(judgment.criterionId) ?? new Set<string>();
-      values.add(judgment.judgment);
-      judgmentsByCriterion.set(judgment.criterionId, values);
-    }
-  }
-  return [...judgmentsByCriterion.values()].some((judgments) => judgments.size > 1)
-    ? 'disagreement_preserved'
-    : 'complete';
-}
-
 export interface HumanEvalComparisonOptions {
   readonly generatedAt: string;
   readonly audience?: 'development' | 'published';
@@ -89,7 +39,18 @@ export function buildHumanEvalComparisonReport(
   dataset: ValidatedHumanEvalDataset,
   options: HumanEvalComparisonOptions,
 ): HumanEvalComparisonReport {
-  const annotationsByRun = currentAnnotationsByRun(dataset.annotations);
+  const activeAnnotations = resolveActiveHumanEvalAnnotations(
+    dataset.annotations,
+  ).activeAnnotations;
+  const annotationsByRun = new Map<string, Array<(typeof activeAnnotations)[number]>>();
+  for (const annotation of activeAnnotations) {
+    const existing = annotationsByRun.get(annotation.runId) ?? [];
+    existing.push(annotation);
+    annotationsByRun.set(annotation.runId, existing);
+  }
+  for (const entries of annotationsByRun.values()) {
+    entries.sort((left, right) => left.annotationId.localeCompare(right.annotationId));
+  }
   const adjudicationsByRun = new Map(
     dataset.adjudications.map((adjudication) => [adjudication.runId, adjudication]),
   );
@@ -129,11 +90,11 @@ export function buildHumanEvalComparisonReport(
             .map((run) => {
               const annotations = annotationsByRun.get(run.runId) ?? [];
               const adjudication = adjudicationsByRun.get(run.runId);
-              const state = annotationState(
-                annotations,
-                adjudication,
-                dataset.suite.policy.minimumIndependentAnnotationsPerRun,
-              );
+              const state = evaluateHumanEvalRunReviewPolicy(annotations, {
+                minimumIndependentAnnotationsPerRun:
+                  dataset.suite.policy.minimumIndependentAnnotationsPerRun,
+                hasAdjudication: adjudication !== undefined,
+              }).annotationState;
               if (state === 'missing' || state === 'incomplete') {
                 runsBelowAnnotationMinimum.push(run.runId);
               }

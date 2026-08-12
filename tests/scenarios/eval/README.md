@@ -94,13 +94,14 @@ CRC 和压缩 scanline，验证 palette 与 indexed pixel 引用，并核对解�
 
 Annotation 必须绑定精确 Run 和 rubric hash、覆盖案例全部适用 criterion，并为每项判断提供允许类型的
 证据。更正使用 `supersedesAnnotationId`，不覆盖旧记录。Adjudication 通过 ID 与 content SHA-256 只引用
-同一 Run 上至少两名独立 reviewer 的当前 annotation。
+同一 Run 上达到 suite 配置最低人数的独立 reviewer 当前 annotation（协议允许 2–10 人）。
 
 ## 本地采集与盲审入口
 
 固定操作顺序为：版本化 snapshot → runtime-attested manifest 派生或人工 manifest → `provider_only`、
 `host_execution_with_manual_artifacts` 或 `host_execution_with_runtime_attested_artifacts` capture → 独立 preparer
-blind sign-off → 两名独立 reviewer → 仅在存在分歧时由独立 adjudicator 裁决 → check/report。
+blind sign-off → 达到 suite policy 最低人数的独立 reviewer → 仅在存在分歧时由独立 adjudicator 裁决 →
+check/report。
 
 ```bash
 pnpm eval:snapshot \
@@ -206,6 +207,7 @@ pnpm eval:report
 
 ```bash
 pnpm eval:check path/to/dataset
+pnpm eval:check path/to/dataset --worklist
 pnpm eval:report path/to/dataset
 ```
 
@@ -214,6 +216,10 @@ Eval-export pages、Provider outcome、宿主事件、annotation supersession、
 readiness。`eval:report` 向标准输出生成 published-audience、内容寻址、无分数 comparison；它只接受
 完成 artifact 验证的目录数据集，按相同
 `conditionSha256` 分组，保留每名 reviewer 的原始 judgment，并报告缺失 live Run 或 annotation。
+`--worklist` 进一步列出真实记录驱动的 capture/sign-off/review/adjudication 缺口；它不会虚构未来 Run、
+Provider 分配或真人审查。Review 是全数据集 sign-off 门：任一 Run 未签署时，`reviewStage`
+明示列出阻断 Run 且 review/adjudication 队列为空。`collectionPolicyMinimumsMet` 与
+`releaseReadiness: "not_assessed"` 分开，因此队列为空也不表示公开数据审核等 release readiness 已经完成。
 
 当前默认数据集的已验证状态为：
 

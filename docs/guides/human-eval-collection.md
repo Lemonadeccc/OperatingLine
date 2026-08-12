@@ -386,6 +386,20 @@ pnpm eval:check "$EVAL_DATASET"
 pnpm eval:report "$EVAL_DATASET"
 ```
 
+需要真实记录驱动的剩余工作队列时运行：
+
+```bash
+pnpm eval:check "$EVAL_DATASET" --worklist
+```
+
+`worklist` 只根据已经存在且通过验证的记录计算：每个 case 在同一 condition 下距离最小 distinct
+treatment 数量还差多少、哪些现有 Run 缺 blind sign-off、独立 annotation 或必要 adjudication。
+Review workspace 是数据集级门禁：任一 Run（包括 non-live Run）未签署时，`reviewStage` 会列出所有阻断
+Run ID，并且不输出暂时不可执行的 review/adjudication 队列。先完成全局 sign-off 后重新运行即可得到
+下一阶段队列。`collectionPolicyMinimumsMet` 只表示采集政策最小值；
+`releaseReadiness: "not_assessed"` 明示它不代表发布就绪。`retired` suite 固定为不可操作。
+它不会发起 Provider 调用，不会生成未来 Run ID/Provider 分配，也不会把 `collecting` suite 误报为已发布数据集。
+
 `eval:check` 必须成功后才能使用 report 作为审计产物。`eval:report` 生成 published-audience、内容寻址、
 无分数 comparison；它会保留 failed、`needs_revision`、`unable_to_judge`、缺失 annotation 和未裁决分歧，
 不会输出 Provider 排名。
@@ -445,9 +459,9 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 - [ ] Blind 命令使用精确 `--assert no_provider_identity_visible`。
 - [ ] 每个 PNG 的精确像素已人工检查，且每个哈希都通过独立 `--reviewed-image-sha256` 传入。
 - [ ] 每个 Run 都有一份不可覆盖、hash 仍有效的 sign-off sidecar。
-- [ ] Preparer、reviewer A、reviewer B、adjudicator pseudonym 彼此独立。
+- [ ] Preparer、达到 suite policy 最低人数的各 reviewer、adjudicator pseudonym 彼此独立。
 - [ ] 浏览器数据不含 Provider profile、alias、sidecar 或真实 Run ID。
-- [ ] 两名 reviewer 都覆盖所有适用 criterion，并引用允许的 evidence。
+- [ ] 达到 suite policy 最低人数的 reviewer 都覆盖所有适用 criterion，并引用允许的 evidence。
 - [ ] 只有真实分歧进入 adjudication；原始 annotation 仍保留。
 - [ ] `eval:check` 成功；`eval:report` 如实显示所有缺口且没有分数或排名。
 - [ ] `trainingUse` 保持 `not_authorized`，公开发布仍经过逐记录人工审核。

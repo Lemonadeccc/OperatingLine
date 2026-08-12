@@ -29,6 +29,7 @@ import {
   type ValidatedHumanEvalDataset,
 } from './dataset.js';
 import { computeHumanEvalContentSha256, computePlanContentSha256 } from './integrity.js';
+import { resolveActiveHumanEvalAnnotations } from './review-policy.js';
 import { markArtifactVerifiedDataset } from './verification.js';
 
 export interface HumanEvalDatasetDirectoryOptions {
@@ -1063,13 +1064,8 @@ function currentAnnotationsForRun(
   dataset: ValidatedHumanEvalDataset,
   runId: string,
 ): ValidatedHumanEvalDataset['annotations'] {
-  const supersededIds = new Set(
-    dataset.annotations.flatMap((annotation) =>
-      annotation.supersedesAnnotationId === null ? [] : [annotation.supersedesAnnotationId],
-    ),
-  );
-  return dataset.annotations.filter(
-    (annotation) => annotation.runId === runId && !supersededIds.has(annotation.annotationId),
+  return resolveActiveHumanEvalAnnotations(dataset.annotations).activeAnnotations.filter(
+    (annotation) => annotation.runId === runId,
   );
 }
 

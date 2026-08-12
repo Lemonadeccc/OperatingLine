@@ -9,8 +9,17 @@ import {
   type ReviewerCaseDto,
   type ReviewerSubmission,
 } from '../../../services/eval-review/src/index.js';
-import { createProviderEvalRun } from '@operatingline/eval-kit';
-import type { HumanEvalAnnotation, HumanEvalJudgment } from '@operatingline/protocol';
+import {
+  buildHumanEvalCollectionWorklist,
+  createHumanEvalIntegrity,
+  createProviderEvalRun,
+  loadHumanEvalDatasetDirectory,
+} from '@operatingline/eval-kit';
+import {
+  humanEvalSuiteSchema,
+  type HumanEvalAnnotation,
+  type HumanEvalJudgment,
+} from '@operatingline/protocol';
 
 import {
   buildHumanEvalSuiteFixture,
@@ -26,13 +35,24 @@ afterEach(async () => {
   );
 });
 
-async function createWorkspace(): Promise<{
+async function createWorkspace(minimumIndependentAnnotationsPerRun = 2): Promise<{
   readonly directory: string;
   readonly workspace: HumanEvalReviewWorkspace;
 }> {
   const directory = await mkdtemp(join(tmpdir(), 'operatingline-review-'));
   temporaryDirectories.push(directory);
-  const suite = buildHumanEvalSuiteFixture();
+  const fixtureSuite = buildHumanEvalSuiteFixture();
+  const suiteContent = {
+    ...withoutKey(fixtureSuite, 'integrity'),
+    policy: {
+      ...fixtureSuite.policy,
+      minimumIndependentAnnotationsPerRun,
+    },
+  };
+  const suite = humanEvalSuiteSchema.parse({
+    ...suiteContent,
+    integrity: createHumanEvalIntegrity(suiteContent),
+  });
   const run = buildProviderEvalRunFixture(suite);
   const signoff = buildProviderBlindSignoffFixture(suite, run);
   await Promise.all([mkdir(join(directory, 'runs')), mkdir(join(directory, 'blind-signoffs'))]);
@@ -313,6 +333,45 @@ describe('HumanEvalReviewWorkspace', () => {
     expect(await readdir(join(directory, 'adjudications'))).toHaveLength(1);
   });
 
+  it('waits for the suite minimum of three independent reviews before opening adjudication', async () => {
+    const { directory, workspace } = await createWorkspace(3);
+    const adjudicationWorkspace = await HumanEvalReviewWorkspace.open({
+      datasetDirectory: directory,
+    });
+    const reviewerA = reviewer(workspace, 'reviewer.alpha');
+    const reviewerB = reviewer(workspace, 'reviewer.beta');
+    const reviewerC = reviewer(workspace, 'reviewer.gamma');
+    const independent = adjudicator(adjudicationWorkspace);
+
+    const dtoA = workspace.listReviewerCases(reviewerA)[0]!;
+    const dtoB = workspace.listReviewerCases(reviewerB)[0]!;
+    const dtoC = workspace.listReviewerCases(reviewerC)[0]!;
+    await workspace.submitReview(reviewerA, submission(dtoA, 'met'));
+    await workspace.submitReview(reviewerB, submission(dtoB, 'not_met'));
+
+    await adjudicationWorkspace.refresh();
+    expect(adjudicationWorkspace.listAdjudicationCases(independent)).toEqual([]);
+
+    await workspace.submitReview(reviewerC, submission(dtoC, 'met'));
+    expect(adjudicationWorkspace.listAdjudicationCases(independent)).toEqual([]);
+
+    await adjudicationWorkspace.refresh();
+    const adjudication = adjudicationWorkspace.listAdjudicationCases(independent)[0]!;
+    expect(adjudication.annotations.map((entry) => entry.label)).toEqual([
+      'Reviewer A',
+      'Reviewer B',
+      'Reviewer C',
+    ]);
+
+    await adjudicationWorkspace.submitAdjudication(independent, {
+      opaqueRunId: adjudication.opaqueRunId,
+      versionToken: adjudication.versionToken,
+      judgments: submission(adjudication, 'met').judgments,
+    });
+    expect(adjudicationWorkspace.listAdjudicationCases(independent)).toEqual([]);
+    expect(await readdir(join(directory, 'adjudications'))).toHaveLength(1);
+  });
+
   it('has no provider, credential, environment, HTTP, or network dependency by construction', async () => {
     const source = await readFile(
       join(process.cwd(), 'services/eval-review/src/review-workspace.ts'),
@@ -440,5 +499,31 @@ describe('HumanEvalReviewWorkspace', () => {
     await expect(readdir(join(directory, 'annotations'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('blocks the global review stage when any mixed-dataset run is unsigned', async () => {
+    const { directory } = await createWorkspace();
+    const suite = buildHumanEvalSuiteFixture();
+    const unsignedRun = withRunIdentity(
+      buildProviderEvalRunFixture(suite),
+      '10000000-0000-4000-8000-000000000099',
+    );
+    await writeFile(
+      join(directory, 'runs', `${unsignedRun.runId}.run.json`),
+      JSON.stringify(unsignedRun),
+    );
+
+    const dataset = await loadHumanEvalDatasetDirectory(directory);
+    const worklist = buildHumanEvalCollectionWorklist(dataset);
+    expect(worklist.reviewStage).toEqual({
+      status: 'blocked_by_unsigned_runs',
+      blockedByUnsignedRunIds: [unsignedRun.runId],
+    });
+    expect(worklist.reviews).toEqual([]);
+    expect(worklist.adjudications).toEqual([]);
+
+    await expect(HumanEvalReviewWorkspace.open({ datasetDirectory: directory })).rejects.toThrow(
+      /provider-blind sign-off for every run/,
+    );
   });
 });

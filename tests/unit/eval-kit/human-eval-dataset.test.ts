@@ -188,6 +188,46 @@ function makeNeedsRevisionRun(run: ReturnType<typeof buildProviderEvalRunFixture
   return reseal(changed);
 }
 
+function suiteWithReviewerMinimum(minimumIndependentAnnotationsPerRun: number) {
+  const content = contentWithoutIntegrity(structuredClone(buildHumanEvalSuiteFixture()));
+  content.policy.minimumIndependentAnnotationsPerRun = minimumIndependentAnnotationsPerRun;
+  return sealHumanEvalSuite(content);
+}
+
+function buildAdjudicationFixture(
+  suite: ReturnType<typeof buildHumanEvalSuiteFixture>,
+  run: ReturnType<typeof buildProviderEvalRunFixture>,
+  annotations: readonly ReturnType<typeof buildHumanEvalAnnotationFixture>[],
+) {
+  return sealHumanEvalAdjudication({
+    formatVersion: '1.0.0',
+    adjudicationId: '30000000-0000-4000-8000-000000000099',
+    caseRef: run.caseRef,
+    runId: run.runId,
+    annotationRefs: annotations.map((annotation) => ({
+      annotationId: annotation.annotationId,
+      annotationContentSha256: annotation.integrity.contentSha256,
+    })),
+    adjudicatorPseudonym: 'reviewer.adjudicator',
+    completedAt: '2026-08-05T00:00:02.000Z',
+    judgments: suite.cases[0]!.rubricCriterionIds.map((criterionId) => ({
+      criterionId,
+      judgment: 'partially_met' as const,
+      rationale: `Independent adjudication for ${criterionId}.`,
+      evidence: [
+        {
+          kind: 'run_output' as const,
+          locator: 'outcome.result.draft',
+          contentSha256: run.outcome.status === 'completed' ? run.outcome.resultSha256 : null,
+          note: 'Adjudicated against the exact parsed provider outcome.',
+        },
+      ],
+    })),
+    sourceKind: 'human_adjudication',
+    dataHandling: run.dataHandling,
+  });
+}
+
 async function writeDataset(
   directory: string,
   records: {
@@ -623,6 +663,79 @@ describe('human eval dataset', () => {
         }),
       ),
     ).toContainEqual(expect.stringContaining('every current annotation'));
+  });
+
+  it('rejects adjudication below the suite independent-reviewer minimum', () => {
+    const suite = suiteWithReviewerMinimum(3);
+    const run = buildProviderEvalRunFixture(suite);
+    const annotations = [
+      buildHumanEvalAnnotationFixture(
+        suite,
+        run,
+        'reviewer.alpha',
+        '20000000-0000-4000-8000-000000000021',
+        'met',
+      ),
+      buildHumanEvalAnnotationFixture(
+        suite,
+        run,
+        'reviewer.beta',
+        '20000000-0000-4000-8000-000000000022',
+        'not_met',
+      ),
+    ];
+    const adjudication = buildAdjudicationFixture(suite, run, annotations);
+
+    expect(
+      issuesFrom(() =>
+        validateHumanEvalDataset({
+          suite,
+          runs: [run],
+          annotations,
+          adjudications: [adjudication],
+          blindSignoffs: [buildProviderBlindSignoffFixture(suite, run)],
+        }),
+      ),
+    ).toContainEqual(expect.stringContaining('requires 3 independent reviewers'));
+  });
+
+  it('accepts adjudication at the suite independent-reviewer minimum when reviews disagree', () => {
+    const suite = suiteWithReviewerMinimum(3);
+    const run = buildProviderEvalRunFixture(suite);
+    const annotations = [
+      buildHumanEvalAnnotationFixture(
+        suite,
+        run,
+        'reviewer.alpha',
+        '20000000-0000-4000-8000-000000000031',
+        'met',
+      ),
+      buildHumanEvalAnnotationFixture(
+        suite,
+        run,
+        'reviewer.beta',
+        '20000000-0000-4000-8000-000000000032',
+        'not_met',
+      ),
+      buildHumanEvalAnnotationFixture(
+        suite,
+        run,
+        'reviewer.gamma',
+        '20000000-0000-4000-8000-000000000033',
+        'met',
+      ),
+    ];
+    const adjudication = buildAdjudicationFixture(suite, run, annotations);
+
+    expect(() =>
+      validateHumanEvalDataset({
+        suite,
+        runs: [run],
+        annotations,
+        adjudications: [adjudication],
+        blindSignoffs: [buildProviderBlindSignoffFixture(suite, run)],
+      }),
+    ).not.toThrow();
   });
 
   it('gates released suites on live treatments, human review, host execution, and render evidence', () => {

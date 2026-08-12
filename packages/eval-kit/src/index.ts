@@ -1,5 +1,6 @@
 export * from './comparison.js';
 export * from './capture.js';
+export * from './collection-policy.js';
 export * from './manifest-template.js';
 export * from './blind-review.js';
 export * from './dataset.js';
@@ -7,3 +8,5 @@ export * from './filesystem.js';
 export * from './filesystem-transaction.js';
 export * from './integrity.js';
 export * from './records.js';
+export * from './review-policy.js';
+export * from './worklist.js';

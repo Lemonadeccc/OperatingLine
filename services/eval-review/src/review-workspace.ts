@@ -7,10 +7,13 @@ import {
   assertProviderIdentityAbsent,
   buildProviderBlindReviewSurface,
   deriveProviderIdentityMarkers,
+  evaluateHumanEvalRunReviewPolicy,
   HumanEvalDatasetBusyError,
   loadHumanEvalDatasetDirectory,
+  resolveActiveHumanEvalAnnotations,
   sealHumanEvalAdjudication,
   sealHumanEvalAnnotation,
+  unsignedHumanEvalRunIds,
   validateHumanEvalDataset,
   withHumanEvalDatasetWriteLock,
   writeHumanEvalFileAtomicExclusive,
@@ -188,29 +191,6 @@ interface EvidenceBinding {
   readonly contentSha256: string | null;
 }
 
-function currentAnnotations(
-  records: readonly HumanEvalAnnotation[],
-): readonly HumanEvalAnnotation[] {
-  const superseded = new Set(
-    records.flatMap((annotation) =>
-      annotation.supersedesAnnotationId === null ? [] : [annotation.supersedesAnnotationId],
-    ),
-  );
-  return records.filter((annotation) => !superseded.has(annotation.annotationId));
-}
-
-function annotationsDisagree(records: readonly HumanEvalAnnotation[]): boolean {
-  const values = new Map<string, Set<HumanEvalJudgment>>();
-  for (const record of records) {
-    for (const judgment of record.review.judgments) {
-      const criterionValues = values.get(judgment.criterionId) ?? new Set<HumanEvalJudgment>();
-      criterionValues.add(judgment.judgment);
-      values.set(judgment.criterionId, criterionValues);
-    }
-  }
-  return [...values.values()].some((criterionValues) => criterionValues.size > 1);
-}
-
 function reviewDataHandling(
   dataset: ValidatedHumanEvalDataset,
   recordKind: 'annotation' | 'adjudication',
@@ -230,8 +210,7 @@ function assertReviewDatasetReady(dataset: ValidatedHumanEvalDataset): Validated
     throw new Error('Human Eval review requires an artifact-verified dataset');
   }
   if (
-    dataset.blindSignoffs.length !== dataset.runs.length ||
-    dataset.runs.some((run) => !dataset.blindSignoffsByRunId.has(run.runId))
+    unsignedHumanEvalRunIds(dataset.runs, new Set(dataset.blindSignoffsByRunId.keys())).length > 0
   ) {
     throw new Error('Human Eval review requires one valid provider-blind sign-off for every run');
   }
@@ -638,14 +617,15 @@ export class HumanEvalReviewWorkspace {
   }
 
   #adjudicationAnnotations(runId: string): readonly HumanEvalAnnotation[] | null {
-    if (this.dataset.adjudications.some((record) => record.runId === runId)) {
-      return null;
-    }
-    const records = currentAnnotations(this.dataset.annotations).filter(
-      (record) => record.runId === runId,
-    );
-    const distinctReviewers = new Set(records.map((record) => record.reviewer.pseudonym));
-    return distinctReviewers.size >= 2 && annotationsDisagree(records) ? records : null;
+    const records = resolveActiveHumanEvalAnnotations(
+      this.dataset.annotations,
+    ).activeAnnotations.filter((record) => record.runId === runId);
+    const policy = evaluateHumanEvalRunReviewPolicy(records, {
+      minimumIndependentAnnotationsPerRun:
+        this.dataset.suite.policy.minimumIndependentAnnotationsPerRun,
+      hasAdjudication: this.dataset.adjudications.some((record) => record.runId === runId),
+    });
+    return policy.adjudicationEligible ? records : null;
   }
 
   #resolveJudgments(
@@ -938,7 +918,7 @@ export class HumanEvalReviewWorkspace {
   }
 
   #ownCurrentAnnotation(session: SessionState, runId: string): HumanEvalAnnotation | undefined {
-    return currentAnnotations(this.dataset.annotations).find(
+    return resolveActiveHumanEvalAnnotations(this.dataset.annotations).activeAnnotations.find(
       (record) => record.runId === runId && record.reviewer.pseudonym === session.pseudonym,
     );
   }
