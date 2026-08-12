@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-export const supportedGuideProtocolVersions = ['1.0.0', '1.1.0', '1.2.0'] as const;
-export const guideProtocolVersion = '1.2.0' as const;
+export const supportedGuideProtocolVersions = ['1.0.0', '1.1.0', '1.2.0', '1.3.0'] as const;
+export const guideProtocolVersion = '1.3.0' as const;
 export const guideProtocolVersionSchema = z.enum(supportedGuideProtocolVersions);
 
 export const guideStepIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -148,7 +148,7 @@ export const guidePlanSchema = z
     steps: z.array(guideStepSchema).min(1),
   })
   .superRefine((plan, context) => {
-    if (plan.protocolVersion === '1.2.0') {
+    if (plan.protocolVersion === '1.2.0' || plan.protocolVersion === '1.3.0') {
       return;
     }
     for (const [index, step] of plan.steps.entries()) {
@@ -156,7 +156,7 @@ export const guidePlanSchema = z
         context.addIssue({
           code: 'custom',
           path: ['steps', index, 'observationPolicy'],
-          message: 'Observation policies require guide protocol 1.2.0',
+          message: 'Observation policies require guide protocol 1.2+',
         });
       }
     }
@@ -165,7 +165,7 @@ export const guidePlanSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { const: '1.2.0' } },
+          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0'] } },
           required: ['protocolVersion'],
         },
         else: {

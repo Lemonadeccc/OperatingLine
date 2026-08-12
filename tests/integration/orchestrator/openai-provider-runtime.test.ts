@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { createOpenAIResponsesPlannerProvider } from '@operatingline/openai-planner-provider';
 import { startRuntime } from '@operatingline/orchestrator';
+import { guideProtocolVersion } from '@operatingline/protocol';
 
 const accessToken = 'openai-runtime-test-access-token';
 const catalogVersion = blenderActionCatalog.catalogVersion;
@@ -137,7 +138,7 @@ describe('OpenAI planner provider runtime integration', () => {
         requiredPhaseIds: ['geometry', 'materials', 'animation', 'render_setup', 'output'],
         capabilityCoverage: snowmanCapabilityCoverage,
       },
-      plan: { ...fixture, id: planId, revision: 1 },
+      plan: { ...fixture, protocolVersion: guideProtocolVersion, id: planId, revision: 1 },
     };
     const upstreamCalls: Array<{ input: string; init?: RequestInit }> = [];
     const fakeFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

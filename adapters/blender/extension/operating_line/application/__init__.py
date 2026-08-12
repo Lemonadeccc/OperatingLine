@@ -22,6 +22,7 @@ from .menu_guidance import (
     MenuGuidanceSnapshot,
     MenuGuidanceTracker,
 )
+from .parameter_form import ParameterField, action_parameter_fields
 from .session import (
     ActionReceipt,
     DemoSession,
@@ -66,6 +67,8 @@ __all__ = (
     "MenuGuidanceRole",
     "MenuGuidanceSnapshot",
     "MenuGuidanceTracker",
+    "ParameterField",
+    "action_parameter_fields",
     "build_goal_request",
     "RevisionLineage",
     "ReplanRunState",

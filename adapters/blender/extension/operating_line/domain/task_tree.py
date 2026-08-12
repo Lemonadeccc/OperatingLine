@@ -174,8 +174,8 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         observation_policy_raw = raw.get("observationPolicy")
         observation_policy = None
         if observation_policy_present:
-            if protocol_version != "1.2.0":
-                raise ValueError("Observation policies require guide protocol 1.2.0")
+            if protocol_version not in {"1.2.0", "1.3.0"}:
+                raise ValueError("Observation policies require guide protocol 1.2+")
             if action is None:
                 raise ValueError(
                     f"Only executable steps can declare an observation policy: {step_id}"
@@ -247,6 +247,11 @@ if (
 def bundled_plan_data() -> dict[str, Any]:
     """Return an isolated copy of the offline plan for immutable revision requests."""
     return deepcopy(_BUNDLED_PLAN)
+
+
+def bundled_action_catalog_data() -> dict[str, Any]:
+    """Return an isolated copy of the bundled parameter and action contract."""
+    return deepcopy(_BUNDLED_ACTION_CATALOG)
 
 
 def executable_steps(root: TaskNode = SNOWMAN_TASK_TREE) -> tuple[TaskNode, ...]:

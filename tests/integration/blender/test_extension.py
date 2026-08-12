@@ -1196,7 +1196,7 @@ def assert_companion_and_plan_semantics() -> None:
                 assert query["instanceId"] == [companion.instance_id]
                 self._reply(
                     {
-                        "protocolVersion": "1.1.0",
+                        "protocolVersion": "1.3.0",
                         "threadId": revision_request["revisionThread"]["threadId"],
                         "targetAdapterId": "blender",
                         "instanceId": companion.instance_id,
@@ -1456,12 +1456,36 @@ def assert_companion_and_plan_semantics() -> None:
         assert tuple(
             node.id for node in companion.revision_reference_nodes()
         ) == ("snowman.model.head", "snowman.model.body_upper")
+        head_fields = {
+            field.name: field
+            for field in companion.revision_parameter_fields(
+                "snowman.model.head"
+            )
+        }
+        assert head_fields["radius"].kind == "number"
+        assert head_fields["radius"].editable is True
+        assert head_fields["resourceId"].editable is False
+        assert bpy.ops.operating_line.edit_revision_parameter(
+            node_id="snowman.model.head",
+            argument_name="radius",
+            value_kind="number",
+            float_value=1.05,
+        ) == {"FINISHED"}
+        assert companion.revision_parameter_edit_count == 1
+        assert math.isclose(
+            companion.revision_parameter_field(
+                "snowman.model.head", "radius"
+            ).value,
+            1.05,
+            abs_tol=1e-6,
+        )
         assert bpy.ops.operating_line.remove_revision_reference(
             node_id="snowman.model.head",
         ) == {"FINISHED"}
         assert tuple(
             node.id for node in companion.revision_reference_nodes()
         ) == ("snowman.model.body_upper",)
+        assert companion.revision_parameter_edit_count == 0
         assert bpy.context.window_manager.operating_line_revision_message == (
             "Make the selected parts slightly rougher"
         )
@@ -1472,6 +1496,32 @@ def assert_companion_and_plan_semantics() -> None:
         assert tuple(
             node.id for node in companion.revision_reference_nodes()
         ) == ("snowman.model.body_upper", "snowman.model.head")
+        body_radius = companion.revision_parameter_field(
+            "snowman.model.body_upper", "radius"
+        )
+        requested_body_radius = float(body_radius.original_value) + 0.1
+        assert bpy.ops.operating_line.edit_revision_parameter(
+            node_id="snowman.model.body_upper",
+            argument_name="radius",
+            value_kind="number",
+            float_value=requested_body_radius,
+        ) == {"FINISHED"}
+        stored_body_radius = companion.revision_parameter_field(
+            "snowman.model.body_upper", "radius"
+        ).value
+        assert math.isclose(
+            stored_body_radius,
+            requested_body_radius,
+            abs_tol=1e-6,
+        )
+        assert companion.revision_parameter_edits() == (
+            {
+                "nodeId": "snowman.model.body_upper",
+                "argumentName": "radius",
+                "before": body_radius.original_value,
+                "after": stored_body_radius,
+            },
+        )
         assert operating_line.get_session() is session_before_request
         assert {item.as_pointer() for item in bpy.data.objects} == (
             scene_objects_before_request
@@ -1494,7 +1544,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(revision_requests) == 1
         revision_request = revision_requests[0]
         uuid.UUID(revision_request["requestId"])
-        assert revision_request["protocolVersion"] == "1.2.0"
+        assert revision_request["protocolVersion"] == "1.3.0"
         assert revision_request["adapterId"] == "blender"
         assert revision_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
         assert revision_request["instanceId"] == companion.instance_id
@@ -1504,12 +1554,21 @@ def assert_companion_and_plan_semantics() -> None:
             {"nodeId": "snowman.model.head", "nodeNumber": "1.1.3"},
         ]
         assert revision_request["message"] == "Make the selected parts slightly rougher"
+        assert revision_request["parameterEdits"] == [
+            {
+                "nodeId": "snowman.model.body_upper",
+                "argumentName": "radius",
+                "before": body_radius.original_value,
+                "after": stored_body_radius,
+            }
+        ]
         assert revision_request["revisionThread"] == {
             "threadId": revision_request["requestId"],
             "turn": 1,
             "parentRequestId": None,
         }
         assert companion.last_revision_request_id == revision_request["requestId"]
+        assert companion.revision_parameter_edit_count == 0
 
         # One explicit authorization queues on the worker and is polled without
         # blocking Blender's main thread. A terminal proposal-created status is
@@ -3235,7 +3294,7 @@ def assert_companion_and_plan_semantics() -> None:
         try:
             CompanionController._validated_session(legacy_gate_plan)
         except ValueError as error:
-            assert "protocol 1.2.0" in str(error)
+            assert "protocol 1.2+" in str(error)
         else:
             raise AssertionError("Legacy plans must not opt into observation gates")
     finally:

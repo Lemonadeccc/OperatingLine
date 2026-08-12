@@ -15,10 +15,18 @@ const basePlan = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
 
-function request(references: Array<{ nodeId: string; nodeNumber: string }>) {
+function request(
+  references: Array<{ nodeId: string; nodeNumber: string }>,
+  parameterEdits?: Array<{
+    nodeId: string;
+    argumentName: string;
+    before: unknown;
+    after: unknown;
+  }>,
+) {
   const requestId = randomUUID();
   return guideRevisionRequestSchema.parse({
-    protocolVersion: '1.1.0',
+    protocolVersion: parameterEdits === undefined ? '1.1.0' : '1.3.0',
     requestId,
     adapterId: 'blender',
     catalogVersion: '1.2.0',
@@ -26,6 +34,7 @@ function request(references: Array<{ nodeId: string; nodeNumber: string }>) {
     basePlan,
     references,
     message: 'Make only the referenced snowman area rougher and easier to understand.',
+    ...(parameterEdits === undefined ? {} : { parameterEdits }),
     revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
     occurredAt: new Date().toISOString(),
   });
@@ -154,5 +163,35 @@ describe('referenced-subtree local replan scope', () => {
       expect.arrayContaining(['plan_structure_invalid', 'scope_root_missing']),
     );
     expect(result.planDiff).toBeNull();
+  });
+
+  it('requires every structured parameter edit to be applied exactly', () => {
+    const revisionRequest = request(
+      [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
+      [
+        {
+          nodeId: 'snowman.model.head',
+          argumentName: 'radius',
+          before: 0.85,
+          after: 1.05,
+        },
+      ],
+    );
+    const missingEdit = targetPlan();
+    step(missingEdit, 'snowman.model.head').title = 'Changed without applying the form edit';
+    expect(findingCodes(evaluateLocalReplanScope(revisionRequest, missingEdit))).toContain(
+      'parameter_edit_not_applied',
+    );
+
+    const exactEdit = targetPlan();
+    const headAction = step(exactEdit, 'snowman.model.head').action;
+    if (headAction === null) {
+      throw new Error('Snowman fixture head must be executable');
+    }
+    headAction.arguments.radius = 1.05;
+    expect(evaluateLocalReplanScope(revisionRequest, exactEdit).locality).toMatchObject({
+      valid: true,
+      findings: [],
+    });
   });
 });

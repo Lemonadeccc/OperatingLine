@@ -15,6 +15,34 @@ export const guideNodeReferenceSchema = z.strictObject({
 });
 export type GuideNodeReference = z.infer<typeof guideNodeReferenceSchema>;
 
+export const guideParameterEditSchema = z.strictObject({
+  nodeId: guideStepIdSchema,
+  argumentName: z
+    .string()
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'Argument names must use portable ASCII identifiers')
+    .max(180),
+  before: z.json(),
+  after: z.json(),
+});
+export type GuideParameterEdit = z.infer<typeof guideParameterEditSchema>;
+
+function canonicalJson(value: unknown): string {
+  const normalize = (candidate: unknown): unknown => {
+    if (Array.isArray(candidate)) {
+      return candidate.map(normalize);
+    }
+    if (candidate !== null && typeof candidate === 'object') {
+      return Object.fromEntries(
+        Object.entries(candidate)
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .map(([key, entry]) => [key, normalize(entry)]),
+      );
+    }
+    return candidate;
+  };
+  return JSON.stringify(normalize(value));
+}
+
 export const guideRevisionThreadSchema = z
   .strictObject({
     threadId: z.uuid(),
@@ -52,7 +80,8 @@ export const guideRevisionRequestSchema = z
     instanceId: z.uuid(),
     basePlan: guidePlanSchema,
     references: z.array(guideNodeReferenceSchema).min(1).max(8),
-    message: z.string().trim().min(1).max(4_000),
+    message: z.string().trim().max(4_000),
+    parameterEdits: z.array(guideParameterEditSchema).min(1).max(64).optional(),
     revisionThread: guideRevisionThreadSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -74,15 +103,72 @@ export const guideRevisionRequestSchema = z
     if (thread?.parentRequestId === request.requestId) {
       context.addIssue({ code: 'custom', message: 'A revision request cannot parent itself' });
     }
+    if (request.protocolVersion !== '1.3.0' && request.parameterEdits !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameterEdits'],
+        message: 'Structured parameter edits require guide protocol 1.3',
+      });
+    }
+    if (request.message.length === 0 && request.parameterEdits === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['message'],
+        message: 'A revision request requires a message or structured parameter edits',
+      });
+    }
+    const references = new Set(request.references.map((reference) => reference.nodeId));
+    const editKeys = new Set<string>();
+    for (const [index, edit] of (request.parameterEdits ?? []).entries()) {
+      const key = `${edit.nodeId}\u0000${edit.argumentName}`;
+      if (editKeys.has(key)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['parameterEdits', index],
+          message: `Structured parameter edit repeats ${edit.nodeId}.${edit.argumentName}`,
+        });
+      }
+      editKeys.add(key);
+      if (!references.has(edit.nodeId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['parameterEdits', index, 'nodeId'],
+          message: 'Structured parameter edits must target directly referenced nodes',
+        });
+      }
+      if (canonicalJson(edit.before) === canonicalJson(edit.after)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['parameterEdits', index, 'after'],
+          message: 'Structured parameter edits must change the argument value',
+        });
+      }
+    }
   })
   .meta({
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0'] } },
+          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionThread'] },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.3.0' } },
+          required: ['protocolVersion'],
+        },
+        then: {
+          anyOf: [
+            { properties: { message: { minLength: 1 } }, required: ['message'] },
+            { required: ['parameterEdits'] },
+          ],
+        },
+        else: {
+          properties: { message: { minLength: 1 } },
+          not: { required: ['parameterEdits'] },
+        },
       },
     ],
   });

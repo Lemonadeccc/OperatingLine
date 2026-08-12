@@ -107,7 +107,7 @@ describe('guide plan protocol fixture', () => {
       expect.arrayContaining([
         expect.objectContaining({
           if: expect.objectContaining({
-            properties: { protocolVersion: { const: '1.2.0' } },
+            properties: { protocolVersion: { enum: ['1.2.0', '1.3.0'] } },
           }),
         }),
       ]),

@@ -199,6 +199,11 @@ Plan ID 的完整更高 revision；它不能原地 patch 已审批计划。生�
 精确基线，而且父 Proposal 必须已在同一宿主实例接受。Orchestrator 对 base/target 计算确定性 Plan diff，保留计划字段、节点增删移动、步骤字段
 以及 action 参数的 JSON 前后值；宿主只负责验证并呈现，不自行猜测差异。
 
+协议 `1.3.0` 还允许请求携带直接引用 action 参数的结构化 `before/after` edit。宿主先用精确目录验证
+隔离副本，Orchestrator 再核对 base 值与合并后的完整 arguments；Provider 输出若没有逐项采用 `after`，
+locality gate 以 `parameter_edit_not_applied` 拒绝。表单草稿、请求排队和 Proposal preview 都不修改活动
+Plan 或场景。
+
 `operatingline.replan.thread.get` 与 `/api/v1/replan/thread` 从现有请求、Proposal 和决策表派生只读
 消息历史，不复制一份可变聊天日志。查询以 thread、adapter 和 instance 隔离，默认返回最新页并用
 `beforeTurn` 向前分页；每页仍按 turn 正序阅读。Blender 合并已加载页面，但不会把 Proposal 当作

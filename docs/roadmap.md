@@ -121,6 +121,11 @@
       结构化节点引用、逐条移除、独立修订正文、线性历史、Plan diff 和 Accept/Reject。引用去重，
       跨基线引用会显式失败而不丢失草稿；折叠或 `Hide Guidance` 不丢失状态。发送只排队，
       不会自动调用 provider 或修改场景。
+- [x] Revision 参数表单：Guide/Companion protocol `1.3.0` 为直接引用 action 参数增加精确
+      `before/after` edits；Blender 从打包 ActionCatalog 派生 boolean/integer/number/enum/定长数值向量
+      控件，编辑仅落入本地草稿。Orchestrator 核对 base 与完整 action schema，Provider 未精确应用时
+      locality gate 拒绝。普通 string 与嵌套 records 仍只读。见
+      [ADR 0033](adr/0033-catalog-derived-revision-parameter-forms.md)。
 - [x] 宿主授权的异步 Replan Run：Blender 在 Runtime acknowledgement 后列出无凭据 Provider
       descriptor，保持默认不选择，并在每次调用或重试前显示数据传输/可能费用披露和原生确认 dialog。
       Orchestrator 持久化授权后立即返回 `202`，后台复用严格 provider generation 与 canonical propose；
@@ -179,8 +184,8 @@
       local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
       provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、
       Proposal 审批和场景执行门禁。
-- [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
-      编辑，不把异步请求伪装成实时聊天。
+- [ ] 修订工作区增强：参数表单已完成；下一步在完整线性消息历史和 Plan diff 基础上增加明确的
+      fork/merge、共同祖先和冲突策略，不把异步请求伪装成实时聊天。
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。

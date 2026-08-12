@@ -132,11 +132,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   校验。独立的 `services/openai-runtime` 只在 `pnpm dev:openai` 时装配该远端 provider；公开
   descriptor 明确声明数据传输与凭据均由 provider 管理。
 - **节点引用与请求关联重规划**：Blender 的活动树和待审树都提供 `Ref`；Revision request 绑定
-  完整 base Plan、稳定节点 ID、显示编号、目录版本与消息。MCP 客户端读取待处理请求并提交完整的
+  完整 base Plan、稳定节点 ID、显示编号、目录版本、消息与可选的精确参数 `before/after` edits。MCP 客户端读取待处理请求并提交完整的
   更高 Plan revision；接受后继续引用会继承同一线性 revision thread。每个请求关联 Proposal
   携带精确的 Plan/节点/字段/参数差异，结果只回到发起实例，仍需用户接受，任何中间阶段都不修改场景。
 - **Blender Revision Workspace**：原生 Sidebar 中的可折叠工作区把当前基线、最多 8 个结构化
-  节点引用、独立修订正文、Provider handoff、异步 Run 状态、线性历史、Plan diff 和 Accept/Reject
+  节点引用、目录派生的 boolean/number/enum/定长向量参数表单、独立修订正文、Provider handoff、
+  异步 Run 状态、线性历史、Plan diff 和 Accept/Reject
   放在同一个操作日志中。
   引用可逐条移除，重复引用会去重，切换到不同基线前必须显式清空草稿；`Hide Guidance`
   只隐藏视口线、数字、状态和任务树，不删除工作区、草稿、Run、历史或场景。Provider 默认不选择，
@@ -257,7 +258,7 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 隔离。当前修订输入不是流式聊天；已经支持 Blender 原生 Revision Workspace、可追溯的多轮线性
 > thread、Plan diff、结构化历史、显式 provider-backed local replan，以及宿主内逐次授权的异步
 > Replan Run，但尚未提供流式助手回复、provider 自动选择/调用、自动语义
-> 重规划、用户可编辑参数表单、显式分支/合并或实时模型对话。Locality、结构质量门和需求覆盖链只证明
+> 重规划、显式分支/合并或实时模型对话。Locality、结构质量门和需求覆盖链只证明
 > provider 的声明符合机器约束并可追溯到真实目录 action，不证明需求抽取正确、参数满足描述或模型
 > 理解了任意目标/修改意图。人工 Eval 的版本化协议、本地采集/盲审工具和 7 个 collecting 案例已经完成，
 > 但真实 Provider 采集、每个 Run 至少两名独立 reviewer 的盲审、分歧裁决、真实宿主 artifact 与 released
@@ -835,7 +836,7 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
 MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、显式蒙皮/权重与 pose transform 动画、
-Observation 成功门、Blender 原生 Undo/Redo，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。
+Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。
 当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
@@ -844,8 +845,8 @@ Observation 成功门、Blender 原生 Undo/Redo，以及 Codex/Claude 本地配
    Responses 插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标
    语义规划可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动
    选择/调用或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
-2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
-   用户可编辑参数表单。
+2. 在已完成的线性多轮 revision thread、Plan diff、结构化消息历史和参数表单上增加显式
+   fork/merge、共同祖先与冲突策略。
 3. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
    Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。

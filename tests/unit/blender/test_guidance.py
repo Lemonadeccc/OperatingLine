@@ -1346,6 +1346,42 @@ class RevisionContractTests(unittest.TestCase):
             instance_id=instance_id,
         )
         self.assertEqual(validated["turns"][0]["request"]["message"], request["message"])
+
+        legacy_12 = deepcopy(history)
+        legacy_12["protocolVersion"] = "1.2.0"
+        legacy_12["turns"][0]["request"]["protocolVersion"] = "1.2.0"
+        legacy_12["turns"][0]["proposal"]["protocolVersion"] = "1.2.0"
+        legacy_12["turns"][0]["decision"]["protocolVersion"] = "1.2.0"
+        validate_revision_thread_history(legacy_12, instance_id=instance_id)
+
+        parameter_history = deepcopy(history)
+        parameter_history["protocolVersion"] = "1.3.0"
+        parameter_request = parameter_history["turns"][0]["request"]
+        parameter_request["protocolVersion"] = "1.3.0"
+        parameter_request["message"] = ""
+        parameter_request["parameterEdits"] = [
+            {
+                "nodeId": "head",
+                "argumentName": "radius",
+                "before": 0.85,
+                "after": 1.05,
+            }
+        ]
+        parameter_validated = validate_revision_thread_history(
+            parameter_history,
+            instance_id=instance_id,
+        )
+        self.assertEqual(
+            parameter_validated["turns"][0]["request"]["parameterEdits"],
+            parameter_request["parameterEdits"],
+        )
+        parameter_request["protocolVersion"] = "1.2.0"
+        with self.assertRaisesRegex(ValueError, "require protocol 1.3"):
+            validate_revision_thread_history(
+                parameter_history,
+                instance_id=instance_id,
+            )
+
         history["turns"][0]["decision"]["instanceId"] = str(uuid.uuid4())
         with self.assertRaisesRegex(ValueError, "outside its proposal scope"):
             validate_revision_thread_history(history, instance_id=instance_id)

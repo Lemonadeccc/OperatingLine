@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 import re
 import uuid
 from typing import Any
@@ -11,7 +12,8 @@ from typing import Any
 from ..domain import PROTOCOL_VERSION
 
 NODE_NUMBER_PATTERN = re.compile(r"^[1-9]\d*(?:\.[1-9]\d*)*$")
-REVISION_PROTOCOL_VERSIONS = frozenset({"1.1.0", PROTOCOL_VERSION})
+ARGUMENT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+REVISION_PROTOCOL_VERSIONS = frozenset({"1.1.0", "1.2.0", PROTOCOL_VERSION})
 PLAN_FIELDS = frozenset({"title", "rootStepId"})
 STEP_FIELDS = frozenset(
     {
@@ -72,6 +74,37 @@ def _require_positive_integer(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{label} must be a positive integer")
     return value
+
+
+def _canonical_json(value: Any, label: str) -> str:
+    def validate(candidate: Any) -> None:
+        if candidate is None or isinstance(candidate, (bool, str)):
+            return
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            return
+        if isinstance(candidate, list):
+            for item in candidate:
+                validate(item)
+            return
+        if isinstance(candidate, dict) and all(
+            isinstance(key, str) for key in candidate
+        ):
+            for item in candidate.values():
+                validate(item)
+            return
+        raise ValueError(f"{label} must be JSON data")
+
+    validate(value)
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} must be finite JSON data") from error
 
 
 def validate_revision_thread(
@@ -288,7 +321,7 @@ def _validate_history_request(
     instance_id: str,
     plan_id: str,
 ) -> None:
-    expected_fields = {
+    required_fields = {
         "protocolVersion",
         "requestId",
         "adapterId",
@@ -300,27 +333,42 @@ def _validate_history_request(
         "revisionThread",
         "occurredAt",
     }
-    if not isinstance(value, dict) or set(value) != expected_fields:
+    if not isinstance(value, dict) or not required_fields.issubset(value):
         raise ValueError("Revision history request does not match the protocol")
-    if value.get("protocolVersion") not in REVISION_PROTOCOL_VERSIONS:
+    protocol_version = value.get("protocolVersion")
+    if protocol_version not in REVISION_PROTOCOL_VERSIONS:
         raise ValueError("Revision history requires protocol 1.1+ requests")
+    parameter_edits = value.get("parameterEdits")
+    expected_fields = required_fields | (
+        {"parameterEdits"} if "parameterEdits" in value else set()
+    )
+    if set(value) != expected_fields:
+        raise ValueError("Revision history request does not match the protocol")
+    if protocol_version != PROTOCOL_VERSION and "parameterEdits" in value:
+        raise ValueError("Structured revision edits require protocol 1.3")
     request_id = _require_uuid(value.get("requestId"), "Revision history request id")
     if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
         raise ValueError("Revision history request is outside this Blender instance")
     thread = validate_revision_thread(value.get("revisionThread"), request_id=request_id)
     if thread["threadId"] != thread_id or thread["turn"] != turn:
         raise ValueError("Revision history request uses the wrong thread turn")
+    base_plan_value = value.get("basePlan")
     base_plan = _validate_embedded_plan_identity(
-        value.get("basePlan"), "Revision history base plan"
+        base_plan_value, "Revision history base plan"
     )
     if base_plan["id"] != plan_id:
         raise ValueError("Revision history cannot change plan id")
     message = value.get("message")
-    if not isinstance(message, str) or not message.strip() or len(message) > 4000:
+    if (
+        not isinstance(message, str)
+        or len(message) > 4000
+        or (not message.strip() and parameter_edits is None)
+    ):
         raise ValueError("Revision history request message is invalid")
     references = value.get("references")
     if not isinstance(references, list) or not 1 <= len(references) <= 8:
         raise ValueError("Revision history request references are invalid")
+    referenced_node_ids: set[str] = set()
     for reference in references:
         if not isinstance(reference, dict) or set(reference) != {
             "nodeId",
@@ -329,12 +377,61 @@ def _validate_history_request(
             raise ValueError("Revision history node reference does not match the protocol")
         if not isinstance(reference.get("nodeId"), str) or not reference["nodeId"]:
             raise ValueError("Revision history node reference id is invalid")
+        referenced_node_ids.add(reference["nodeId"])
         node_number = reference.get("nodeNumber")
         if (
             not isinstance(node_number, str)
             or NODE_NUMBER_PATTERN.fullmatch(node_number) is None
         ):
             raise ValueError("Revision history node reference number is invalid")
+
+    if parameter_edits is None:
+        return
+    if not isinstance(parameter_edits, list) or not 1 <= len(parameter_edits) <= 64:
+        raise ValueError("Revision history parameter edits are invalid")
+    base_steps = {
+        step.get("id"): step
+        for step in base_plan_value.get("steps", [])
+        if isinstance(step, dict) and isinstance(step.get("id"), str)
+    }
+    edit_keys: set[tuple[str, str]] = set()
+    for edit in parameter_edits:
+        if not isinstance(edit, dict) or set(edit) != {
+            "nodeId",
+            "argumentName",
+            "before",
+            "after",
+        }:
+            raise ValueError("Revision history parameter edit does not match the protocol")
+        node_id = edit.get("nodeId")
+        argument_name = edit.get("argumentName")
+        if node_id not in referenced_node_ids:
+            raise ValueError("Revision history parameter edit requires a direct reference")
+        if (
+            not isinstance(argument_name, str)
+            or len(argument_name) > 180
+            or ARGUMENT_NAME_PATTERN.fullmatch(argument_name) is None
+        ):
+            raise ValueError("Revision history parameter argument name is invalid")
+        edit_key = (node_id, argument_name)
+        if edit_key in edit_keys:
+            raise ValueError("Revision history parameter edits must be unique")
+        edit_keys.add(edit_key)
+        before = _canonical_json(edit.get("before"), "Revision parameter before")
+        after = _canonical_json(edit.get("after"), "Revision parameter after")
+        if before == after:
+            raise ValueError("Revision history parameter edit must change its value")
+        base_step = base_steps.get(node_id)
+        if base_step is None:
+            continue
+        action = base_step.get("action")
+        arguments = action.get("arguments") if isinstance(action, dict) else None
+        if not isinstance(arguments, dict) or argument_name not in arguments:
+            raise ValueError("Revision history parameter edit targets an unknown argument")
+        if _canonical_json(
+            arguments[argument_name], "Revision parameter base value"
+        ) != before:
+            raise ValueError("Revision history parameter before value does not match the base")
 
 
 def _validate_history_proposal(

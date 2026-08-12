@@ -145,6 +145,48 @@ export function validateGuideRevisionRequest(
       );
     }
   }
+
+  const steps = new Map(request.basePlan.steps.map((step) => [step.id, step] as const));
+  const catalogActions = new Map(catalog.actions.map((action) => [action.name, action] as const));
+  const editedArguments = new Map<string, Record<string, unknown>>();
+  for (const edit of request.parameterEdits ?? []) {
+    if (!referencedNodeIds.has(edit.nodeId)) {
+      throw new Error(`Guide parameter edit target ${edit.nodeId} must be a direct node reference`);
+    }
+    const step = steps.get(edit.nodeId);
+    if (step?.action === null || step?.action === undefined) {
+      throw new Error(`Guide parameter edit target ${edit.nodeId} is not an action step`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(step.action.arguments, edit.argumentName)) {
+      throw new Error(
+        `Guide parameter edit references unknown argument ${edit.nodeId}.${edit.argumentName}`,
+      );
+    }
+    if (!isDeepStrictEqual(step.action.arguments[edit.argumentName], edit.before)) {
+      throw new Error(
+        `Guide parameter edit before value does not match ${edit.nodeId}.${edit.argumentName}`,
+      );
+    }
+    const argumentsAfter =
+      editedArguments.get(edit.nodeId) ?? structuredClone(step.action.arguments);
+    argumentsAfter[edit.argumentName] = structuredClone(edit.after);
+    editedArguments.set(edit.nodeId, argumentsAfter);
+  }
+  for (const [stepId, argumentsAfter] of editedArguments) {
+    const step = steps.get(stepId)!;
+    const action = catalogActions.get(step.action!.name);
+    if (action === undefined) {
+      throw new Error(
+        `Guide parameter edit action is absent from the catalog: ${step.action!.name}`,
+      );
+    }
+    const errors = validateActionArguments(argumentsAfter, action.argumentsSchema);
+    if (errors.length > 0) {
+      throw new Error(
+        `Guide parameter edits violate ${step.action!.name} on ${stepId}: ${errors.join('; ')}`,
+      );
+    }
+  }
 }
 
 export function validateGuideRevisionThread(

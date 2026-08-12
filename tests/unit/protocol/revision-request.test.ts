@@ -12,7 +12,7 @@ const readPlan = (): unknown =>
 function revisionRequest() {
   const requestId = randomUUID();
   return {
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     requestId,
     adapterId: 'blender',
     catalogVersion: '1.0.0',
@@ -129,11 +129,68 @@ describe('guide revision request protocol', () => {
     ).toBe(true);
   });
 
+  it('accepts typed parameter edits as the complete revision intent in protocol 1.3', () => {
+    const request = revisionRequest();
+    const parameterEdit = {
+      nodeId: 'snowman.model.head',
+      argumentName: 'radius',
+      before: 0.85,
+      after: 1.05,
+    };
+
+    expect(
+      guideRevisionRequestSchema.parse({
+        ...request,
+        message: '',
+        parameterEdits: [parameterEdit],
+      }),
+    ).toMatchObject({ message: '', parameterEdits: [parameterEdit] });
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        parameterEdits: [{ ...parameterEdit, nodeId: 'snowman.model.body_upper' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        parameterEdits: [{ ...parameterEdit, after: parameterEdit.before }],
+      }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        parameterEdits: [parameterEdit, parameterEdit],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps protocol 1.2 message-only and requires at least one intent source', () => {
+    const request = revisionRequest();
+    const parameterEdits = [
+      {
+        nodeId: 'snowman.model.head',
+        argumentName: 'radius',
+        before: 0.85,
+        after: 1.05,
+      },
+    ];
+
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        protocolVersion: '1.2.0',
+        parameterEdits,
+      }).success,
+    ).toBe(false);
+    expect(guideRevisionRequestSchema.safeParse({ ...request, message: '' }).success).toBe(false);
+  });
+
   it('emits protocol-version and turn conditions for non-TypeScript hosts', () => {
     const schema = JSON.parse(
       readFileSync(resolve('protocol/schemas/v1/guide-revision-request.schema.json'), 'utf8'),
     ) as { allOf?: unknown[]; properties?: { revisionThread?: { allOf?: unknown[] } } };
-    expect(schema.allOf).toHaveLength(1);
+    expect(schema.allOf).toHaveLength(2);
     expect(schema.properties?.revisionThread?.allOf).toHaveLength(2);
   });
 });

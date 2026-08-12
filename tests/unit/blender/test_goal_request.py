@@ -53,7 +53,7 @@ class GoalRequestPayloadTests(unittest.TestCase):
                 "occurredAt",
             },
         )
-        self.assertEqual(payload["protocolVersion"], "1.2.0")
+        self.assertEqual(payload["protocolVersion"], "1.3.0")
         self.assertEqual(payload["adapterId"], "blender")
         self.assertEqual(
             payload["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION

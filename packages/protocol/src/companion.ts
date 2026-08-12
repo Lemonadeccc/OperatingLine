@@ -257,7 +257,7 @@ export const companionStateReportSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.2.0' } },
+          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['observationGate'] },
@@ -417,18 +417,25 @@ export const companionStateReportSchema = z
         message: 'executionId requires a plan reference and planContentSha256',
       });
     }
-    if (report.protocolVersion === '1.2.0' && report.observationGate === undefined) {
+    if (
+      (report.protocolVersion === '1.2.0' || report.protocolVersion === '1.3.0') &&
+      report.observationGate === undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['observationGate'],
-        message: 'Protocol 1.2 reports require an explicit observationGate field',
+        message: 'Protocol 1.2+ reports require an explicit observationGate field',
       });
     }
-    if (report.protocolVersion !== '1.2.0' && report.observationGate !== undefined) {
+    if (
+      report.protocolVersion !== '1.2.0' &&
+      report.protocolVersion !== '1.3.0' &&
+      report.observationGate !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['observationGate'],
-        message: 'Observation gate reports require protocol 1.2',
+        message: 'Observation gate reports require protocol 1.2+',
       });
     }
     const gate = report.observationGate;

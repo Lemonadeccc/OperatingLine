@@ -181,6 +181,7 @@ export const localReplanFindingCodeSchema = z.enum([
   'step_changed_outside_scope',
   'step_added_outside_scope',
   'step_moved_across_scope',
+  'parameter_edit_not_applied',
   'no_local_change',
 ]);
 export type LocalReplanFindingCode = z.infer<typeof localReplanFindingCodeSchema>;

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { FakeBlenderAdapter, FakePlannerProvider } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
+import type { GuidePlan } from '@operatingline/protocol';
 
 import {
   computeEvalContentSha256,
@@ -550,6 +551,7 @@ describe('OperatingLine runtime', () => {
       },
       plan: {
         ...structuredClone(fixture),
+        protocolVersion: packet.context.protocolVersion,
         id: packet.context.requestedPlanId,
         revision: packet.context.recommendedRevision,
       },
@@ -709,11 +711,7 @@ describe('OperatingLine runtime', () => {
   it('generates a typed local replan before explicitly proposing its exact draft', async () => {
     const basePlan = JSON.parse(
       readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
-    ) as {
-      id: string;
-      revision: number;
-      steps: Array<{ id: string; title: string }>;
-    };
+    ) as GuidePlan;
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
     const provider = new FakePlannerProvider(
       () => {
@@ -741,6 +739,13 @@ describe('OperatingLine runtime', () => {
           throw new Error('Snowman fixture is missing the referenced head step');
         }
         head.title = 'Create a larger beginner-friendly snowman head';
+        for (const edit of packet.context.revisionRequest.parameterEdits ?? []) {
+          const editedStep = plan.steps.find((step) => step.id === edit.nodeId);
+          if (editedStep?.action === null || editedStep?.action === undefined) {
+            throw new Error(`Structured edit target is not executable: ${edit.nodeId}`);
+          }
+          editedStep.action.arguments[edit.argumentName] = structuredClone(edit.after);
+        }
         return {
           requestId: packet.context.revisionRequest.requestId,
           catalogVersion: packet.context.catalog.catalogVersion,
@@ -766,7 +771,7 @@ describe('OperatingLine runtime', () => {
     const revisionRequestId = randomUUID();
     const instanceId = randomUUID();
     const revisionRequest = {
-      protocolVersion: '1.2.0',
+      protocolVersion: '1.3.0',
       requestId: revisionRequestId,
       adapterId: 'blender',
       catalogVersion,
@@ -774,6 +779,14 @@ describe('OperatingLine runtime', () => {
       basePlan,
       references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
       message: 'Make only the referenced snowman head larger and easier to understand.',
+      parameterEdits: [
+        {
+          nodeId: 'snowman.model.head',
+          argumentName: 'radius',
+          before: 0.85,
+          after: 1.05,
+        },
+      ],
       revisionThread: {
         threadId: revisionRequestId,
         turn: 1,
@@ -818,7 +831,17 @@ describe('OperatingLine runtime', () => {
         formatVersion: '1.1.0',
         operation: 'local_replan',
         context: {
-          revisionRequest: { requestId: revisionRequestId },
+          revisionRequest: {
+            requestId: revisionRequestId,
+            parameterEdits: [
+              {
+                nodeId: 'snowman.model.head',
+                argumentName: 'radius',
+                before: 0.85,
+                after: 1.05,
+              },
+            ],
+          },
           targetRevision: basePlan.revision + 1,
           scope: { normalizedRootIds: ['snowman.model.head'] },
         },
@@ -852,6 +875,10 @@ describe('OperatingLine runtime', () => {
           plan: { id: basePlan.id, revision: basePlan.revision + 1 },
         },
       });
+      expect(
+        generated.draft.plan.steps.find((step) => step.id === 'snowman.model.head')?.action
+          ?.arguments.radius,
+      ).toBe(1.05);
       expect(provider.replanInputs).toHaveLength(1);
 
       const alternateGenerationRequest = {
@@ -874,7 +901,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1344,7 +1371,7 @@ describe('OperatingLine runtime', () => {
       const requestId = randomUUID();
       const instanceId = randomUUID();
       const revisionRequest = {
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         requestId,
         adapterId: 'blender',
         catalogVersion,
@@ -1571,7 +1598,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const acceptedDecision = {
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         decisionId: randomUUID(),
         proposalId: JSON.parse(proposed.result?.content?.[0]?.text ?? '{}').proposalId,
         adapterId: 'blender',
@@ -1762,7 +1789,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(delivered.status).toBe(200);
       await expect(delivered.json()).resolves.toMatchObject({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: { id: plan.id, revision: plan.revision },
         planContentSha256: computePlanContentSha256(plan),
         proposalPlanContentSha256: null,
@@ -1776,7 +1803,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1800,7 +1827,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1828,7 +1855,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1880,7 +1907,7 @@ describe('OperatingLine runtime', () => {
       const delivery = await fetch(guideUrl, { headers });
       expect(delivery.status).toBe(200);
       await expect(delivery.json()).resolves.toMatchObject({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposalPlanContentSha256: computePlanContentSha256(plan),
@@ -1895,7 +1922,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1903,7 +1930,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const decision = {
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         decisionId: randomUUID(),
         proposalId: proposalResult.proposalId,
         adapterId: 'blender',
@@ -1930,7 +1957,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.2.0',
+        protocolVersion: '1.3.0',
         plan: null,
         planContentSha256: null,
         proposal: null,

@@ -36,7 +36,7 @@ function stateReport() {
 function currentStateReport() {
   return {
     ...stateReport(),
-    protocolVersion: '1.2.0',
+    protocolVersion: '1.3.0',
     observationGate: null,
   };
 }

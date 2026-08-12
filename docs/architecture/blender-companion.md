@@ -135,8 +135,11 @@ Reject。普通 UI Disconnect 只暂停网络并保留待审 Proposal、Goal 关
 活动树和待审树的每个节点都提供 `Ref`。引用以结构化行显示，不插入或篡改用户正文；重复点击
 去重，每条可独立移除。同一草稿最多引用 8 个节点，且不能混合两个 Plan 基线；尝试引用其他
 基线会显式失败，保留当前引用和正文，需用户先 `Clear Draft`。发送时 Companion 把完整 base Plan、
-稳定节点 ID、当时的树编号、
-打包目录版本和消息放入后台队列。请求确认或暂时失败只更新 UI 状态，不调用 `bpy` 场景 API。
+稳定节点 ID、当时的树编号、打包目录版本、消息和可选结构化参数 edits 放入后台队列。每个 action
+引用下的表单由打包目录派生：boolean、integer、number、enum 与 1–4 维定长数值向量可编辑；普通
+string 与嵌套 records 保持只读。每次 edit 都先在 base Plan 隔离副本中通过完整 action 参数验证；移除
+引用会同步移除其 edits，Reset/Clear 只清理本地草稿。请求确认或暂时失败只更新 UI 状态，不调用
+`bpy` 场景 API。
 Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blender 在主线程再次核对后才建立
 只读预览。Protocol `1.1.0` 的 Proposal 还必须带线性 thread 元数据和 Plan diff；Panel 在 Accept 前
 显示 `+ / - / ~ / moved`、变化节点、字段和可紧凑表示的 action 参数前后值。接受请求关联 Proposal
@@ -144,7 +147,7 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 明确称为修订操作日志，而不是 Chat，因为当前没有自动 provider 选择/调用或流式回复。点击
 `Send Request` 只进入认证的后台队列，不执行 Blender action。Runtime acknowledgement 后，工作区可列出
 严格公开的 replan Provider descriptor，但默认保持未选择；不可用项只显示原因。选择远端 Provider 后，
-界面明确说明将发送修订消息、完整 base Plan/引用、ActionCatalog 与最新 Companion 状态，且调用可能
+界面明确说明将发送修订消息、结构化参数 edits、完整 base Plan/引用、ActionCatalog 与最新 Companion 状态，且调用可能
 产生费用、OperatingLine 无法估价。`Confirm Provider Run` 使用 Blender 原生 dialog 逐次确认；重试显示
 `Confirm New Provider Run`。Provider、
 request 改变、断开、终态或 Retry 都不会沿用先前确认。

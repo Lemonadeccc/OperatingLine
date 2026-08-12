@@ -12,7 +12,7 @@ export const guideRevisionTurnStateSchema = z.enum([
 ]);
 export type GuideRevisionTurnState = z.infer<typeof guideRevisionTurnStateSchema>;
 
-const guideRevisionHistoryProtocolVersions = ['1.1.0', guideProtocolVersion] as const;
+const guideRevisionHistoryProtocolVersions = ['1.1.0', '1.2.0', guideProtocolVersion] as const;
 const guideRevisionHistoryProtocolVersionSet = new Set<string>(
   guideRevisionHistoryProtocolVersions,
 );

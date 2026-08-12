@@ -6,7 +6,8 @@
       "type": "string",
       "enum": [
         "1.1.0",
-        "1.2.0"
+        "1.2.0",
+        "1.3.0"
       ]
     },
     "threadId": {
@@ -69,7 +70,8 @@
                 "enum": [
                   "1.0.0",
                   "1.1.0",
-                  "1.2.0"
+                  "1.2.0",
+                  "1.3.0"
                 ]
               },
               "requestId": {
@@ -98,7 +100,8 @@
                     "enum": [
                       "1.0.0",
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   },
                   "id": {
@@ -482,7 +485,10 @@
                     "if": {
                       "properties": {
                         "protocolVersion": {
-                          "const": "1.2.0"
+                          "enum": [
+                            "1.2.0",
+                            "1.3.0"
+                          ]
                         }
                       },
                       "required": [
@@ -530,8 +536,39 @@
               },
               "message": {
                 "type": "string",
-                "minLength": 1,
                 "maxLength": 4000
+              },
+              "parameterEdits": {
+                "minItems": 1,
+                "maxItems": 64,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "nodeId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "argumentName": {
+                      "type": "string",
+                      "maxLength": 180,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                    },
+                    "before": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "after": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  "required": [
+                    "nodeId",
+                    "argumentName",
+                    "before",
+                    "after"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "revisionThread": {
                 "type": "object",
@@ -632,7 +669,8 @@
                     "protocolVersion": {
                       "enum": [
                         "1.1.0",
-                        "1.2.0"
+                        "1.2.0",
+                        "1.3.0"
                       ]
                     }
                   },
@@ -644,6 +682,49 @@
                   "required": [
                     "revisionThread"
                   ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "protocolVersion": {
+                      "const": "1.3.0"
+                    }
+                  },
+                  "required": [
+                    "protocolVersion"
+                  ]
+                },
+                "then": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "message": {
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "parameterEdits"
+                      ]
+                    }
+                  ]
+                },
+                "else": {
+                  "properties": {
+                    "message": {
+                      "minLength": 1
+                    }
+                  },
+                  "not": {
+                    "required": [
+                      "parameterEdits"
+                    ]
+                  }
                 }
               }
             ]
@@ -658,7 +739,8 @@
                     "enum": [
                       "1.0.0",
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   },
                   "proposalId": {
@@ -683,7 +765,8 @@
                         "enum": [
                           "1.0.0",
                           "1.1.0",
-                          "1.2.0"
+                          "1.2.0",
+                          "1.3.0"
                         ]
                       },
                       "id": {
@@ -1067,7 +1150,10 @@
                         "if": {
                           "properties": {
                             "protocolVersion": {
-                              "const": "1.2.0"
+                              "enum": [
+                                "1.2.0",
+                                "1.3.0"
+                              ]
                             }
                           },
                           "required": [
@@ -1268,10 +1354,10 @@
                                   ]
                                 },
                                 "before": {
-                                  "$ref": "#/$defs/__schema0"
+                                  "$ref": "#/$defs/__schema2"
                                 },
                                 "after": {
-                                  "$ref": "#/$defs/__schema1"
+                                  "$ref": "#/$defs/__schema3"
                                 }
                               },
                               "required": [
@@ -1523,10 +1609,10 @@
                                             ]
                                           },
                                           "before": {
-                                            "$ref": "#/$defs/__schema2"
+                                            "$ref": "#/$defs/__schema4"
                                           },
                                           "after": {
-                                            "$ref": "#/$defs/__schema3"
+                                            "$ref": "#/$defs/__schema5"
                                           }
                                         },
                                         "required": [
@@ -1590,7 +1676,8 @@
                         "protocolVersion": {
                           "enum": [
                             "1.1.0",
-                            "1.2.0"
+                            "1.2.0",
+                            "1.3.0"
                           ]
                         }
                       },
@@ -1674,7 +1761,8 @@
                     "enum": [
                       "1.0.0",
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   },
                   "decisionId": {
@@ -1742,7 +1830,8 @@
                   "protocolVersion": {
                     "enum": [
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   }
                 }
@@ -1752,7 +1841,8 @@
                   "protocolVersion": {
                     "enum": [
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   }
                 }
@@ -1762,7 +1852,8 @@
                   "protocolVersion": {
                     "enum": [
                       "1.1.0",
-                      "1.2.0"
+                      "1.2.0",
+                      "1.3.0"
                     ]
                   }
                 }
@@ -1944,6 +2035,68 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema3"
+          }
+        }
+      ]
+    },
+    "__schema4": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema4"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          }
+        }
+      ]
+    },
+    "__schema5": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema5"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema5"
           }
         }
       ]

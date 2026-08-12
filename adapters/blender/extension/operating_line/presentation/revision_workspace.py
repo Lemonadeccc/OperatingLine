@@ -103,6 +103,58 @@ def _compact_diff_value(value) -> str | None:
     return None
 
 
+def _parameter_value(value) -> str:
+    compact = _compact_diff_value(value)
+    if compact is not None:
+        return compact
+    if isinstance(value, list):
+        return f"[{len(value)} items]"
+    if isinstance(value, dict):
+        return f"{{{len(value)} fields}}"
+    return type(value).__name__
+
+
+def _draw_parameter_form(layout, companion, node) -> None:
+    if node.action is None:
+        return
+    fields = companion.revision_parameter_fields(node.id)
+    if not fields:
+        return
+    form = layout.box()
+    form.label(text="Parameter form", icon="PREFERENCES")
+    form.label(text=node.action.name)
+    for field in fields:
+        row = form.row(align=True)
+        changed = field.value != field.original_value
+        row.label(
+            text=(
+                f"{field.name}: {_parameter_value(field.original_value)} -> "
+                f"{_parameter_value(field.value)}"
+                if changed
+                else f"{field.name}: {_parameter_value(field.value)}"
+            ),
+            icon="FILE_REFRESH" if changed else "DOT",
+        )
+        if field.editable:
+            edit = row.operator(
+                "operating_line.edit_revision_parameter",
+                text="Edit",
+                icon="GREASEPENCIL",
+            )
+            edit.node_id = node.id
+            edit.argument_name = field.name
+            if changed:
+                reset = row.operator(
+                    "operating_line.reset_revision_parameter",
+                    text="",
+                    icon="LOOP_BACK",
+                )
+                reset.node_id = node.id
+                reset.argument_name = field.name
+        else:
+            row.label(text="Read-only", icon="LOCKED")
+
+
 def _draw_action_argument_diff(layout, field_change) -> None:
     before = field_change.get("before")
     after = field_change.get("after")
@@ -263,15 +315,20 @@ def _draw_revision_request(layout, context, companion) -> None:
                 icon="X",
             )
             remove.node_id = node.id
+            _draw_parameter_form(reference, companion, node)
 
-    composer.label(text="Requested change")
+    composer.label(text="Requested change (optional with form edits)")
     composer.prop(
         context.window_manager,
         "operating_line_revision_message",
         text="",
     )
     clear = composer.row()
-    clear.enabled = bool(base or context.window_manager.operating_line_revision_message)
+    clear.enabled = bool(
+        base
+        or companion.revision_parameter_edit_count
+        or context.window_manager.operating_line_revision_message
+    )
     clear.operator(
         "operating_line.clear_revision_request",
         text="Clear",
@@ -283,7 +340,10 @@ def _draw_revision_request(layout, context, companion) -> None:
         and not companion.goal_request.active
         and not companion.provider_handoff.active
         and bool(references)
-        and bool(context.window_manager.operating_line_revision_message.strip())
+        and bool(
+            context.window_manager.operating_line_revision_message.strip()
+            or companion.revision_parameter_edit_count
+        )
     )
     send.operator(
         "operating_line.submit_revision_request",
@@ -295,6 +355,11 @@ def _draw_revision_request(layout, context, companion) -> None:
         "Request only; scene unchanged.",
         icon="INFO",
     )
+    if companion.revision_parameter_edit_count:
+        composer.label(
+            text=f"Structured edits: {companion.revision_parameter_edit_count}",
+            icon="PREFERENCES",
+        )
     if companion.provider_handoff.active:
         _draw_wrapped_text(
             composer,
@@ -388,8 +453,8 @@ def _draw_provider_handoff(layout, companion) -> None:
         if selected["dataHandling"]["executionLocation"] == "remote":
             _draw_wrapped_text(
                 disclosure,
-                "A confirmed run sends the revision message, full base Plan, node "
-                "references, ActionCatalog, and latest companion state.",
+                "A confirmed run sends the revision message, structured parameter edits, "
+                "full base Plan, node references, ActionCatalog, and latest companion state.",
                 icon="URL",
             )
             _draw_wrapped_text(
@@ -508,6 +573,21 @@ def _draw_revision_history(layout, context, companion) -> None:
         turn_box.label(text=f"You {references}", icon="GREASEPENCIL")
         for line in _wrap_history_message(record["request"]["message"]):
             turn_box.label(text=line)
+        parameter_edits = record["request"].get("parameterEdits", [])
+        if parameter_edits:
+            turn_box.label(
+                text=f"Structured edits {len(parameter_edits)}",
+                icon="PREFERENCES",
+            )
+            for edit in parameter_edits[:3]:
+                _draw_wrapped_text(
+                    turn_box,
+                    (
+                        f"{edit['nodeId']}.{edit['argumentName']}: "
+                        f"{_parameter_value(edit['before'])} -> "
+                        f"{_parameter_value(edit['after'])}"
+                    ),
+                )
         proposal = record["proposal"]
         if proposal is not None:
             turn_box.label(

@@ -71,7 +71,10 @@ Companion 仍负责真实宿主状态和最终执行验证。
 `guide-replan-submission.schema.json` 定义 MCP 客户端针对该请求提交的完整新版计划。请求保存精确
 ActionCatalog 版本、完整 base Plan、稳定节点 ID 和当时的显示编号，而不是只保存易漂移的自由文本。
 协议 `1.1.0` 还增加线性 `revisionThread`；`guide-plan-diff.schema.json` 定义服务端计算并随请求关联
-Proposal 投递的精确 Plan/节点/字段前后值。`1.0.0` payload 仍可读取，但新 Companion 产生 `1.1.0`。
+Proposal 投递的精确 Plan/节点/字段前后值。协议 `1.3.0` 增加可选 `parameterEdits`，把直接引用 action
+叶节点的顶层参数绑定为精确 `before/after`；请求可使用消息、结构化 edits 或两者，但 Provider 必须在
+完整新版 Plan 中逐项精确应用。`1.0.0`–`1.2.0` payload 仍可读取且保持 message-only，新 Companion
+产生 `1.3.0`。
 `guide-revision-thread-history-request.schema.json` 与
 `guide-revision-thread-history.schema.json` 定义按宿主实例隔离、以 `beforeTurn` 向前分页的完整修订
 记录；每轮原样关联请求、Proposal、diff 和人工决策。
@@ -101,7 +104,7 @@ adjudication 保存逐 criterion 人工判断和内容寻址分歧。Comparison 
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
-- 当前 Guide/Companion 生产版本为 `1.2.0`；读端保留 `1.0.0`/`1.1.0`。旧版 observation 只能是
+- 当前 Guide/Companion 生产版本为 `1.3.0`；读端保留 `1.0.0`/`1.1.0`/`1.2.0`。旧版 observation 只能是
   telemetry，不得由新宿主静默升级为 success gate。
 - Major 不兼容时必须拒绝连接，不能静默降级。
 - 屏幕像素坐标不是持久协议字段；适配器在运行时解析语义锚点。
@@ -135,6 +138,8 @@ adjudication 保存逐 criterion 人工判断和内容寻址分歧。Comparison 
   相反决策是 conflict。其他实例仍可独立审查同一提案。
 - 修订请求以 `requestId` 幂等；相同 ID 的不同 payload 是 conflict。引用的 `nodeId + nodeNumber`
   必须与请求携带的完整 base Plan 一致。
+- `parameterEdits` 只允许出现在 `1.3.0` 请求中，必须指向直接引用的 action 叶节点。`before` 必须匹配
+  base Plan，合并后的完整 action arguments 必须通过精确目录，Provider 输出必须逐项等于 `after`。
 - `revisionThread` 的首轮使用 `threadId = requestId`；后续 turn 必须指向当前 thread head，并以该父
   请求关联且已在同一宿主实例接受的 Proposal 完整计划作为精确 base。当前协议只允许线性历史，
   不静默创建分支。

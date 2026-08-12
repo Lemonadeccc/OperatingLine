@@ -144,6 +144,17 @@ export function evaluateLocalReplanScope(
 
   const baseSteps = stepMap(request.basePlan);
   const targetSteps = stepMap(targetPlan);
+  for (const edit of request.parameterEdits ?? []) {
+    const targetStep = targetSteps.get(edit.nodeId);
+    const actual = targetStep?.action?.arguments[edit.argumentName];
+    if (!isDeepStrictEqual(actual, edit.after)) {
+      addFinding(
+        'parameter_edit_not_applied',
+        `Structured parameter edit ${edit.nodeId}.${edit.argumentName} must equal its requested after value.`,
+        [edit.nodeId],
+      );
+    }
+  }
   for (const rootId of scope.normalizedRootIds) {
     const before = baseSteps.get(rootId);
     const after = targetSteps.get(rootId);

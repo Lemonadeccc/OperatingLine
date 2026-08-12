@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
+import json
 from queue import Empty
 import time
 import uuid
@@ -23,6 +25,7 @@ from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession, ObservationGateState
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import InitialPlanRunState, ReplanRunState
+from .parameter_form import ParameterField, action_parameter_fields
 from .revision_review import (
     RevisionLineage,
     lineage_from_proposal,
@@ -68,6 +71,7 @@ class CompanionController:
         self._revision_base_session: DemoSession | None = None
         self._revision_reference_scope: str | None = None
         self._revision_reference_ids: list[str] = []
+        self._revision_parameter_edits: dict[tuple[str, str], dict[str, Any]] = {}
         self.revision_request_status = ""
         self.last_revision_request_id: str | None = None
         self.provider_handoff = ReplanRunState()
@@ -347,6 +351,124 @@ class CompanionController:
             if node is not None
         )
 
+    @property
+    def revision_parameter_edit_count(self) -> int:
+        return len(self._revision_parameter_edits)
+
+    def revision_parameter_edits(self) -> tuple[dict[str, Any], ...]:
+        """Return stable isolated edits for request serialization and UI review."""
+        reference_order = {
+            node_id: index for index, node_id in enumerate(self._revision_reference_ids)
+        }
+        return tuple(
+            deepcopy(edit)
+            for _, edit in sorted(
+                self._revision_parameter_edits.items(),
+                key=lambda item: (
+                    reference_order.get(item[0][0], len(reference_order)),
+                    item[0][1],
+                ),
+            )
+        )
+
+    def revision_parameter_fields(self, node_id: str) -> tuple[ParameterField, ...]:
+        base = self._revision_base_session
+        if base is None or node_id not in self._revision_reference_ids:
+            return ()
+        node = base.find_node(node_id)
+        if node is None or node.action is None:
+            return ()
+        requested = {
+            argument_name: edit["after"]
+            for (edit_node_id, argument_name), edit in self._revision_parameter_edits.items()
+            if edit_node_id == node_id
+        }
+        return action_parameter_fields(node.action, requested)
+
+    def revision_parameter_field(
+        self, node_id: str, argument_name: str
+    ) -> ParameterField:
+        field = next(
+            (
+                candidate
+                for candidate in self.revision_parameter_fields(node_id)
+                if candidate.name == argument_name
+            ),
+            None,
+        )
+        if field is None:
+            raise ValueError(f"Unknown editable action argument: {node_id}.{argument_name}")
+        return field
+
+    def _parameter_edited_plan(
+        self, edits: dict[tuple[str, str], dict[str, Any]]
+    ) -> dict[str, Any]:
+        base = self._revision_base_session
+        source_plan = base.source_plan_copy() if base is not None else None
+        if source_plan is None:
+            raise ValueError("The selected plan has no immutable source payload")
+        steps = {
+            step.get("id"): step
+            for step in source_plan.get("steps", [])
+            if isinstance(step, dict)
+        }
+        for (node_id, argument_name), edit in edits.items():
+            step = steps.get(node_id)
+            action = step.get("action") if isinstance(step, dict) else None
+            arguments = action.get("arguments") if isinstance(action, dict) else None
+            if not isinstance(arguments, dict) or argument_name not in arguments:
+                raise ValueError(
+                    f"Unknown action argument in revision draft: {node_id}.{argument_name}"
+                )
+            if arguments[argument_name] != edit["before"]:
+                raise ValueError(
+                    f"Revision parameter base changed: {node_id}.{argument_name}"
+                )
+            arguments[argument_name] = deepcopy(edit["after"])
+        self._validated_session(source_plan)
+        return source_plan
+
+    def set_revision_parameter_edit(
+        self, node_id: str, argument_name: str, value: Any
+    ) -> ParameterField:
+        if node_id not in self._revision_reference_ids:
+            raise ValueError("Reference the task node before editing its parameters")
+        field = self.revision_parameter_field(node_id, argument_name)
+        if not field.editable:
+            raise ValueError(
+                f"Structured argument {argument_name} is read-only in this bounded form"
+            )
+        try:
+            json.dumps(value, allow_nan=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Parameter value must be finite JSON data") from error
+        candidate = dict(self._revision_parameter_edits)
+        key = (node_id, argument_name)
+        if value == field.original_value:
+            candidate.pop(key, None)
+        else:
+            candidate[key] = {
+                "nodeId": node_id,
+                "argumentName": argument_name,
+                "before": deepcopy(field.original_value),
+                "after": deepcopy(value),
+            }
+        self._parameter_edited_plan(candidate)
+        self._revision_parameter_edits = candidate
+        return self.revision_parameter_field(node_id, argument_name)
+
+    def reset_revision_parameter_edit(
+        self, node_id: str, argument_name: str
+    ) -> bool:
+        key = (node_id, argument_name)
+        if key not in self._revision_parameter_edits:
+            return False
+        candidate = dict(self._revision_parameter_edits)
+        candidate.pop(key)
+        self._parameter_edited_plan(candidate)
+        self._revision_parameter_edits = candidate
+        return True
+
     def has_revision_reference(self, scope: str, node_id: str) -> bool:
         """Return whether the current draft references this node on this base."""
         if self._revision_reference_scope != scope:
@@ -385,6 +507,11 @@ class CompanionController:
         if node_id not in self._revision_reference_ids:
             return False
         self._revision_reference_ids.remove(node_id)
+        self._revision_parameter_edits = {
+            key: value
+            for key, value in self._revision_parameter_edits.items()
+            if key[0] != node_id
+        }
         if not self._revision_reference_ids:
             self._revision_base_session = None
             self._revision_reference_scope = None
@@ -394,6 +521,7 @@ class CompanionController:
         self._revision_base_session = None
         self._revision_reference_scope = None
         self._revision_reference_ids.clear()
+        self._revision_parameter_edits.clear()
         window_manager = getattr(bpy.context, "window_manager", None)
         if window_manager is not None and hasattr(
             window_manager,
@@ -545,8 +673,11 @@ class CompanionController:
         if base is None or not references:
             raise ValueError("Select at least one task-node reference")
         normalized_message = message.strip() if isinstance(message, str) else ""
-        if not normalized_message:
-            raise ValueError("Revision request message must not be empty")
+        parameter_edits = self.revision_parameter_edits()
+        if not normalized_message and not parameter_edits:
+            raise ValueError(
+                "Revision request requires a message or structured parameter edit"
+            )
         if len(normalized_message) > 4000:
             raise ValueError("Revision request message must not exceed 4000 characters")
         source_plan = base.source_plan_copy()
@@ -568,6 +699,11 @@ class CompanionController:
                 {"nodeId": node.id, "nodeNumber": node.number} for node in references
             ],
             "message": normalized_message,
+            **(
+                {"parameterEdits": list(parameter_edits)}
+                if parameter_edits
+                else {}
+            ),
             "revisionThread": revision_thread,
             "occurredAt": datetime.now(timezone.utc)
             .isoformat()
@@ -759,10 +895,8 @@ class CompanionController:
                 )
             if goal_request_id != self.goal_request.request_id:
                 raise ValueError("Proposal does not match the active goal request")
-            if proposal_protocol_version != PROTOCOL_VERSION:
-                raise ValueError(
-                    f"Goal-linked proposals require protocol {PROTOCOL_VERSION}"
-                )
+            if proposal_protocol_version == "1.0.0":
+                raise ValueError("Goal-linked proposals require protocol 1.1+")
         revision_thread = proposal.get("revisionThread")
         if revision_thread is not None:
             if revision_request_id is None:

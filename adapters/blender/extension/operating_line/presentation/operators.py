@@ -1,5 +1,6 @@
 """Operators exposing accepted-plan guidance and proposal review use cases."""
 
+import json
 import bpy
 
 from ..application import ObservationGateError
@@ -506,6 +507,154 @@ class OPERATINGLINE_OT_remove_revision_reference(bpy.types.Operator):
         return {"FINISHED"}
 
 
+_PARAMETER_ENUM_ITEMS_CACHE = {}
+
+
+def _parameter_enum_items(operator, _context):
+    cached = _PARAMETER_ENUM_ITEMS_CACHE.get(operator.enum_values_json)
+    if cached is not None:
+        return cached
+    try:
+        values = json.loads(operator.enum_values_json)
+    except (TypeError, ValueError):
+        values = []
+    items = tuple(
+        (value, value, f"Use {value}")
+        for value in values
+        if isinstance(value, str)
+    )
+    _PARAMETER_ENUM_ITEMS_CACHE[operator.enum_values_json] = items
+    return items
+
+
+class OPERATINGLINE_OT_edit_revision_parameter(bpy.types.Operator):
+    bl_idname = "operating_line.edit_revision_parameter"
+    bl_label = "Edit Requested Parameter"
+    bl_description = (
+        "Add a typed parameter edit to the immutable revision request; "
+        "this does not modify the active Plan or scene"
+    )
+
+    node_id: bpy.props.StringProperty(options={"HIDDEN"})
+    argument_name: bpy.props.StringProperty(options={"HIDDEN"})
+    value_kind: bpy.props.StringProperty(options={"HIDDEN"})
+    vector_length: bpy.props.IntProperty(default=0, min=0, max=4, options={"HIDDEN"})
+    enum_values_json: bpy.props.StringProperty(default="[]", options={"HIDDEN"})
+    bool_value: bpy.props.BoolProperty(name="Requested value")
+    int_value: bpy.props.IntProperty(name="Requested value")
+    float_value: bpy.props.FloatProperty(name="Requested value", precision=6)
+    enum_value: bpy.props.EnumProperty(name="Requested value", items=_parameter_enum_items)
+    vector_value: bpy.props.FloatVectorProperty(
+        name="Requested value",
+        size=4,
+        precision=6,
+    )
+
+    def invoke(self, context, _event):
+        try:
+            field = _companion().revision_parameter_field(
+                self.node_id,
+                self.argument_name,
+            )
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        if not field.editable:
+            self.report({"ERROR"}, f"{field.name} is read-only in this parameter form")
+            return {"CANCELLED"}
+        self.value_kind = field.kind
+        self.vector_length = field.vector_length
+        self.enum_values_json = json.dumps(field.enum_values)
+        if field.kind == "boolean":
+            self.bool_value = bool(field.value)
+        elif field.kind == "integer":
+            self.int_value = int(field.value)
+        elif field.kind == "number":
+            self.float_value = float(field.value)
+        elif field.kind == "enum":
+            self.enum_value = str(field.value)
+        elif field.kind in {"integer_vector", "number_vector"}:
+            values = tuple(float(value) for value in field.value)
+            self.vector_value = values + (0.0,) * (4 - len(values))
+        else:
+            self.report({"ERROR"}, f"Unsupported parameter form type: {field.kind}")
+            return {"CANCELLED"}
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.label(text=f"{self.node_id}.{self.argument_name}")
+        if self.value_kind == "boolean":
+            layout.prop(self, "bool_value")
+        elif self.value_kind == "integer":
+            layout.prop(self, "int_value")
+        elif self.value_kind == "number":
+            layout.prop(self, "float_value")
+        elif self.value_kind == "enum":
+            layout.prop(self, "enum_value")
+        elif self.value_kind in {"integer_vector", "number_vector"}:
+            for index in range(self.vector_length):
+                layout.prop(self, "vector_value", index=index, text=f"Value {index + 1}")
+        layout.label(text="Request draft only; Plan and scene stay unchanged", icon="INFO")
+
+    def execute(self, _context):
+        if self.value_kind == "boolean":
+            value = self.bool_value
+        elif self.value_kind == "integer":
+            value = self.int_value
+        elif self.value_kind == "number":
+            value = self.float_value
+        elif self.value_kind == "enum":
+            value = self.enum_value
+        elif self.value_kind in {"integer_vector", "number_vector"}:
+            values = self.vector_value[: self.vector_length]
+            value = (
+                [int(round(item)) for item in values]
+                if self.value_kind == "integer_vector"
+                else [float(item) for item in values]
+            )
+        else:
+            self.report({"ERROR"}, "Unsupported parameter form type")
+            return {"CANCELLED"}
+        companion = _companion()
+        try:
+            companion.set_revision_parameter_edit(
+                self.node_id,
+                self.argument_name,
+                value,
+            )
+        except ValueError as error:
+            companion.revision_request_status = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        companion.revision_request_status = (
+            f"Structured edit set: {self.argument_name}; Plan and scene unchanged"
+        )
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_reset_revision_parameter(bpy.types.Operator):
+    bl_idname = "operating_line.reset_revision_parameter"
+    bl_label = "Reset Requested Parameter"
+    bl_description = "Remove this structured parameter edit from the local draft"
+
+    node_id: bpy.props.StringProperty(options={"HIDDEN"})
+    argument_name: bpy.props.StringProperty(options={"HIDDEN"})
+
+    def execute(self, _context):
+        companion = _companion()
+        if not companion.reset_revision_parameter_edit(
+            self.node_id,
+            self.argument_name,
+        ):
+            self.report({"WARNING"}, "Parameter edit is no longer present")
+            return {"CANCELLED"}
+        companion.revision_request_status = (
+            f"Structured edit reset: {self.argument_name}"
+        )
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_clear_revision_request(bpy.types.Operator):
     bl_idname = "operating_line.clear_revision_request"
     bl_label = "Clear Request"
@@ -679,6 +828,8 @@ CLASSES = (
     OPERATINGLINE_OT_reject_proposal,
     OPERATINGLINE_OT_reference_node,
     OPERATINGLINE_OT_remove_revision_reference,
+    OPERATINGLINE_OT_edit_revision_parameter,
+    OPERATINGLINE_OT_reset_revision_parameter,
     OPERATINGLINE_OT_clear_revision_request,
     OPERATINGLINE_OT_submit_revision_request,
     OPERATINGLINE_OT_load_older_revision_history,
