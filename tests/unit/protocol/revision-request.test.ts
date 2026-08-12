@@ -12,7 +12,7 @@ const readPlan = (): unknown =>
 function revisionRequest() {
   const requestId = randomUUID();
   return {
-    protocolVersion: '1.1.0',
+    protocolVersion: '1.2.0',
     requestId,
     adapterId: 'blender',
     catalogVersion: '1.0.0',
@@ -29,7 +29,7 @@ describe('guide revision request protocol', () => {
   it('binds a user message to an immutable base plan and stable node references', () => {
     const request = guideRevisionRequestSchema.parse(revisionRequest());
 
-    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 5 });
+    expect(request.basePlan).toMatchObject({ id: 'snowman-demo', revision: 6 });
     expect(request.catalogVersion).toBe('1.0.0');
     expect(request.references).toEqual([{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }]);
     expect(request.revisionThread).toEqual({
@@ -74,13 +74,13 @@ describe('guide revision request protocol', () => {
         generationRequestId,
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
-        plan: { ...plan, revision: 6 },
+        plan: { ...plan, revision: 7 },
       }).success,
     ).toBe(true);
     expect(
       guideReplanSubmissionSchema.safeParse({
         requestId: randomUUID(),
-        plan: { ...plan, revision: 6 },
+        plan: { ...plan, revision: 7 },
       }).success,
     ).toBe(false);
     expect(
@@ -88,13 +88,13 @@ describe('guide revision request protocol', () => {
         generationRequestId,
         requestId: randomUUID(),
         catalogVersion: '1.0.0',
-        plan: { ...plan, revision: 6 },
+        plan: { ...plan, revision: 7 },
         generationResult: 'must-not-be-embedded',
       }).success,
     ).toBe(false);
   });
 
-  it('requires explicit, linear thread lineage in protocol 1.1 requests', () => {
+  it('requires explicit, linear thread lineage in protocol 1.1+ requests', () => {
     const first = revisionRequest();
     expect(
       guideRevisionRequestSchema.safeParse({ ...first, revisionThread: undefined }).success,

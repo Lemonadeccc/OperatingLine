@@ -33,6 +33,14 @@ function stateReport() {
   };
 }
 
+function currentStateReport() {
+  return {
+    ...stateReport(),
+    protocolVersion: '1.2.0',
+    observationGate: null,
+  };
+}
+
 describe('companion protocol', () => {
   it('accepts strict language-neutral guide requests and state reports', () => {
     expect(
@@ -185,6 +193,96 @@ describe('companion protocol', () => {
     expect(companionStateReportSchema.safeParse(extraObservationField).success).toBe(false);
   });
 
+  it('reports fail-closed observation gates and explicit recovery transitions', () => {
+    const stepId = 'snowman.body';
+    const base = {
+      ...currentStateReport(),
+      plan: { id: 'snowman', revision: 6 },
+      planContentSha256: 'a'.repeat(64),
+      executionId: randomUUID(),
+      phase: 'blocked',
+      activeStepId: stepId,
+      transition: 'step_observation_failed',
+      stepId,
+      observations: [{ kind: 'object_exists', satisfied: false, details: {} }],
+      observationGate: {
+        stepId,
+        status: 'repair_required',
+        failureStrategy: 'retain_for_repair',
+        message: 'Expected observation did not pass',
+      },
+    };
+    expect(companionStateReportSchema.safeParse(base).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        phase: 'running',
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        phase: 'running',
+        transition: 'observation_recovered',
+        observations: [{ kind: 'object_exists', satisfied: true, details: {} }],
+        observationGate: { ...base.observationGate, status: 'recovered' },
+      }).success,
+    ).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        observations: [{ kind: 'object_exists', satisfied: true, details: {} }],
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        completedStepIds: [stepId],
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        activeStepId: 'snowman.head',
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        phase: 'running',
+        transition: 'observation_recovered',
+        observationGate: { ...base.observationGate, status: 'recovered' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        observationGate: { ...base.observationGate, stepId: 'snowman.head' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...base,
+        observationGate: {
+          ...base.observationGate,
+          status: 'rollback_failed',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...currentStateReport(),
+        observationGate: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...stateReport(),
+        observationGate: null,
+      }).success,
+    ).toBe(false);
+  });
+
   it('emits language-neutral schemas for pairing, uniqueness, and cross-field rules', () => {
     const requestSchema = JSON.parse(
       readFileSync(resolve('protocol/schemas/v1/companion-guide-request.schema.json'), 'utf8'),
@@ -194,7 +292,10 @@ describe('companion protocol', () => {
     ) as {
       additionalProperties?: boolean;
       allOf?: unknown[];
-      properties?: { completedStepIds?: { uniqueItems?: boolean } };
+      properties?: {
+        completedStepIds?: { uniqueItems?: boolean };
+        observationGate?: unknown;
+      };
     };
 
     expect(requestSchema.dependentRequired).toEqual({
@@ -204,6 +305,22 @@ describe('companion protocol', () => {
     });
     expect(stateSchema.additionalProperties).toBe(false);
     expect(stateSchema.properties?.completedStepIds?.uniqueItems).toBe(true);
+    expect(stateSchema.properties?.observationGate).toBeDefined();
     expect(stateSchema.allOf?.length).toBeGreaterThanOrEqual(7);
+    expect(stateSchema.allOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          if: { properties: { phase: { const: 'blocked' } }, required: ['phase'] },
+          then: expect.objectContaining({ required: ['observationGate'] }),
+        }),
+        expect.objectContaining({
+          if: {
+            properties: { transition: { const: 'step_observation_failed' } },
+            required: ['transition'],
+          },
+          then: expect.objectContaining({ required: ['observationGate'] }),
+        }),
+      ]),
+    );
   });
 });

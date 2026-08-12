@@ -180,6 +180,45 @@ class ActionReceipt:
 
 ExecuteAction = Callable[[Mapping[str, ActionReceipt]], ActionReceipt]
 RollbackAction = Callable[[ActionReceipt], None]
+EvaluateObservations = Callable[
+    [tuple[dict[str, Any], ...], Mapping[str, ActionReceipt]],
+    list[dict[str, Any]],
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationGateState:
+    """One deterministic success-gate outcome for companion reporting and recovery."""
+
+    step_id: str
+    status: str
+    failure_strategy: str
+    message: str
+    observations: tuple[dict[str, Any], ...]
+
+    @property
+    def blocking(self) -> bool:
+        return self.status in {"repair_required", "rollback_failed"}
+
+    def report_data(self) -> dict[str, str]:
+        return {
+            "stepId": self.step_id,
+            "status": self.status,
+            "failureStrategy": self.failure_strategy,
+            "message": self.message,
+        }
+
+    def observation_copy(self) -> list[dict[str, Any]]:
+        return deepcopy(list(self.observations))
+
+
+class ObservationGateError(RuntimeError):
+    """Expected, recoverable failure of a step's declared success gate."""
+
+    def __init__(self, step: TaskNode, gate: ObservationGateState) -> None:
+        super().__init__(gate.message)
+        self.step = step
+        self.gate = gate
 
 
 class DemoSession:
@@ -192,6 +231,7 @@ class DemoSession:
         revision: int | None = 1,
         source_plan: Mapping[str, Any] | None = None,
         plan_content_sha256: str | None = None,
+        observation_evaluator: EvaluateObservations | None = None,
     ) -> None:
         self.root = root
         self._actions = actions
@@ -222,9 +262,20 @@ class DemoSession:
         )
         self.execution_id: str | None = None
         self.steps = executable_steps(root)
+        if observation_evaluator is None and any(
+            step.observation_policy is not None
+            and step.observation_policy.mode == "success_gate"
+            for step in self.steps
+        ):
+            raise ValueError("A success-gated plan requires an observation evaluator")
+        self._observation_evaluator = observation_evaluator
         self.active_index = -1
         self.started = False
         self.receipts: dict[str, ActionReceipt] = {}
+        self.observation_gate: ObservationGateState | None = None
+        self._last_success_gate_result: (
+            tuple[str, tuple[dict[str, Any], ...]] | None
+        ) = None
         self._branch_node_ids = self._branch_ids(root)
         self.expanded_node_ids = set(self._branch_node_ids)
         self._nodes_by_id = self._index_nodes(root)
@@ -266,6 +317,31 @@ class DemoSession:
             return self.steps[self.active_index]
         return None
 
+    @property
+    def observation_blocked(self) -> bool:
+        return self.observation_gate is not None and self.observation_gate.blocking
+
+    @property
+    def completed_steps(self) -> tuple[TaskNode, ...]:
+        completed = self.steps[: self.active_index + 1]
+        gate = self.observation_gate
+        if gate is not None and gate.blocking:
+            return tuple(step for step in completed if step.id != gate.step_id)
+        return completed
+
+    @property
+    def completed_step_ids(self) -> tuple[str, ...]:
+        return tuple(step.id for step in self.completed_steps)
+
+    def success_gate_observation_copy(
+        self,
+        step_id: str,
+    ) -> list[dict[str, Any]] | None:
+        result = self._last_success_gate_result
+        if result is None or result[0] != step_id:
+            return None
+        return deepcopy(list(result[1]))
+
     def start(self) -> None:
         self.reset()
         self.execution_id = str(uuid.uuid4())
@@ -274,21 +350,181 @@ class DemoSession:
     def _step_actions(self, step: TaskNode) -> tuple[ExecuteAction, RollbackAction]:
         return self._actions[step.id]
 
+    @staticmethod
+    def _failed_observations(
+        step: TaskNode,
+        evaluation_error: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "kind": str(expectation.get("kind")),
+                "satisfied": False,
+                "details": {
+                    "parameters": deepcopy(expectation.get("parameters", {})),
+                    "supported": True,
+                    "evaluationError": evaluation_error,
+                },
+            }
+            for expectation in step.expected_observations
+        ]
+
+    def _evaluate_step(self, step: TaskNode) -> list[dict[str, Any]]:
+        evaluator = self._observation_evaluator
+        if evaluator is None:
+            return self._failed_observations(step, "EvaluatorUnavailable")
+        try:
+            observations = evaluator(step.expected_observations, self.receipts)
+        except Exception as error:
+            return self._failed_observations(step, type(error).__name__)
+        if not isinstance(observations, list) or len(observations) != len(
+            step.expected_observations
+        ):
+            return self._failed_observations(step, "InvalidObservationResult")
+        for expectation, observation in zip(
+            step.expected_observations,
+            observations,
+            strict=True,
+        ):
+            if (
+                not isinstance(observation, dict)
+                or set(observation) != {"kind", "satisfied", "details"}
+                or observation.get("kind") != str(expectation.get("kind"))
+                or not isinstance(observation.get("satisfied"), bool)
+                or not isinstance(observation.get("details"), dict)
+            ):
+                return self._failed_observations(step, "InvalidObservationResult")
+        return deepcopy(observations)
+
+    @staticmethod
+    def _gate_message(step: TaskNode, observations: list[dict[str, Any]]) -> str:
+        failed_kinds = [
+            str(observation["kind"])
+            for observation in observations
+            if not observation["satisfied"]
+        ]
+        return (
+            f"Observation gate failed for {step.id}: "
+            + ", ".join(failed_kinds)
+        )
+
+    @staticmethod
+    def _gate_state(
+        step: TaskNode,
+        *,
+        status: str,
+        message: str,
+        observations: list[dict[str, Any]],
+    ) -> ObservationGateState:
+        policy = step.observation_policy
+        if policy is None or policy.failure_strategy is None:
+            raise RuntimeError(f"Step {step.id} does not declare a success gate")
+        return ObservationGateState(
+            step_id=step.id,
+            status=status,
+            failure_strategy=policy.failure_strategy,
+            message=message,
+            observations=tuple(deepcopy(observations)),
+        )
+
     def next(self) -> TaskNode | None:
         if not self.started:
             self.start()
+        if self.observation_blocked:
+            gate = self.observation_gate
+            step = self.active_step
+            if gate is None or step is None:
+                raise RuntimeError("Observation gate state is inconsistent")
+            raise ObservationGateError(step, gate)
+        self.observation_gate = None
+        self._last_success_gate_result = None
         next_index = self.active_index + 1
         if next_index >= len(self.steps):
             return None
         step = self.steps[next_index]
-        execute, _rollback = self._step_actions(step)
+        execute, rollback = self._step_actions(step)
         receipt = execute(self.receipts)
         action_name = step.action.name if step.action else ""
         if receipt.step_id != step.id or receipt.action_name != action_name:
             raise RuntimeError(f"Action returned a receipt for the wrong step: {step.id}")
         self.receipts[step.id] = receipt
+        policy = step.observation_policy
+        if policy is not None and policy.mode == "success_gate":
+            observations = self._evaluate_step(step)
+            if not observations or not all(
+                observation["satisfied"] for observation in observations
+            ):
+                message = self._gate_message(step, observations)
+                if policy.failure_strategy == "rollback_step":
+                    try:
+                        rollback(receipt)
+                    except Exception as rollback_error:
+                        self.active_index = next_index
+                        gate = self._gate_state(
+                            step,
+                            status="rollback_failed",
+                            message=(
+                                f"{message}; automatic rollback failed "
+                                f"({type(rollback_error).__name__})"
+                            ),
+                            observations=observations,
+                        )
+                        self.observation_gate = gate
+                        raise ObservationGateError(step, gate) from rollback_error
+                    del self.receipts[step.id]
+                    gate = self._gate_state(
+                        step,
+                        status="failed_rolled_back",
+                        message=f"{message}; the step was rolled back",
+                        observations=observations,
+                    )
+                    self.observation_gate = gate
+                    raise ObservationGateError(step, gate)
+                self.active_index = next_index
+                gate = self._gate_state(
+                    step,
+                    status="repair_required",
+                    message=f"{message}; repair the scene or use Back",
+                    observations=observations,
+                )
+                self.observation_gate = gate
+                raise ObservationGateError(step, gate)
+            self._last_success_gate_result = (
+                step.id,
+                tuple(deepcopy(observations)),
+            )
         self.active_index = next_index
         return step
+
+    def recheck_observations(self) -> TaskNode:
+        gate = self.observation_gate
+        step = self.active_step
+        if gate is None or not gate.blocking or step is None or gate.step_id != step.id:
+            raise ValueError("No blocked observation gate is available to recheck")
+        observations = self._evaluate_step(step)
+        if observations and all(
+            observation["satisfied"] for observation in observations
+        ):
+            self.observation_gate = self._gate_state(
+                step,
+                status="recovered",
+                message=f"Observation gate recovered for {step.id}",
+                observations=observations,
+            )
+            self._last_success_gate_result = (
+                step.id,
+                tuple(deepcopy(observations)),
+            )
+            return step
+        self.observation_gate = self._gate_state(
+            step,
+            status=gate.status,
+            message=(
+                f"{self._gate_message(step, observations)}; "
+                "repair the scene or use Back"
+            ),
+            observations=observations,
+        )
+        raise ObservationGateError(step, self.observation_gate)
 
     def back(self) -> TaskNode | None:
         step = self.active_step
@@ -300,6 +536,8 @@ class DemoSession:
             rollback(receipt)
             del self.receipts[step.id]
         self.active_index -= 1
+        self.observation_gate = None
+        self._last_success_gate_result = None
         return step
 
     def is_expanded(self, node_id: str) -> bool:
@@ -320,3 +558,5 @@ class DemoSession:
         self.active_index = -1
         self.started = False
         self.execution_id = None
+        self.observation_gate = None
+        self._last_success_gate_result = None

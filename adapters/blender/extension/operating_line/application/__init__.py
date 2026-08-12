@@ -22,7 +22,12 @@ from .menu_guidance import (
     MenuGuidanceSnapshot,
     MenuGuidanceTracker,
 )
-from .session import ActionReceipt, DemoSession
+from .session import (
+    ActionReceipt,
+    DemoSession,
+    ObservationGateError,
+    ObservationGateState,
+)
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import InitialPlanRunState, ReplanRunState, validate_provider_list
 from .revision_review import (
@@ -37,6 +42,8 @@ from .revision_review import (
 __all__ = (
     "ActionReceipt",
     "DemoSession",
+    "ObservationGateError",
+    "ObservationGateState",
     "GuidanceState",
     "GuidanceStep",
     "GoalRequestState",

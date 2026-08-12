@@ -39,8 +39,9 @@ interface、节点、输入默认值和链接签名。`Back` 只有在这些状�
 - `modifier_ready` 通过活动 receipt 的 modifier identity 检查所属对象、modifier 类型和允许属性。
 - `geometry_nodes_ready` 检查所属对象、NODES modifier、受管 Node Group 和精确节点类型集合。
 
-这些 observation 是当前协议 `0.1.0` 的执行后遥测，不在本决策中升级为自动成功门；成功门和恢复
-策略另行版本化。
+这些 observation 在本决策发布时仍是执行后遥测；后续 Guide protocol `1.2.0` 已在
+[ADR 0030](0030-observation-success-gates-and-recovery.md) 中为显式 opt-in Plan 增加成功门与恢复策略，
+没有回写本 ADR 当时的 action/catalog 边界。
 
 ## 版本与兼容性
 

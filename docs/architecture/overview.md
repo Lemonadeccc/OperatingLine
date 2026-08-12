@@ -565,7 +565,7 @@ reviewed public release 不能解释为训练授权；Eval export 的未脱敏�
 
 Companion 应按步骤 ID 保存 action receipt，不能把 action 名当作唯一键；一个计划可以在多个
 步骤复用同一种通用 action。receipt 可以包含多个新建宿主资源、对既有自有资源的 mutation、
-文件产物和用于视觉定位的锚点。Blender revision 5 实现使用 pointer、不可预测 receipt token
+文件产物和用于视觉定位的锚点。Blender revision 6 实现使用 pointer、不可预测 receipt token
 和 logical ID 的组合身份，并额外核对步骤 ID 与 action 名；名称只用于显示和冲突预检，不构成
 删除授权。
 

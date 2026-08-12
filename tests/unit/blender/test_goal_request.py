@@ -53,7 +53,7 @@ class GoalRequestPayloadTests(unittest.TestCase):
                 "occurredAt",
             },
         )
-        self.assertEqual(payload["protocolVersion"], "1.1.0")
+        self.assertEqual(payload["protocolVersion"], "1.2.0")
         self.assertEqual(payload["adapterId"], "blender")
         self.assertEqual(
             payload["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION
@@ -251,7 +251,7 @@ class GoalRequestTransportTests(unittest.TestCase):
     def test_lost_decision_response_retries_exact_decision_until_main_thread_ack(self) -> None:
         instance_id = str(uuid.uuid4())
         decision = {
-            "protocolVersion": "1.1.0",
+            "protocolVersion": "1.2.0",
             "decisionId": str(uuid.uuid4()),
             "proposalId": str(uuid.uuid4()),
             "adapterId": "blender",

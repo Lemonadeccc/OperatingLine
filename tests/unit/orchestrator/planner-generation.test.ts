@@ -45,7 +45,7 @@ const capabilityCoverage = {
 function packetFor(request: PlanningPromptRequest): PlanningPromptPacket {
   return buildPlanningPromptPacket(
     planningContextSchema.parse({
-      protocolVersion: '1.1.0',
+      protocolVersion: '1.2.0',
       targetAdapterId: request.targetAdapterId,
       goal: request.goal,
       requestedPlanId: request.planId,

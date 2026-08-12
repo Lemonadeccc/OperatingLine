@@ -12,6 +12,14 @@ export const guideRevisionTurnStateSchema = z.enum([
 ]);
 export type GuideRevisionTurnState = z.infer<typeof guideRevisionTurnStateSchema>;
 
+const guideRevisionHistoryProtocolVersions = ['1.1.0', guideProtocolVersion] as const;
+const guideRevisionHistoryProtocolVersionSet = new Set<string>(
+  guideRevisionHistoryProtocolVersions,
+);
+export const guideRevisionHistoryProtocolVersionSchema = z.enum(
+  guideRevisionHistoryProtocolVersions,
+);
+
 export const guideRevisionThreadHistoryRequestSchema = z.strictObject({
   threadId: z.uuid(),
   targetAdapterId: z.string().trim().min(1).max(180),
@@ -32,6 +40,22 @@ export const guideRevisionThreadTurnSchema = z
     decision: guideProposalDecisionSchema.nullable(),
   })
   .superRefine((record, context) => {
+    for (const [path, protocolVersion] of [
+      ['request', record.request.protocolVersion],
+      ['proposal', record.proposal?.protocolVersion],
+      ['decision', record.decision?.protocolVersion],
+    ] as const) {
+      if (
+        protocolVersion !== undefined &&
+        !guideRevisionHistoryProtocolVersionSet.has(protocolVersion)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: [path, 'protocolVersion'],
+          message: 'Revision history entries require protocol 1.1+',
+        });
+      }
+    }
     const thread = record.request.revisionThread;
     if (thread === undefined || thread.turn !== record.turn) {
       context.addIssue({
@@ -81,12 +105,35 @@ export const guideRevisionThreadTurnSchema = z
         message: 'Revision history decision must match its proposal, host, and state',
       });
     }
+  })
+  .meta({
+    allOf: [
+      {
+        properties: {
+          request: {
+            properties: {
+              protocolVersion: { enum: [...guideRevisionHistoryProtocolVersions] },
+            },
+          },
+          proposal: {
+            properties: {
+              protocolVersion: { enum: [...guideRevisionHistoryProtocolVersions] },
+            },
+          },
+          decision: {
+            properties: {
+              protocolVersion: { enum: [...guideRevisionHistoryProtocolVersions] },
+            },
+          },
+        },
+      },
+    ],
   });
 export type GuideRevisionThreadTurn = z.infer<typeof guideRevisionThreadTurnSchema>;
 
 export const guideRevisionThreadHistorySchema = z
   .strictObject({
-    protocolVersion: z.literal(guideProtocolVersion),
+    protocolVersion: guideRevisionHistoryProtocolVersionSchema,
     threadId: z.uuid(),
     targetAdapterId: z.string().min(1),
     instanceId: z.uuid(),

@@ -1,7 +1,7 @@
 {
-  "protocolVersion": "1.1.0",
+  "protocolVersion": "1.2.0",
   "id": "snowman-demo",
-  "revision": 5,
+  "revision": 6,
   "title": "Create a complete snowman preview",
   "rootStepId": "snowman",
   "steps": [
@@ -77,6 +77,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -137,6 +141,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -180,6 +188,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -223,6 +235,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -300,6 +316,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -343,6 +363,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -388,6 +412,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -431,6 +459,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -474,6 +506,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -517,6 +553,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -560,6 +600,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -603,6 +647,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -663,6 +711,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -706,6 +758,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -749,6 +805,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -810,6 +870,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -854,6 +918,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -917,6 +985,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1008,6 +1080,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1054,6 +1130,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1238,6 +1318,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1336,6 +1420,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1397,6 +1485,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1466,6 +1558,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false
@@ -1529,6 +1625,10 @@
           }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
       "rollback": {
         "mode": "compensating_action",
         "checkpointRequired": false

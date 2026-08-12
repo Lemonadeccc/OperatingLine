@@ -36,6 +36,7 @@
       ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
       Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
       仍可精确回放。见 [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)。
+      当前 revision 6 只在同一 25 步结构上增加版本化 observation success gate；见 ADR 0030。
 - [x] Blender Cube 原生纵向切片：ActionCatalog `1.5.0` 新增严格的单 Cube action，InteractionCatalog
       `1.2.0` 绑定真实 `Add → Mesh → Cube`；数据层创建、resource observation、receipt、`Back`、
       原生菜单入口与自动 `Next` 的同一结果均在 Blender 4.5.3/5.1.1 验证。历史 catalog `1.4.0` 与
@@ -135,6 +136,12 @@
       evidence。Provider profile/settings 也只是 operator-attested，Run 强制 `not_reproducible`；发布级
       treatment comparison 仍等待 Runtime attestation。见
       [ADR 0019](adr/0019-local-human-eval-capture-and-blind-review.md)。
+- [x] Observation 成功门与恢复策略：Guide/Companion protocol `1.2.0` 为可执行叶节点增加显式
+      `telemetry | success_gate` policy；失败可自动补偿并原位重试，或保留现场、锁住 Next 后通过
+      `Recheck Observations`/`Back` 恢复。blocked step 不进入 completed evidence，成功报告复用放行时
+      的单次 observation。内置雪人 revision 6 的 25 个叶节点全部启用自动回滚门，并在 Blender
+      4.5.3/5.1.1 验证。旧 `1.0.0`/`1.1.0` 仍保持遥测。见
+      [ADR 0030](adr/0030-observation-success-gates-and-recovery.md)。
 
 ## 后续里程碑
 

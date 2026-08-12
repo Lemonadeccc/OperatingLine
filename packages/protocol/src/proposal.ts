@@ -55,8 +55,11 @@ export const guideProposalSchema = z
         message: 'A proposal cannot link both a goal request and a revision request',
       });
     }
-    if (proposal.protocolVersion === '1.1.0' && proposal.planDiff === undefined) {
-      context.addIssue({ code: 'custom', message: 'Protocol 1.1 proposals require planDiff' });
+    if (proposal.protocolVersion !== '1.0.0' && proposal.planDiff === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Protocol 1.1+ proposals require planDiff',
+      });
     }
     if (proposal.revisionRequestId === undefined) {
       if (proposal.revisionThread !== undefined) {
@@ -73,13 +76,13 @@ export const guideProposalSchema = z
       }
       return;
     }
-    if (proposal.protocolVersion === '1.1.0' && proposal.revisionThread === undefined) {
+    if (proposal.protocolVersion !== '1.0.0' && proposal.revisionThread === undefined) {
       context.addIssue({
         code: 'custom',
         message: 'A request-linked proposal requires revisionThread',
       });
     }
-    if (proposal.protocolVersion === '1.1.0' && proposal.planDiff == null) {
+    if (proposal.protocolVersion !== '1.0.0' && proposal.planDiff == null) {
       context.addIssue({ code: 'custom', message: 'A request-linked proposal requires planDiff' });
     }
     if (
@@ -95,7 +98,7 @@ export const guideProposalSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { const: '1.1.0' } },
+          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['planDiff'] },

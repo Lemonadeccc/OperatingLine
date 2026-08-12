@@ -110,7 +110,8 @@
           "type": "string",
           "enum": [
             "1.0.0",
-            "1.1.0"
+            "1.1.0",
+            "1.2.0"
           ]
         },
         "id": {
@@ -359,6 +360,44 @@
                   "additionalProperties": false
                 }
               },
+              "observationPolicy": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "telemetry"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "success_gate"
+                      },
+                      "failureStrategy": {
+                        "type": "string",
+                        "enum": [
+                          "rollback_step",
+                          "retain_for_repair"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "failureStrategy"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
               "rollback": {
                 "type": "object",
                 "properties": {
@@ -396,7 +435,49 @@
               "expectedObservations",
               "rollback"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "observationPolicy"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "action": {
+                      "type": "object"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "observationPolicy": {
+                      "properties": {
+                        "mode": {
+                          "const": "success_gate"
+                        }
+                      },
+                      "required": [
+                        "mode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "observationPolicy"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "expectedObservations": {
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       },
@@ -408,7 +489,34 @@
         "rootStepId",
         "steps"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "protocolVersion": {
+                "const": "1.2.0"
+              }
+            },
+            "required": [
+              "protocolVersion"
+            ]
+          },
+          "else": {
+            "properties": {
+              "steps": {
+                "items": {
+                  "not": {
+                    "required": [
+                      "observationPolicy"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "required": [

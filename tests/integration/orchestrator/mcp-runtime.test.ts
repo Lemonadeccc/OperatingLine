@@ -766,7 +766,7 @@ describe('OperatingLine runtime', () => {
     const revisionRequestId = randomUUID();
     const instanceId = randomUUID();
     const revisionRequest = {
-      protocolVersion: '1.1.0',
+      protocolVersion: '1.2.0',
       requestId: revisionRequestId,
       adapterId: 'blender',
       catalogVersion,
@@ -874,7 +874,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1344,7 +1344,7 @@ describe('OperatingLine runtime', () => {
       const requestId = randomUUID();
       const instanceId = randomUUID();
       const revisionRequest = {
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         requestId,
         adapterId: 'blender',
         catalogVersion,
@@ -1406,7 +1406,7 @@ describe('OperatingLine runtime', () => {
           {
             requestId,
             catalogVersion,
-            basePlan: { id: 'snowman-demo', revision: 5 },
+            basePlan: { id: 'snowman-demo', revision: 6 },
             references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
           },
         ],
@@ -1414,7 +1414,7 @@ describe('OperatingLine runtime', () => {
 
       const replanned = {
         ...basePlan,
-        revision: 6,
+        revision: 7,
         title: 'Create a snowman with a larger head',
       };
       const malformedSubmission = {
@@ -1488,13 +1488,13 @@ describe('OperatingLine runtime', () => {
       expect(JSON.parse(proposed.result?.content?.[0]?.text ?? '{}')).toMatchObject({
         proposed: true,
         planId: 'snowman-demo',
-        revision: 6,
+        revision: 7,
         catalogVersion,
         revisionRequestId: requestId,
         revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
         planDiff: {
-          basePlan: { id: 'snowman-demo', revision: 5 },
-          targetPlan: { id: 'snowman-demo', revision: 6 },
+          basePlan: { id: 'snowman-demo', revision: 6 },
+          targetPlan: { id: 'snowman-demo', revision: 7 },
           summary: { planFields: 1 },
         },
       });
@@ -1536,7 +1536,7 @@ describe('OperatingLine runtime', () => {
           revisionRequestId: requestId,
           targetInstanceId: instanceId,
           catalogVersion,
-          plan: { id: 'snowman-demo', revision: 6 },
+          plan: { id: 'snowman-demo', revision: 7 },
         },
       });
       guideUrl.searchParams.set('instanceId', randomUUID());
@@ -1571,7 +1571,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const acceptedDecision = {
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         decisionId: randomUUID(),
         proposalId: JSON.parse(proposed.result?.content?.[0]?.text ?? '{}').proposalId,
         adapterId: 'blender',
@@ -1604,7 +1604,7 @@ describe('OperatingLine runtime', () => {
       const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
         requestId,
         catalogVersion,
-        plan: { ...replanned, revision: 7 },
+        plan: { ...replanned, revision: 8 },
       });
       expect(secondProposal.result).toMatchObject({ isError: true });
       expect(secondProposal.result?.content?.[0]?.text).toContain('already has a proposal');
@@ -1654,7 +1654,7 @@ describe('OperatingLine runtime', () => {
 
       const continuedPlan = {
         ...replanned,
-        revision: 7,
+        revision: 8,
         title: 'Create a reviewed snowman with a larger head',
       };
       const continuedProposal = await callMcpTool(runtime, 22, 'operatingline.replan.propose', {
@@ -1669,7 +1669,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(JSON.parse(continuedProposal.result?.content?.[0]?.text ?? '{}')).toMatchObject({
         proposed: true,
-        revision: 7,
+        revision: 8,
         revisionRequestId: continuedRequestId,
         revisionThread: {
           threadId: requestId,
@@ -1677,8 +1677,8 @@ describe('OperatingLine runtime', () => {
           parentRequestId: requestId,
         },
         planDiff: {
-          basePlan: { id: 'snowman-demo', revision: 6 },
-          targetPlan: { id: 'snowman-demo', revision: 7 },
+          basePlan: { id: 'snowman-demo', revision: 7 },
+          targetPlan: { id: 'snowman-demo', revision: 8 },
           summary: { planFields: 1 },
         },
       });
@@ -1715,7 +1715,7 @@ describe('OperatingLine runtime', () => {
       ).resolves.toMatchObject({
         proposal: {
           revisionRequestId: continuedRequestId,
-          plan: { id: 'snowman-demo', revision: 7 },
+          plan: { id: 'snowman-demo', revision: 8 },
         },
       });
     } finally {
@@ -1762,7 +1762,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(delivered.status).toBe(200);
       await expect(delivered.json()).resolves.toMatchObject({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: { id: plan.id, revision: plan.revision },
         planContentSha256: computePlanContentSha256(plan),
         proposalPlanContentSha256: null,
@@ -1776,7 +1776,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1800,7 +1800,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1828,7 +1828,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1880,7 +1880,7 @@ describe('OperatingLine runtime', () => {
       const delivery = await fetch(guideUrl, { headers });
       expect(delivery.status).toBe(200);
       await expect(delivery.json()).resolves.toMatchObject({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposalPlanContentSha256: computePlanContentSha256(plan),
@@ -1895,7 +1895,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1903,7 +1903,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const decision = {
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         decisionId: randomUUID(),
         proposalId: proposalResult.proposalId,
         adapterId: 'blender',
@@ -1930,7 +1930,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         plan: null,
         planContentSha256: null,
         proposal: null,

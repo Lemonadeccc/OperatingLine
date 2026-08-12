@@ -285,7 +285,13 @@ def _draw_overlay() -> None:
     guide_targets = []
     for step, index, state in (
         (active, session.active_index, GuidanceState.BACK),
-        (next_step, next_index, GuidanceState.NEXT),
+        (
+            next_step,
+            next_index,
+            step_state(session, next_index)
+            if next_step is not None
+            else GuidanceState.LOCKED,
+        ),
     ):
         if step is None or index not in badge_centers:
             continue
@@ -369,7 +375,9 @@ def _draw_overlay() -> None:
             else "BACK --  Nothing to roll back"
         )
         next_text = (
-            f"NEXT {next_index + 1:02d}  {next_step.title}"
+            f"NEXT {next_index + 1:02d}  Locked by observation gate"
+            if next_step is not None and session.observation_blocked
+            else f"NEXT {next_index + 1:02d}  {next_step.title}"
             if next_step is not None
             else "NEXT --  Walkthrough complete"
         )
@@ -386,7 +394,9 @@ def _draw_overlay() -> None:
             next_text,
             (left + 20.0, next_y),
             15,
-            color_for(GuidanceState.NEXT) if next_step is not None else MUTED_TEXT,
+            color_for(step_state(session, next_index))
+            if next_step is not None
+            else MUTED_TEXT,
         )
 
         semantic_step = next_step or active

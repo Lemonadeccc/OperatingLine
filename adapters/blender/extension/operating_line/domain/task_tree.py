@@ -21,6 +21,12 @@ class ActionSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ObservationPolicySpec:
+    mode: str
+    failure_strategy: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskNode:
     id: str
     number: str
@@ -30,6 +36,7 @@ class TaskNode:
     action: ActionSpec | None = None
     anchors: tuple[dict[str, Any], ...] = ()
     expected_observations: tuple[dict[str, Any], ...] = ()
+    observation_policy: ObservationPolicySpec | None = None
     children: tuple["TaskNode", ...] = ()
 
 
@@ -45,6 +52,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
         raise ValueError("Plan must be a JSON object")
     raw_steps = plan.get("steps")
     root_id = plan.get("rootStepId")
+    protocol_version = plan.get("protocolVersion")
     if not isinstance(raw_steps, list) or not isinstance(root_id, str):
         raise ValueError("Plan must contain steps and rootStepId")
 
@@ -162,6 +170,38 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             for observation in expected_observations
         ):
             raise ValueError(f"Invalid expectedObservations on step: {step_id}")
+        observation_policy_present = "observationPolicy" in raw
+        observation_policy_raw = raw.get("observationPolicy")
+        observation_policy = None
+        if observation_policy_present:
+            if protocol_version != "1.2.0":
+                raise ValueError("Observation policies require guide protocol 1.2.0")
+            if action is None:
+                raise ValueError(
+                    f"Only executable steps can declare an observation policy: {step_id}"
+                )
+            if not isinstance(observation_policy_raw, dict):
+                raise ValueError(f"Invalid observationPolicy on step: {step_id}")
+            mode = observation_policy_raw.get("mode")
+            if mode == "telemetry" and set(observation_policy_raw) == {"mode"}:
+                observation_policy = ObservationPolicySpec(mode="telemetry")
+            elif mode == "success_gate" and set(observation_policy_raw) == {
+                "mode",
+                "failureStrategy",
+            }:
+                failure_strategy = observation_policy_raw.get("failureStrategy")
+                if failure_strategy not in {"rollback_step", "retain_for_repair"}:
+                    raise ValueError(f"Invalid observationPolicy on step: {step_id}")
+                if not expected_observations:
+                    raise ValueError(
+                        f"Success-gated step requires observations: {step_id}"
+                    )
+                observation_policy = ObservationPolicySpec(
+                    mode="success_gate",
+                    failure_strategy=failure_strategy,
+                )
+            else:
+                raise ValueError(f"Invalid observationPolicy on step: {step_id}")
         return TaskNode(
             id=step_id,
             number=number,
@@ -171,6 +211,7 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             action=action,
             anchors=tuple(dict(item) for item in anchors),
             expected_observations=tuple(dict(item) for item in expected_observations),
+            observation_policy=observation_policy,
             children=children,
         )
 

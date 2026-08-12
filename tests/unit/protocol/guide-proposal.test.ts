@@ -22,7 +22,7 @@ describe('guide proposal protocol', () => {
     const proposalId = randomUUID();
     expect(
       guideProposalSchema.safeParse({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         proposalId,
         targetAdapterId: submission.targetAdapterId,
         plan: submission.plan,
@@ -32,7 +32,7 @@ describe('guide proposal protocol', () => {
     ).toBe(true);
     expect(
       guideProposalDecisionSchema.safeParse({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         decisionId: randomUUID(),
         proposalId,
         adapterId: 'blender',
@@ -53,7 +53,7 @@ describe('guide proposal protocol', () => {
     ).toBe(false);
     expect(
       guideProposalDecisionSchema.safeParse({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         decisionId: randomUUID(),
         proposalId: randomUUID(),
         adapterId: 'blender',
@@ -88,7 +88,7 @@ describe('guide proposal protocol', () => {
     ).toBe(false);
     expect(
       guideProposalSchema.safeParse({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         proposalId: randomUUID(),
         targetAdapterId: 'blender',
         targetInstanceId: randomUUID(),
@@ -101,7 +101,7 @@ describe('guide proposal protocol', () => {
     ).toBe(true);
     expect(
       guideProposalSchema.safeParse({
-        protocolVersion: '1.1.0',
+        protocolVersion: '1.2.0',
         proposalId: randomUUID(),
         targetAdapterId: 'blender',
         targetInstanceId: randomUUID(),
@@ -115,7 +115,7 @@ describe('guide proposal protocol', () => {
     ).toBe(false);
   });
 
-  it('requires explicit diff review for protocol 1.1 while reading legacy envelopes', () => {
+  it('requires explicit diff review for protocol 1.1+ while reading legacy envelopes', () => {
     const proposalId = randomUUID();
     const requestId = randomUUID();
     const common = {
@@ -130,6 +130,17 @@ describe('guide proposal protocol', () => {
     expect(
       guideProposalSchema.safeParse({
         protocolVersion: '1.1.0',
+        ...common,
+        targetInstanceId: randomUUID(),
+        revisionRequestId: requestId,
+        revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+        catalogVersion: '1.1.0',
+        planDiff: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      guideProposalSchema.safeParse({
+        protocolVersion: '1.2.0',
         ...common,
         targetInstanceId: randomUUID(),
         revisionRequestId: requestId,

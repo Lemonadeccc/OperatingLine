@@ -169,6 +169,7 @@ describe('planning quality baseline', () => {
     const head = missingGuidance.steps.find((step) => step.id === 'snowman.model.head')!;
     head.anchors = [];
     head.expectedObservations = [];
+    head.observationPolicy = undefined;
     expect(evaluate(missingGuidance).findings.map((finding) => finding.code)).toEqual(
       expect.arrayContaining(['guidance.anchor_missing', 'guidance.observation_missing']),
     );

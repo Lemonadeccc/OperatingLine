@@ -12,6 +12,12 @@ suite 留在 `fixtures/v1/eval/`，由 `@operatingline/eval-kit` 直接验证，
 `guide-proposal-*` 定义 AI 提案、服务端信封和宿主决策。它们与 GuidePlan Schema 一样由
 `packages/protocol` 生成；任何宿主不得自行增加未版本化字段。
 
+Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
+观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或
+`retain_for_repair`。`1.0.0`/`1.1.0` 不得携带该字段。Companion report `1.2.0` 必须显式携带
+`observationGate`（无门状态为 `null`），并用 `blocked`、`step_observation_failed` 与
+`observation_recovered` 区分可修复门失败和宿主 error。旧版 report 不得携带此字段。
+
 `action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
 `semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。
@@ -95,6 +101,8 @@ adjudication 保存逐 criterion 人工判断和内容寻址分歧。Comparison 
 ## 版本规则
 
 - `protocolVersion` 使用语义化版本。
+- 当前 Guide/Companion 生产版本为 `1.2.0`；读端保留 `1.0.0`/`1.1.0`。旧版 observation 只能是
+  telemetry，不得由新宿主静默升级为 success gate。
 - Major 不兼容时必须拒绝连接，不能静默降级。
 - 屏幕像素坐标不是持久协议字段；适配器在运行时解析语义锚点。
 - 树形父子关系用于呈现和引用，`dependsOn` 用于执行调度。

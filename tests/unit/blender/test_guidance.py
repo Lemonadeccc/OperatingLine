@@ -22,6 +22,8 @@ visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
 InitialPlanRunState = application.InitialPlanRunState
 DemoSession = application.DemoSession
+ActionReceipt = application.ActionReceipt
+ObservationGateError = application.ObservationGateError
 RevisionLineage = application.RevisionLineage
 ReplanRunState = application.ReplanRunState
 lineage_from_proposal = application.lineage_from_proposal
@@ -33,6 +35,7 @@ validate_plan_diff = application.validate_plan_diff
 validate_provider_list = application.validate_provider_list
 validate_revision_thread_history = application.validate_revision_thread_history
 ActionSpec = domain.ActionSpec
+ObservationPolicySpec = domain.ObservationPolicySpec
 TaskNode = domain.TaskNode
 STATE_COLORS = visual_theme.STATE_COLORS
 STATE_SYMBOLS = visual_theme.STATE_SYMBOLS
@@ -168,6 +171,13 @@ class GuidanceStateTests(unittest.TestCase):
             ((0, GuidanceState.NEXT),),
         )
 
+    def test_observation_gate_locks_lookahead_without_hiding_back(self) -> None:
+        self.session.active_index = 1
+        self.session.observation_blocked = True
+
+        self.assertEqual(step_state(self.session, 1), GuidanceState.BACK)
+        self.assertEqual(step_state(self.session, 2), GuidanceState.LOCKED)
+
     def test_active_step_is_back_and_window_preserves_execution_order(self) -> None:
         self.session.active_index = 3
 
@@ -251,6 +261,203 @@ class GuidanceStateTests(unittest.TestCase):
         self.assertEqual(len(set(STATE_SYMBOLS.values())), len(GuidanceState))
         self.assertEqual(STATE_SYMBOLS[GuidanceState.BACK], "BACK")
         self.assertEqual(STATE_SYMBOLS[GuidanceState.NEXT], "NEXT")
+
+
+class ObservationGateSessionTests(unittest.TestCase):
+    def gated_session(
+        self,
+        failure_strategy: str,
+        evaluator,
+        *,
+        rollback=None,
+    ) -> tuple[DemoSession, list[str]]:
+        step = TaskNode(
+            id="step-gated",
+            number="1.1",
+            title="Gated",
+            order=0,
+            action=ActionSpec("test", "test.gated", {}),
+            expected_observations=(
+                {"kind": "test_ready", "parameters": {}},
+            ),
+            observation_policy=ObservationPolicySpec(
+                "success_gate",
+                failure_strategy,
+            ),
+        )
+        root = TaskNode(
+            id="root",
+            number="1",
+            title="Root",
+            order=0,
+            children=(step,),
+        )
+        calls: list[str] = []
+
+        def execute(_receipts):
+            calls.append("execute")
+            return ActionReceipt("receipt", step.id, step.action.name)
+
+        def default_rollback(_receipt):
+            calls.append("rollback")
+
+        return (
+            DemoSession(
+                root,
+                {step.id: (execute, rollback or default_rollback)},
+                observation_evaluator=evaluator,
+            ),
+            calls,
+        )
+
+    @staticmethod
+    def result(satisfied: bool) -> list[dict]:
+        return [
+            {
+                "kind": "test_ready",
+                "satisfied": satisfied,
+                "details": {},
+            }
+        ]
+
+    def test_failed_gate_rolls_back_and_retries_without_advancing(self) -> None:
+        outcomes = iter((False, True))
+        session, calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(next(outcomes)),
+        )
+        session.start()
+
+        with self.assertRaises(ObservationGateError) as caught:
+            session.next()
+
+        self.assertEqual(caught.exception.gate.status, "failed_rolled_back")
+        self.assertFalse(session.observation_blocked)
+        self.assertEqual(session.active_index, -1)
+        self.assertEqual(session.completed_step_ids, ())
+        self.assertEqual(session.receipts, {})
+        self.assertEqual(calls, ["execute", "rollback"])
+
+        self.assertEqual(session.next().id, "step-gated")
+        self.assertEqual(session.completed_step_ids, ("step-gated",))
+        self.assertEqual(
+            session.success_gate_observation_copy("step-gated"),
+            self.result(True),
+        )
+        self.assertEqual(calls, ["execute", "rollback", "execute"])
+
+    def test_retain_for_repair_blocks_next_until_recheck_succeeds(self) -> None:
+        ready = False
+
+        def evaluate(_expectations, _receipts):
+            return self.result(ready)
+
+        session, calls = self.gated_session("retain_for_repair", evaluate)
+        session.start()
+        with self.assertRaises(ObservationGateError):
+            session.next()
+
+        self.assertTrue(session.observation_blocked)
+        self.assertEqual(session.active_index, 0)
+        self.assertEqual(session.completed_step_ids, ())
+        self.assertIn("step-gated", session.receipts)
+        with self.assertRaises(ObservationGateError):
+            session.next()
+        self.assertEqual(calls, ["execute"])
+
+        ready = True
+        self.assertEqual(session.recheck_observations().id, "step-gated")
+        self.assertFalse(session.observation_blocked)
+        self.assertEqual(session.observation_gate.status, "recovered")
+        self.assertEqual(session.completed_step_ids, ("step-gated",))
+        self.assertEqual(
+            session.success_gate_observation_copy("step-gated"),
+            self.result(True),
+        )
+
+    def test_invalid_evaluator_result_fails_closed(self) -> None:
+        session, calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: [
+                {
+                    "kind": "test_ready",
+                    "satisfied": True,
+                    "details": {},
+                    "unversioned": True,
+                }
+            ],
+        )
+        session.start()
+
+        with self.assertRaises(ObservationGateError) as caught:
+            session.next()
+
+        self.assertEqual(caught.exception.gate.status, "failed_rolled_back")
+        self.assertEqual(
+            caught.exception.gate.observations[0]["details"]["evaluationError"],
+            "InvalidObservationResult",
+        )
+        self.assertEqual(calls, ["execute", "rollback"])
+
+    def test_failed_automatic_rollback_keeps_receipt_and_back_recovery(self) -> None:
+        rollback_fails = True
+        calls: list[str] = []
+
+        def rollback(_receipt):
+            calls.append("rollback")
+            if rollback_fails:
+                raise RuntimeError("conflict")
+
+        session, execute_calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(False),
+            rollback=rollback,
+        )
+        session.start()
+        with self.assertRaises(ObservationGateError) as caught:
+            session.next()
+
+        self.assertEqual(caught.exception.gate.status, "rollback_failed")
+        self.assertTrue(session.observation_blocked)
+        self.assertEqual(session.active_index, 0)
+        self.assertIn("step-gated", session.receipts)
+        self.assertEqual(execute_calls, ["execute"])
+
+        rollback_fails = False
+        self.assertEqual(session.back().id, "step-gated")
+        self.assertFalse(session.observation_blocked)
+        self.assertEqual(session.active_index, -1)
+        self.assertEqual(calls, ["rollback", "rollback"])
+
+    def test_success_gated_session_requires_an_evaluator(self) -> None:
+        with self.assertRaisesRegex(ValueError, "observation evaluator"):
+            self.gated_session("rollback_step", None)
+
+    def test_explicit_null_observation_policy_is_rejected(self) -> None:
+        plan = {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "step",
+            "steps": [
+                {
+                    "id": "step",
+                    "parentId": None,
+                    "order": 0,
+                    "dependsOn": [],
+                    "title": "Step",
+                    "action": {
+                        "adapterId": "test",
+                        "name": "test.step",
+                        "arguments": {},
+                    },
+                    "anchors": [],
+                    "expectedObservations": [],
+                    "observationPolicy": None,
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "Invalid observationPolicy"):
+            domain.load_task_tree_data(plan)
 
 
 class ProviderHandoffTests(unittest.TestCase):

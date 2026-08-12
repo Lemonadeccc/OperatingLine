@@ -58,10 +58,10 @@ export const guideRevisionRequestSchema = z
   })
   .superRefine((request, context) => {
     const thread = request.revisionThread;
-    if (request.protocolVersion === '1.1.0' && thread === undefined) {
+    if (request.protocolVersion !== '1.0.0' && thread === undefined) {
       context.addIssue({
         code: 'custom',
-        message: 'Protocol 1.1 revision requests require revisionThread',
+        message: 'Protocol 1.1+ revision requests require revisionThread',
       });
       return;
     }
@@ -79,7 +79,7 @@ export const guideRevisionRequestSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { const: '1.1.0' } },
+          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionThread'] },

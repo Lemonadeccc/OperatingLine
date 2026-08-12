@@ -2,6 +2,7 @@
 
 import bpy
 
+from ..application import ObservationGateError
 from ..infrastructure import (
     disable_overlay,
     enable_overlay,
@@ -42,6 +43,16 @@ def _execute_next(operator):
     candidate = session.steps[next_index] if next_index < len(session.steps) else None
     try:
         step = session.next()
+    except ObservationGateError as error:
+        _companion().report(
+            "step_observation_failed",
+            step=error.step,
+            observations_override=error.gate.observation_copy(),
+            observation_gate_override=error.gate,
+        )
+        operator.report({"WARNING"}, str(error))
+        refresh_native_menu_guidance()
+        return {"CANCELLED"}
     except (OSError, RuntimeError, ValueError) as error:
         _companion().report("error", step=candidate, error=str(error))
         operator.report({"ERROR"}, str(error))
@@ -131,6 +142,50 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
 
     def execute(self, _context):
         return _execute_next(self)
+
+
+class OPERATINGLINE_OT_recheck_observations(bpy.types.Operator):
+    bl_idname = "operating_line.recheck_observations"
+    bl_label = "Recheck Observations"
+    bl_description = "Re-evaluate the blocked step without executing it again"
+    bl_options = {"REGISTER"}
+
+    def execute(self, _context):
+        session = _session()
+        candidate = session.active_step
+        try:
+            step = session.recheck_observations()
+        except ObservationGateError as error:
+            _companion().report(
+                "step_observation_failed",
+                step=error.step,
+                observations_override=error.gate.observation_copy(),
+                observation_gate_override=error.gate,
+            )
+            self.report({"WARNING"}, str(error))
+            refresh_native_menu_guidance()
+            return {"CANCELLED"}
+        except ValueError as error:
+            self.report({"WARNING"}, str(error))
+            refresh_native_menu_guidance()
+            return {"CANCELLED"}
+        except (OSError, RuntimeError) as error:
+            _companion().report("error", step=candidate, error=str(error))
+            self.report({"ERROR"}, str(error))
+            refresh_native_menu_guidance()
+            return {"CANCELLED"}
+        gate = session.observation_gate
+        if gate is None:
+            raise RuntimeError("Recovered observation gate was not retained for reporting")
+        _companion().report(
+            "observation_recovered",
+            step=step,
+            observations_override=gate.observation_copy(),
+            observation_gate_override=gate,
+        )
+        self.report({"INFO"}, gate.message)
+        refresh_native_menu_guidance()
+        return {"FINISHED"}
 
 
 class OPERATINGLINE_OT_open_add_menu(bpy.types.Operator):
@@ -576,6 +631,7 @@ CLASSES = (
     OPERATINGLINE_OT_run_replan_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
+    OPERATINGLINE_OT_recheck_observations,
     OPERATINGLINE_OT_open_add_menu,
     OPERATINGLINE_OT_guided_menu_action,
     OPERATINGLINE_OT_back,

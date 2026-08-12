@@ -206,7 +206,7 @@ def draw_proposal_review(layout, companion, active_session) -> None:
     decisions.operator("operating_line.reject_proposal", icon="CANCEL")
     if missing_verifiable_base:
         review.label(
-            text="Accept requires a protocol 1.1 proposal with a verifiable base",
+            text="Accept requires a protocol 1.1+ proposal with a verifiable base",
             icon="ERROR",
         )
     elif active_session.receipts:

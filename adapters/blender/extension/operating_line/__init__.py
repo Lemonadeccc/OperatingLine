@@ -15,6 +15,7 @@ from .infrastructure import (
     disable_overlay,
     forget_managed_collection,
 )
+from .infrastructure.observations import evaluate_observations
 from .presentation import CLASSES
 from .presentation.native_menu_guidance import (
     disable_native_menu_guidance,
@@ -34,6 +35,7 @@ def get_session() -> DemoSession:
             plan_id=SNOWMAN_PLAN_ID,
             revision=SNOWMAN_PLAN_REVISION,
             source_plan=bundled_plan_data(),
+            observation_evaluator=evaluate_observations,
         )
     return _session
 
@@ -155,6 +157,7 @@ def register() -> None:
             plan_id=SNOWMAN_PLAN_ID,
             revision=SNOWMAN_PLAN_REVISION,
             source_plan=bundled_plan_data(),
+            observation_evaluator=evaluate_observations,
         )
     get_companion().register_timer()
 

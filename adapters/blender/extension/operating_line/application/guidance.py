@@ -12,6 +12,7 @@ class GuidanceSession(Protocol):
 
     steps: tuple[TaskNode, ...]
     active_index: int
+    observation_blocked: bool
 
 
 class GuidanceState(str, Enum):
@@ -72,6 +73,8 @@ def step_state(
     if index == active_index:
         return GuidanceState.BACK
     if index == active_index + 1:
+        if getattr(session, "observation_blocked", False):
+            return GuidanceState.LOCKED
         return GuidanceState.NEXT
     return GuidanceState.LOCKED
 

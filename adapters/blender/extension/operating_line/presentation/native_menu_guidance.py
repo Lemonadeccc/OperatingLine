@@ -46,6 +46,8 @@ def _next_step():
     if _session_provider is None:
         return None
     session = _session_provider()
+    if session.observation_blocked:
+        return None
     next_index = session.active_index + 1
     if next_index < 0 or next_index >= len(session.steps):
         return None

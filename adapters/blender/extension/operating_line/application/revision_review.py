@@ -8,8 +8,10 @@ import re
 import uuid
 from typing import Any
 
+from ..domain import PROTOCOL_VERSION
 
 NODE_NUMBER_PATTERN = re.compile(r"^[1-9]\d*(?:\.[1-9]\d*)*$")
+REVISION_PROTOCOL_VERSIONS = frozenset({"1.1.0", PROTOCOL_VERSION})
 PLAN_FIELDS = frozenset({"title", "rootStepId"})
 STEP_FIELDS = frozenset(
     {
@@ -23,6 +25,7 @@ STEP_FIELDS = frozenset(
         "action",
         "anchors",
         "expectedObservations",
+        "observationPolicy",
         "rollback",
     }
 )
@@ -299,8 +302,8 @@ def _validate_history_request(
     }
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ValueError("Revision history request does not match the protocol")
-    if value.get("protocolVersion") != "1.1.0":
-        raise ValueError("Revision history requires protocol 1.1 requests")
+    if value.get("protocolVersion") not in REVISION_PROTOCOL_VERSIONS:
+        raise ValueError("Revision history requires protocol 1.1+ requests")
     request_id = _require_uuid(value.get("requestId"), "Revision history request id")
     if value.get("adapterId") != "blender" or value.get("instanceId") != instance_id:
         raise ValueError("Revision history request is outside this Blender instance")
@@ -359,7 +362,7 @@ def _validate_history_proposal(
         raise ValueError("Revision history proposal does not match the protocol")
     _require_uuid(value.get("proposalId"), "Revision history proposal id")
     if (
-        value.get("protocolVersion") != "1.1.0"
+        value.get("protocolVersion") not in REVISION_PROTOCOL_VERSIONS
         or value.get("targetAdapterId") != "blender"
         or value.get("targetInstanceId") != instance_id
         or value.get("revisionRequestId") != request.get("requestId")
@@ -406,7 +409,8 @@ def _validate_history_decision(
     _require_uuid(value.get("decisionId"), "Revision history decision id")
     decision = value.get("decision")
     if (
-        value.get("proposalId") != proposal.get("proposalId")
+        value.get("protocolVersion") not in REVISION_PROTOCOL_VERSIONS
+        or value.get("proposalId") != proposal.get("proposalId")
         or value.get("adapterId") != "blender"
         or value.get("instanceId") != instance_id
         or decision not in {"accepted", "rejected"}
@@ -433,7 +437,7 @@ def validate_revision_thread_history(
     }
     if not isinstance(value, dict) or set(value) != expected_fields:
         raise ValueError("Revision thread history does not match the protocol")
-    if value.get("protocolVersion") != "1.1.0":
+    if value.get("protocolVersion") not in REVISION_PROTOCOL_VERSIONS:
         raise ValueError("Unsupported revision history protocol version")
     thread_id = _require_uuid(value.get("threadId"), "Revision history thread id")
     _require_uuid(instance_id, "Blender instance id")

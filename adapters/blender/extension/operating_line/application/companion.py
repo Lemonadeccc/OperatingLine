@@ -20,7 +20,7 @@ from ..domain import (
 from ..infrastructure.blender_actions import action_registry
 from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
-from .session import DemoSession
+from .session import DemoSession, ObservationGateState
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import InitialPlanRunState, ReplanRunState
 from .revision_review import (
@@ -296,6 +296,7 @@ class CompanionController:
             revision=revision,
             source_plan=plan,
             plan_content_sha256=plan_content_sha256,
+            observation_evaluator=evaluate_observations,
         )
 
     def _session_for_reference_scope(self, scope: str) -> DemoSession:
@@ -759,7 +760,9 @@ class CompanionController:
             if goal_request_id != self.goal_request.request_id:
                 raise ValueError("Proposal does not match the active goal request")
             if proposal_protocol_version != PROTOCOL_VERSION:
-                raise ValueError("Goal-linked proposals require protocol 1.1")
+                raise ValueError(
+                    f"Goal-linked proposals require protocol {PROTOCOL_VERSION}"
+                )
         revision_thread = proposal.get("revisionThread")
         if revision_thread is not None:
             if revision_request_id is None:
@@ -789,9 +792,9 @@ class CompanionController:
             raise ValueError(
                 "A request-linked proposal must declare catalog and target instance"
             )
-        if proposal_protocol_version == PROTOCOL_VERSION:
+        if proposal_protocol_version != "1.0.0":
             if "planDiff" not in proposal:
-                raise ValueError("Protocol 1.1 proposals require a plan diff field")
+                raise ValueError("Protocol 1.1+ proposals require a plan diff field")
             if revision_request_id is not None and (
                 revision_thread is None or proposal.get("planDiff") is None
             ):
@@ -1080,7 +1083,7 @@ class CompanionController:
             if not isinstance(plan_diff, dict):
                 self.error = (
                     "Cannot accept this request-linked proposal without a verifiable "
-                    "base; request a protocol 1.1 proposal"
+                    "base; request a protocol 1.1+ proposal"
                 )
                 self.status = "Proposal base cannot be verified"
                 return False
@@ -1488,15 +1491,19 @@ class CompanionController:
         *,
         step: Any = None,
         error: str | None = None,
+        observations_override: list[dict[str, Any]] | None = None,
+        observation_gate_override: ObservationGateState | None = None,
     ) -> dict[str, Any]:
         from .. import get_session
 
         session = get_session()
         active = session.active_step
-        completed = [item.id for item in session.steps[: session.active_index + 1]]
+        completed = list(session.completed_step_ids)
         if error is not None:
             phase = "error"
-        elif session.started and session.active_index == len(session.steps) - 1:
+        elif session.observation_blocked:
+            phase = "blocked"
+        elif session.started and len(completed) == len(session.steps):
             phase = "completed"
         elif session.started:
             phase = "running"
@@ -1505,14 +1512,33 @@ class CompanionController:
         else:
             phase = "idle"
         observation_step = step or active
-        observations = (
-            evaluate_observations(
-                observation_step.expected_observations,
-                session.receipts,
-            )
-            if observation_step is not None
-            else []
+        gate = (
+            observation_gate_override
+            if observation_gate_override is not None
+            else session.observation_gate
+            if session.observation_blocked and error is None
+            else None
         )
+        if observations_override is not None:
+            observations = observations_override
+        elif gate is not None:
+            observations = gate.observation_copy()
+        elif observation_step is None:
+            observations = []
+        else:
+            verified_observations = (
+                session.success_gate_observation_copy(observation_step.id)
+                if transition == "step_succeeded"
+                else None
+            )
+            observations = (
+                verified_observations
+                if verified_observations is not None
+                else evaluate_observations(
+                    observation_step.expected_observations,
+                    session.receipts,
+                )
+            )
         self._sequence += 1
         report = {
             "protocolVersion": PROTOCOL_VERSION,
@@ -1533,8 +1559,15 @@ class CompanionController:
             "activeStepId": active.id if active is not None else None,
             "completedStepIds": completed,
             "transition": transition,
-            "stepId": step.id if step is not None else None,
+            "stepId": (
+                step.id
+                if step is not None
+                else gate.step_id
+                if gate is not None
+                else None
+            ),
             "observations": observations,
+            "observationGate": gate.report_data() if gate is not None else None,
             "error": error,
             "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }

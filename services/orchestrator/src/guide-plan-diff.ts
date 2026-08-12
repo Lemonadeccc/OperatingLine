@@ -20,6 +20,7 @@ const stepFields = [
   'action',
   'anchors',
   'expectedObservations',
+  'observationPolicy',
   'rollback',
 ] as const satisfies readonly GuideStepField[];
 
@@ -37,7 +38,7 @@ function canonicalJson(value: unknown): string {
     }
     return candidate;
   };
-  const serialized = JSON.stringify(normalize(value));
+  const serialized = JSON.stringify(normalize(value === undefined ? null : value));
   if (serialized === undefined) {
     throw new Error('Guide plan diff values must be JSON serializable');
   }

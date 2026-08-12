@@ -75,14 +75,14 @@ const collectKeys = (value: unknown): string[] => {
 };
 
 describe('complete snowman guide fixture', () => {
-  it('validates as GuidePlan revision 5 and covers the seven ordered stages', () => {
+  it('validates as GuidePlan revision 6 and covers the seven ordered stages', () => {
     const plan = readPlan();
     const rootChildren = plan.steps
       .filter((step) => step.parentId === plan.rootStepId)
       .sort((left, right) => left.order - right.order)
       .map((step) => step.id);
 
-    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 5, rootStepId: 'snowman' });
+    expect(plan).toMatchObject({ id: 'snowman-demo', revision: 6, rootStepId: 'snowman' });
     expect(rootChildren).toEqual(stageIds);
   });
 
@@ -123,6 +123,10 @@ describe('complete snowman guide fixture', () => {
       expect(operatorAnchor, step.id).toBeDefined();
       expect(operatorAnchor?.menuPath?.length, step.id).toBeGreaterThan(1);
       expect(step.expectedObservations.length, step.id).toBeGreaterThan(0);
+      expect(step.observationPolicy, step.id).toEqual({
+        mode: 'success_gate',
+        failureStrategy: 'rollback_step',
+      });
       expect(step.rollback, step.id).toEqual({
         mode: 'compensating_action',
         checkpointRequired: false,
@@ -246,5 +250,10 @@ describe('complete snowman guide fixture', () => {
     for (const [key, value] of ownedNameEntries) {
       expect(value, key).toEqual(expect.stringMatching(/^OperatingLine\./));
     }
+    expect(
+      plan.steps
+        .filter((step) => step.action === null)
+        .every((step) => step.observationPolicy === undefined),
+    ).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 # 场景 001：创建完整雪人预览
 
 这是 OperatingLine 的第一条可执行产品场景规范。规范对应
-`protocol/fixtures/v1/snowman-teaching.plan.json` 的 `snowman-demo` revision 5，用来冻结任务树、动作参数、
+`protocol/fixtures/v1/snowman-teaching.plan.json` 的 `snowman-demo` revision 6，用来冻结任务树、动作参数、
 观察证据和回退边界；它不是要求 AI 每次都照抄的固定建模教程。
 原 `snowman.plan.json` revision 4 只作为既有 Human Eval 套件的不可变历史输入保留。
 
@@ -42,7 +42,7 @@
     1.7.1 生成第 20 帧的 320 × 320 Eevee PNG 预览
 ```
 
-## revision 5 已完成的协议范围
+## revision 6 已完成的协议范围
 
 - 25 个可执行叶节点组成严格线性 DAG；每个叶节点只依赖前一个叶节点。
 - 每个眼睛、鼻子、嘴点、纽扣和手臂都有独立 action、观察、receipt 与补偿边界；教学模式不再把
@@ -52,6 +52,8 @@
 - 所有 Blender datablock 名使用 `OperatingLine.` 命名空间，避免静默覆盖用户资源。
 - 每个可执行叶节点都有语义锚点、可序列化的 `operatorId + menuPath` 操作参考、预期观察和
   `compensating_action` 回退声明；操作参考用于教学，不冒充数据 API 实际点击记录。
+- 每个叶节点都显式使用 `success_gate + rollback_step`；只有单次 observation 全部满足才推进，失败
+  自动补偿并保留门证据，旧协议 fixture 仍保持 telemetry。
 - 观察类型限定为 `resource_exists`、`material_assigned`、`armature_ready`、
   `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
   `render_artifact_exists`。
@@ -67,7 +69,8 @@ Blender Companion 对这些通用动作的实际执行与补偿必须由 Blender
 1. Blender Sidebar 和 Overlay 按上述编号显示当前步骤；蓝色完成、红色 Back、绿色 Next 和
    灰色锁定状态在前进与回退后保持同步。
 2. 默认启动文件中的 Cube、Camera 和 Light 不因执行本场景被隐式删除。
-3. 每次 `Next` 只执行当前叶节点；失败时停止后续步骤并回传错误证据。
+3. 每次 `Next` 只执行当前叶节点；action 后 observation 不满足时自动补偿、不推进，并回传
+   `step_observation_failed` 门证据。
 4. `Back` 只补偿当前运行产生且 receipt 身份一致的资源，不按名称删除用户对象。
 5. 完成第 25 步后，扩展管理的临时目录中存在第 20 帧 PNG 预览，并能通过逻辑 `renderId` 观察到。
 6. 自有 Mesh/Material/Collection/Armature/Action 出现计划外用户或内容时，`Back` 在修改任何资源前拒绝执行，
@@ -86,4 +89,4 @@ Blender Companion 对这些通用动作的实际执行与补偿必须由 Blender
   切分。
 - **跨宿主复用**：在第二个开源软件适配同一协议，验证通用 action/anchor/observation 边界。
 
-上述能力完成前，不应把本 revision 5 fixture 描述为“AI 已能自动完成任意 Blender 任务”。
+上述能力完成前，不应把本 revision 6 fixture 描述为“AI 已能自动完成任意 Blender 任务”。

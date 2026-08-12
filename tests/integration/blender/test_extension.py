@@ -63,6 +63,7 @@ from operating_line_extension.operating_line.presentation.operators import (  # 
     OPERATINGLINE_OT_back,
     OPERATINGLINE_OT_guided_menu_action,
     OPERATINGLINE_OT_next,
+    OPERATINGLINE_OT_recheck_observations,
     OPERATINGLINE_OT_start,
 )
 from operating_line_extension.operating_line.presentation.native_menu_guidance import (  # noqa: E402
@@ -138,7 +139,7 @@ EXPECTED = tuple(step["action"]["arguments"]["objectName"] for step in ACTION_ST
 PLAN_REVISION = BUNDLED_PLAN["revision"]
 DYNAMIC_REVISION = PLAN_REVISION + 1
 FULL_PLAN_CONTENT_SHA256 = (
-    "a609769b0a12d9c4d93851106fb04db3084344287672dd0a536673ffaa3c875c"
+    "f896ba6e2d9a927e1dee8875bfae3541cdd1d423b9b9e70d39cdef516ad8617e"
 )
 
 
@@ -1487,7 +1488,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(revision_requests) == 1
         revision_request = revision_requests[0]
         uuid.UUID(revision_request["requestId"])
-        assert revision_request["protocolVersion"] == "1.1.0"
+        assert revision_request["protocolVersion"] == "1.2.0"
         assert revision_request["adapterId"] == "blender"
         assert revision_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
         assert revision_request["instanceId"] == companion.instance_id
@@ -2401,6 +2402,7 @@ def assert_companion_and_plan_semantics() -> None:
             "transition",
             "stepId",
             "observations",
+            "observationGate",
             "error",
             "occurredAt",
         }
@@ -2462,8 +2464,9 @@ def assert_companion_and_plan_semantics() -> None:
         reconnect_plan = deepcopy(dynamic_plan)
         reconnect_plan["id"] = reconnect_goal["planId"]
         reconnect_plan["revision"] += 30
+        reconnect_plan["protocolVersion"] = "1.2.0"
         reconnect_proposal = {
-            "protocolVersion": "1.1.0",
+            "protocolVersion": "1.2.0",
             "proposalId": str(uuid.uuid4()),
             "goalRequestId": reconnect_goal["requestId"],
             "targetAdapterId": "blender",
@@ -3069,7 +3072,10 @@ def assert_companion_and_plan_semantics() -> None:
     # the action result and report an unsatisfied expectation without claiming
     # that the expectation itself was verified.
     telemetry_plan = deepcopy(BUNDLED_PLAN)
+    telemetry_plan["protocolVersion"] = "1.1.0"
     telemetry_plan["id"] = "observation-telemetry-plan"
+    for item in telemetry_plan["steps"]:
+        item.pop("observationPolicy", None)
     telemetry_step_data = next(
         item for item in telemetry_plan["steps"] if item["action"] is not None
     )
@@ -3097,6 +3103,148 @@ def assert_companion_and_plan_semantics() -> None:
         }
     ]
     telemetry_session.back()
+
+    gate_ready = {"value": False}
+    original_gate_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
+        "test_gate_ready"
+    )
+    original_one_shot_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
+        "test_gate_one_shot"
+    )
+    observation_module.OBSERVATION_EVALUATORS["test_gate_ready"] = (
+        lambda _parameters, _receipts: (
+            gate_ready["value"],
+            {"ready": gate_ready["value"]},
+        )
+    )
+    one_shot_calls = {"count": 0}
+
+    def one_shot_gate(_parameters, _receipts):
+        one_shot_calls["count"] += 1
+        return one_shot_calls["count"] == 1, {
+            "evaluationCount": one_shot_calls["count"]
+        }
+
+    observation_module.OBSERVATION_EVALUATORS["test_gate_one_shot"] = (
+        one_shot_gate
+    )
+    try:
+        rollback_gate_plan = deepcopy(BUNDLED_PLAN)
+        rollback_gate_plan["protocolVersion"] = "1.2.0"
+        rollback_gate_plan["id"] = "observation-rollback-gate-plan"
+        rollback_gate_step_data = next(
+            item for item in rollback_gate_plan["steps"] if item["action"] is not None
+        )
+        rollback_gate_step_data["expectedObservations"] = [
+            {"kind": "test_gate_ready", "parameters": {}}
+        ]
+        rollback_gate_step_data["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        assert companion.install_plan(rollback_gate_plan) is True
+        rollback_gate_session = operating_line.get_session()
+        rollback_gate_session.start()
+        assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        assert rollback_gate_session.active_index == -1
+        assert rollback_gate_session.receipts == {}
+        assert bpy.data.objects.get(EXPECTED[0]) is None
+        assert companion.last_report["transition"] == "step_observation_failed"
+        assert companion.last_report["phase"] == "running"
+        assert companion.last_report["completedStepIds"] == []
+        assert companion.last_report["observationGate"] == {
+            "stepId": rollback_gate_step_data["id"],
+            "status": "failed_rolled_back",
+            "failureStrategy": "rollback_step",
+            "message": (
+                "Observation gate failed for snowman.model.body_lower: "
+                "test_gate_ready; the step was rolled back"
+            ),
+        }
+
+        one_shot_plan = deepcopy(rollback_gate_plan)
+        one_shot_plan["id"] = "observation-one-shot-gate-plan"
+        one_shot_step_data = next(
+            item for item in one_shot_plan["steps"] if item["action"] is not None
+        )
+        one_shot_step_data["expectedObservations"] = [
+            {"kind": "test_gate_one_shot", "parameters": {}}
+        ]
+        assert companion.install_plan(one_shot_plan) is True
+        one_shot_session = operating_line.get_session()
+        one_shot_session.start()
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
+        assert one_shot_calls["count"] == 1
+        assert companion.last_report["transition"] == "step_succeeded"
+        assert companion.last_report["observations"] == [
+            {
+                "kind": "test_gate_one_shot",
+                "satisfied": True,
+                "details": {
+                    "parameters": {},
+                    "evaluationCount": 1,
+                    "supported": True,
+                },
+            }
+        ]
+        one_shot_session.back()
+
+        retain_gate_plan = deepcopy(rollback_gate_plan)
+        retain_gate_plan["id"] = "observation-retain-gate-plan"
+        retain_gate_step_data = next(
+            item for item in retain_gate_plan["steps"] if item["action"] is not None
+        )
+        retain_gate_step_data["observationPolicy"]["failureStrategy"] = (
+            "retain_for_repair"
+        )
+        assert companion.install_plan(retain_gate_plan) is True
+        retain_gate_session = operating_line.get_session()
+        retain_gate_session.start()
+        assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        retained_pointer = bpy.data.objects[EXPECTED[0]].as_pointer()
+        assert retain_gate_session.observation_blocked is True
+        assert retain_gate_session.active_index == 0
+        assert retain_gate_session.completed_step_ids == ()
+        assert companion.last_report["phase"] == "blocked"
+        assert companion.last_report["observationGate"]["status"] == (
+            "repair_required"
+        )
+        assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        assert bpy.data.objects[EXPECTED[0]].as_pointer() == retained_pointer
+
+        gate_ready["value"] = True
+        assert bpy.ops.operating_line.recheck_observations() == {"FINISHED"}
+        assert retain_gate_session.observation_blocked is False
+        assert retain_gate_session.completed_step_ids == (
+            retain_gate_step_data["id"],
+        )
+        assert companion.last_report["transition"] == "observation_recovered"
+        assert companion.last_report["observationGate"]["status"] == "recovered"
+        assert companion.last_report["observations"][0]["satisfied"] is True
+        retain_gate_session.back()
+        assert bpy.data.objects.get(EXPECTED[0]) is None
+
+        legacy_gate_plan = deepcopy(retain_gate_plan)
+        legacy_gate_plan["protocolVersion"] = "1.1.0"
+        try:
+            CompanionController._validated_session(legacy_gate_plan)
+        except ValueError as error:
+            assert "protocol 1.2.0" in str(error)
+        else:
+            raise AssertionError("Legacy plans must not opt into observation gates")
+    finally:
+        if original_gate_evaluator is None:
+            del observation_module.OBSERVATION_EVALUATORS["test_gate_ready"]
+        else:
+            observation_module.OBSERVATION_EVALUATORS["test_gate_ready"] = (
+                original_gate_evaluator
+            )
+        if original_one_shot_evaluator is None:
+            del observation_module.OBSERVATION_EVALUATORS["test_gate_one_shot"]
+        else:
+            observation_module.OBSERVATION_EVALUATORS["test_gate_one_shot"] = (
+                original_one_shot_evaluator
+            )
 
     original_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
         "test_evaluation_error"
@@ -3449,8 +3597,9 @@ def main() -> None:
     goal_plan = deepcopy(BUNDLED_PLAN)
     goal_plan["id"] = goal_request["planId"]
     goal_plan["revision"] += 20
+    goal_plan["protocolVersion"] = "1.2.0"
     goal_proposal = {
-        "protocolVersion": "1.1.0",
+        "protocolVersion": "1.2.0",
         "proposalId": str(uuid.uuid4()),
         "goalRequestId": goal_request["requestId"],
         "targetAdapterId": "blender",
@@ -3585,8 +3734,9 @@ def main() -> None:
     initial_plan = deepcopy(BUNDLED_PLAN)
     initial_plan["id"] = initial_goal["planId"]
     initial_plan["revision"] += 21
+    initial_plan["protocolVersion"] = "1.2.0"
     initial_proposal = {
-        "protocolVersion": "1.1.0",
+        "protocolVersion": "1.2.0",
         "proposalId": initial_proposal_id,
         "goalRequestId": initial_goal["requestId"],
         "targetAdapterId": "blender",
@@ -3644,8 +3794,9 @@ def main() -> None:
         plan = deepcopy(BUNDLED_PLAN)
         plan["id"] = goal["planId"]
         plan["revision"] += 30
+        plan["protocolVersion"] = "1.2.0"
         proposal = {
-            "protocolVersion": "1.1.0",
+            "protocolVersion": "1.2.0",
             "proposalId": str(uuid.uuid4()),
             "goalRequestId": goal["requestId"],
             "targetAdapterId": "blender",
@@ -3711,7 +3862,12 @@ def main() -> None:
     registered_companion._transport = None
     assert all(
         "UNDO" not in operator.bl_options
-        for operator in (OPERATINGLINE_OT_start, OPERATINGLINE_OT_next, OPERATINGLINE_OT_back)
+        for operator in (
+            OPERATINGLINE_OT_start,
+            OPERATINGLINE_OT_next,
+            OPERATINGLINE_OT_recheck_observations,
+            OPERATINGLINE_OT_back,
+        )
     )
     try:
         # An edited startup object is user content: the atomic signature must fail

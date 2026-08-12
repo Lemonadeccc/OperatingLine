@@ -215,7 +215,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   也可显式连接回环地址上的
   Orchestrator，非阻塞拉取新计划或提案并回传步骤结果。提案会显示独立的只读任务树、
   `Accept Plan` 与 `Reject Plan`；接受前 Start/Next 不可执行，且场景与活动计划不会改变。
-- **完整雪人预览垂直切片**：内置 revision 5 教学计划包含 7 个阶段、25 个可执行步骤，依次完成
+- **完整雪人预览垂直切片**：内置 revision 6 教学计划包含 7 个阶段、25 个可执行步骤，依次完成
   地面、三段身体，并把两只眼睛、鼻子、五个嘴点、三个纽扣和两条手臂分别作为独立可回退叶节点，
   再完成材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
   隔离渲染场景、双 Area Light、相机和帧 20 的 320 × 320 Eevee PNG；`Back` 可以逐步反向补偿
@@ -584,7 +584,7 @@ PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出
 选择/拓扑操作、任意 Modifier/Geometry Nodes 图或任意 Python 操作必须明确保留为人工步骤。可重放的非雪人参考输入位于
 [`robot-preview.benchmark.json`](protocol/fixtures/v1/planning/robot-preview.benchmark.json)。
 当前 Blender 包使用 [`snowman-teaching.plan.json`](protocol/fixtures/v1/snowman-teaching.plan.json)
-revision 5；[`snowman.plan.json`](protocol/fixtures/v1/snowman.plan.json) revision 4 仅作为已有
+revision 6；[`snowman.plan.json`](protocol/fixtures/v1/snowman.plan.json) revision 4 仅作为已有
 ActionCatalog 1.3.0 Human Eval 套件的不可变哈希输入保留。
 
 计划安装、Start/Next/Back 和步骤观察可以通过
@@ -656,11 +656,13 @@ Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。
 遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
 外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
 
-revision 5 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+revision 6 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
 `render_artifact_exists` 七类 observation 检查资源、材质、骨架绑定、关键帧、场景、灯光相机
-和 PNG 产物。协议 `0.1.0` 仍把 observation 作为执行后遥测：不满足的观察会回传，
-但不会把 action 的 `step_succeeded` 自动改判为失败，也不会触发自动补偿。
+和 PNG 产物。25 个叶节点都使用 Guide protocol `1.2.0` 的 `success_gate + rollback_step`：只有单次
+观察全部满足才推进；失败会回传 `step_observation_failed`、自动补偿并允许原位重试。支持
+`retain_for_repair` 的外部计划会保留现场、锁住 Next，并提供 `Recheck Observations` 或 `Back`。
+旧 `1.0.0`/`1.1.0` Plan 仍保持 observation 遥测语义。
 
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
 自动回退场景。该受信任更新会显示为 pending，用户 Back 到起点后才会安装。`guide.propose`

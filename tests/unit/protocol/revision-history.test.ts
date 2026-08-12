@@ -88,6 +88,21 @@ describe('guide revision thread history protocol', () => {
     });
   });
 
+  it('reads protocol 1.1 history, emits 1.2 history, and rejects 1.0 turn envelopes', () => {
+    const current = historyFixture();
+    current.protocolVersion = '1.2.0';
+    current.turns[0]!.request.protocolVersion = '1.2.0';
+    current.turns[0]!.proposal!.protocolVersion = '1.2.0';
+    current.turns[0]!.decision!.protocolVersion = '1.2.0';
+    expect(guideRevisionThreadHistorySchema.safeParse(current).success).toBe(true);
+
+    for (const field of ['request', 'proposal', 'decision'] as const) {
+      const invalid = historyFixture();
+      invalid.turns[0]![field]!.protocolVersion = '1.0.0';
+      expect(guideRevisionThreadHistorySchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
   it('rejects cross-thread decisions and inconsistent page cursors', () => {
     const history = historyFixture();
     expect(

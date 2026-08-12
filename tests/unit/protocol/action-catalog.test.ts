@@ -655,7 +655,7 @@ describe('action catalog protocol', () => {
       readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
     ) as unknown;
     const revisionRequestBase = {
-      protocolVersion: '1.1.0',
+      protocolVersion: '1.2.0',
       requestId: '00000000-0000-4000-8000-000000000001',
       adapterId: 'blender',
       instanceId: '00000000-0000-4000-8000-000000000002',
@@ -693,7 +693,7 @@ describe('action catalog protocol', () => {
           ...revisionRequestBase,
           catalogVersion: blenderActionCatalog.catalogVersion,
         },
-        targetRevision: 6,
+        targetRevision: 7,
         catalog: blenderActionCatalog,
         companionState: null,
         scope,

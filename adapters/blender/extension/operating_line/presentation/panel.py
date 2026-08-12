@@ -72,12 +72,41 @@ def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> No
         icon=STATE_ICONS[GuidanceState.BACK] if active else "LOCKED",
     )
     forward = controls.row(align=True)
-    forward.enabled = next_step is not None and not proposal_pending
+    forward.enabled = (
+        next_step is not None
+        and not proposal_pending
+        and not session.observation_blocked
+    )
     forward.operator(
         "operating_line.next",
         text=f"{_step_ordinal(next_index if next_step else None)} Next",
         icon=STATE_ICONS[GuidanceState.NEXT] if next_step else "CHECKMARK",
     )
+
+    gate = session.observation_gate
+    if gate is not None and gate.status != "recovered":
+        gate_box = layout.box()
+        gate_box.alert = True
+        gate_box.label(text="Observation success gate did not pass", icon="ERROR")
+        draw_wrapped_text(gate_box, gate.message)
+        if gate.blocking:
+            strategy = (
+                "Automatic rollback failed; repair the conflict or use Back"
+                if gate.status == "rollback_failed"
+                else "Scene retained for repair; recheck before continuing or use Back"
+            )
+            draw_wrapped_text(gate_box, strategy, icon="RECOVER_LAST")
+            gate_box.operator(
+                "operating_line.recheck_observations",
+                text="Recheck Observations",
+                icon="FILE_REFRESH",
+            )
+        else:
+            draw_wrapped_text(
+                gate_box,
+                "The failed step was rolled back. Next retries the same step.",
+                icon="LOOP_BACK",
+            )
 
 
 def _draw_guidance_status(layout, session) -> None:
@@ -87,7 +116,7 @@ def _draw_guidance_status(layout, session) -> None:
 
     status = layout.box()
     status.label(
-        text=f"Progress {session.active_index + 1:02d} / {len(session.steps):02d}",
+        text=f"Progress {len(session.completed_steps):02d} / {len(session.steps):02d}",
         icon="INFO",
     )
     if active is None:
@@ -97,7 +126,12 @@ def _draw_guidance_status(layout, session) -> None:
             text=f"Back {session.active_index + 1:02d}  {active.title}",
             icon=STATE_ICONS[GuidanceState.BACK],
         )
-    if next_step is None:
+    if session.observation_blocked:
+        status.label(
+            text=f"Next {next_index + 1:02d}  Locked by observation gate",
+            icon="LOCKED",
+        )
+    elif next_step is None:
         status.label(text="Next --  Walkthrough complete", icon="CHECKMARK")
     else:
         status.label(

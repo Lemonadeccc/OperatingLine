@@ -35,6 +35,34 @@ describe('guide plan protocol fixture', () => {
     expect(guidePlanSchema.safeParse(stepExtra).success).toBe(false);
   });
 
+  it('versions observation success gates without changing legacy telemetry semantics', () => {
+    const gated = readFixture() as {
+      protocolVersion: string;
+      steps: Array<Record<string, unknown>>;
+    };
+    const executable = gated.steps.find((step) => step.action !== null);
+    expect(executable).toBeDefined();
+    gated.protocolVersion = '1.2.0';
+    executable!.observationPolicy = {
+      mode: 'success_gate',
+      failureStrategy: 'rollback_step',
+    };
+    expect(guidePlanSchema.safeParse(gated).success).toBe(true);
+
+    gated.protocolVersion = '1.1.0';
+    expect(guidePlanSchema.safeParse(gated).success).toBe(false);
+
+    gated.protocolVersion = '1.2.0';
+    executable!.expectedObservations = [];
+    expect(guidePlanSchema.safeParse(gated).success).toBe(false);
+
+    delete executable!.observationPolicy;
+    const group = gated.steps.find((step) => step.action === null);
+    expect(group).toBeDefined();
+    group!.observationPolicy = { mode: 'telemetry' };
+    expect(guidePlanSchema.safeParse(gated).success).toBe(false);
+  });
+
   it('keeps Zod and the emitted JSON Schema aligned for 3D positions', () => {
     const extraCoordinate = readFixture() as { steps: Array<Record<string, unknown>> };
     const anchorStep = extraCoordinate.steps.find(
@@ -48,6 +76,7 @@ describe('guide plan protocol fixture', () => {
       readFileSync(resolve('protocol/schemas/v1/guide-plan.schema.json'), 'utf8'),
     ) as {
       additionalProperties?: unknown;
+      allOf?: unknown[];
       properties?: {
         steps?: {
           items?: {
@@ -74,5 +103,14 @@ describe('guide plan protocol fixture', () => {
       (candidate) => candidate.properties?.position,
     )?.properties?.position;
     expect(positionSchema).toMatchObject({ minItems: 3, maxItems: 3 });
+    expect(emitted.allOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          if: expect.objectContaining({
+            properties: { protocolVersion: { const: '1.2.0' } },
+          }),
+        }),
+      ]),
+    );
   });
 });

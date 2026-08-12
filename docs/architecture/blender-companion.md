@@ -175,9 +175,9 @@ Provider Proposal。队列为活动/已知 Provider 结果保留容量；队列�
 全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
 不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、Run、历史、执行进度或场景状态。
 
-## revision 5 雪人教学执行切片
+## revision 6 雪人教学执行切片
 
-打包内的 `snowman-demo` revision 5 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
+打包内的 `snowman-demo` revision 6 是当前 Blender Companion 的确定性验收场景。它按线性 DAG
 执行 7 个阶段、25 个叶子步骤：创建地面和三段身体，再逐件创建两只眼睛、一个鼻子、五个嘴点、
 三个纽扣和两条手臂，使每个部件都能独立引用、执行与回退；随后分配雪、煤、
 胡萝卜、木头和地面材质，创建四骨骼 Armature 并把头部组件与两条手臂刚性绑定，写入第 1、20、40
@@ -257,11 +257,13 @@ Blender Collection 名称已经是目标无关的 `OperatingLine Generated`。
 预览 action 只接受扩展临时目录、1–100000 的显式帧，单边分辨率上限为 1024，采样上限为 128，
 防止远端计划以合法参数长时间同步阻塞 Blender 主线程。
 
-revision 5 使用 `resource_exists`、`material_assigned`、`armature_ready`、
+revision 6 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
-`render_artifact_exists` 七类 observation。它们读取 receipt 身份与当前 Blender 状态，并随
-Companion report 回传；在协议 `0.1.0` 中仍是遥测，不是
-`step_succeeded` 的提交门，也不会因 `satisfied: false` 自动回退 action。
+`render_artifact_exists` 七类 observation。25 个叶节点使用 Guide protocol `1.2.0` 的
+`success_gate + rollback_step`：动作后只读评估一次，全部满足才进入 completed evidence；失败则
+回传精确 observation、以 receipt 自动补偿并原位重试。外部 `retain_for_repair` Plan 会保留现场并
+锁住 Next，Recheck 只重新观察而不重复 action；回滚冲突升级为 blocked 并保留 receipt。旧
+`1.0.0`/`1.1.0` Plan 继续按 telemetry 执行。见 [ADR 0030](../adr/0030-observation-success-gates-and-recovery.md)。
 
 ## 非雪人规划基准
 

@@ -112,6 +112,34 @@ describe('guide plan diff', () => {
     expect(() => computeGuidePlanDiff(base, base)).toThrow('must be newer');
   });
 
+  it('captures an observation policy removal as an explicit null value', () => {
+    const base = snowmanPlan();
+    const stepId = 'snowman.model.head';
+    const target = guidePlanSchema.parse({
+      ...base,
+      revision: base.revision + 1,
+      steps: base.steps.map((step) =>
+        step.id === stepId ? { ...step, observationPolicy: undefined } : step,
+      ),
+    });
+
+    const diff = computeGuidePlanDiff(base, target);
+
+    expect(diff.stepChanges).toEqual([
+      expect.objectContaining({
+        kind: 'updated',
+        stepId,
+        changes: [
+          {
+            field: 'observationPolicy',
+            before: { mode: 'success_gate', failureStrategy: 'rollback_step' },
+            after: null,
+          },
+        ],
+      }),
+    ]);
+  });
+
   it('rejects inconsistent portable diff envelopes at the protocol boundary', () => {
     const base = snowmanPlan();
     const diff = computeGuidePlanDiff(base, { ...base, revision: base.revision + 1 });
