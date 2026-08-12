@@ -14,7 +14,7 @@
 > Orchestrator 现在可以查询 Blender `1.9.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
-> `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` →
+> `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:review` →
 > `eval:check`/`eval:report` 采集与盲审工具链；当前尚无真实 Provider Run、blind sign-off 或人工
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
@@ -206,7 +206,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   检查每个精确哈希对应的像素，再由 blind sign-off 绑定该逐图声明。项目和 PNG metadata 都标记
   `manual_artifact_not_runtime_bound`。Capture 中的 Provider
   profile/settings 可保留 operator-attested 降级并强制 `not_reproducible`；opt-in Provider 也可把规范化
-  profile/settings、request/packet/output hash 写成运行时证明，供 capture 和 released 门禁精确复核。
+  profile/settings、request/packet/output hash 写成运行时证明。离线 `eval:manifest` 可从冻结证明自动派生
+  精确的 `provider_only` capture manifest，要求显式 case/request/run，并固定保守的 `best_effort`；它不读取
+  凭据或调用 Provider。Capture 和 released 门禁仍会独立精确复核。
   每个 Run 必须先由独立 preparer 检查
   provider-blind 投影并写入 sign-off sidecar，才能在回环 headless service 提供的浏览器工作台中由两名
   独立 reviewer 审核；只有保留的分歧才交给第三个独立 adjudicator。浏览器只收到 opaque Run ID 和

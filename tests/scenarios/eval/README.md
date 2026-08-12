@@ -98,7 +98,8 @@ Annotation 必须绑定精确 Run 和 rubric hash、覆盖案例全部适用 cri
 
 ## 本地采集与盲审入口
 
-固定操作顺序为：版本化 snapshot → `provider_only` 或 `host_execution_with_manual_artifacts` capture → 独立 preparer
+固定操作顺序为：版本化 snapshot → runtime-attested manifest 派生或人工 manifest → `provider_only`、
+`host_execution_with_manual_artifacts` 或 `host_execution_with_runtime_attested_artifacts` capture → 独立 preparer
 blind sign-off → 两名独立 reviewer → 仅在存在分歧时由独立 adjudicator 裁决 → check/report。
 
 ```bash
@@ -109,6 +110,20 @@ pnpm eval:snapshot \
   --plan <plan-id> \
   --instance <blender-instance-id> \
   --out <private-snapshot-directory>
+
+pnpm eval:manifest \
+  --suite <dataset-directory>/suite.json \
+  --snapshot <private-snapshot-directory> \
+  --case <exact-case-id> \
+  --request <generation-request-uuid> \
+  --run <new-run-uuid> \
+  --replicate 1 \
+  --recorder-name local-human-eval-capture \
+  --recorder-version 1.0.0 \
+  --operating-line-version 0.1.0 \
+  --source-commit '<40-lowercase-hex-commit-or-none>' \
+  --out-root '<private-capture-input-directory>' \
+  --out '<private-capture-input-directory>/capture.json'
 
 pnpm eval:capture \
   --dataset <dataset-directory> \
@@ -149,8 +164,10 @@ pnpm eval:review \
 独立。服务输出带 fragment token 的 `reviewUrl`，操作者在本机普通浏览器打开；这是回环 headless
 service，不是 Electron 应用。
 
-Capture、blind、review、check 和 report 默认不需要模型 Provider 凭据，不调用模型 API，也不产生模型
-API 费用。Snapshot 只从 `--token-env` 指定的环境变量读取本地 OperatingLine Runtime access token，且
+Manifest derivation、capture、blind、review、check 和 report 默认不需要模型 Provider 凭据，不调用模型
+API，也不产生模型 API 费用。`eval:manifest` 只接受 runtime-attested frozen evidence，显式选择 case/request，
+自动派生 profile/settings，固定 provider-only `best_effort`，并拒绝 credential-like 参数。Snapshot 只从
+`--token-env` 指定的环境变量读取本地 OperatingLine Runtime access token，且
 不会把 token 写入文件；该 token 不是模型 Provider key。只有在上游生成新的真实 Provider 输出时才需要
 该 Provider 的凭据与预算。Blender render 在本机执行，只消耗本地计算资源。
 

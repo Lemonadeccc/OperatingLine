@@ -1,5 +1,6 @@
 export * from './comparison.js';
 export * from './capture.js';
+export * from './manifest-template.js';
 export * from './blind-review.js';
 export * from './dataset.js';
 export * from './filesystem.js';

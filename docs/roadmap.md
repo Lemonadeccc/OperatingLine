@@ -189,9 +189,11 @@
   - [x] 定义无分数 suite/run/annotation/adjudication/comparison 协议、`@operatingline/eval-kit`、
         `eval:check`/`eval:report`，并提交 7 个 `collecting` Blender 案例，覆盖 initial plan、local replan
         和 adversarial 能力边界。
-  - [x] 实现本地 `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` 工具链、单写者锁和
+  - [x] 实现本地 `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:review`
+        工具链、单写者锁和
         provider-blind 浏览器投影；这只完成安全的本地采集/评审面，不代表已经采集或评审任何真实数据，
-        也不构成发布级 treatment/artifact attestation。
+        也不构成发布级 treatment/artifact attestation。`eval:manifest` 只从冻结 runtime proof 派生
+        provider-only `best_effort` 输入，要求显式 case/request/run，且不读取 Provider credential。
   - [ ] 按明确的数据披露与可能费用确认，为 7 个案例采集真实 Provider Run；当前 `runCount` 为 0。
   - [ ] 为每个 Run 取得至少两名校准 reviewer 的 provider-blind annotation，保留并按需 adjudicate
         分歧；当前 `blindSignoffCount`、`annotationCount` 与 `adjudicationCount` 均为 0。

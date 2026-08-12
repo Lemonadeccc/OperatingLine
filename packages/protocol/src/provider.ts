@@ -81,6 +81,170 @@ export const plannerProviderRuntimeProfileSchema = z
   });
 export type PlannerProviderRuntimeProfile = z.infer<typeof plannerProviderRuntimeProfileSchema>;
 
+const credentialKeyTokens = new Set([
+  'auth',
+  'authorization',
+  'bearer',
+  'credential',
+  'credentials',
+  'cookie',
+  'cookies',
+  'passphrase',
+  'passphrases',
+  'password',
+  'passwords',
+  'secret',
+  'secrets',
+]);
+
+const credentialKeyQualifiers = new Set([
+  'access',
+  'api',
+  'client',
+  'encryption',
+  'id',
+  'oauth',
+  'private',
+  'provider',
+  'refresh',
+  'secret',
+  'session',
+  'signing',
+  'vendor',
+]);
+
+const compactCredentialKeySuffixes = [
+  'accesstoken',
+  'accesstokens',
+  'apikey',
+  'apikeys',
+  'authheader',
+  'authtoken',
+  'bearertoken',
+  'clientsecret',
+  'clientsecrets',
+  'credential',
+  'credentials',
+  'encryptionkey',
+  'idtoken',
+  'password',
+  'passwords',
+  'passphrase',
+  'passphrases',
+  'privatekey',
+  'privatekeys',
+  'providertoken',
+  'providertokens',
+  'refreshtoken',
+  'secretaccesskey',
+  'secretkey',
+  'secretkeys',
+  'sessiontoken',
+  'sessiontokens',
+  'signingkey',
+  'signingkeys',
+] as const;
+
+const publicTokenMetricSuffixes = new Set([
+  'budget',
+  'count',
+  'counts',
+  'estimate',
+  'estimates',
+  'limit',
+  'limits',
+  'length',
+  'maximum',
+  'minimum',
+  'rate',
+  'usage',
+]);
+
+const publicTokenMetricPrefixes = new Set([
+  'completion',
+  'input',
+  'max',
+  'maximum',
+  'min',
+  'minimum',
+  'new',
+  'output',
+  'prompt',
+]);
+
+const compactCredentialCompoundPattern =
+  /(?:access|api|auth|bearer|client|encryption|id|oauth|private|provider|refresh|secret|session|signing|vendor)(?:key|keys|secret|secrets|token|tokens)/u;
+
+function parameterKeyTokens(key: string): readonly string[] {
+  return key
+    .replaceAll(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replaceAll(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((token) => token !== '');
+}
+
+function isCredentialLikeParameterKey(key: string): boolean {
+  const tokens = parameterKeyTokens(key);
+  const compactKey = key.toLowerCase().replaceAll(/[^a-z0-9]/g, '');
+  if (
+    compactKey.endsWith('token') ||
+    compactCredentialCompoundPattern.test(compactKey) ||
+    compactCredentialKeySuffixes.some((suffix) => compactKey.endsWith(suffix))
+  ) {
+    return true;
+  }
+  if (tokens.some((token) => credentialKeyTokens.has(token))) return true;
+  const tokenIndex = tokens.findIndex((token) => token === 'token' || token === 'tokens');
+  if (tokenIndex >= 0) {
+    const prefix = tokens.slice(0, tokenIndex);
+    const suffix = tokens.slice(tokenIndex + 1);
+    if (prefix.some((token) => credentialKeyQualifiers.has(token))) return true;
+    const isPublicMetric =
+      (suffix.length > 0 && suffix.every((token) => publicTokenMetricSuffixes.has(token))) ||
+      (suffix.length === 0 &&
+        prefix.length > 0 &&
+        prefix.every((token) => publicTokenMetricPrefixes.has(token)));
+    if (!isPublicMetric) return true;
+  }
+  const keyIndex = tokens.findIndex((token) => token === 'key' || token === 'keys');
+  return (
+    keyIndex >= 0 && tokens.slice(0, keyIndex).some((token) => credentialKeyQualifiers.has(token))
+  );
+}
+
+function jsonPointerSegment(value: string | number): string {
+  return String(value).replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+/**
+ * Finds the first parameter path whose name implies credential material. Provider runtime
+ * treatments are durable evidence, so credentials must remain provider-managed and absent from
+ * this otherwise provider-defined JSON object.
+ */
+export function findPlannerProviderCredentialLikeParameterPath(
+  value: unknown,
+  path: readonly (string | number)[] = [],
+): string | null {
+  if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      const found = findPlannerProviderCredentialLikeParameterPath(entry, [...path, index]);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (value === null || typeof value !== 'object') return null;
+  for (const [key, entry] of Object.entries(value)) {
+    const nextPath = [...path, key];
+    if (isCredentialLikeParameterKey(key)) {
+      return `/${nextPath.map(jsonPointerSegment).join('/')}`;
+    }
+    const found = findPlannerProviderCredentialLikeParameterPath(entry, nextPath);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 export const plannerProviderGenerationSettingsSchema = z
   .strictObject({
     normalizedParameters: z.record(z.string().min(1), z.json()),
@@ -89,6 +253,16 @@ export const plannerProviderGenerationSettingsSchema = z
     determinism: z.enum(['deterministic', 'seeded_best_effort', 'non_deterministic', 'unknown']),
   })
   .superRefine((settings, context) => {
+    const credentialPath = findPlannerProviderCredentialLikeParameterPath(
+      settings.normalizedParameters,
+    );
+    if (credentialPath !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['normalizedParameters'],
+        message: `Normalized parameters must not contain credential-like key ${credentialPath}`,
+      });
+    }
     if (settings.determinism === 'seeded_best_effort' && settings.seed === null) {
       context.addIssue({
         code: 'custom',

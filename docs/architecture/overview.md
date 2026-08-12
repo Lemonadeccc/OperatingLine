@@ -543,8 +543,10 @@ Provider profile、补充 alias、私有 sign-off sidecar 或真实 Run ID；adj
 `Reviewer B` 等匿名标签。服务在返回与接受内容时都会重新扫描 Provider identity marker。它不是 Electron
 桌面壳，也不会把数据上传到远端服务。
 
-Capture、blind preparation、review、check 与 report 默认完全离线：不需要模型 Provider 凭据，不会调用
-模型 Provider，也不产生模型 API 费用。Snapshot 命令仅访问本机 OperatingLine Runtime；其 access token
+Manifest derivation、capture、blind preparation、review、check 与 report 默认完全离线：不需要模型
+Provider 凭据，不会调用模型 Provider，也不产生模型 API 费用。`eval:manifest` 从冻结的 runtime-attested
+requested/completed 事件派生 profile/settings，要求显式 case/request/run，拒绝 credential-like 参数并固定
+provider-only `best_effort`；不会猜测宿主构建身份。Snapshot 命令仅访问本机 OperatingLine Runtime；其 access token
 通过命名环境变量传入且不写入 snapshot。只有在采集链上游选择生成一份新的真实 Provider 输出时，才由
 那个可选 Provider 的调用路径承担凭据、网络传输与费用边界。`host_execution_with_manual_artifacts` 所需 Blender 渲染在
 本机执行，仅消耗本地计算资源。
@@ -553,13 +555,15 @@ Capture、blind preparation、review、check 与 report 默认完全离线：不
 该降级路径不使用终态文件哈希，因此它们没有运行时来源绑定：PNG 可以出现在本地盲审
 界面，并由 blind sign-off 绑定内容哈希，但作为 `manual_review_image` 不允许携带 `visualEnvironment`，
 不能满足 `released` artifact criterion。工程 `host_project` 与 PNG metadata 都标记
-`manual_artifact_not_runtime_bound`。Capture manifest 的 Provider profile 与 generation
-settings 也来自 operator attestation，不是 Runtime attestation；此类 Run 固定为 `not_reproducible`，不能
-形成发布级 treatment comparison。
+`manual_artifact_not_runtime_bound`。Artifact provenance 与 Provider treatment provenance 是独立维度：
+同一 manual-artifact capture 可使用完整 runtime-attested treatment，也可降级为 operator-attested
+profile/settings。只有后一种 treatment 降级强制 Run 为 `not_reproducible`；前一种仍不能把人工 artifact
+升级成 released visual evidence，也不能单独形成发布级 comparison。
 
 Opt-in Provider 现在可在 requested/completed 事件中写入规范化 profile/settings、treatment hash、request
 fingerprint、packet hash 与严格 draft hash。Blender `1.5.0` 终态可保存工程副本并绑定 `.blend`/PNG hash、
-尺寸和渲染环境。Capture 只有在 manifest 与这些事件逐字段一致时才保存 runtime attestation；released
+尺寸和渲染环境。`eval:manifest` 可离线生成精确的 runtime-attested provider-only 输入；Capture 仍只有在
+manifest 与这些事件逐字段一致时才保存 runtime attestation；released
 校验还会从冻结 Eval export 重新核对同一终态报告及两个实际 artifact 字节。见
 [ADR 0036](../adr/0036-runtime-attested-eval-evidence.md)。这仍不替代真实调用、双人盲审、数据审核或授权。
 

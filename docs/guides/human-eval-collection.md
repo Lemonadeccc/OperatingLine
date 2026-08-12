@@ -11,6 +11,7 @@ blind sign-off、0 个 annotation、0 个 adjudication。下列工具已经实�
 
 ```text
 versioned Eval snapshot
+  -> runtime-attested provider_only manifest (automatic), or reviewed manual manifest
   -> capture: provider_only | host_execution_with_manual_artifacts
             | host_execution_with_runtime_attested_artifacts
   -> independent preparer provider-blind sign-off
@@ -30,8 +31,8 @@ versioned Eval snapshot
 
 ## 凭据、网络与费用边界
 
-`eval:capture`、`eval:blind`、`eval:review`、`eval:check` 和 `eval:report` 默认完全离线：它们不读取模型
-Provider 凭据、不调用模型 API，也不产生模型 API 费用。
+`eval:manifest`、`eval:capture`、`eval:blind`、`eval:review`、`eval:check` 和 `eval:report` 默认完全离线：
+它们不读取模型 Provider 凭据、不调用模型 API，也不产生模型 API 费用。
 
 `eval:snapshot` 只访问 `127.0.0.1`、`localhost` 或 `::1` 上的 OperatingLine Runtime。它从
 `--token-env` 指定的环境变量读取本地 Runtime access token，并明确不把 token 写入 snapshot；该 token
@@ -85,10 +86,39 @@ pnpm eval:snapshot \
 不匹配的页面、漂移的 snapshot identity、重复事件和不完整 page chain。输出目录必须尚不存在；
 `snapshot.json` 最后写入并作为完成标记。
 
-## 2. 编写 capture manifest
+## 2. 生成或编写 capture manifest
 
-Manifest 由操作者根据那次真实调用的公开 descriptor、generation settings 和事件 ID 填写。它不保存
-credential、原始 Provider response 或 private reasoning。下面是字段模板；替换所有 `REPLACE_*` 值，
+若 snapshot 的精确 requested/completed 事件包含 Runtime treatment/output attestation，优先让离线工具
+派生 `provider_only` manifest，避免手抄 Provider profile、generation settings 和版本身份：
+
+```bash
+pnpm eval:manifest \
+  --suite "$EVAL_DATASET/suite.json" \
+  --snapshot "$EVAL_SNAPSHOT" \
+  --case '<exact-suite-case-id>' \
+  --request '<exact-generation-request-uuid>' \
+  --run '<new-run-uuid>' \
+  --replicate 1 \
+  --recorder-name local-human-eval-capture \
+  --recorder-version 1.0.0 \
+  --operating-line-version 0.1.0 \
+  --source-commit '<40-lowercase-hex-commit-or-none>' \
+  --out-root "$EVAL_CAPTURE_INPUT" \
+  --out "$EVAL_CAPTURE_INPUT/capture.json"
+```
+
+需要 lineage 时增加 `--parent-run '<uuid>'`，已知供应商 request identity 时增加
+`--vendor-request '<public-request-id>'`；两者都可显式传 `none`。命令不会读取环境变量或访问网络，要求
+明确选择 case 和 generation request，验证完整冻结 page chain、suite/case/scope、request/terminal、
+packet/output hash 及 runtime attestation，并拒绝 `normalizedParameters` 中递归出现的明显 credential-like
+键。`--case`、`--request`、`--run`、replicate/lineage、recorder identity、OperatingLine version、source
+commit 与可选 vendor request 是操作者提供的数据，不是从 snapshot 推导的事实。输出固定为
+`provider_only`、`runtime_attested` 和保守的 `best_effort`：缺少精确宿主 build identity 时不会声明
+`reproducible`。`--out-root` 是显式私有写入边界，必须预先存在、不是 symlink；`--out` 必须位于其中。
+文件以私有权限原子创建且不覆盖已有路径，边界内的任何既存祖先都不得是 symlink。
+
+如果 runtime attestation 缺失，只能使用下面的人工降级模板。此路径的公开 descriptor/settings 必须由
+操作者复核，不保存 credential、原始 Provider response 或 private reasoning。替换所有 `REPLACE_*` 值，
 并确保 `generationRequestId` 与 snapshot 中唯一 requested/terminal 事件完全一致：
 
 ```json
@@ -164,8 +194,8 @@ credential、原始 Provider response 或 private reasoning。下面是字段模
 将文件保存为 `$EVAL_CAPTURE_INPUT/capture.json`。`provider_only` 保存 Provider request/outcome 的冻结证据，
 不会假装 execution 或 visual criterion 可判断。
 
-如果 snapshot 的 requested/completed 事件带有 Orchestrator 运行时证明，应把 `reproducibility` 设为
-`best_effort`（只有 resolved revision 与确定性设置均满足协议时才可用 `reproducible`），并用：
+如果不使用自动生成器而手工表达 snapshot 中已有的 Orchestrator 运行时证明，应把 `reproducibility`
+保守设为 `best_effort`，并用：
 
 ```json
 "treatmentAttestation": {
@@ -177,6 +207,8 @@ credential、原始 Provider response 或 private reasoning。下面是字段模
 Capture 不会信任这句声明本身：它会逐字段核对 manifest profile/settings、requested treatment、completed
 output、request fingerprint、packet hash 和 draft hash。任一处缺失或漂移都会拒绝采集。旧式
 `operator_attested_not_runtime_verified` 路径继续可用于本地审阅，且必须保持 `not_reproducible`。
+不要只因 model revision 和 generation setting 看似固定就把 `provider_only` 改成 `reproducible`；当前
+Provider-only manifest 没有精确 adapter/host build identity。
 
 若 snapshot 还包含同一输出 Plan 的精确授权及目标宿主 terminal report，并且已经在本机保存对应 Blender
 工程与真实 PNG，把 mode 改为 `host_execution_with_manual_artifacts` 并增加：
@@ -212,13 +244,13 @@ artifact 字节、PNG 解码结果和尺寸；缺少精确宿主事件链时使�
 `manual_review_image`，由 blind sign-off 绑定内容哈希并可在本地 reviewer 界面查看。两者的 metadata 都
 标记 `manual_artifact_not_runtime_bound`，且协议禁止 `manual_review_image` 携带 `visualEnvironment`，因此
 它绝不会满足 `released` artifact criterion。Provider profile 和 generation settings 也由操作者根据公开调用信息
-填写，不是 Runtime-attested；manifest 必须使用精确
-`operator_attested_not_runtime_verified` evidence class 与
-`profile_and_settings_reviewed_no_credentials` assertion，并记录 attestor pseudonym/time。Capture 强制 Run
-为 `not_reproducible`，输出 `runtimeTreatmentEligible: false` 与
-`releasedComparisonEligible: false`，并把这份 attestation 保存为内容寻址的 `provider_output`
-artifact。Runtime-attested 路径会输出 `runtimeTreatmentEligible: true`；capture 完成仍不等于满足盲审、
-公开审核和整套 released readiness，因此 `releasedComparisonEligible` 仍为 `false`。
+填写还是从 runtime attestation 派生，是与 artifact 来源独立的维度。若 treatment 只能由操作者复核，manifest
+必须使用精确 `operator_attested_not_runtime_verified` evidence class 与
+`profile_and_settings_reviewed_no_credentials` assertion，并记录 attestor pseudonym/time；此时 Capture 强制
+Run 为 `not_reproducible`，输出 `runtimeTreatmentEligible: false`。若同一 snapshot 已含完整 runtime treatment/
+output attestation，则也可将该证明与 manual artifacts 组合，输出 `runtimeTreatmentEligible: true`，但工程/PNG
+仍保持 `manual_artifact_not_runtime_bound`。两种组合的 `releasedComparisonEligible` 都为 `false`：capture
+完成仍不等于满足运行时 artifact 证明、盲审、公开审核和整套 released readiness。
 
 若 Blender 终态报告包含 Guide/Companion `1.5.0` 的非空 `artifactAttestation`，可以改用：
 
@@ -392,6 +424,7 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 
 - [ ] Suite/case、catalog hash、operation、Plan ID/revision 与真实调用一致。
 - [ ] Snapshot 是完整冻结 `1.1.0` page chain，token 未写入任何文件。
+- [ ] Runtime-attested provider-only 路径优先使用 `eval:manifest`，并检查输出未含 credential-like 参数。
 - [ ] Run 使用新的 UUID；generation request ID 与唯一 requested/terminal event 一致。
 - [ ] Capture mode 诚实：缺少精确宿主因果链时使用 `provider_only`。
 - [ ] 使用 runtime treatment 时，manifest 与 requested/completed attestation 完全匹配；未披露 resolved
@@ -403,8 +436,8 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
       提供、无 Runtime hash 绑定，未用作 released visual evidence。
 - [ ] PNG 是无 `visualEnvironment` 的 `manual_review_image`，已由 blind sign-off 绑定哈希，仅用于本地
       review；project 与 PNG metadata 均为 `manual_artifact_not_runtime_bound`。
-- [ ] Provider profile/settings 明确是 operator-attested，Run 为 `not_reproducible`，未形成发布级
-      treatment comparison。
+- [ ] 若 Provider profile/settings 使用 operator-attested 降级路径，Run 为 `not_reproducible`；若使用
+      runtime-attested treatment，则它与 requested/completed 证明完全一致。两者都未自动形成发布级 comparison。
 - [ ] Treatment attestation 使用精确 evidence class/assertion，attestor pseudonym 与时间经过复核。
 - [ ] Manifest 不含 credential、raw Provider response 或 private reasoning。
 - [ ] `--repo-root` 指向用于解析 `repo://` artifact 的精确仓库根目录。

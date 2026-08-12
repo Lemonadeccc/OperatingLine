@@ -10,6 +10,7 @@ import {
   plannerGenerationResultSchema,
   plannerProviderContractVersion,
   plannerProviderDescriptorSchema,
+  plannerProviderGenerationSettingsSchema,
   plannerProviderListSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -28,6 +29,55 @@ const descriptor = {
     credentialManagement: 'provider_managed' as const,
   },
 };
+
+describe('planner provider generation settings', () => {
+  const settings = (normalizedParameters: Record<string, unknown>) => ({
+    normalizedParameters,
+    parametersSha256: 'a'.repeat(64),
+    seed: null,
+    determinism: 'unknown' as const,
+  });
+
+  it.each([
+    ['plain token', { token: 'credential' }],
+    ['provider token', { providerToken: 'credential' }],
+    ['compact provider token', { providertoken: 'credential' }],
+    ['access token value', { accessTokenValue: 'credential' }],
+    ['provider token header', { providerTokenHeader: 'credential' }],
+    ['access tokens', { accessTokens: ['credential'] }],
+    ['provider tokens', { providerTokens: ['credential'] }],
+    ['session tokens', { sessionTokens: ['credential'] }],
+    ['API key', { 'API-Key': 'credential' }],
+    ['compact API key', { apikey: 'credential' }],
+    ['API keys', { apiKeys: ['credential'] }],
+    ['access keys', { accessKeys: ['credential'] }],
+    ['private key PEM', { privateKeyPem: 'credential' }],
+    ['compact private key', { privatekey: 'credential' }],
+    ['private keys', { privateKeys: ['credential'] }],
+    ['access key ID', { accessKeyId: 'credential' }],
+    ['client secrets', { clientSecrets: ['credential'] }],
+    ['passwords', { passwords: ['credential'] }],
+    ['cookies', { cookies: ['credential'] }],
+    ['authorization header', { headers: { Authorization: 'credential' } }],
+    ['nested session token', { transport: [{ session_token: 'credential' }] }],
+  ])('rejects credential-like parameter keys: %s', (_label, normalizedParameters) => {
+    expect(
+      plannerProviderGenerationSettingsSchema.safeParse(settings(normalizedParameters)).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    ['output-token limit', { maxOutputTokens: 32_768 }],
+    ['maximum new tokens', { maxNewTokens: 4_096 }],
+    ['token budget', { tokenBudget: 32_768 }],
+    ['token usage estimate', { tokenUsageEstimate: 128 }],
+    ['secretary mode', { secretaryMode: false }],
+  ])('accepts noncredential parameter keys: %s', (_label, normalizedParameters) => {
+    expect(
+      plannerProviderGenerationSettingsSchema.safeParse(settings(normalizedParameters)).success,
+    ).toBe(true);
+  });
+});
 
 function generationResult() {
   const benchmark = JSON.parse(

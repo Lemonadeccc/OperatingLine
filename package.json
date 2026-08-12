@@ -20,6 +20,7 @@
     "setup:codex": "tsx packages/client-setup/src/cli.ts --client codex",
     "setup:claude": "tsx packages/client-setup/src/cli.ts --client claude",
     "eval:snapshot": "tsx tools/eval/snapshot.ts",
+    "eval:manifest": "tsx tools/eval/manifest.ts",
     "eval:capture": "tsx tools/eval/capture.ts",
     "eval:blind": "tsx tools/eval/blind.ts",
     "eval:review": "tsx services/eval-review/src/cli.ts",

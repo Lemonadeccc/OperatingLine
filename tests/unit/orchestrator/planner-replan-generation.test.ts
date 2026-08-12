@@ -369,6 +369,50 @@ describe('planner replan generation coordinator', () => {
     await coordinator.close();
   });
 
+  it('rejects credential-like replan parameters before provider invocation or event persistence', async () => {
+    const revision = revisionRequest();
+    const provider = providerWithReplan(
+      ({ packet }) => validDraft(packet),
+      1,
+      () => ({
+        profile: {
+          descriptor: provider.descriptor,
+          vendor: 'OperatingLine tests',
+          implementation: { name: '@operatingline/test-kit', version: '0.1.0' },
+          model: {
+            requested: 'unsafe-replan-fixture',
+            resolvedRevision: 'unsafe-replan-fixture',
+            resolution: 'resolved',
+          },
+          api: {
+            surface: 'in-process-test',
+            version: '1.0.0',
+            sdkName: '@operatingline/test-kit',
+            sdkVersion: '0.1.0',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters: { clientSecrets: ['must-not-be-persisted'] },
+          seed: null,
+          determinism: 'deterministic',
+        },
+      }),
+    );
+    const { coordinator, events } = harness(provider, revision);
+
+    await expect(coordinator.generate(generationRequest(revision))).rejects.toMatchObject({
+      code: 'planner_identity_mismatch',
+    });
+    expect(events.some((event) => event.eventType === 'planning.provider.replan.requested')).toBe(
+      false,
+    );
+    expect(provider.replanInputs).toHaveLength(0);
+    await coordinator.close();
+  });
+
   it('returns needs_revision for a schema-valid local draft missing capability coverage', async () => {
     const revision = revisionRequest();
     const provider = providerWithReplan(({ packet }) => {

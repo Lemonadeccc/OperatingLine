@@ -69,6 +69,11 @@ Descriptor 使用契约版本 `1.0.0`，并声明：
 Descriptor 是公开数据，不得包含 API Key、访问令牌、私有 endpoint 或其他秘密。核心 wire schema
 也不接收这些字段。
 
+实现 `describeRuntimeTreatment()` 时，`profile` 与 `generationSettings.normalizedParameters` 同样会作为
+持久化的公开运行证据。插件只能返回模型名、采样参数、公开 endpoint 分类等非秘密设置；API key、
+token、password、private/signing key、authorization header、cookie 或其他 credential 必须留在
+Provider 内部。Orchestrator 会在 Provider 调用和 requested event 落盘前递归拒绝 credential-like 参数名。
+
 ## 运行与安全边界
 
 - Generate 可能把用户目标、Companion 状态和完整 ActionCatalog 发送到远端并产生费用。插件负责
