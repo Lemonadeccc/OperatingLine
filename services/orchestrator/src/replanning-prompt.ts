@@ -33,13 +33,21 @@ export function buildReplanningPromptPacket(
     throw new Error('A provider replan prompt requires a protocol 1.1 revision thread');
   }
   const capabilityAware = context.catalog.semanticCapabilities !== undefined;
-  const workflowInstructions = capabilityAware
+  const baseInstructions = capabilityAware
     ? [
         ...historicalWorkflowInstructions.slice(0, 3),
         capabilityCoverageInstruction,
         ...historicalWorkflowInstructions.slice(3),
       ]
     : historicalWorkflowInstructions;
+  const workflowInstructions =
+    context.merge === undefined
+      ? baseInstructions
+      : [
+          ...baseInstructions.slice(0, 4),
+          'This is a conflict-free branch merge. Copy context.merge.expectedMergedPlan exactly as output.plan; do not add, remove, reinterpret, or resolve any other change.',
+          ...baseInstructions.slice(4),
+        ];
 
   const responseSchema = z.toJSONSchema(plannerReplanDraftSchema, {
     target: 'draft-2020-12',

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-import { guideProtocolVersion } from './guide.js';
+import { guidePlanSchema, guideProtocolVersion } from './guide.js';
 import { guideProposalDecisionSchema, guideProposalSchema } from './proposal.js';
-import { guideRevisionRequestSchema } from './revision.js';
+import { guideRevisionOperationSchema, guideRevisionRequestSchema } from './revision.js';
 
 export const guideRevisionTurnStateSchema = z.enum([
   'awaiting_proposal',
@@ -12,7 +12,31 @@ export const guideRevisionTurnStateSchema = z.enum([
 ]);
 export type GuideRevisionTurnState = z.infer<typeof guideRevisionTurnStateSchema>;
 
-const guideRevisionHistoryProtocolVersions = ['1.1.0', '1.2.0', guideProtocolVersion] as const;
+function proposalPreservesRevisionOperation(
+  proposal: z.infer<typeof guideRevisionOperationSchema> | undefined,
+  request: z.infer<typeof guideRevisionOperationSchema> | undefined,
+): boolean {
+  if (request === undefined) {
+    return proposal === undefined || proposal.kind === 'revise';
+  }
+  if (proposal === undefined || proposal.kind !== request.kind) {
+    return false;
+  }
+  if (proposal.kind === 'revise' || request.kind === 'revise') {
+    return true;
+  }
+  return (
+    proposal.sourceThreadId === request.sourceThreadId &&
+    proposal.sourceRequestId === request.sourceRequestId
+  );
+}
+
+const guideRevisionHistoryProtocolVersions = [
+  '1.1.0',
+  '1.2.0',
+  '1.3.0',
+  guideProtocolVersion,
+] as const;
 const guideRevisionHistoryProtocolVersionSet = new Set<string>(
   guideRevisionHistoryProtocolVersions,
 );
@@ -78,7 +102,11 @@ export const guideRevisionThreadTurnSchema = z
       record.proposal.revisionRequestId !== record.request.requestId ||
       record.proposal.revisionThread?.threadId !== thread?.threadId ||
       record.proposal.revisionThread?.turn !== record.turn ||
-      record.proposal.revisionThread?.parentRequestId !== thread?.parentRequestId
+      record.proposal.revisionThread?.parentRequestId !== thread?.parentRequestId ||
+      !proposalPreservesRevisionOperation(
+        record.proposal.revisionOperation,
+        record.request.revisionOperation,
+      )
     ) {
       context.addIssue({
         code: 'custom',
@@ -238,3 +266,96 @@ export const guideRevisionThreadHistorySchema = z
     }
   });
 export type GuideRevisionThreadHistory = z.infer<typeof guideRevisionThreadHistorySchema>;
+
+export const guideRevisionBranchListRequestSchema = z.strictObject({
+  targetAdapterId: z.string().trim().min(1).max(180),
+  instanceId: z.uuid(),
+  planId: z.string().trim().min(1).max(180),
+  limit: z.coerce.number().int().positive().max(100).default(100),
+});
+export type GuideRevisionBranchListRequest = z.infer<typeof guideRevisionBranchListRequestSchema>;
+
+export const guideRevisionBranchSchema = z
+  .strictObject({
+    threadId: z.uuid(),
+    headRequestId: z.uuid(),
+    headTurn: z.number().int().positive(),
+    status: guideRevisionTurnStateSchema,
+    operation: guideRevisionOperationSchema,
+    plan: guidePlanSchema.nullable(),
+    planContentSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((branch, context) => {
+    if (branch.headTurn === 1 && branch.headRequestId !== branch.threadId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['headRequestId'],
+        message: 'The first revision branch head must use its thread id as request id',
+      });
+    }
+    const operation = branch.operation;
+    if (
+      (operation.kind === 'fork' && branch.headTurn !== 1) ||
+      (operation.kind === 'merge' && branch.headTurn <= 1)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['operation', 'kind'],
+        message: 'Revision branch head operation must match its turn topology',
+      });
+    }
+    if (operation.kind !== 'revise' && operation.sourceThreadId === branch.threadId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['operation', 'sourceThreadId'],
+        message: 'Revision branch source must use a different thread',
+      });
+    }
+    if ((branch.status === 'accepted') !== (branch.plan !== null)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only an accepted branch head can expose an installable Plan',
+      });
+    }
+    if ((branch.plan === null) !== (branch.planContentSha256 === null)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Branch Plan content hash must be present exactly with its Plan',
+      });
+    }
+  });
+export type GuideRevisionBranch = z.infer<typeof guideRevisionBranchSchema>;
+
+export const guideRevisionBranchListSchema = z
+  .strictObject({
+    protocolVersion: z.literal(guideProtocolVersion),
+    targetAdapterId: z.string().min(1),
+    instanceId: z.uuid(),
+    planId: z.string().min(1),
+    branches: z.array(guideRevisionBranchSchema).max(100),
+  })
+  .superRefine((list, context) => {
+    const threadIds = new Set<string>();
+    for (const [index, branch] of list.branches.entries()) {
+      if (threadIds.has(branch.threadId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['branches', index, 'threadId'],
+          message: 'Revision branch list cannot repeat a thread',
+        });
+      }
+      threadIds.add(branch.threadId);
+      if (branch.plan !== null && branch.plan.id !== list.planId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['branches', index, 'plan', 'id'],
+          message: 'Revision branch Plan must match the requested Plan id',
+        });
+      }
+    }
+  });
+export type GuideRevisionBranchList = z.infer<typeof guideRevisionBranchListSchema>;

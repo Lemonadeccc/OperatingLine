@@ -52,6 +52,8 @@ LOCAL_REPLAN_FINDING_CODES = frozenset(
         "step_changed_outside_scope",
         "step_added_outside_scope",
         "step_moved_across_scope",
+        "parameter_edit_not_applied",
+        "merge_result_mismatch",
         "no_local_change",
     }
 )

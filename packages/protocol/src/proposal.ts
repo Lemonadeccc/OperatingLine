@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { guidePlanDiffSchema } from './diff.js';
 import { guidePlanSchema, guideProtocolVersionSchema } from './guide.js';
 import { planningIntentSchema } from './planning.js';
-import { guideRevisionThreadSchema } from './revision.js';
+import { guideRevisionOperationSchema, guideRevisionThreadSchema } from './revision.js';
 import { catalogVersionSchema } from './version.js';
 
 export const guideProposalSubmissionSchema = z
@@ -44,6 +44,8 @@ export const guideProposalSchema = z
     goalRequestId: z.uuid().optional(),
     revisionRequestId: z.uuid().optional(),
     revisionThread: guideRevisionThreadSchema.optional(),
+    revisionOperation: guideRevisionOperationSchema.optional(),
+    mergeBaseRequestId: z.uuid().optional(),
     planDiff: guidePlanDiffSchema.nullable().optional(),
     catalogVersion: catalogVersionSchema.optional(),
     proposedAt: z.iso.datetime({ offset: true }),
@@ -62,10 +64,14 @@ export const guideProposalSchema = z
       });
     }
     if (proposal.revisionRequestId === undefined) {
-      if (proposal.revisionThread !== undefined) {
+      if (
+        proposal.revisionThread !== undefined ||
+        proposal.revisionOperation !== undefined ||
+        proposal.mergeBaseRequestId !== undefined
+      ) {
         context.addIssue({
           code: 'custom',
-          message: 'A standalone proposal cannot declare a revision thread',
+          message: 'A standalone proposal cannot declare revision lineage',
         });
       }
       if (proposal.planDiff !== undefined && proposal.planDiff !== null) {
@@ -85,6 +91,31 @@ export const guideProposalSchema = z
     if (proposal.protocolVersion !== '1.0.0' && proposal.planDiff == null) {
       context.addIssue({ code: 'custom', message: 'A request-linked proposal requires planDiff' });
     }
+    if (proposal.protocolVersion === '1.4.0' && proposal.revisionOperation === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Protocol 1.4 request-linked proposals require revisionOperation',
+      });
+    }
+    if (proposal.protocolVersion !== '1.4.0' && proposal.revisionOperation !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Proposal revisionOperation requires protocol 1.4',
+      });
+    }
+    if (proposal.revisionOperation?.kind === 'merge') {
+      if (proposal.mergeBaseRequestId === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: 'A merge proposal requires its computed common ancestor request',
+        });
+      }
+    } else if (proposal.mergeBaseRequestId !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only a merge proposal can declare mergeBaseRequestId',
+      });
+    }
     if (
       proposal.planDiff !== undefined &&
       proposal.planDiff !== null &&
@@ -98,7 +129,7 @@ export const guideProposalSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0'] } },
+          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['planDiff'] },
@@ -114,9 +145,35 @@ export const guideProposalSchema = z
           properties: { planDiff: { type: 'object' } },
         },
         else: {
-          not: { required: ['revisionThread'] },
+          not: {
+            anyOf: [
+              { required: ['revisionThread'] },
+              { required: ['revisionOperation'] },
+              { required: ['mergeBaseRequestId'] },
+            ],
+          },
           properties: { planDiff: { type: 'null' } },
         },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.4.0' } },
+          required: ['protocolVersion', 'revisionRequestId'],
+        },
+        then: { required: ['revisionOperation'] },
+      },
+      {
+        if: {
+          properties: {
+            revisionOperation: {
+              properties: { kind: { const: 'merge' } },
+              required: ['kind'],
+            },
+          },
+          required: ['revisionOperation'],
+        },
+        then: { required: ['mergeBaseRequestId'] },
+        else: { not: { required: ['mergeBaseRequestId'] } },
       },
       {
         not: { required: ['goalRequestId', 'revisionRequestId'] },

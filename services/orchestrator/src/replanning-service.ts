@@ -33,6 +33,7 @@ import {
 } from './local-replan-scope.js';
 import { evaluatePlanningQuality } from './planning-quality.js';
 import { PlannerGenerationRuntimeError } from './planner-provider-errors.js';
+import { resolveGuideRevisionMergeContext } from './guide-revision-branches.js';
 import { buildReplanningPromptPacket } from './replanning-prompt.js';
 
 export interface ReplanProposalCreationInput {
@@ -45,6 +46,8 @@ export interface ReplanProposalCreationInput {
     readonly generationRequestId?: string;
     readonly basePlan: GuidePlan;
     readonly revisionThread: NonNullable<GuideRevisionRequest['revisionThread']>;
+    readonly revisionOperation?: GuideRevisionRequest['revisionOperation'];
+    readonly mergeBaseRequestId?: string;
   };
   readonly planning?: PlanningIntent;
 }
@@ -73,6 +76,8 @@ export interface ReplanProposalResult {
   readonly catalogVersion: string | null;
   readonly revisionRequestId: string | null;
   readonly revisionThread: GuideProposal['revisionThread'] | null;
+  readonly revisionOperation: GuideProposal['revisionOperation'] | null;
+  readonly mergeBaseRequestId: string | null;
   readonly planDiff: GuideProposal['planDiff'] | null;
   readonly planningQuality: PlanningQualityReport;
   readonly duplicate: boolean;
@@ -98,6 +103,8 @@ function proposalResult(
     catalogVersion: proposal.catalogVersion ?? null,
     revisionRequestId: proposal.revisionRequestId ?? null,
     revisionThread: proposal.revisionThread ?? null,
+    revisionOperation: proposal.revisionOperation ?? null,
+    mergeBaseRequestId: proposal.mergeBaseRequestId ?? null,
     planDiff: proposal.planDiff ?? null,
     planningQuality,
     duplicate,
@@ -177,15 +184,23 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
             state.adapterId === revisionRequest.adapterId &&
             state.instanceId === revisionRequest.instanceId,
         ) ?? null;
+    const targetRevision = options.resolveTargetRevision(
+      revisionRequest.basePlan.id,
+      revisionRequest.basePlan.revision,
+    );
+    const merge = resolveGuideRevisionMergeContext(
+      options.database,
+      revisionRequest,
+      catalog,
+      targetRevision,
+    );
     const packet = buildReplanningPromptPacket({
       revisionRequest,
-      targetRevision: options.resolveTargetRevision(
-        revisionRequest.basePlan.id,
-        revisionRequest.basePlan.revision,
-      ),
+      targetRevision,
       catalog,
       companionState,
       scope: createLocalReplanScope(revisionRequest),
+      ...(merge === null ? {} : { merge }),
     });
     if (recordEvents) {
       options.database.appendEvent({
@@ -257,6 +272,26 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
         'Replan proposal failed deterministic GuidePlan or ActionCatalog validation',
         'never',
       );
+    }
+    const mergeContext = resolveGuideRevisionMergeContext(
+      options.database,
+      revisionRequest,
+      submissionCatalog,
+      submission.plan.revision,
+    );
+    if (mergeContext !== null) {
+      const scopeEvaluation = evaluateLocalReplanScope(
+        revisionRequest,
+        submission.plan,
+        mergeContext,
+      );
+      if (!scopeEvaluation.locality.valid || scopeEvaluation.planDiff === null) {
+        throw new PlannerGenerationRuntimeError(
+          'planner_replan_submission_invalid',
+          'Branch merge proposal does not match the deterministic conflict-free merge result',
+          'never',
+        );
+      }
     }
     const submittedQuality = evaluatePlanningQuality(
       planningQualityEvaluationRequestSchema.parse({
@@ -370,7 +405,11 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           'never',
         );
       }
-      const scopeEvaluation = evaluateLocalReplanScope(revisionRequest, submission.plan);
+      const scopeEvaluation = evaluateLocalReplanScope(
+        revisionRequest,
+        submission.plan,
+        packet.context.merge ?? null,
+      );
       const planningQuality = evaluatePlanningQuality(
         planningQualityEvaluationRequestSchema.parse({
           targetAdapterId: revisionRequest.adapterId,
@@ -412,6 +451,12 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
           : { generationRequestId: submission.generationRequestId }),
         basePlan: revisionRequest.basePlan,
         revisionThread: revisionRequest.revisionThread,
+        ...(revisionRequest.revisionOperation === undefined
+          ? {}
+          : { revisionOperation: revisionRequest.revisionOperation }),
+        ...(mergeContext === null
+          ? {}
+          : { mergeBaseRequestId: mergeContext.commonAncestorRequestId }),
       },
       ...(submission.planning === undefined ? {} : { planning: submission.planning }),
     });

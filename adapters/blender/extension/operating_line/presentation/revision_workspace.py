@@ -245,6 +245,25 @@ def draw_proposal_review(layout, companion, active_session) -> None:
             ),
             icon="LINKED",
         )
+    revision_operation = proposal.get("revisionOperation")
+    if revision_operation is not None:
+        kind = revision_operation["kind"]
+        if kind == "revise":
+            review.label(text="Operation: revise", icon="GREASEPENCIL")
+        else:
+            review.label(
+                text=(
+                    f"Operation: {kind} from "
+                    f"{revision_operation['sourceThreadId'][:8]}"
+                ),
+                icon="FILE_REFRESH" if kind == "merge" else "ADD",
+            )
+    merge_base_request_id = proposal.get("mergeBaseRequestId")
+    if merge_base_request_id is not None:
+        review.label(
+            text=f"Merge base: {merge_base_request_id[:8]}",
+            icon="FILE_TICK",
+        )
     _draw_plan_diff(review, proposal.get("planDiff"))
 
     decisions = review.row(align=True)
@@ -280,6 +299,27 @@ def _proposal_accept_requires_verifiable_base(proposal) -> bool:
 def _draw_revision_request(layout, context, companion) -> None:
     composer = layout.box()
     composer.label(text="New revision", icon="GREASEPENCIL")
+    operation_kind = companion.revision_operation_kind
+    if operation_kind == "fork":
+        source_thread_id = companion.revision_source_thread_id
+        composer.label(
+            text=(
+                "Fork mode"
+                if source_thread_id is None
+                else f"Fork from {source_thread_id[:8]}"
+            ),
+            icon="ADD",
+        )
+    elif operation_kind == "merge":
+        source_thread_id = companion.revision_source_thread_id
+        composer.label(
+            text=(
+                "Merge mode"
+                if source_thread_id is None
+                else f"Merge from {source_thread_id[:8]}"
+            ),
+            icon="FILE_REFRESH",
+        )
     base = companion.revision_base_session
     references = companion.revision_reference_nodes()
     composer.label(text=f"References {len(references)} / 8", icon="LINKED")
@@ -294,7 +334,9 @@ def _draw_revision_request(layout, context, companion) -> None:
         except ValueError as error:
             composer.label(text=str(error), icon="ERROR")
         else:
-            if lineage is None:
+            if operation_kind == "fork":
+                composer.label(text="New branch  turn 1", icon="ADD")
+            elif lineage is None:
                 composer.label(text="New revision thread  turn 1", icon="ADD")
             else:
                 composer.label(
@@ -327,6 +369,7 @@ def _draw_revision_request(layout, context, companion) -> None:
     clear.enabled = bool(
         base
         or companion.revision_parameter_edit_count
+        or operation_kind != "revise"
         or context.window_manager.operating_line_revision_message
     )
     clear.operator(
@@ -345,9 +388,13 @@ def _draw_revision_request(layout, context, companion) -> None:
             or companion.revision_parameter_edit_count
         )
     )
+    send_label = {
+        "fork": "Send Fork Request",
+        "merge": "Send Merge Request",
+    }.get(operation_kind, "Send Request")
     send.operator(
         "operating_line.submit_revision_request",
-        text="Send Request",
+        text=send_label,
         icon="EXPORT",
     )
     _draw_wrapped_text(
@@ -529,6 +576,95 @@ def _compact_history_message(value, limit: int = 76) -> str:
     return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
 
 
+def _draw_revision_branches(layout, companion, active_session) -> None:
+    branches_box = layout.box()
+    header = branches_box.row(align=True)
+    header.label(text="Revision branches", icon="LINKED")
+    lineage = companion.active_revision_lineage
+    can_prepare = not (
+        companion.proposed_plan is not None
+        or companion.goal_request.active
+        or companion.provider_handoff.active
+        or companion.initial_plan_handoff.active
+    )
+    fork = header.row(align=True)
+    fork.enabled = lineage is not None and can_prepare
+    fork.operator(
+        "operating_line.fork_revision_branch",
+        text="Fork",
+        icon="ADD",
+    )
+
+    if lineage is None:
+        branches_box.label(
+            text="Accept a revision to establish an active branch",
+            icon="INFO",
+        )
+    else:
+        branches_box.label(
+            text=f"Active {lineage.thread_id[:8]}  turn {lineage.turn}",
+            icon="FILE_TICK",
+        )
+
+    status_presentation = {
+        "awaiting_proposal": ("Awaiting proposal", "TIME"),
+        "awaiting_decision": ("Awaiting decision", "QUESTION"),
+        "accepted": ("Accepted", "CHECKMARK"),
+        "rejected": ("Rejected", "CANCEL"),
+    }
+    if not companion.revision_branches:
+        branches_box.label(text="No revision branches stored for this Plan", icon="INFO")
+    for branch in companion.revision_branches:
+        item = branches_box.box()
+        active = lineage is not None and branch["threadId"] == lineage.thread_id
+        status_label, status_icon = status_presentation[branch["status"]]
+        item.label(
+            text=(
+                f"{branch['threadId'][:8]}  turn {branch['headTurn']}  "
+                f"{status_label}{'  Active' if active else ''}"
+            ),
+            icon="FILE_TICK" if active else status_icon,
+        )
+        operation = branch["operation"]
+        if operation["kind"] != "revise":
+            item.label(
+                text=f"Head operation: {operation['kind']}",
+                icon="FILE_REFRESH" if operation["kind"] == "merge" else "ADD",
+            )
+        plan = branch["plan"]
+        if plan is not None:
+            item.label(text=f"Plan r{plan['revision']}")
+        if branch["status"] == "accepted" and not active:
+            actions = item.row(align=True)
+            actions.enabled = can_prepare and not bool(active_session.receipts)
+            switch = actions.operator(
+                "operating_line.switch_revision_branch",
+                text="Switch",
+                icon="FILE_TICK",
+            )
+            switch.thread_id = branch["threadId"]
+            merge = actions.row(align=True)
+            merge.enabled = lineage is not None
+            merge_operator = merge.operator(
+                "operating_line.merge_revision_branch",
+                text="Merge",
+                icon="FILE_REFRESH",
+            )
+            merge_operator.source_thread_id = branch["threadId"]
+
+    if active_session.receipts:
+        branches_box.label(
+            text="Use Back to reach the start before switching or merging",
+            icon="ERROR",
+        )
+    if companion.revision_branches_error:
+        _draw_wrapped_text(
+            branches_box,
+            companion.revision_branches_error,
+            icon="ERROR",
+        )
+
+
 def _draw_revision_history(layout, context, companion) -> None:
     history = companion.revision_thread_history
     if history is None:
@@ -567,6 +703,15 @@ def _draw_revision_history(layout, context, companion) -> None:
         label, icon = state_presentation[record["state"]]
         turn_box = history_box.box()
         turn_box.label(text=f"Turn {record['turn']}  {label}", icon=icon)
+        operation = record["request"].get("revisionOperation")
+        if operation is not None and operation["kind"] != "revise":
+            turn_box.label(
+                text=(
+                    f"{operation['kind'].capitalize()} from "
+                    f"{operation['sourceThreadId'][:8]}"
+                ),
+                icon="FILE_REFRESH" if operation["kind"] == "merge" else "ADD",
+            )
         references = " ".join(
             f"@{item['nodeNumber']}" for item in record["request"]["references"]
         )
@@ -650,6 +795,7 @@ def draw_revision_workspace(layout, context, companion, active_session) -> None:
         return
 
     draw_proposal_review(workspace, companion, active_session)
+    _draw_revision_branches(workspace, companion, active_session)
     _draw_revision_request(workspace, context, companion)
     _draw_provider_handoff(workspace, companion)
     _draw_revision_history(workspace, context, companion)

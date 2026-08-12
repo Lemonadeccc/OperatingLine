@@ -165,6 +165,12 @@ export interface OperatingLineDatabase {
     beforeTurn: number | null,
     limit: number,
   ): StoredGuideRevisionThreadTurn[];
+  listGuideRevisionThreadHeads(
+    adapterId: string,
+    instanceId: string,
+    planId: string,
+    limit: number,
+  ): StoredGuideRevisionThreadTurn[];
   listPendingGuideRevisionRequests(adapterId: string | undefined, limit: number): unknown[];
   recordGuideGoalRequest<T extends GuideGoalRequestInput>(request: T): RecordGuideGoalRequestResult;
   getGuideGoalRequest(requestId: string): unknown | null;
@@ -638,6 +644,35 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         OR CAST(json_extract(request.payload, '$.revisionThread.turn') AS INTEGER) < ?
       )
     ORDER BY CAST(json_extract(request.payload, '$.revisionThread.turn') AS INTEGER) DESC
+    LIMIT ?
+  `);
+  const listRevisionThreadHeads = sqlite.prepare(`
+    SELECT
+      request.payload AS request_payload,
+      proposal.payload AS proposal_payload,
+      decision.payload AS decision_payload
+    FROM guide_revision_requests AS request
+    LEFT JOIN guide_revision_request_proposals AS linked
+      ON linked.request_id = request.request_id
+    LEFT JOIN guide_proposals AS proposal
+      ON proposal.proposal_id = linked.proposal_id
+    LEFT JOIN guide_proposal_decisions AS decision
+      ON decision.proposal_id = proposal.proposal_id
+      AND decision.adapter_id = request.adapter_id
+      AND decision.instance_id = request.instance_id
+    WHERE request.adapter_id = ?
+      AND request.instance_id = ?
+      AND request.base_plan_id = ?
+      AND json_extract(request.payload, '$.revisionThread.threadId') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM guide_revision_requests AS newer
+        WHERE json_extract(newer.payload, '$.revisionThread.threadId') =
+              json_extract(request.payload, '$.revisionThread.threadId')
+          AND CAST(json_extract(newer.payload, '$.revisionThread.turn') AS INTEGER) >
+              CAST(json_extract(request.payload, '$.revisionThread.turn') AS INTEGER)
+      )
+    ORDER BY request.occurred_at DESC, request.request_id DESC
     LIMIT ?
   `);
   const insertRevisionRequestProposal = sqlite.prepare(`
@@ -1274,6 +1309,38 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
                 : (JSON.parse(candidate.decision_payload) as unknown),
           };
         });
+    },
+    listGuideRevisionThreadHeads(adapterId, instanceId, planId, limit) {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new Error('Revision branch limit must be an integer between 1 and 100');
+      }
+      return listRevisionThreadHeads.all(adapterId, instanceId, planId, limit).map((row) => {
+        const candidate = row as {
+          request_payload?: unknown;
+          proposal_payload?: unknown;
+          decision_payload?: unknown;
+        };
+        if (typeof candidate.request_payload !== 'string') {
+          throw new Error('SQLite returned an invalid guide revision branch request');
+        }
+        if (candidate.proposal_payload !== null && typeof candidate.proposal_payload !== 'string') {
+          throw new Error('SQLite returned an invalid guide revision branch proposal');
+        }
+        if (candidate.decision_payload !== null && typeof candidate.decision_payload !== 'string') {
+          throw new Error('SQLite returned an invalid guide revision branch decision');
+        }
+        return {
+          request: JSON.parse(candidate.request_payload) as unknown,
+          proposal:
+            candidate.proposal_payload === null
+              ? null
+              : (JSON.parse(candidate.proposal_payload) as unknown),
+          decision:
+            candidate.decision_payload === null
+              ? null
+              : (JSON.parse(candidate.decision_payload) as unknown),
+        };
+      });
     },
     listPendingGuideRevisionRequests(adapterId, limit) {
       return listPendingRevisionRequests

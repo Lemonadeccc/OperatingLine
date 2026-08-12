@@ -33,6 +33,8 @@ relevant_steps = application.relevant_steps
 step_state = application.step_state
 validate_plan_diff = application.validate_plan_diff
 validate_provider_list = application.validate_provider_list
+validate_revision_branch_list = application.validate_revision_branch_list
+validate_revision_operation = application.validate_revision_operation
 validate_revision_thread_history = application.validate_revision_thread_history
 ActionSpec = domain.ActionSpec
 ObservationPolicySpec = domain.ObservationPolicySpec
@@ -1212,6 +1214,78 @@ class RevisionContractTests(unittest.TestCase):
             },
         )
 
+    def test_revision_operations_and_branch_lists_are_strict(self) -> None:
+        target_thread_id = str(uuid.uuid4())
+        target_request_id = str(uuid.uuid4())
+        source_thread_id = str(uuid.uuid4())
+        source_request_id = source_thread_id
+        merge = {
+            "kind": "merge",
+            "sourceThreadId": source_thread_id,
+            "sourceRequestId": source_request_id,
+        }
+        self.assertEqual(
+            validate_revision_operation(
+                merge,
+                thread={"threadId": target_thread_id, "turn": 3},
+            ),
+            merge,
+        )
+        with self.assertRaisesRegex(ValueError, "continue an existing"):
+            validate_revision_operation(
+                merge,
+                thread={"threadId": target_thread_id, "turn": 1},
+            )
+
+        instance_id = str(uuid.uuid4())
+        accepted_plan = {"id": "snowman", "revision": 4}
+        branches = {
+            "protocolVersion": "1.4.0",
+            "targetAdapterId": "blender",
+            "instanceId": instance_id,
+            "planId": "snowman",
+            "branches": [
+                {
+                    "threadId": target_thread_id,
+                    "headRequestId": target_request_id,
+                    "headTurn": 2,
+                    "status": "accepted",
+                    "operation": {"kind": "revise"},
+                    "plan": accepted_plan,
+                    "planContentSha256": "a" * 64,
+                    "occurredAt": "2026-08-12T10:00:00Z",
+                },
+                {
+                    "threadId": source_thread_id,
+                    "headRequestId": source_request_id,
+                    "headTurn": 1,
+                    "status": "awaiting_proposal",
+                    "operation": {
+                        "kind": "fork",
+                        "sourceThreadId": target_thread_id,
+                        "sourceRequestId": target_request_id,
+                    },
+                    "plan": None,
+                    "planContentSha256": None,
+                    "occurredAt": "2026-08-12T10:01:00Z",
+                },
+            ],
+        }
+        validated = validate_revision_branch_list(
+            branches,
+            instance_id=instance_id,
+            plan_id="snowman",
+        )
+        self.assertEqual(validated, branches)
+        duplicate = deepcopy(branches)
+        duplicate["branches"][1]["threadId"] = target_thread_id
+        with self.assertRaisesRegex(ValueError, "repeats a thread"):
+            validate_revision_branch_list(
+                duplicate,
+                instance_id=instance_id,
+                plan_id="snowman",
+            )
+
     def test_plan_diff_validation_preserves_exact_parameter_values(self) -> None:
         plan = {"id": "snowman", "revision": 2}
         diff = {
@@ -1381,6 +1455,25 @@ class RevisionContractTests(unittest.TestCase):
                 parameter_history,
                 instance_id=instance_id,
             )
+
+        current_history = deepcopy(history)
+        current_history["protocolVersion"] = "1.4.0"
+        current_request = current_history["turns"][0]["request"]
+        current_proposal = current_history["turns"][0]["proposal"]
+        current_decision = current_history["turns"][0]["decision"]
+        current_request["protocolVersion"] = "1.4.0"
+        current_request["revisionOperation"] = {"kind": "revise"}
+        current_proposal["protocolVersion"] = "1.4.0"
+        current_proposal["revisionOperation"] = {"kind": "revise"}
+        current_decision["protocolVersion"] = "1.4.0"
+        validate_revision_thread_history(current_history, instance_id=instance_id)
+        current_proposal["revisionOperation"] = {
+            "kind": "fork",
+            "sourceThreadId": str(uuid.uuid4()),
+            "sourceRequestId": str(uuid.uuid4()),
+        }
+        with self.assertRaisesRegex(ValueError, "preserve its request operation"):
+            validate_revision_thread_history(current_history, instance_id=instance_id)
 
         history["turns"][0]["decision"]["instanceId"] = str(uuid.uuid4())
         with self.assertRaisesRegex(ValueError, "outside its proposal scope"):

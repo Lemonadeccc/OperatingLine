@@ -27,6 +27,8 @@ import {
   guideProposalSchema,
   guideProposalSubmissionSchema,
   guideReplanSubmissionSchema,
+  guideRevisionBranchListRequestSchema,
+  guideRevisionBranchListSchema,
   guideRevisionRequestSchema,
   guideRevisionThreadHistoryRequestSchema,
   guideRevisionThreadHistorySchema,
@@ -236,6 +238,16 @@ const schemas = [
     'guide-revision-thread-history.schema.json',
     'https://operatingline.dev/schema/v1/guide-revision-thread-history.json',
     guideRevisionThreadHistorySchema,
+  ],
+  [
+    'guide-revision-branch-list-request.schema.json',
+    'https://operatingline.dev/schema/v1/guide-revision-branch-list-request.json',
+    guideRevisionBranchListRequestSchema,
+  ],
+  [
+    'guide-revision-branch-list.schema.json',
+    'https://operatingline.dev/schema/v1/guide-revision-branch-list.json',
+    guideRevisionBranchListSchema,
   ],
   [
     'guide-plan-diff.schema.json',

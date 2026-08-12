@@ -705,6 +705,65 @@ class OPERATINGLINE_OT_load_older_revision_history(bpy.types.Operator):
         return {"CANCELLED"}
 
 
+class OPERATINGLINE_OT_fork_revision_branch(bpy.types.Operator):
+    bl_idname = "operating_line.fork_revision_branch"
+    bl_label = "Fork Branch"
+    bl_description = (
+        "Compose the first turn of a new revision branch from the active accepted head"
+    )
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.begin_revision_fork()
+        except ValueError as error:
+            companion.revision_request_status = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Fork mode selected; choose task references")
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_merge_revision_branch(bpy.types.Operator):
+    bl_idname = "operating_line.merge_revision_branch"
+    bl_label = "Merge Branch"
+    bl_description = (
+        "Prepare a deterministic three-way merge from this accepted branch"
+    )
+
+    source_thread_id: bpy.props.StringProperty(options={"HIDDEN"})
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.begin_revision_merge(self.source_thread_id)
+        except ValueError as error:
+            companion.revision_request_status = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Merge request prepared; scene unchanged")
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_switch_revision_branch(bpy.types.Operator):
+    bl_idname = "operating_line.switch_revision_branch"
+    bl_label = "Switch Branch"
+    bl_description = "Activate this accepted branch head without executing its Plan"
+
+    thread_id: bpy.props.StringProperty(options={"HIDDEN"})
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.switch_revision_branch(self.thread_id)
+        except ValueError as error:
+            companion.revision_branches_error = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Revision branch {self.thread_id[:8]} activated")
+        return {"FINISHED"}
+
+
 class OPERATINGLINE_OT_refresh_replan_providers(bpy.types.Operator):
     bl_idname = "operating_line.refresh_replan_providers"
     bl_label = "Refresh Providers"
@@ -833,6 +892,9 @@ CLASSES = (
     OPERATINGLINE_OT_clear_revision_request,
     OPERATINGLINE_OT_submit_revision_request,
     OPERATINGLINE_OT_load_older_revision_history,
+    OPERATINGLINE_OT_fork_revision_branch,
+    OPERATINGLINE_OT_merge_revision_branch,
+    OPERATINGLINE_OT_switch_revision_branch,
     OPERATINGLINE_OT_refresh_replan_providers,
     OPERATINGLINE_OT_select_replan_provider,
     OPERATINGLINE_OT_run_replan_provider,

@@ -8,7 +8,8 @@
         "1.0.0",
         "1.1.0",
         "1.2.0",
-        "1.3.0"
+        "1.3.0",
+        "1.4.0"
       ]
     },
     "proposalId": {
@@ -34,7 +35,8 @@
             "1.0.0",
             "1.1.0",
             "1.2.0",
-            "1.3.0"
+            "1.3.0",
+            "1.4.0"
           ]
         },
         "id": {
@@ -420,7 +422,8 @@
               "protocolVersion": {
                 "enum": [
                   "1.2.0",
-                  "1.3.0"
+                  "1.3.0",
+                  "1.4.0"
                 ]
               }
             },
@@ -527,6 +530,78 @@
           }
         }
       ]
+    },
+    "revisionOperation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "revise"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sourceThreadId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sourceRequestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "fork"
+            }
+          },
+          "required": [
+            "sourceThreadId",
+            "sourceRequestId",
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sourceThreadId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sourceRequestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "merge"
+            }
+          },
+          "required": [
+            "sourceThreadId",
+            "sourceRequestId",
+            "kind"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "mergeBaseRequestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     },
     "planDiff": {
       "anyOf": [
@@ -945,7 +1020,8 @@
             "enum": [
               "1.1.0",
               "1.2.0",
-              "1.3.0"
+              "1.3.0",
+              "1.4.0"
             ]
           }
         },
@@ -993,14 +1069,77 @@
       },
       "else": {
         "not": {
-          "required": [
-            "revisionThread"
+          "anyOf": [
+            {
+              "required": [
+                "revisionThread"
+              ]
+            },
+            {
+              "required": [
+                "revisionOperation"
+              ]
+            },
+            {
+              "required": [
+                "mergeBaseRequestId"
+              ]
+            }
           ]
         },
         "properties": {
           "planDiff": {
             "type": "null"
           }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "protocolVersion": {
+            "const": "1.4.0"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "revisionRequestId"
+        ]
+      },
+      "then": {
+        "required": [
+          "revisionOperation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "revisionOperation": {
+            "properties": {
+              "kind": {
+                "const": "merge"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "revisionOperation"
+        ]
+      },
+      "then": {
+        "required": [
+          "mergeBaseRequestId"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "mergeBaseRequestId"
+          ]
         }
       }
     },

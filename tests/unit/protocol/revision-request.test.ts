@@ -12,7 +12,7 @@ const readPlan = (): unknown =>
 function revisionRequest() {
   const requestId = randomUUID();
   return {
-    protocolVersion: '1.3.0',
+    protocolVersion: '1.4.0',
     requestId,
     adapterId: 'blender',
     catalogVersion: '1.0.0',
@@ -21,6 +21,7 @@ function revisionRequest() {
     references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
     message: 'Make the head slightly larger.',
     revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+    revisionOperation: { kind: 'revise' as const },
     occurredAt: '2026-08-04T12:00:00Z',
   };
 }
@@ -125,11 +126,12 @@ describe('guide revision request protocol', () => {
         ...first,
         protocolVersion: '1.0.0',
         revisionThread: undefined,
+        revisionOperation: undefined,
       }).success,
     ).toBe(true);
   });
 
-  it('accepts typed parameter edits as the complete revision intent in protocol 1.3', () => {
+  it('accepts typed parameter edits as the complete revision intent in protocol 1.4', () => {
     const request = revisionRequest();
     const parameterEdit = {
       nodeId: 'snowman.model.head',
@@ -181,16 +183,52 @@ describe('guide revision request protocol', () => {
         ...request,
         protocolVersion: '1.2.0',
         parameterEdits,
+        revisionOperation: undefined,
       }).success,
     ).toBe(false);
     expect(guideRevisionRequestSchema.safeParse({ ...request, message: '' }).success).toBe(false);
+  });
+
+  it('requires explicit fork and merge topology in protocol 1.4', () => {
+    const request = revisionRequest();
+    const sourceThreadId = randomUUID();
+    const sourceRequestId = randomUUID();
+    expect(
+      guideRevisionRequestSchema.safeParse({ ...request, revisionOperation: undefined }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        revisionOperation: { kind: 'fork', sourceThreadId, sourceRequestId },
+      }).success,
+    ).toBe(true);
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        revisionOperation: { kind: 'merge', sourceThreadId, sourceRequestId },
+      }).success,
+    ).toBe(false);
+
+    const continuedRequestId = randomUUID();
+    expect(
+      guideRevisionRequestSchema.safeParse({
+        ...request,
+        requestId: continuedRequestId,
+        revisionThread: {
+          threadId: request.requestId,
+          turn: 2,
+          parentRequestId: request.requestId,
+        },
+        revisionOperation: { kind: 'merge', sourceThreadId, sourceRequestId },
+      }).success,
+    ).toBe(true);
   });
 
   it('emits protocol-version and turn conditions for non-TypeScript hosts', () => {
     const schema = JSON.parse(
       readFileSync(resolve('protocol/schemas/v1/guide-revision-request.schema.json'), 'utf8'),
     ) as { allOf?: unknown[]; properties?: { revisionThread?: { allOf?: unknown[] } } };
-    expect(schema.allOf).toHaveLength(2);
+    expect(schema.allOf).toHaveLength(3);
     expect(schema.properties?.revisionThread?.allOf).toHaveLength(2);
   });
 });

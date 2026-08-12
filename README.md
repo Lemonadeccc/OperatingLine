@@ -632,15 +632,19 @@ ActionCatalog 1.3.0 Human Eval 套件的不可变哈希输入保留。
    树中每个节点的 `Ref` 会加入一条结构化 `@1.2.3  标题` 引用，不会篡改独立的正文；
    可逐条移除，且一次只能引用同一活动计划或同一待审计划中的最多 8 个节点。尝试混用
    两个基线会保留已有草稿并要求先显式 `Clear Draft`。
-8. `Send Request` 只把不可变请求排入本地运行时，不调用 Blender action，也不自动选择
+8. `Revision branches` 显示同一 Plan 在当前 Blender 实例中的 durable thread heads。`Fork` 从活动的
+   已接受 head 建立新 thread；`Switch` 只安装另一条已接受 branch 的 Plan，不执行步骤；`Merge` 创建
+   显式三方合并请求。合并由 Runtime 计算唯一共同祖先并确定性组合独立字段，冲突或 source 前移会
+   明确失败，不能由 Provider 自行猜测解决。
+9. `Send Request` 只把不可变请求排入本地运行时，不调用 Blender action，也不自动选择
    provider。MCP/provider 返回的新计划仍须在同一工作区审批；若基线来自已接受的请求关联
    Proposal，输入区会显示将继续的 thread 与下一 turn。
-9. `Revision history` 显示每轮请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
-   `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
-10. `Goal to Guidance` 在 Goal acknowledgement 后可显示可选 Initial Plan Provider；列表默认不选择，
+10. `Revision history` 显示每轮操作、请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
+    `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
+11. `Goal to Guidance` 在 Goal acknowledgement 后可显示可选 Initial Plan Provider；列表默认不选择，
     每次调用都要重新确认。queued、generating、needs_revision、failed、interrupted 或
     proposal_created 状态只描述后台规划，不代表场景已改变。
-11. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
+12. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
     `guide.publish` 更新，但保留待审 Proposal、Goal 关联、活动 Initial Plan Run 的精确授权、修订草稿
     和待确认的精确决策。重新 Connect 后只会以同一 generation UUID 恢复状态，不会另行授权一次
     Provider 调用；Extension 卸载/重载才清理这些进程内状态。
@@ -836,7 +840,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
 MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、显式蒙皮/权重与 pose transform 动画、
-Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。
+Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单、显式 revision fork/merge，以及
+Codex/Claude 本地配置与 Claude Desktop MCPB。
 当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
@@ -845,13 +850,11 @@ Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单，以�
    Responses 插件、类型化局部重规划后端和原生 Revision Workspace 已经完成，但它们不证明任意目标
    语义规划可靠；Blender 已接入逐次授权的 Provider Run，但仍未接入流式模型对话、provider 自动
    选择/调用或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
-2. 在已完成的线性多轮 revision thread、Plan diff、结构化消息历史和参数表单上增加显式
-   fork/merge、共同祖先与冲突策略。
-3. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
+2. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
    Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。
-4. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
-5. 在首个稳定发布前引入 Changesets 与自动发布流程。
+3. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
+4. 在首个稳定发布前引入 Changesets 与自动发布流程。
 
 首版只保证自有面板控件、三维对象和世界坐标锚点，不承诺精确标注任意 Blender 内置按钮。
 对没有官方扩展 API 的宿主，只提供能力画像明确允许的降级体验。

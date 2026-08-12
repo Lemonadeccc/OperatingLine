@@ -6,6 +6,7 @@ import {
   localReplanScopeSchema,
   type GuidePlan,
   type GuidePlanDiff,
+  type GuideRevisionMergeContext,
   type GuideRevisionRequest,
   type GuideStep,
   type LocalReplanFindingCode,
@@ -104,6 +105,7 @@ function isEmptyDiff(diff: GuidePlanDiff): boolean {
 export function evaluateLocalReplanScope(
   request: GuideRevisionRequest,
   targetPlan: GuidePlan,
+  mergeContext: GuideRevisionMergeContext | null = null,
 ): LocalReplanScopeEvaluation {
   const scope = createLocalReplanScope(request);
   const findings: LocalityFinding[] = [];
@@ -133,6 +135,15 @@ export function evaluateLocalReplanScope(
       'plan_structure_invalid',
       'The complete replanned GuidePlan has an invalid tree or dependency structure.',
     );
+  }
+
+  if (request.revisionOperation?.kind === 'merge') {
+    if (mergeContext === null || !isDeepStrictEqual(targetPlan, mergeContext.expectedMergedPlan)) {
+      addFinding(
+        'merge_result_mismatch',
+        'A branch merge draft must exactly match the deterministic conflict-free merged Plan.',
+      );
+    }
   }
 
   if (targetPlan.title !== request.basePlan.title) {

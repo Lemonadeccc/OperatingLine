@@ -53,6 +53,7 @@ from operating_line_extension.operating_line.application import (  # noqa: E402
     DemoSession,
     InteractionPathKind,
     MenuGuidanceTracker,
+    RevisionLineage,
 )
 from operating_line_extension.operating_line.application.session import (  # noqa: E402
     _canonical_json_value_bytes,
@@ -1196,7 +1197,7 @@ def assert_companion_and_plan_semantics() -> None:
                 assert query["instanceId"] == [companion.instance_id]
                 self._reply(
                     {
-                        "protocolVersion": "1.3.0",
+                        "protocolVersion": "1.4.0",
                         "threadId": revision_request["revisionThread"]["threadId"],
                         "targetAdapterId": "blender",
                         "instanceId": companion.instance_id,
@@ -1217,6 +1218,21 @@ def assert_companion_and_plan_semantics() -> None:
                             "nextBeforeTurn": None,
                             "hasMore": False,
                         },
+                    }
+                )
+                return
+            if parsed_path.path == "/api/v1/replan/branches":
+                query = parse_qs(parsed_path.query)
+                assert query["targetAdapterId"] == ["blender"]
+                assert query["instanceId"] == [companion.instance_id]
+                assert query["limit"] == ["20"]
+                self._reply(
+                    {
+                        "protocolVersion": "1.4.0",
+                        "targetAdapterId": "blender",
+                        "instanceId": companion.instance_id,
+                        "planId": query["planId"][0],
+                        "branches": [],
                     }
                 )
                 return
@@ -1544,7 +1560,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(revision_requests) == 1
         revision_request = revision_requests[0]
         uuid.UUID(revision_request["requestId"])
-        assert revision_request["protocolVersion"] == "1.3.0"
+        assert revision_request["protocolVersion"] == "1.4.0"
         assert revision_request["adapterId"] == "blender"
         assert revision_request["catalogVersion"] == ACTION_CATALOG["catalogVersion"]
         assert revision_request["instanceId"] == companion.instance_id
@@ -1567,6 +1583,7 @@ def assert_companion_and_plan_semantics() -> None:
             "turn": 1,
             "parentRequestId": None,
         }
+        assert revision_request["revisionOperation"] == {"kind": "revise"}
         assert companion.last_revision_request_id == revision_request["requestId"]
         assert companion.revision_parameter_edit_count == 0
 
@@ -1708,13 +1725,14 @@ def assert_companion_and_plan_semantics() -> None:
         provider_plan["revision"] = DYNAMIC_REVISION + 1
         provider_plan_content_sha256 = canonical_plan_content_sha256(provider_plan)
         provider_proposal = {
-            "protocolVersion": "1.1.0",
+            "protocolVersion": "1.4.0",
             "proposalId": provider_proposal_id,
             "targetAdapterId": "blender",
             "targetInstanceId": companion.instance_id,
             "catalogVersion": ACTION_CATALOG["catalogVersion"],
             "revisionRequestId": revision_request["requestId"],
             "revisionThread": revision_request["revisionThread"],
+            "revisionOperation": revision_request["revisionOperation"],
             "plan": provider_plan,
             "planDiff": {
                 "basePlan": {
@@ -1737,6 +1755,19 @@ def assert_companion_and_plan_semantics() -> None:
             },
             "proposedAt": "2026-08-05T12:00:03Z",
         }
+        provider_proposal_without_operation = deepcopy(provider_proposal)
+        provider_proposal_without_operation.pop("revisionOperation")
+        try:
+            companion.stage_proposal(
+                provider_proposal_without_operation,
+                provider_plan_content_sha256,
+            )
+        except ValueError as error:
+            assert "require a revision operation" in str(error)
+        else:
+            raise AssertionError(
+                "A protocol 1.4 revision proposal must preserve its explicit operation"
+            )
         assert companion.stage_proposal(
             provider_proposal,
             provider_plan_content_sha256,
@@ -2666,6 +2697,157 @@ def assert_companion_and_plan_semantics() -> None:
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=2.0)
+
+    # Accepted branch heads stay immutable and installable. Fork starts a new
+    # thread, merge continues the active target, and switching replaces only
+    # the idle Session while leaving Blender scene objects untouched.
+    session_before_branch_test = operating_line.get_session()
+    branch_target_plan = deepcopy(BUNDLED_PLAN)
+    branch_target_plan["id"] = "revision-branch-regression"
+    branch_target_plan["revision"] = PLAN_REVISION + 40
+    branch_source_plan = deepcopy(branch_target_plan)
+    branch_source_plan["revision"] += 1
+    branch_source_plan["steps"][-1]["title"] = "Source branch head"
+    branch_target_session = CompanionController._validated_session(branch_target_plan)
+    replace_operating_line_session(branch_target_session)
+    branch_controller = CompanionController()
+    target_thread_id = str(uuid.uuid4())
+    target_head_request_id = str(uuid.uuid4())
+    source_thread_id = str(uuid.uuid4())
+    source_head_request_id = source_thread_id
+    branch_controller._active_revision_lineage = RevisionLineage(
+        target_thread_id,
+        2,
+        target_head_request_id,
+    )
+    branch_controller.set_revision_branches(
+        {
+            "protocolVersion": "1.4.0",
+            "targetAdapterId": "blender",
+            "instanceId": branch_controller.instance_id,
+            "planId": branch_target_plan["id"],
+            "branches": [
+                {
+                    "threadId": target_thread_id,
+                    "headRequestId": target_head_request_id,
+                    "headTurn": 2,
+                    "status": "accepted",
+                    "operation": {"kind": "revise"},
+                    "plan": branch_target_plan,
+                    "planContentSha256": canonical_plan_content_sha256(
+                        branch_target_plan
+                    ),
+                    "occurredAt": "2026-08-12T12:00:00Z",
+                },
+                {
+                    "threadId": source_thread_id,
+                    "headRequestId": source_head_request_id,
+                    "headTurn": 1,
+                    "status": "accepted",
+                    "operation": {
+                        "kind": "fork",
+                        "sourceThreadId": target_thread_id,
+                        "sourceRequestId": target_head_request_id,
+                    },
+                    "plan": branch_source_plan,
+                    "planContentSha256": canonical_plan_content_sha256(
+                        branch_source_plan
+                    ),
+                    "occurredAt": "2026-08-12T12:01:00Z",
+                },
+            ],
+        }
+    )
+
+    class BranchTransport:
+        running = True
+
+        def __init__(self):
+            self.incoming = Queue()
+            self.revision_requests = []
+            self.accepted_plans = []
+            self.followed_threads = []
+            self.reports = []
+
+        def submit_revision_request(self, request):
+            self.revision_requests.append(request)
+
+        def accept_plan(self, plan_id, revision, plan_content_sha256):
+            self.accepted_plans.append((plan_id, revision, plan_content_sha256))
+
+        def follow_revision_thread(self, thread_id):
+            self.followed_threads.append(thread_id)
+
+        def send_report(self, report):
+            self.reports.append(report)
+
+    branch_transport = BranchTransport()
+    branch_controller._transport = branch_transport
+    branch_scene = {item.as_pointer() for item in bpy.data.objects}
+    branch_controller.begin_revision_fork()
+    branch_controller.add_revision_reference("active", "snowman.model.head")
+    fork_request = branch_controller.submit_revision_request("Make a forked head edit")
+    assert fork_request["protocolVersion"] == "1.4.0"
+    assert fork_request["revisionThread"] == {
+        "threadId": fork_request["requestId"],
+        "turn": 1,
+        "parentRequestId": None,
+    }
+    assert fork_request["revisionOperation"] == {
+        "kind": "fork",
+        "sourceThreadId": target_thread_id,
+        "sourceRequestId": target_head_request_id,
+    }
+    assert fork_request["basePlan"] == branch_target_plan
+
+    branch_controller.begin_revision_merge(source_thread_id)
+    merge_request = branch_controller.submit_revision_request(
+        bpy.context.window_manager.operating_line_revision_message
+    )
+    assert merge_request["revisionThread"] == {
+        "threadId": target_thread_id,
+        "turn": 3,
+        "parentRequestId": target_head_request_id,
+    }
+    assert merge_request["revisionOperation"] == {
+        "kind": "merge",
+        "sourceThreadId": source_thread_id,
+        "sourceRequestId": source_head_request_id,
+    }
+    assert merge_request["references"] == [
+        {"nodeId": branch_target_plan["rootStepId"], "nodeNumber": "1"}
+    ]
+    assert "parameterEdits" not in merge_request
+    assert branch_transport.revision_requests == [fork_request, merge_request]
+    assert {item.as_pointer() for item in bpy.data.objects} == branch_scene
+
+    branch_controller.switch_revision_branch(source_thread_id)
+    active_source = operating_line.get_session()
+    assert active_source.source_plan_copy() == branch_source_plan
+    assert branch_controller.active_revision_lineage == RevisionLineage(
+        source_thread_id,
+        1,
+        source_head_request_id,
+    )
+    assert branch_transport.accepted_plans[-1][:2] == (
+        branch_source_plan["id"],
+        branch_source_plan["revision"],
+    )
+    assert branch_transport.followed_threads[-1] == source_thread_id
+    assert {item.as_pointer() for item in bpy.data.objects} == branch_scene
+    branch_transport.incoming.put(
+        {
+            "kind": "revision_branch_list_unavailable",
+            "message": "temporary branch endpoint outage",
+        }
+    )
+    branch_controller.pump()
+    assert branch_controller.revision_branches == ()
+    assert branch_controller.revision_branches_error == (
+        "temporary branch endpoint outage"
+    )
+    branch_controller._transport = None
+    replace_operating_line_session(session_before_branch_test)
 
     installed_session = operating_line.get_session()
     invalid_plan = deepcopy(dynamic_plan)

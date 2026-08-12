@@ -257,7 +257,7 @@ export const companionStateReportSchema = z
       },
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0'] } },
+          properties: { protocolVersion: { enum: ['1.2.0', '1.3.0', '1.4.0'] } },
           required: ['protocolVersion'],
         },
         then: { required: ['observationGate'] },
@@ -418,7 +418,9 @@ export const companionStateReportSchema = z
       });
     }
     if (
-      (report.protocolVersion === '1.2.0' || report.protocolVersion === '1.3.0') &&
+      (report.protocolVersion === '1.2.0' ||
+        report.protocolVersion === '1.3.0' ||
+        report.protocolVersion === '1.4.0') &&
       report.observationGate === undefined
     ) {
       context.addIssue({
@@ -430,6 +432,7 @@ export const companionStateReportSchema = z
     if (
       report.protocolVersion !== '1.2.0' &&
       report.protocolVersion !== '1.3.0' &&
+      report.protocolVersion !== '1.4.0' &&
       report.observationGate !== undefined
     ) {
       context.addIssue({

@@ -144,6 +144,7 @@ class CompanionTransport:
         )
         self._revision_history_signature: str | None = None
         self._revision_history_before_turn: int | None = None
+        self._revision_branches_signature: str | None = None
         parsed_base_url = urlsplit(self.base_url)
         self._host = parsed_base_url.hostname or "127.0.0.1"
         self._port = parsed_base_url.port or 80
@@ -486,6 +487,7 @@ class CompanionTransport:
                 }
             )
         self._poll_revision_history()
+        self._poll_revision_branches()
 
     @staticmethod
     def _validated_delivery_hash(
@@ -550,6 +552,52 @@ class CompanionTransport:
         if requested_before_turn is not None:
             self._revision_history_before_turn = None
             self._revision_history_signature = None
+
+    def _poll_revision_branches(self) -> None:
+        plan_id = self._known_plan_id
+        if plan_id is None:
+            return
+        query = urlencode(
+            {
+                "targetAdapterId": "blender",
+                "instanceId": self._instance_id,
+                "planId": plan_id,
+                "limit": "20",
+            }
+        )
+        try:
+            response = self._request_json(
+                "GET",
+                f"/api/v1/replan/branches?{query}",
+                abort_on_stop=True,
+            )
+            if response.get("protocolVersion") != PROTOCOL_VERSION:
+                raise ValueError("Unsupported revision branch protocol version")
+            if response.get("planId") != plan_id:
+                raise ValueError("Runtime returned revision branches for the wrong Plan")
+        except (
+            HTTPError,
+            HTTPException,
+            OSError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
+            signature = f"unavailable:{plan_id}:{type(error).__name__}"
+            if signature != self._revision_branches_signature:
+                self._revision_branches_signature = signature
+                self.incoming.put(
+                    {
+                        "kind": "revision_branch_list_unavailable",
+                        "message": "Runtime revision branches are unavailable",
+                    }
+                )
+            return
+        signature = json.dumps(response, sort_keys=True, separators=(",", ":"))
+        if signature != self._revision_branches_signature:
+            self._revision_branches_signature = signature
+            self.incoming.put(
+                {"kind": "revision_branch_list", "branches": response}
+            )
 
     def _poll_replan_run(self, generation_request_id: str) -> dict[str, Any]:
         response = self._request_json(
@@ -646,6 +694,7 @@ class CompanionTransport:
                         self._known_plan_content_sha256 = str(
                             control["planContentSha256"]
                         )
+                        self._revision_branches_signature = None
                     elif control.get("kind") == "proposal_seen":
                         self._known_proposal_id = str(control["proposalId"])
                     elif control.get("kind") == "follow_revision_thread":

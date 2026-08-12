@@ -40,6 +40,8 @@ from .revision_review import (
     lineage_from_proposal,
     new_revision_thread,
     validate_plan_diff,
+    validate_revision_branch_list,
+    validate_revision_operation,
     validate_revision_thread,
     validate_revision_thread_history,
 )
@@ -79,6 +81,8 @@ __all__ = (
     "relevant_steps",
     "step_state",
     "validate_plan_diff",
+    "validate_revision_branch_list",
+    "validate_revision_operation",
     "validate_provider_list",
     "validate_revision_thread",
     "validate_revision_thread_history",

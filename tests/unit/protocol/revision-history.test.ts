@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  guideRevisionBranchListRequestSchema,
+  guideRevisionBranchListSchema,
   guideRevisionThreadHistoryRequestSchema,
   guideRevisionThreadHistorySchema,
 } from '@operatingline/protocol';
@@ -88,13 +90,21 @@ describe('guide revision thread history protocol', () => {
     });
   });
 
-  it('reads protocol 1.1 history, emits 1.3 history, and rejects 1.0 turn envelopes', () => {
+  it('reads legacy history, normalizes implicit revise into current proposals, and rejects 1.0', () => {
     const current = historyFixture();
     current.protocolVersion = '1.3.0';
     current.turns[0]!.request.protocolVersion = '1.3.0';
     current.turns[0]!.proposal!.protocolVersion = '1.3.0';
     current.turns[0]!.decision!.protocolVersion = '1.3.0';
     expect(guideRevisionThreadHistorySchema.safeParse(current).success).toBe(true);
+
+    const normalized = historyFixture();
+    normalized.protocolVersion = '1.4.0';
+    normalized.turns[0]!.proposal!.protocolVersion = '1.4.0';
+    (normalized.turns[0]!.proposal as Record<string, unknown>).revisionOperation = {
+      kind: 'revise',
+    };
+    expect(guideRevisionThreadHistorySchema.safeParse(normalized).success).toBe(true);
 
     for (const field of ['request', 'proposal', 'decision'] as const) {
       const invalid = historyFixture();
@@ -152,5 +162,54 @@ describe('guide revision thread history protocol', () => {
       };
       expect(schema.additionalProperties).toBe(false);
     }
+  });
+
+  it('validates installable branch heads and explicit branch topology', () => {
+    const plan = historyFixture().turns[0]!.proposal!.plan;
+    const instanceId = randomUUID();
+    const threadId = randomUUID();
+    const sourceThreadId = randomUUID();
+    const branchList = {
+      protocolVersion: '1.4.0',
+      targetAdapterId: 'blender',
+      instanceId,
+      planId: plan.id,
+      branches: [
+        {
+          threadId,
+          headRequestId: threadId,
+          headTurn: 1,
+          status: 'accepted',
+          operation: {
+            kind: 'fork',
+            sourceThreadId,
+            sourceRequestId: randomUUID(),
+          },
+          plan,
+          planContentSha256: 'a'.repeat(64),
+          occurredAt: '2026-08-12T10:00:00Z',
+        },
+      ],
+    } as const;
+
+    expect(guideRevisionBranchListSchema.parse(branchList).branches[0]?.plan).toEqual(plan);
+    expect(
+      guideRevisionBranchListSchema.safeParse({
+        ...branchList,
+        branches: [
+          {
+            ...branchList.branches[0],
+            headTurn: 2,
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      guideRevisionBranchListRequestSchema.parse({
+        targetAdapterId: 'blender',
+        instanceId,
+        planId: plan.id,
+      }),
+    ).toMatchObject({ limit: 100 });
   });
 });

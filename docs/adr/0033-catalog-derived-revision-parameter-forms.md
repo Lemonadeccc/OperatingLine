@@ -42,4 +42,5 @@ Proposal，并经过 Blender 内 Accept/Reject；参数表单不是直接执行�
 
 - 简单参数修改成为可审查、可验证的精确意图，不再依赖 Provider 猜测数值。
 - 当前只编辑已存在的顶层参数，不提供嵌套权重、关键帧记录或任意 JSON 编辑器，也不新增 action 参数。
-- 当前 revision history 仍是线性 thread；显式 fork、三方 merge 与冲突处理属于后续独立协议决策。
+- 本 ADR 落地时 revision history 仍是线性 thread；后续 fork、三方 merge 与冲突处理由
+  [ADR 0034](0034-explicit-revision-branches-and-three-way-merge.md) 独立定义。

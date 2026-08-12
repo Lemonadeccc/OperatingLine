@@ -126,6 +126,13 @@
       控件，编辑仅落入本地草稿。Orchestrator 核对 base 与完整 action schema，Provider 未精确应用时
       locality gate 拒绝。普通 string 与嵌套 records 仍只读。见
       [ADR 0033](adr/0033-catalog-derived-revision-parameter-forms.md)。
+- [x] 显式 revision 分支与确定性合并：Guide/Companion protocol `1.4.0` 为每个请求增加
+      `revise | fork | merge` 操作；thread 内继续保持唯一 parent，fork/merge source 建立显式 DAG 边。
+      Runtime 只接受同宿主/目录/Plan 的已接受当前 head，以唯一最低共同祖先执行递归三方合并；独立
+      字段组合，同字段分歧、delete-vs-edit、歧义 merge base、空 source contribution 或 source 前移均
+      fail closed。Provider 必须原样返回 `expectedMergedPlan`，Proposal 保存 merge base 并继续经过
+      Accept/Reject。Blender 可 Fork、Merge 和 Switch 已接受 head；这些操作都不执行 action 或修改场景。
+      见 [ADR 0034](adr/0034-explicit-revision-branches-and-three-way-merge.md)。
 - [x] 宿主授权的异步 Replan Run：Blender 在 Runtime acknowledgement 后列出无凭据 Provider
       descriptor，保持默认不选择，并在每次调用或重试前显示数据传输/可能费用披露和原生确认 dialog。
       Orchestrator 持久化授权后立即返回 `202`，后台复用严格 provider generation 与 canonical propose；
@@ -184,8 +191,6 @@
       local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
       provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、
       Proposal 审批和场景执行门禁。
-- [ ] 修订工作区增强：参数表单已完成；下一步在完整线性消息历史和 Plan diff 基础上增加明确的
-      fork/merge、共同祖先和冲突策略，不把异步请求伪装成实时聊天。
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。

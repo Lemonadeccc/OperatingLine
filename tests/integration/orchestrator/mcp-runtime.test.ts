@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { FakeBlenderAdapter, FakePlannerProvider } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
-import type { GuidePlan } from '@operatingline/protocol';
+import { guideProtocolVersion, type GuidePlan } from '@operatingline/protocol';
 
 import {
   computeEvalContentSha256,
@@ -261,6 +261,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.replan.generate' },
             { name: 'operatingline.replan.requests.list' },
             { name: 'operatingline.replan.thread.get' },
+            { name: 'operatingline.replan.branches.list' },
             { name: 'operatingline.eval.export' },
             { name: 'operatingline.replan.propose' },
             { name: 'operatingline.guide.publish' },
@@ -771,7 +772,7 @@ describe('OperatingLine runtime', () => {
     const revisionRequestId = randomUUID();
     const instanceId = randomUUID();
     const revisionRequest = {
-      protocolVersion: '1.3.0',
+      protocolVersion: guideProtocolVersion,
       requestId: revisionRequestId,
       adapterId: 'blender',
       catalogVersion,
@@ -792,6 +793,7 @@ describe('OperatingLine runtime', () => {
         turn: 1,
         parentRequestId: null,
       },
+      revisionOperation: { kind: 'revise' as const },
       occurredAt: new Date().toISOString(),
     };
     const generationRequest = {
@@ -901,7 +903,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1371,7 +1373,7 @@ describe('OperatingLine runtime', () => {
       const requestId = randomUUID();
       const instanceId = randomUUID();
       const revisionRequest = {
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         requestId,
         adapterId: 'blender',
         catalogVersion,
@@ -1380,6 +1382,7 @@ describe('OperatingLine runtime', () => {
         references: [{ nodeId: 'snowman.model.head', nodeNumber: '1.2.3' }],
         message: 'Make the head larger while preserving the three-part silhouette.',
         revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+        revisionOperation: { kind: 'revise' as const },
         occurredAt: new Date().toISOString(),
       };
 
@@ -1598,7 +1601,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const acceptedDecision = {
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         decisionId: randomUUID(),
         proposalId: JSON.parse(proposed.result?.content?.[0]?.text ?? '{}').proposalId,
         adapterId: 'blender',
@@ -1626,6 +1629,60 @@ describe('OperatingLine runtime', () => {
       ).resolves.toMatchObject({
         status: 'accepted',
         turns: [{ turn: 1, state: 'accepted', decision: { decision: 'accepted' } }],
+      });
+
+      const forkRequestId = randomUUID();
+      const forkRequest = {
+        ...revisionRequest,
+        requestId: forkRequestId,
+        basePlan: replanned,
+        message: 'Create an alternate larger-head branch.',
+        revisionThread: {
+          threadId: forkRequestId,
+          turn: 1,
+          parentRequestId: null,
+        },
+        revisionOperation: {
+          kind: 'fork',
+          sourceThreadId: requestId,
+          sourceRequestId: requestId,
+        },
+        occurredAt: new Date(Date.now() + 500).toISOString(),
+      };
+      const forked = await fetch(`${runtime.baseUrl}/api/v1/companion/revision-request`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(forkRequest),
+      });
+      expect(forked.status).toBe(200);
+      await expect(forked.json()).resolves.toEqual({
+        result: 'accepted',
+        requestId: forkRequestId,
+      });
+      const branchList = await callMcpTool(runtime, 192, 'operatingline.replan.branches.list', {
+        targetAdapterId: 'blender',
+        instanceId,
+        planId: replanned.id,
+      });
+      expect(JSON.parse(branchList.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        protocolVersion: guideProtocolVersion,
+        planId: replanned.id,
+        branches: expect.arrayContaining([
+          expect.objectContaining({
+            threadId: requestId,
+            headRequestId: requestId,
+            status: 'accepted',
+            operation: { kind: 'revise' },
+            plan: expect.objectContaining({ revision: 7 }),
+          }),
+          expect.objectContaining({
+            threadId: forkRequestId,
+            headRequestId: forkRequestId,
+            status: 'awaiting_proposal',
+            operation: expect.objectContaining({ kind: 'fork', sourceRequestId: requestId }),
+            plan: null,
+          }),
+        ]),
       });
 
       const secondProposal = await callMcpTool(runtime, 21, 'operatingline.replan.propose', {
@@ -1789,7 +1846,7 @@ describe('OperatingLine runtime', () => {
       });
       expect(delivered.status).toBe(200);
       await expect(delivered.json()).resolves.toMatchObject({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: { id: plan.id, revision: plan.revision },
         planContentSha256: computePlanContentSha256(plan),
         proposalPlanContentSha256: null,
@@ -1803,7 +1860,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1827,7 +1884,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1855,7 +1912,7 @@ describe('OperatingLine runtime', () => {
           response.json(),
         ),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1907,7 +1964,7 @@ describe('OperatingLine runtime', () => {
       const delivery = await fetch(guideUrl, { headers });
       expect(delivery.status).toBe(200);
       await expect(delivery.json()).resolves.toMatchObject({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposalPlanContentSha256: computePlanContentSha256(plan),
@@ -1922,7 +1979,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,
@@ -1930,7 +1987,7 @@ describe('OperatingLine runtime', () => {
       });
 
       const decision = {
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         decisionId: randomUUID(),
         proposalId: proposalResult.proposalId,
         adapterId: 'blender',
@@ -1957,7 +2014,7 @@ describe('OperatingLine runtime', () => {
       await expect(
         fetch(guideUrl, { headers }).then((response) => response.json()),
       ).resolves.toEqual({
-        protocolVersion: '1.3.0',
+        protocolVersion: guideProtocolVersion,
         plan: null,
         planContentSha256: null,
         proposal: null,

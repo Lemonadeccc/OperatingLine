@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { actionCatalogSchema } from './catalog.js';
 import { companionStateReportSchema } from './companion.js';
 import { guidePlanDiffSchema } from './diff.js';
-import { guideStepIdSchema } from './guide.js';
+import { guidePlanSchema, guideStepIdSchema } from './guide.js';
 import { planningIntentSchema, planningQualityReportSchema } from './planning.js';
 import {
   plannerGenerationErrorCodeSchema,
@@ -57,6 +57,16 @@ export const replanningPromptRequestSchema = z.strictObject({
 });
 export type ReplanningPromptRequest = z.infer<typeof replanningPromptRequestSchema>;
 
+export const guideRevisionMergeContextSchema = z.strictObject({
+  sourceThreadId: z.uuid(),
+  sourceRequestId: z.uuid(),
+  commonAncestorRequestId: z.uuid(),
+  commonAncestorPlan: guidePlanSchema,
+  sourcePlan: guidePlanSchema,
+  expectedMergedPlan: guidePlanSchema,
+});
+export type GuideRevisionMergeContext = z.infer<typeof guideRevisionMergeContextSchema>;
+
 export const replanningPromptContextSchema = z
   .strictObject({
     revisionRequest: guideRevisionRequestSchema,
@@ -64,9 +74,30 @@ export const replanningPromptContextSchema = z
     catalog: actionCatalogSchema,
     companionState: companionStateReportSchema.nullable(),
     scope: localReplanScopeSchema,
+    merge: guideRevisionMergeContextSchema.optional(),
   })
   .superRefine((context, refinement) => {
     const request = context.revisionRequest;
+    const operation = request.revisionOperation;
+    if ((operation?.kind === 'merge') !== (context.merge !== undefined)) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['merge'],
+        message: 'Replanning merge context must be present exactly for a branch merge',
+      });
+    }
+    if (
+      operation?.kind === 'merge' &&
+      context.merge !== undefined &&
+      (context.merge.sourceThreadId !== operation.sourceThreadId ||
+        context.merge.sourceRequestId !== operation.sourceRequestId)
+    ) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['merge'],
+        message: 'Replanning merge context must match the immutable merge request',
+      });
+    }
     if (
       context.catalog.adapterId !== request.adapterId ||
       context.catalog.catalogVersion !== request.catalogVersion
@@ -82,6 +113,19 @@ export const replanningPromptContextSchema = z
         code: 'custom',
         path: ['targetRevision'],
         message: 'Replanning target revision must be newer than the immutable base plan',
+      });
+    }
+    if (
+      context.merge !== undefined &&
+      (context.merge.expectedMergedPlan.id !== request.basePlan.id ||
+        context.merge.expectedMergedPlan.revision !== context.targetRevision ||
+        context.merge.sourcePlan.id !== request.basePlan.id ||
+        context.merge.commonAncestorPlan.id !== request.basePlan.id)
+    ) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['merge'],
+        message: 'Merge Plans must share the request Plan id and exact target revision',
       });
     }
     const referencedIds = request.references.map((reference) => reference.nodeId);
@@ -182,6 +226,7 @@ export const localReplanFindingCodeSchema = z.enum([
   'step_added_outside_scope',
   'step_moved_across_scope',
   'parameter_edit_not_applied',
+  'merge_result_mismatch',
   'no_local_change',
 ]);
 export type LocalReplanFindingCode = z.infer<typeof localReplanFindingCodeSchema>;

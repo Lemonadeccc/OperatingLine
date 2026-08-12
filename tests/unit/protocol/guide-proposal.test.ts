@@ -151,6 +151,45 @@ describe('guide proposal protocol', () => {
     ).toBe(false);
   });
 
+  it('requires an explicit operation on protocol 1.4 revision proposals', () => {
+    const requestId = randomUUID();
+    const targetInstanceId = randomUUID();
+    const plan = readPlan() as { id: string; revision: number };
+    plan.revision += 1;
+    const proposal = {
+      protocolVersion: '1.4.0',
+      proposalId: randomUUID(),
+      targetAdapterId: 'blender',
+      targetInstanceId,
+      revisionRequestId: requestId,
+      revisionThread: { threadId: requestId, turn: 1, parentRequestId: null },
+      catalogVersion: '1.1.0',
+      plan,
+      planDiff: {
+        basePlan: { id: plan.id, revision: plan.revision - 1 },
+        targetPlan: { id: plan.id, revision: plan.revision },
+        summary: {
+          planFields: 0,
+          addedSteps: 0,
+          removedSteps: 0,
+          updatedSteps: 0,
+          movedSteps: 0,
+        },
+        planChanges: [],
+        stepChanges: [],
+      },
+      proposedAt: '2026-08-04T10:00:00Z',
+    };
+
+    expect(guideProposalSchema.safeParse(proposal).success).toBe(false);
+    expect(
+      guideProposalSchema.safeParse({
+        ...proposal,
+        revisionOperation: { kind: 'revise' },
+      }).success,
+    ).toBe(true);
+  });
+
   it('emits dedicated language-neutral schemas for proposal boundaries', () => {
     for (const filename of [
       'guide-proposal-submission.schema.json',

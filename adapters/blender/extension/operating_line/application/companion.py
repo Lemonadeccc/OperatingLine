@@ -31,6 +31,8 @@ from .revision_review import (
     lineage_from_proposal,
     new_revision_thread,
     validate_plan_diff,
+    validate_revision_branch_list,
+    validate_revision_operation,
     validate_revision_thread,
     validate_revision_thread_history,
 )
@@ -63,6 +65,11 @@ class CompanionController:
             tuple[str | None, str], tuple[dict[str, Any], DemoSession]
         ] = {}
         self._active_revision_lineage: RevisionLineage | None = None
+        self.revision_branches: tuple[dict[str, Any], ...] = ()
+        self.revision_branches_error = ""
+        self._revision_operation_kind = "revise"
+        self._revision_source_thread_id: str | None = None
+        self._revision_source_request_id: str | None = None
         self.revision_thread_history: dict[str, Any] | None = None
         self.revision_history_error = ""
         self._revision_history_turns: dict[int, dict[str, Any]] = {}
@@ -91,6 +98,27 @@ class CompanionController:
     @property
     def timer_registered(self) -> bool:
         return self._timer_registered
+
+    @property
+    def active_revision_lineage(self) -> RevisionLineage | None:
+        return self._active_revision_lineage
+
+    @property
+    def revision_operation_kind(self) -> str:
+        return self._revision_operation_kind
+
+    @property
+    def revision_source_thread_id(self) -> str | None:
+        return self._revision_source_thread_id
+
+    @property
+    def revision_source_request_id(self) -> str | None:
+        return self._revision_source_request_id
+
+    def _reset_revision_operation(self) -> None:
+        self._revision_operation_kind = "revise"
+        self._revision_source_thread_id = None
+        self._revision_source_request_id = None
 
     @property
     def timer_callback(self):
@@ -340,6 +368,147 @@ class CompanionController:
             return self._active_revision_lineage
         raise ValueError("Revision reference scope must be active or proposal")
 
+    def _revision_branch(self, thread_id: str) -> dict[str, Any]:
+        try:
+            uuid.UUID(thread_id)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Revision branch id must be a UUID") from error
+        branch = next(
+            (
+                candidate
+                for candidate in self.revision_branches
+                if candidate["threadId"] == thread_id
+            ),
+            None,
+        )
+        if branch is None:
+            raise ValueError("Revision branch is no longer available")
+        return branch
+
+    def set_revision_branches(self, value: Any) -> None:
+        from .. import get_session
+
+        session = get_session()
+        if session.plan_id is None:
+            raise ValueError("Active Plan has no branch identity")
+        validated = validate_revision_branch_list(
+            value,
+            instance_id=self.instance_id,
+            plan_id=session.plan_id,
+        )
+        self.revision_branches = tuple(validated["branches"])
+        self.revision_branches_error = ""
+
+    def begin_revision_fork(self) -> None:
+        lineage = self._active_revision_lineage
+        if lineage is None:
+            raise ValueError("Accept a revision before forking its branch")
+        if self.goal_request.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active goal workflow before forking")
+        if self.proposed_plan is not None:
+            raise ValueError("Review the pending Proposal before forking")
+        if self.provider_handoff.active:
+            raise ValueError("Wait for the active provider run before forking")
+        if (
+            self._revision_base_session is not None
+            and self._revision_reference_scope != "active"
+        ):
+            raise ValueError("A fork draft must reference the active accepted branch")
+        self._revision_operation_kind = "fork"
+        self._revision_source_thread_id = lineage.thread_id
+        self._revision_source_request_id = lineage.request_id
+        self.revision_request_status = (
+            f"Forking branch {lineage.thread_id[:8]}; compose the first new turn"
+        )
+
+    def begin_revision_merge(self, source_thread_id: str) -> None:
+        from .. import get_session
+
+        lineage = self._active_revision_lineage
+        if lineage is None:
+            raise ValueError("Accept a revision before merging another branch")
+        if source_thread_id == lineage.thread_id:
+            raise ValueError("Select a different source branch to merge")
+        source = self._revision_branch(source_thread_id)
+        if source["status"] != "accepted" or source["plan"] is None:
+            raise ValueError("Merge source branch head must be accepted")
+        if self.proposed_plan is not None:
+            raise ValueError("Review the pending Proposal before merging")
+        if self.goal_request.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active goal workflow before merging")
+        if self.provider_handoff.active:
+            raise ValueError("Wait for the active provider run before merging")
+        session = get_session()
+        if session.receipts:
+            raise ValueError("Use Back to return the active walkthrough to its start")
+        self.clear_revision_draft()
+        self.add_revision_reference("active", session.root.id)
+        self._revision_operation_kind = "merge"
+        self._revision_source_thread_id = source["threadId"]
+        self._revision_source_request_id = source["headRequestId"]
+        window_manager = getattr(bpy.context, "window_manager", None)
+        if window_manager is not None and hasattr(
+            window_manager, "operating_line_revision_message"
+        ):
+            window_manager.operating_line_revision_message = (
+                f"Merge accepted branch {source['threadId'][:8]} into "
+                f"{lineage.thread_id[:8]}"
+            )
+        self.revision_request_status = (
+            f"Conflict-free merge draft from branch {source['threadId'][:8]}"
+        )
+
+    def switch_revision_branch(self, thread_id: str) -> None:
+        from .. import get_session, replace_session
+
+        branch = self._revision_branch(thread_id)
+        if branch["status"] != "accepted" or branch["plan"] is None:
+            raise ValueError("Only an accepted branch head can be activated")
+        if self.proposed_plan is not None:
+            raise ValueError("Review the pending Proposal before switching branches")
+        if self.goal_request.active:
+            raise ValueError("Finish the active goal workflow before switching branches")
+        if self.provider_handoff.active or self.initial_plan_handoff.active:
+            raise ValueError("Wait for the active provider run before switching branches")
+        current = get_session()
+        if current.receipts:
+            raise ValueError("Use Back to return the active walkthrough to its start")
+        if self._active_revision_lineage is not None and (
+            self._active_revision_lineage.thread_id == thread_id
+        ):
+            raise ValueError("This revision branch is already active")
+        replacement = self._validated_session(
+            branch["plan"],
+            branch["planContentSha256"],
+        )
+        self.clear_revision_draft()
+        self._clear_revision_history()
+        replace_session(replacement)
+        lineage = RevisionLineage(
+            thread_id=branch["threadId"],
+            turn=branch["headTurn"],
+            request_id=branch["headRequestId"],
+        )
+        self._active_revision_lineage = lineage
+        self.pending_plan = None
+        self.pending_plan_content_sha256 = None
+        self._invalidate_handoff_for_plan_install()
+        if self._transport is not None:
+            assert replacement.plan_id is not None
+            assert replacement.revision is not None
+            assert replacement.plan_content_sha256 is not None
+            self._transport.accept_plan(
+                replacement.plan_id,
+                replacement.revision,
+                replacement.plan_content_sha256,
+            )
+            self._transport.follow_revision_thread(lineage.thread_id)
+        self.status = (
+            f"Branch {lineage.thread_id[:8]} active at r{replacement.revision}"
+        )
+        self.error = ""
+        self.report("plan_loaded")
+
     def revision_reference_nodes(self) -> tuple[Any, ...]:
         base = self._revision_base_session
         if base is None:
@@ -522,6 +691,7 @@ class CompanionController:
         self._revision_reference_scope = None
         self._revision_reference_ids.clear()
         self._revision_parameter_edits.clear()
+        self._reset_revision_operation()
         window_manager = getattr(bpy.context, "window_manager", None)
         if window_manager is not None and hasattr(
             window_manager,
@@ -684,10 +854,46 @@ class CompanionController:
         if source_plan is None:
             raise ValueError("The selected plan has no immutable source payload")
         request_id = str(uuid.uuid4())
-        revision_thread = new_revision_thread(
-            request_id,
-            self.revision_draft_lineage,
-        )
+        lineage = self.revision_draft_lineage
+        operation_kind = self._revision_operation_kind
+        if operation_kind == "fork":
+            if (
+                lineage is None
+                or lineage.thread_id != self._revision_source_thread_id
+                or lineage.request_id != self._revision_source_request_id
+            ):
+                raise ValueError("Fork source no longer matches the active accepted branch")
+            revision_thread = new_revision_thread(request_id, None)
+            revision_operation = {
+                "kind": "fork",
+                "sourceThreadId": lineage.thread_id,
+                "sourceRequestId": lineage.request_id,
+            }
+        elif operation_kind == "merge":
+            if lineage is None:
+                raise ValueError("Merge target no longer has accepted branch lineage")
+            if (
+                len(references) != 1
+                or references[0].id != base.root.id
+                or parameter_edits
+            ):
+                raise ValueError(
+                    "A deterministic merge must reference only the Plan root and cannot include parameter edits"
+                )
+            if (
+                self._revision_source_thread_id is None
+                or self._revision_source_request_id is None
+            ):
+                raise ValueError("Merge source branch is no longer selected")
+            revision_thread = new_revision_thread(request_id, lineage)
+            revision_operation = {
+                "kind": "merge",
+                "sourceThreadId": self._revision_source_thread_id,
+                "sourceRequestId": self._revision_source_request_id,
+            }
+        else:
+            revision_thread = new_revision_thread(request_id, lineage)
+            revision_operation = {"kind": "revise"}
         request = {
             "protocolVersion": PROTOCOL_VERSION,
             "requestId": request_id,
@@ -705,6 +911,7 @@ class CompanionController:
                 else {}
             ),
             "revisionThread": revision_thread,
+            "revisionOperation": revision_operation,
             "occurredAt": datetime.now(timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
@@ -796,6 +1003,9 @@ class CompanionController:
             return False
         if self._revision_base_session is current:
             self.clear_revision_draft()
+        if current.plan_id != plan_id:
+            self.revision_branches = ()
+            self.revision_branches_error = ""
         self._active_revision_lineage = None
         self._clear_revision_history()
         self.revision_history_error = ""
@@ -843,6 +1053,8 @@ class CompanionController:
             "goalRequestId",
             "revisionRequestId",
             "revisionThread",
+            "revisionOperation",
+            "mergeBaseRequestId",
             "planDiff",
             "catalogVersion",
             "targetInstanceId",
@@ -898,15 +1110,51 @@ class CompanionController:
             if proposal_protocol_version == "1.0.0":
                 raise ValueError("Goal-linked proposals require protocol 1.1+")
         revision_thread = proposal.get("revisionThread")
+        validated_revision_thread = None
         if revision_thread is not None:
             if revision_request_id is None:
                 raise ValueError(
                     "A standalone proposal cannot declare a revision thread"
                 )
-            validate_revision_thread(
+            validated_revision_thread = validate_revision_thread(
                 revision_thread,
                 request_id=revision_request_id,
             )
+        revision_operation = proposal.get("revisionOperation")
+        if (
+            revision_request_id is not None
+            and proposal_protocol_version == PROTOCOL_VERSION
+            and revision_operation is None
+        ):
+            raise ValueError(
+                "Protocol 1.4 request-linked proposals require a revision operation"
+            )
+        if revision_operation is not None:
+            if revision_request_id is None or validated_revision_thread is None:
+                raise ValueError(
+                    "A standalone proposal cannot declare a revision operation"
+                )
+            if proposal_protocol_version != PROTOCOL_VERSION:
+                raise ValueError("Explicit revision operations require protocol 1.4")
+            validate_revision_operation(
+                revision_operation,
+                thread=validated_revision_thread,
+            )
+        merge_base_request_id = proposal.get("mergeBaseRequestId")
+        if (
+            isinstance(revision_operation, dict)
+            and revision_operation.get("kind") == "merge"
+        ):
+            if not isinstance(merge_base_request_id, str):
+                raise ValueError("A merge proposal requires its common ancestor")
+            try:
+                uuid.UUID(merge_base_request_id)
+            except ValueError as error:
+                raise ValueError(
+                    "Merge proposal common ancestor must be a UUID"
+                ) from error
+        elif merge_base_request_id is not None:
+            raise ValueError("Only a merge proposal can declare a common ancestor")
         catalog_version = proposal.get("catalogVersion")
         if catalog_version is not None and (
             not isinstance(catalog_version, str)
@@ -1572,6 +1820,23 @@ class CompanionController:
                     except (TypeError, ValueError) as error:
                         self.initial_plan_handoff.message = str(error)
                         self.error = str(error)
+                elif message.get("kind") == "revision_branch_list":
+                    try:
+                        self.set_revision_branches(message.get("branches"))
+                    except (KeyError, TypeError, ValueError) as error:
+                        self.revision_branches = ()
+                        self.revision_branches_error = str(error)
+                        self.error = str(error)
+                        self.status = "Revision branches rejected"
+                        self.report("error", error=self.error)
+                elif message.get("kind") == "revision_branch_list_unavailable":
+                    self.revision_branches = ()
+                    self.revision_branches_error = str(
+                        message.get(
+                            "message",
+                            "Runtime revision branches are unavailable",
+                        )
+                    )
                 elif message.get("kind") == "revision_thread_history":
                     try:
                         history = validate_revision_thread_history(

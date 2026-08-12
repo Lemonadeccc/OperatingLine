@@ -71,6 +71,18 @@ export const guideRevisionThreadSchema = z
   });
 export type GuideRevisionThread = z.infer<typeof guideRevisionThreadSchema>;
 
+const guideRevisionSourceSchema = z.strictObject({
+  sourceThreadId: z.uuid(),
+  sourceRequestId: z.uuid(),
+});
+
+export const guideRevisionOperationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('revise') }),
+  guideRevisionSourceSchema.extend({ kind: z.literal('fork') }),
+  guideRevisionSourceSchema.extend({ kind: z.literal('merge') }),
+]);
+export type GuideRevisionOperation = z.infer<typeof guideRevisionOperationSchema>;
+
 export const guideRevisionRequestSchema = z
   .strictObject({
     protocolVersion: guideProtocolVersionSchema,
@@ -83,6 +95,7 @@ export const guideRevisionRequestSchema = z
     message: z.string().trim().max(4_000),
     parameterEdits: z.array(guideParameterEditSchema).min(1).max(64).optional(),
     revisionThread: guideRevisionThreadSchema.optional(),
+    revisionOperation: guideRevisionOperationSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
   .superRefine((request, context) => {
@@ -103,12 +116,70 @@ export const guideRevisionRequestSchema = z
     if (thread?.parentRequestId === request.requestId) {
       context.addIssue({ code: 'custom', message: 'A revision request cannot parent itself' });
     }
-    if (request.protocolVersion !== '1.3.0' && request.parameterEdits !== undefined) {
+    if (
+      request.protocolVersion !== '1.3.0' &&
+      request.protocolVersion !== '1.4.0' &&
+      request.parameterEdits !== undefined
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['parameterEdits'],
-        message: 'Structured parameter edits require guide protocol 1.3',
+        message: 'Structured parameter edits require guide protocol 1.3+',
       });
+    }
+    if (request.protocolVersion === '1.4.0' && request.revisionOperation === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['revisionOperation'],
+        message: 'Protocol 1.4 revision requests require an explicit operation',
+      });
+    }
+    if (request.protocolVersion !== '1.4.0' && request.revisionOperation !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['revisionOperation'],
+        message: 'Explicit revision operations require guide protocol 1.4',
+      });
+    }
+    const operation = request.revisionOperation;
+    if (operation?.kind === 'fork') {
+      if (thread?.turn !== 1) {
+        context.addIssue({
+          code: 'custom',
+          path: ['revisionOperation', 'kind'],
+          message: 'A fork must start a new revision thread at turn 1',
+        });
+      }
+      if (operation.sourceThreadId === thread?.threadId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['revisionOperation', 'sourceThreadId'],
+          message: 'A fork source must be a different revision thread',
+        });
+      }
+    }
+    if (operation?.kind === 'merge') {
+      if (thread === undefined || thread.turn <= 1) {
+        context.addIssue({
+          code: 'custom',
+          path: ['revisionOperation', 'kind'],
+          message: 'A merge must continue an existing target revision thread',
+        });
+      }
+      if (operation.sourceThreadId === thread?.threadId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['revisionOperation', 'sourceThreadId'],
+          message: 'A merge source must be a different revision thread',
+        });
+      }
+      if (request.parameterEdits !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['parameterEdits'],
+          message: 'A deterministic branch merge cannot include parameter edits',
+        });
+      }
     }
     if (request.message.length === 0 && request.parameterEdits === undefined) {
       context.addIssue({
@@ -149,14 +220,16 @@ export const guideRevisionRequestSchema = z
     allOf: [
       {
         if: {
-          properties: { protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0'] } },
+          properties: {
+            protocolVersion: { enum: ['1.1.0', '1.2.0', '1.3.0', '1.4.0'] },
+          },
           required: ['protocolVersion'],
         },
         then: { required: ['revisionThread'] },
       },
       {
         if: {
-          properties: { protocolVersion: { const: '1.3.0' } },
+          properties: { protocolVersion: { enum: ['1.3.0', '1.4.0'] } },
           required: ['protocolVersion'],
         },
         then: {
@@ -169,6 +242,14 @@ export const guideRevisionRequestSchema = z
           properties: { message: { minLength: 1 } },
           not: { required: ['parameterEdits'] },
         },
+      },
+      {
+        if: {
+          properties: { protocolVersion: { const: '1.4.0' } },
+          required: ['protocolVersion'],
+        },
+        then: { required: ['revisionOperation'] },
+        else: { not: { required: ['revisionOperation'] } },
       },
     ],
   });

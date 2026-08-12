@@ -204,10 +204,22 @@ Plan ID 的完整更高 revision；它不能原地 patch 已审批计划。生�
 locality gate 以 `parameter_edit_not_applied` 拒绝。表单草稿、请求排队和 Proposal preview 都不修改活动
 Plan 或场景。
 
+协议 `1.4.0` 把 thread 内线性历史扩展为显式 revision DAG，但不改变既有父链唯一性。每个请求声明
+`revise`、`fork` 或 `merge`；fork 从另一条已接受 head 建立 turn 1，merge 继续目标 thread 并引用另一条
+已接受 head。Runtime 要求 source 仍是当前 head，并从请求父边加 fork/merge source 边推导唯一最低共同
+祖先。三方合并按 Plan/step 字段递归组合独立 JSON object 改动，数组保持原子；同字段分歧、删除与编辑
+并发、Plan identity 变化、无唯一共同祖先或空 source contribution 都会在创建请求或 prompt 时失败。
+Provider 收到完整 ancestor/source/target 与权威 `expectedMergedPlan`，输出必须与其深度相等；它不能自行
+解决冲突。Merge Proposal 保存 `mergeBaseRequestId`，仍经过同一 diff 与 Accept/Reject 门。
+
 `operatingline.replan.thread.get` 与 `/api/v1/replan/thread` 从现有请求、Proposal 和决策表派生只读
 消息历史，不复制一份可变聊天日志。查询以 thread、adapter 和 instance 隔离，默认返回最新页并用
 `beforeTurn` 向前分页；每页仍按 turn 正序阅读。Blender 合并已加载页面，但不会把 Proposal 当作
 模型推理或流式聊天内容。
+
+`operatingline.replan.branches.list` 与 `/api/v1/replan/branches` 同样从规范化表派生每条 thread 的 durable
+head。只有已接受 head 返回完整 Plan 与内容 SHA-256；Blender 可在无 receipt、无待审 Proposal/活动 Run
+时切换到它，切换只替换 Session，不执行 action 或修改场景。
 
 列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
 Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：

@@ -8,7 +8,8 @@
 - `Panel` / `UILayout`：可折叠 Goal-to-Guidance 输入、异步请求状态和初始 Proposal 审批入口。
 - `Panel` / `UILayout`：同一 Sidebar 内的 AI 提案摘要、只读树与 Accept/Reject。
 - `Panel` / `UILayout`：可折叠 Revision Workspace，包含活动树/待审树节点 `Ref`、逐条移除、
-  独立修订正文、Provider 选择/披露、异步 Run 状态、历史、Plan diff 与 Accept/Reject。
+  独立修订正文、branch fork/switch/merge、Provider 选择/披露、异步 Run 状态、历史、Plan diff 与
+  Accept/Reject。
 - `Operator` / 原生 dialog：每次 Provider Run 的明确确认；不保存长期 consent、模型或 Provider 凭据。
 - `Operator`：宿主数据操作。`Back` 保留 receipt 补偿语义；Start、Next、Recheck、原生菜单动作和
   Back 同时接入 Blender 原生 Undo，`undo_post`/`redo_post` 会恢复模块 Session 并重绑定 RNA identity。
@@ -152,6 +153,13 @@ Orchestrator 返回的请求关联 Proposal 必须带当前 `instanceId`，Blend
 `Confirm New Provider Run`。Provider、
 request 改变、断开、终态或 Retry 都不会沿用先前确认。
 
+Protocol `1.4.0` 下，后台还按当前 Plan 拉取每条 revision thread 的 durable head。只有带已接受 Proposal
+和精确 `planContentSha256` 的 head 可以 `Switch`；切换要求当前 walkthrough 无 receipt、无待审 Proposal
+或活动 Run，只替换 idle Session 并跟随对应历史，不执行 action。`Fork` 把活动已接受 lineage 固定为
+source 并创建 turn 1；`Merge` 自动清空普通草稿、只引用目标 Plan root，并把选中的另一条已接受 head
+作为 source。Runtime 负责唯一共同祖先、三方合并与冲突拒绝；Blender 不提供手工覆盖冲突的旁路。
+生成的 merge Proposal 显示 source 与 `mergeBaseRequestId`，仍须 Accept/Reject。
+
 确认后 transport 只发送一个短 POST，并轮询版本化 Run 状态。Run 的 queued/generating/needs_revision/
 failed/interrupted 状态只更新应用/UI 状态；`proposal_created` 仍通过既有 Companion delivery 建立只读
 preview。同一实例已有活动 Run 或未决 Proposal 时 Runtime 拒绝新 Run；失败/重启后的 Retry 使用新 UUID
@@ -173,7 +181,7 @@ Provider Proposal。队列为活动/已知 Provider 结果保留容量；队列�
 不变。没有可验证 `planDiff.basePlan` 的旧版 request-linked Proposal 仍能查看和 Reject，但 Accept 在 UI
 与 Controller 两层 fail closed。
 
-后台 transport 还会读取当前 thread 的
+后台 transport 还会读取当前 Plan 的 branch heads 和当前 thread 的
 最新历史页；主线程验证 request/proposal/diff/decision 关系并在 Sidebar 显示最近三轮。用户可展开
 全部已加载轮次，或通过 `Load Older Turns` 使用 `beforeTurn` 继续向前分页。历史是只读审查事实，
 不会调用场景 API。折叠 Revision Workspace 或使用 `Hide Guidance` 都不会丢失草稿、Run、历史、执行进度或场景状态。

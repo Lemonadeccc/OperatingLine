@@ -31,6 +31,7 @@ import {
   guideReplanSubmissionSchema,
   guideRevisionRequestListSchema,
   guideRevisionRequestSchema,
+  guideRevisionBranchListRequestSchema,
   guideRevisionThreadHistoryRequestSchema,
   planningContextRequestSchema,
   planningContextSchema,
@@ -76,6 +77,10 @@ import {
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
 import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
+import {
+  createGuideRevisionBranchList,
+  validateGuideRevisionOperation,
+} from './guide-revision-branches.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import {
@@ -456,6 +461,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         revisionThread: NonNullable<
           ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
         >;
+        revisionOperation?: ReturnType<
+          typeof guideRevisionRequestSchema.parse
+        >['revisionOperation'];
+        mergeBaseRequestId?: string;
       };
       planning?: PlanningIntent;
     }): { proposal: GuideProposal; planningQuality: PlanningQualityReport } => {
@@ -525,6 +534,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           : {
               revisionRequestId: input.replan.requestId,
               revisionThread: input.replan.revisionThread,
+              revisionOperation: input.replan.revisionOperation ?? { kind: 'revise' },
+              ...(input.replan.mergeBaseRequestId === undefined
+                ? {}
+                : { mergeBaseRequestId: input.replan.mergeBaseRequestId }),
             }),
         ...(input.goalRequestId === undefined ? {} : { goalRequestId: input.goalRequestId }),
         planDiff:
@@ -564,6 +577,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       goalRequestId: proposal.goalRequestId ?? null,
       revisionRequestId: proposal.revisionRequestId ?? null,
       revisionThread: proposal.revisionThread ?? null,
+      revisionOperation: proposal.revisionOperation ?? null,
+      mergeBaseRequestId: proposal.mergeBaseRequestId ?? null,
       planDiff: proposal.planDiff ?? null,
       planningQuality,
     });
@@ -951,6 +966,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               {
                 type: 'text',
                 text: JSON.stringify(createGuideRevisionThreadHistory(database, request)),
+              },
+            ],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.replan.branches.list',
+        {
+          description:
+            'List durable revision branch heads for one exact host instance and Plan id.',
+          inputSchema: guideRevisionBranchListRequestSchema,
+        },
+        async (requestInput) => {
+          const request = guideRevisionBranchListRequestSchema.parse(requestInput);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(createGuideRevisionBranchList(database, request)),
               },
             ],
           };
@@ -1404,6 +1439,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/replan/branches', async (request, reply) => {
+      const parsedRequest = guideRevisionBranchListRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply
+          .code(400)
+          .send({ error: 'invalid_request', issues: parsedRequest.error.issues });
+      }
+      try {
+        return createGuideRevisionBranchList(database, parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'revision_branch_list_invalid',
+          message: error instanceof Error ? error.message : 'Unknown revision branch error',
+        });
+      }
+    });
     runtimeApp.post('/api/v1/replan/propose', async (request, reply) => {
       const parsedSubmission = guideReplanSubmissionSchema.safeParse(request.body);
       if (!parsedSubmission.success) {
@@ -1525,13 +1576,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send({ error: 'invalid_revision_request', issues: parsedRequest.error.issues });
       }
       try {
-        validateGuideRevisionRequest(
-          parsedRequest.data,
-          actionCatalogRegistry.get({
-            targetAdapterId: parsedRequest.data.adapterId,
-            catalogVersion: parsedRequest.data.catalogVersion,
-          }),
-        );
+        const catalog = actionCatalogRegistry.get({
+          targetAdapterId: parsedRequest.data.adapterId,
+          catalogVersion: parsedRequest.data.catalogVersion,
+        });
+        validateGuideRevisionRequest(parsedRequest.data, catalog);
         if (database.getGuideRevisionRequest(parsedRequest.data.requestId) === null) {
           const thread = parsedRequest.data.revisionThread;
           const rawHead =
@@ -1557,6 +1606,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               ? null
               : guideProposalDecisionSchema.parse(rawParentDecision);
           validateGuideRevisionThread(parsedRequest.data, head, parentProposal, parentDecision);
+          validateGuideRevisionOperation(database, parsedRequest.data, catalog);
         }
       } catch (error) {
         return reply.code(422).send({
@@ -1663,6 +1713,12 @@ export {
   computePlanContentSha256,
 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
+export {
+  computeGuidePlanThreeWayMerge,
+  createGuideRevisionBranchList,
+  resolveGuideRevisionMergeContext,
+  validateGuideRevisionOperation,
+} from './guide-revision-branches.js';
 export { operatingLineMcpInstructions } from './mcp-instructions.js';
 export { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 export {
