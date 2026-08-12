@@ -46,6 +46,9 @@ try {
     'operator',
     'menu-add',
     'menu-mesh',
+    'menu-cube',
+    'menu-icosphere',
+    'menu-torus',
     'menu-cone',
     'menu-cylinder',
   ];

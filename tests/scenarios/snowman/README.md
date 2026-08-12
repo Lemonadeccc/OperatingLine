@@ -78,7 +78,7 @@ Blender Companion 对这些通用动作的实际执行与补偿必须由 Blender
 ## 后续产品能力（本次不包含）
 
 - **任意目标的完整 Blender 能力**：当前 Planner 可以生成目录约束的任务树，但目录尚未覆盖
-  Cube/Icosphere/Torus、Edit Mode、Modifier、Sculpt、UV 和 Geometry Nodes 等工作流。
+  Edit Mode、Modifier、Sculpt、UV 和 Geometry Nodes 等工作流。
 - **修订工作区增强**：在已完成的线性多轮 thread 与 Plan diff 上增加完整消息历史、分支/合并策略
   和参数编辑。
 - **人工确认策略**：对高风险动作、失败重试和无法补偿的步骤提供明确审批点。

@@ -34,6 +34,7 @@ spec.loader.exec_module(operating_line)
 
 from operating_line_extension.operating_line.infrastructure import (  # noqa: E402
     CompanionTransport,
+    action_registry,
     overlay_enabled,
     remove_factory_startup_objects,
     validate_companion_url,
@@ -85,6 +86,11 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     ALLOWED_ACTIONS,
     COLLECTION_NAME,
     OWNER_VALUE,
+)
+from operating_line_extension.operating_line.infrastructure.snowman_actions.model import (  # noqa: E402
+    validate_cube,
+    validate_icosphere,
+    validate_torus,
 )
 
 
@@ -173,6 +179,468 @@ def assert_plan_rejected(steps: list[dict], message: str) -> None:
         assert message in str(error), f"Expected {message!r}, received {error!r}"
     else:
         raise AssertionError(f"Plan should be rejected with {message!r}")
+
+
+def assert_cube_action_round_trip() -> None:
+    cube_name = "OperatingLine.CubeRoundTrip"
+    cube_step = step(
+        "cube.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_cube",
+            "arguments": {
+                "resourceId": "cube.round_trip",
+                "objectName": cube_name,
+                "size": 2.5,
+                "location": [1.0, -2.0, 3.0],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), cube_step])
+    session = DemoSession(root, action_registry(root))
+
+    session.start()
+    assert session.next() is not None
+    cube = bpy.data.objects.get(cube_name)
+    assert cube is not None and cube.type == "MESH"
+    assert tuple(round(value, 6) for value in cube.location) == (1.0, -2.0, 3.0)
+    assert tuple(round(value, 6) for value in cube.dimensions) == (2.5, 2.5, 2.5)
+    receipt = session.receipts["cube.create"]
+    assert receipt.action_name == "blender.mesh.create_cube"
+    assert {item.logical_id for item in receipt.created} >= {
+        "cube.round_trip",
+        "cube.round_trip.mesh",
+    }
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_cube_resource_id_boundaries() -> None:
+    arguments = {
+        "resourceId": "c" * 180,
+        "objectName": "OperatingLine.BoundaryCube",
+        "size": 1.0,
+        "location": [0.0, 0.0, 0.0],
+    }
+    primitives = validate_cube(arguments)
+    assert primitives[0].logical_id == arguments["resourceId"]
+
+    try:
+        validate_cube({**arguments, "resourceId": "c" * 181})
+    except ValueError as error:
+        assert "arguments.resourceId" in str(error)
+    else:
+        raise AssertionError("Cube resourceId longer than 180 characters must fail")
+
+
+def assert_cube_guided_menu_round_trip() -> None:
+    cube_name = "OperatingLine.GuidedCubeRoundTrip"
+    cube_step = step(
+        "cube.guided",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_cube",
+            "arguments": {
+                "resourceId": "cube.guided_round_trip",
+                "objectName": cube_name,
+                "size": 1.75,
+                "location": [-1.0, 2.0, 0.5],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), cube_step])
+    session = DemoSession(root, action_registry(root), plan_id="cube-guided", revision=1)
+    replace_operating_line_session(session)
+
+    assert bpy.ops.operating_line.start() == {"FINISHED"}
+    snapshot = native_menu_snapshot()
+    assert snapshot is not None
+    assert snapshot.step_id == "cube.guided"
+    assert snapshot.items[-1].label == "Cube"
+    assert reveal_native_menu("Add")
+    assert reveal_native_menu("Mesh")
+    assert bpy.ops.operating_line.guided_menu_action(
+        step_id="cube.guided",
+        operator_id="mesh.primitive_cube_add",
+    ) == {"FINISHED"}
+    cube = bpy.data.objects.get(cube_name)
+    assert cube is not None
+    assert tuple(round(value, 6) for value in cube.dimensions) == (1.75, 1.75, 1.75)
+    guided_receipt = session.receipts["cube.guided"]
+    guided_signature = (
+        guided_receipt.action_name,
+        tuple(item.logical_id for item in guided_receipt.created),
+        tuple(item.display_name for item in guided_receipt.created),
+    )
+
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.ops.operating_line.next() == {"FINISHED"}
+    automatic_receipt = session.receipts["cube.guided"]
+    assert (
+        automatic_receipt.action_name,
+        tuple(item.logical_id for item in automatic_receipt.created),
+        tuple(item.display_name for item in automatic_receipt.created),
+    ) == guided_signature
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(cube_name) is None
+    assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+    assert overlay_enabled() is False
+    assert native_menu_guidance_enabled() is False
+
+
+def assert_icosphere_action_round_trip() -> None:
+    object_name = "OperatingLine.IcosphereRoundTrip"
+    radius = 1.25
+    ico_step = step(
+        "icosphere.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_icosphere",
+            "arguments": {
+                "resourceId": "icosphere.round_trip",
+                "objectName": object_name,
+                "subdivisions": 2,
+                "radius": radius,
+                "location": [-1.0, 2.0, 3.5],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), ico_step])
+    session = DemoSession(root, action_registry(root))
+
+    session.start()
+    assert session.next() is not None
+    icosphere = bpy.data.objects.get(object_name)
+    assert icosphere is not None and icosphere.type == "MESH"
+    assert tuple(round(value, 6) for value in icosphere.location) == (-1.0, 2.0, 3.5)
+    assert len(icosphere.data.vertices) == 42
+    assert len(icosphere.data.polygons) == 80
+    assert all(
+        math.isclose(vertex.co.length, radius, abs_tol=1e-5)
+        for vertex in icosphere.data.vertices
+    )
+    receipt = session.receipts["icosphere.create"]
+    assert receipt.action_name == "blender.mesh.create_icosphere"
+    assert {item.logical_id for item in receipt.created} >= {
+        "icosphere.round_trip",
+        "icosphere.round_trip.mesh",
+    }
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_icosphere_argument_boundaries() -> None:
+    arguments = {
+        "resourceId": "i" * 180,
+        "objectName": "OperatingLine.BoundaryIcosphere",
+        "subdivisions": 1,
+        "radius": 1.0,
+        "location": [0.0, 0.0, 0.0],
+    }
+    assert validate_icosphere(arguments)[0].subdivisions == 1
+    assert validate_icosphere({**arguments, "subdivisions": 5})[0].subdivisions == 5
+
+    for invalid, expected in (
+        ({**arguments, "resourceId": "i" * 181}, "arguments.resourceId"),
+        ({**arguments, "subdivisions": 0}, "integer in [1, 5]"),
+        ({**arguments, "subdivisions": 6}, "integer in [1, 5]"),
+        ({**arguments, "radius": 0.00001}, "arguments.radius"),
+    ):
+        try:
+            validate_icosphere(invalid)
+        except ValueError as error:
+            assert expected in str(error)
+        else:
+            raise AssertionError(f"Invalid Icosphere arguments must fail: {invalid}")
+
+
+def assert_icosphere_guided_menu_round_trip() -> None:
+    object_name = "OperatingLine.GuidedIcosphereRoundTrip"
+    ico_step = step(
+        "icosphere.guided",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_icosphere",
+            "arguments": {
+                "resourceId": "icosphere.guided_round_trip",
+                "objectName": object_name,
+                "subdivisions": 2,
+                "radius": 1.5,
+                "location": [1.0, -2.0, 0.5],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), ico_step])
+    session = DemoSession(
+        root,
+        action_registry(root),
+        plan_id="icosphere-guided",
+        revision=1,
+    )
+    replace_operating_line_session(session)
+
+    assert bpy.ops.operating_line.start() == {"FINISHED"}
+    snapshot = native_menu_snapshot()
+    assert snapshot is not None
+    assert snapshot.step_id == "icosphere.guided"
+    assert snapshot.items[-1].label == "Ico Sphere"
+    assert reveal_native_menu("Add")
+    assert reveal_native_menu("Mesh")
+    assert bpy.ops.operating_line.guided_menu_action(
+        step_id="icosphere.guided",
+        operator_id="mesh.primitive_ico_sphere_add",
+    ) == {"FINISHED"}
+    icosphere = bpy.data.objects.get(object_name)
+    assert icosphere is not None
+    assert len(icosphere.data.vertices) == 42
+    guided_receipt = session.receipts["icosphere.guided"]
+    guided_signature = (
+        guided_receipt.action_name,
+        tuple(item.logical_id for item in guided_receipt.created),
+        tuple(item.display_name for item in guided_receipt.created),
+    )
+
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.ops.operating_line.next() == {"FINISHED"}
+    automatic_receipt = session.receipts["icosphere.guided"]
+    assert (
+        automatic_receipt.action_name,
+        tuple(item.logical_id for item in automatic_receipt.created),
+        tuple(item.display_name for item in automatic_receipt.created),
+    ) == guided_signature
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(object_name) is None
+
+
+def assert_torus_action_round_trip() -> None:
+    object_name = "OperatingLine.TorusRoundTrip"
+    major_segments = 16
+    minor_segments = 8
+    major_radius = 2.0
+    minor_radius = 0.5
+    torus_step = step(
+        "torus.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_torus",
+            "arguments": {
+                "resourceId": "torus.round_trip",
+                "objectName": object_name,
+                "majorSegments": major_segments,
+                "minorSegments": minor_segments,
+                "majorRadius": major_radius,
+                "minorRadius": minor_radius,
+                "location": [1.0, -2.0, 3.0],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), torus_step])
+    session = DemoSession(root, action_registry(root))
+
+    session.start()
+    assert session.next() is not None
+    torus = bpy.data.objects.get(object_name)
+    assert torus is not None and torus.type == "MESH"
+    assert tuple(round(value, 6) for value in torus.location) == (1.0, -2.0, 3.0)
+    assert len(torus.data.vertices) == major_segments * minor_segments
+    assert len(torus.data.polygons) == major_segments * minor_segments
+    assert all(len(polygon.vertices) == 4 for polygon in torus.data.polygons)
+    assert tuple(round(value, 6) for value in torus.dimensions) == (5.0, 5.0, 1.0)
+    assert all(
+        math.isclose(
+            math.hypot(
+                math.hypot(vertex.co.x, vertex.co.y) - major_radius,
+                vertex.co.z,
+            ),
+            minor_radius,
+            abs_tol=1e-5,
+        )
+        for vertex in torus.data.vertices
+    )
+    for polygon in torus.data.polygons:
+        center = polygon.center
+        radial_length = math.hypot(center.x, center.y)
+        outward_x = center.x - major_radius * center.x / radial_length
+        outward_y = center.y - major_radius * center.y / radial_length
+        outward_dot = (
+            polygon.normal.x * outward_x
+            + polygon.normal.y * outward_y
+            + polygon.normal.z * center.z
+        )
+        assert outward_dot > 0.0
+    receipt = session.receipts["torus.create"]
+    assert receipt.action_name == "blender.mesh.create_torus"
+    assert {item.logical_id for item in receipt.created} >= {
+        "torus.round_trip",
+        "torus.round_trip.mesh",
+    }
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_torus_maximum_topology() -> None:
+    object_name = "OperatingLine.MaximumTorus"
+    torus_step = step(
+        "torus.maximum",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_torus",
+            "arguments": {
+                "resourceId": "torus.maximum",
+                "objectName": object_name,
+                "majorSegments": 128.0,
+                "minorSegments": 64.0,
+                "majorRadius": 2.0,
+                "minorRadius": 0.5,
+                "location": [0.0, 0.0, 0.0],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), torus_step])
+    session = DemoSession(root, action_registry(root))
+
+    session.start()
+    assert session.next() is not None
+    torus = bpy.data.objects.get(object_name)
+    assert torus is not None and torus.type == "MESH"
+    assert len(torus.data.vertices) == 8192
+    assert len(torus.data.edges) == 16384
+    assert len(torus.data.polygons) == 8192
+    assert all(len(polygon.vertices) == 4 for polygon in torus.data.polygons)
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_torus_argument_boundaries() -> None:
+    arguments = {
+        "resourceId": "t" * 180,
+        "objectName": "OperatingLine.BoundaryTorus",
+        "majorSegments": 3,
+        "minorSegments": 3,
+        "majorRadius": 2.0,
+        "minorRadius": 0.5,
+        "location": [0.0, 0.0, 0.0],
+    }
+    primitive = validate_torus(arguments)[0]
+    assert primitive.major_segments == 3
+    assert primitive.minor_segments == 3
+    maximum = validate_torus(
+        {**arguments, "majorSegments": 128, "minorSegments": 64}
+    )[0]
+    assert maximum.major_segments == 128
+    assert maximum.minor_segments == 64
+    integral_float = validate_torus(
+        {**arguments, "majorSegments": 16.0, "minorSegments": 8.0}
+    )[0]
+    assert integral_float.major_segments == 16
+    assert integral_float.minor_segments == 8
+    assert validate_icosphere(
+        {
+            "resourceId": "icosphere.integral_float",
+            "objectName": "OperatingLine.IntegralFloatIcosphere",
+            "subdivisions": 2.0,
+            "radius": 1.0,
+            "location": [0.0, 0.0, 0.0],
+        }
+    )[0].subdivisions == 2
+
+    for invalid, expected in (
+        ({**arguments, "resourceId": "t" * 181}, "arguments.resourceId"),
+        ({**arguments, "majorSegments": 2}, "integer in [3, 128]"),
+        ({**arguments, "majorSegments": 129}, "integer in [3, 128]"),
+        ({**arguments, "minorSegments": 2}, "integer in [3, 64]"),
+        ({**arguments, "minorSegments": 65}, "integer in [3, 64]"),
+        ({**arguments, "majorSegments": 16.5}, "integer in [3, 128]"),
+        ({**arguments, "minorSegments": 8.5}, "integer in [3, 64]"),
+        ({**arguments, "majorRadius": 0.00001}, "arguments.majorRadius"),
+        ({**arguments, "minorRadius": 0.00001}, "arguments.minorRadius"),
+    ):
+        try:
+            validate_torus(invalid)
+        except ValueError as error:
+            assert expected in str(error)
+        else:
+            raise AssertionError(f"Invalid Torus arguments must fail: {invalid}")
+
+
+def assert_torus_guided_menu_round_trip() -> None:
+    object_name = "OperatingLine.GuidedTorusRoundTrip"
+    torus_step = step(
+        "torus.guided",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_torus",
+            "arguments": {
+                "resourceId": "torus.guided_round_trip",
+                "objectName": object_name,
+                "majorSegments": 16,
+                "minorSegments": 8,
+                "majorRadius": 2.0,
+                "minorRadius": 0.5,
+                "location": [1.0, -2.0, 0.5],
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), torus_step])
+    session = DemoSession(root, action_registry(root), plan_id="torus-guided", revision=1)
+    replace_operating_line_session(session)
+
+    assert bpy.ops.operating_line.start() == {"FINISHED"}
+    snapshot = native_menu_snapshot()
+    assert snapshot is not None
+    assert snapshot.step_id == "torus.guided"
+    assert snapshot.items[-1].label == "Torus"
+    assert reveal_native_menu("Add")
+    assert reveal_native_menu("Mesh")
+    assert bpy.ops.operating_line.guided_menu_action(
+        step_id="torus.guided",
+        operator_id="mesh.primitive_torus_add",
+    ) == {"FINISHED"}
+    torus = bpy.data.objects.get(object_name)
+    assert torus is not None
+    assert len(torus.data.vertices) == 128
+    guided_receipt = session.receipts["torus.guided"]
+    guided_signature = (
+        guided_receipt.action_name,
+        tuple(item.logical_id for item in guided_receipt.created),
+        tuple(item.display_name for item in guided_receipt.created),
+    )
+
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.ops.operating_line.next() == {"FINISHED"}
+    automatic_receipt = session.receipts["torus.guided"]
+    assert (
+        automatic_receipt.action_name,
+        tuple(item.logical_id for item in automatic_receipt.created),
+        tuple(item.display_name for item in automatic_receipt.created),
+    ) == guided_signature
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert bpy.data.objects.get(object_name) is None
 
 
 def assert_companion_and_plan_semantics() -> None:
@@ -2497,7 +2965,7 @@ def main() -> None:
     assert sum(
         recipe["guidance"]["kind"] == "native_path"
         for recipe in INTERACTION_CATALOG["recipes"]
-    ) == 4
+    ) == 7
     assert (ADAPTER_ROOT / "LICENSE").read_text(encoding="utf-8") == (
         REPO_ROOT / "LICENSE"
     ).read_text(encoding="utf-8")
@@ -2543,6 +3011,55 @@ def main() -> None:
         "Mesh",
         "Planned parts",
     )
+    cube_recipe = next(
+        recipe
+        for recipe in INTERACTION_CATALOG["recipes"]
+        if recipe["actionName"] == "blender.mesh.create_cube"
+    )
+    assert tuple(item["label"] for item in cube_recipe["guidance"]["steps"]) == (
+        "Layout",
+        "Add",
+        "Mesh",
+        "Cube",
+    )
+    assert cube_recipe["guidance"]["execution"]["operatorId"] == (
+        "mesh.primitive_cube_add"
+    )
+    assert INTERACTION_CATALOG["hostVersionRange"] == (
+        ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0"
+    )
+    icosphere_recipe = next(
+        recipe
+        for recipe in INTERACTION_CATALOG["recipes"]
+        if recipe["actionName"] == "blender.mesh.create_icosphere"
+    )
+    assert tuple(
+        item["label"] for item in icosphere_recipe["guidance"]["steps"]
+    ) == ("Layout", "Add", "Mesh", "Ico Sphere")
+    assert icosphere_recipe["guidance"]["execution"]["operatorId"] == (
+        "mesh.primitive_ico_sphere_add"
+    )
+    torus_recipe = next(
+        recipe
+        for recipe in INTERACTION_CATALOG["recipes"]
+        if recipe["actionName"] == "blender.mesh.create_torus"
+    )
+    assert tuple(item["label"] for item in torus_recipe["guidance"]["steps"]) == (
+        "Layout",
+        "Add",
+        "Mesh",
+        "Torus",
+    )
+    assert torus_recipe["guidance"]["execution"]["operatorId"] == (
+        "mesh.primitive_torus_add"
+    )
+    assert_torus_argument_boundaries()
+    assert_torus_action_round_trip()
+    assert_torus_maximum_topology()
+    assert_icosphere_argument_boundaries()
+    assert_icosphere_action_round_trip()
+    assert_cube_resource_id_boundaries()
+    assert_cube_action_round_trip()
 
     session_before_registration = operating_line.get_session()
     operating_line.register()
@@ -2566,6 +3083,9 @@ def main() -> None:
         "operating_line_goal_workspace_expanded",
     )
     assert bpy.context.window_manager.operating_line_goal_workspace_expanded is True
+    assert_torus_guided_menu_round_trip()
+    assert_icosphere_guided_menu_round_trip()
+    assert_cube_guided_menu_round_trip()
     assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
     assert_companion_and_plan_semantics()
 

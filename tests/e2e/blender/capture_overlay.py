@@ -41,6 +41,9 @@ OUTPUT_NAMES = {
     "operator": "guidance-operator-fallback.png",
     "menu-add": "guidance-menu-add.png",
     "menu-mesh": "guidance-menu-mesh.png",
+    "menu-cube": "guidance-menu-cube.png",
+    "menu-icosphere": "guidance-menu-icosphere.png",
+    "menu-torus": "guidance-menu-torus.png",
     "menu-cone": "guidance-menu-cone.png",
     "menu-cylinder": "guidance-menu-cylinder.png",
 }
@@ -393,7 +396,7 @@ def configure_state():
             "targetInstanceId": companion.instance_id,
             "revisionRequestId": request_id,
             "revisionThread": revision_thread,
-            "catalogVersion": "1.4.0",
+            "catalogVersion": "1.7.0",
             "plan": plan,
             "planDiff": plan_diff,
             "proposedAt": "2026-08-04T12:00:00Z",
@@ -403,7 +406,7 @@ def configure_state():
             "protocolVersion": "1.1.0",
             "requestId": request_id,
             "adapterId": "blender",
-            "catalogVersion": "1.4.0",
+            "catalogVersion": "1.7.0",
             "instanceId": companion.instance_id,
             "basePlan": base_plan,
             "references": [
@@ -491,6 +494,98 @@ def configure_state():
         if bpy.context.window is not None:
             bpy.context.window.scene = render_scene
         render_scene.frame_set(20)
+    elif STATE == "menu-cube":
+        plan_path = ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
+        cube_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        cube_plan["id"] = "cube-menu-visual"
+        cube_plan["revision"] = 1
+        cube_step = next(
+            step
+            for step in cube_plan["steps"]
+            if step["id"] == "snowman.scene.ground"
+        )
+        cube_step["title"] = "Create one cube"
+        cube_step["intent"] = "Create a cube from the guided native menu"
+        cube_step["action"]["name"] = "blender.mesh.create_cube"
+        cube_step["action"]["arguments"]["objectName"] = "OperatingLine.VisualCube"
+        cube_step["action"]["arguments"]["size"] = 2.0
+        cube_step["anchors"][1] = {
+            "kind": "operator",
+            "operatorId": "mesh.primitive_cube_add",
+            "menuPath": ["Add", "Mesh", "Cube"],
+        }
+        assert extension.get_companion().install_plan(cube_plan)
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        cube_session = extension.get_session()
+        assert cube_session.steps[0].id == "snowman.scene.ground"
+        menu_path = interaction_guidance_snapshot()
+        assert menu_path is not None and menu_path.native
+        assert menu_path.items[-1].label == "Cube"
+        assert menu_path.operator_id == "mesh.primitive_cube_add"
+    elif STATE == "menu-icosphere":
+        plan_path = ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
+        icosphere_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        icosphere_plan["id"] = "icosphere-menu-visual"
+        icosphere_plan["revision"] = 1
+        icosphere_step = next(
+            step
+            for step in icosphere_plan["steps"]
+            if step["id"] == "snowman.scene.ground"
+        )
+        icosphere_step["title"] = "Create one Icosphere"
+        icosphere_step["intent"] = "Create an Icosphere from the guided native menu"
+        icosphere_step["action"]["name"] = "blender.mesh.create_icosphere"
+        arguments = icosphere_step["action"]["arguments"]
+        arguments["objectName"] = "OperatingLine.VisualIcosphere"
+        del arguments["size"]
+        arguments["subdivisions"] = 2
+        arguments["radius"] = 1.5
+        icosphere_step["anchors"][1] = {
+            "kind": "operator",
+            "operatorId": "mesh.primitive_ico_sphere_add",
+            "menuPath": ["Add", "Mesh", "Ico Sphere"],
+        }
+        assert extension.get_companion().install_plan(icosphere_plan)
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        icosphere_session = extension.get_session()
+        assert icosphere_session.steps[0].id == "snowman.scene.ground"
+        menu_path = interaction_guidance_snapshot()
+        assert menu_path is not None and menu_path.native
+        assert menu_path.items[-1].label == "Ico Sphere"
+        assert menu_path.operator_id == "mesh.primitive_ico_sphere_add"
+    elif STATE == "menu-torus":
+        plan_path = ADAPTER_ROOT / "operating_line" / "resources" / "snowman.plan.json"
+        torus_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        torus_plan["id"] = "torus-menu-visual"
+        torus_plan["revision"] = 1
+        torus_step = next(
+            step
+            for step in torus_plan["steps"]
+            if step["id"] == "snowman.scene.ground"
+        )
+        torus_step["title"] = "Create one torus"
+        torus_step["intent"] = "Create a torus from the guided native menu"
+        torus_step["action"]["name"] = "blender.mesh.create_torus"
+        arguments = torus_step["action"]["arguments"]
+        arguments["objectName"] = "OperatingLine.VisualTorus"
+        del arguments["size"]
+        arguments["majorSegments"] = 48
+        arguments["minorSegments"] = 12
+        arguments["majorRadius"] = 2.0
+        arguments["minorRadius"] = 0.5
+        torus_step["anchors"][1] = {
+            "kind": "operator",
+            "operatorId": "mesh.primitive_torus_add",
+            "menuPath": ["Add", "Mesh", "Torus"],
+        }
+        assert extension.get_companion().install_plan(torus_plan)
+        assert bpy.ops.operating_line.start() == {"FINISHED"}
+        torus_session = extension.get_session()
+        assert torus_session.steps[0].id == "snowman.scene.ground"
+        menu_path = interaction_guidance_snapshot()
+        assert menu_path is not None and menu_path.native
+        assert menu_path.items[-1].label == "Torus"
+        assert menu_path.operator_id == "mesh.primitive_torus_add"
     elif STATE in {"menu-add", "menu-mesh", "menu-cone", "menu-cylinder"}:
         target_step_id = {
             "menu-add": "snowman.model.body_lower",
@@ -547,7 +642,15 @@ def prepare_view():
         space.region_3d.view_distance = 10.5
         space.region_3d.view_rotation = Quaternion((0.81, 0.37, 0.16, 0.42))
 
-    if STATE in {"menu-add", "menu-mesh", "menu-cone", "menu-cylinder"}:
+    if STATE in {
+        "menu-add",
+        "menu-mesh",
+        "menu-cube",
+        "menu-icosphere",
+        "menu-torus",
+        "menu-cone",
+        "menu-cylinder",
+    }:
         bpy.context.preferences.view.show_tooltips = False
         bpy.context.window.cursor_warp(1400, 900)
         with bpy.context.temp_override(area=area, region=region, space_data=space):
@@ -624,7 +727,7 @@ def capture_and_quit():
         assert_active_session_preserved()
     if STATE == "forward":
         shutil.copyfile(OUTPUT, SMOKE_OUTPUT)
-    if STATE == "menu-mesh":
+    if STATE == "menu-torus":
         shutil.copyfile(OUTPUT, DOCS_MENU_OUTPUT)
     print(f"OperatingLine visual state captured: {OUTPUT.name}", flush=True)
 
@@ -686,6 +789,10 @@ def assert_guidance_pixels():
         # red previous/BACK menu target until a nested menu has opened.
         assert 0.00003 < completed < 0.0003
         assert back < 0.00003
+    elif STATE in {"menu-cube", "menu-icosphere", "menu-torus"}:
+        assert completed > 0.00005
+        assert back > 0.0001
+        assert next_step > 0.0003
     elif STATE in {
         "forward",
         "back",

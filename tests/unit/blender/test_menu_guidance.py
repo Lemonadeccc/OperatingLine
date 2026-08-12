@@ -67,7 +67,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             snapshot.recipe_id,
             "blender.mesh.create_uv_sphere.native",
         )
-        self.assertEqual(snapshot.catalog_version, "1.1.0")
+        self.assertEqual(snapshot.catalog_version, "1.4.0")
         self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
         self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
@@ -168,11 +168,22 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         self.assertTrue(plane_snapshot.accepts("mesh.primitive_plane_add"))
 
         for action_name, operator_id, label in (
+            (
+                "blender.mesh.create_icosphere",
+                "mesh.primitive_ico_sphere_add",
+                "Ico Sphere",
+            ),
+            ("blender.mesh.create_cube", "mesh.primitive_cube_add", "Cube"),
             ("blender.mesh.create_cone", "mesh.primitive_cone_add", "Cone"),
             (
                 "blender.mesh.create_cylinder",
                 "mesh.primitive_cylinder_add",
                 "Cylinder",
+            ),
+            (
+                "blender.mesh.create_torus",
+                "mesh.primitive_torus_add",
+                "Torus",
             ),
         ):
             primitive = action_step(
@@ -184,7 +195,12 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             assert primitive_snapshot is not None
             self.assertEqual(primitive_snapshot.items[-1].label, label)
             self.assertTrue(primitive_snapshot.accepts(operator_id))
-            self.assertFalse(primitive_snapshot.accepts("mesh.primitive_cube_add"))
+            wrong_operator = (
+                "mesh.primitive_cube_add"
+                if operator_id != "mesh.primitive_cube_add"
+                else "mesh.primitive_ico_sphere_add"
+            )
+            self.assertFalse(primitive_snapshot.accepts(wrong_operator))
 
     def test_marks_semantic_paths_locked_and_refuses_native_execution(self) -> None:
         semantic = action_step(

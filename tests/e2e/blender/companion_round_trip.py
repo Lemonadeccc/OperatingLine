@@ -208,7 +208,7 @@ def main() -> None:
         assert not session.started and not session.receipts
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
-        assert controller.proposed_plan["catalogVersion"] == "1.4.0"
+        assert controller.proposed_plan["catalogVersion"] == "1.7.0"
         first_thread = controller.proposed_plan["revisionThread"]
         assert first_thread == {
             "threadId": revision_request_id,

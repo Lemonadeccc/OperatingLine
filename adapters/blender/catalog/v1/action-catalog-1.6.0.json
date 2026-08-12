@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.7.0",
+  "catalogVersion": "1.6.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful part per leaf for teaching and use batches only when atomic grouped creation is intentional. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, and cylinders or bounded primitive batches; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful part per leaf for teaching and use batches only when atomic grouped creation is intentional. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -29,7 +29,6 @@
         "blender.mesh.create_cube",
         "blender.mesh.create_cone",
         "blender.mesh.create_cylinder",
-        "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch"
       ]
     },
@@ -80,7 +79,7 @@
     {
       "id": "geometry.primitive_assembly",
       "title": "Primitive assembly",
-      "description": "Construct an owned model from supported cube, UV-sphere, Icosphere, cone, cylinder, and torus primitives.",
+      "description": "Construct an owned model from supported cube, UV-sphere, Icosphere, cone, and cylinder primitives.",
       "selectionGuidance": "Select when the requested form can be represented by individual supported primitives or an intentionally atomic bounded batch.",
       "actionNames": [
         "blender.mesh.create_uv_sphere",
@@ -88,7 +87,6 @@
         "blender.mesh.create_cube",
         "blender.mesh.create_cone",
         "blender.mesh.create_cylinder",
-        "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch"
       ]
     },
@@ -499,94 +497,6 @@
             "minItems": 3,
             "maxItems": 3,
             "description": "World-space [x, y, z] end point; start and end must differ."
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "create",
-          "resourceType": "OBJECT",
-          "argumentPath": "resourceId",
-          "derivedResourceTypes": ["MESH"],
-          "description": "Creates the object resource and a resourceId.mesh datablock."
-        },
-        {
-          "access": "create",
-          "resourceType": "COLLECTION",
-          "argumentPath": "$managed.snowman.collection",
-          "derivedResourceTypes": [],
-          "description": "The first geometry action creates the shared managed collection if needed."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.mesh.create_torus",
-      "title": "Create one torus",
-      "description": "Creates one owned torus mesh object around the local Z axis in the adapter-managed collection.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "resourceId",
-          "objectName",
-          "majorSegments",
-          "minorSegments",
-          "majorRadius",
-          "minorRadius",
-          "location"
-        ],
-        "properties": {
-          "resourceId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "maxLength": 180,
-            "description": "Plan-unique logical object resource ID. The mesh uses the derived suffix .mesh."
-          },
-          "objectName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180,
-            "description": "Blender object name owned by OperatingLine."
-          },
-          "majorSegments": {
-            "type": "integer",
-            "minimum": 3,
-            "maximum": 128,
-            "description": "Segments around the major ring; capped below Blender's native limit to bound mesh size."
-          },
-          "minorSegments": {
-            "type": "integer",
-            "minimum": 3,
-            "maximum": 64,
-            "description": "Segments around each circular cross-section; capped below Blender's native limit to bound mesh size."
-          },
-          "majorRadius": {
-            "type": "number",
-            "minimum": 0.0001,
-            "maximum": 1000,
-            "description": "Distance from the local Z axis to the center of each circular cross-section."
-          },
-          "minorRadius": {
-            "type": "number",
-            "minimum": 0.0001,
-            "maximum": 1000,
-            "description": "Radius of each circular cross-section."
-          },
-          "location": {
-            "type": "array",
-            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
-            "minItems": 3,
-            "maxItems": 3,
-            "description": "World-space [x, y, z] center."
           }
         },
         "additionalProperties": false

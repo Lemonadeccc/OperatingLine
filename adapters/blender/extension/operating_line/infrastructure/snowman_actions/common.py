@@ -98,13 +98,14 @@ def integer(
     minimum: int = 1,
     maximum: int = 16384,
 ) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or not minimum <= value <= maximum
-    ):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be an integer in [{minimum}, {maximum}]")
-    return value
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise ValueError(f"{label} must be an integer in [{minimum}, {maximum}]")
+    result = int(value)
+    if not minimum <= result <= maximum:
+        raise ValueError(f"{label} must be an integer in [{minimum}, {maximum}]")
+    return result
 
 
 def vector(
@@ -130,8 +131,11 @@ def validate_adapter(adapter_id: str, action_name: str) -> None:
 ALLOWED_ACTIONS = frozenset(
     {
         "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_icosphere",
+        "blender.mesh.create_cube",
         "blender.mesh.create_cone",
         "blender.mesh.create_cylinder",
+        "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch",
         "blender.mesh.create_plane",
         "blender.material.create_and_assign",

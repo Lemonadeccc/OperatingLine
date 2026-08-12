@@ -30,9 +30,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.1.0")
-        self.assertEqual(catalog.action_catalog_version, "1.4.0")
-        self.assertEqual(len(catalog.recipes), 12)
+        self.assertEqual(catalog.catalog_version, "1.4.0")
+        self.assertEqual(catalog.action_catalog_version, "1.7.0")
+        self.assertEqual(
+            catalog.host_version_range,
+            ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
+        )
+        self.assertEqual(len(catalog.recipes), 15)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -42,9 +46,12 @@ class InteractionCatalogTests(unittest.TestCase):
             native,
             (
                 "blender.mesh.create_uv_sphere",
+                "blender.mesh.create_icosphere",
                 "blender.mesh.create_plane",
+                "blender.mesh.create_cube",
                 "blender.mesh.create_cone",
                 "blender.mesh.create_cylinder",
+                "blender.mesh.create_torus",
             ),
         )
         self.assertTrue(

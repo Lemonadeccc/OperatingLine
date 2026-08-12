@@ -7,7 +7,16 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.4.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.7.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.6.0' }).catalogVersion,
+    ).toBe('1.6.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.5.0' }).catalogVersion,
+    ).toBe('1.5.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.4.0' }).catalogVersion,
+    ).toBe('1.4.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.3.0' }).catalogVersion,
     ).toBe('1.3.0');

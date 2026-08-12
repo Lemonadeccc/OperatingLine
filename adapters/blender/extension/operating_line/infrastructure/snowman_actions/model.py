@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from math import cos, sin, tau
 from typing import Any
 
 import bmesh
@@ -18,6 +19,7 @@ from .common import (
     ensure_logical_ids_available,
     ensure_name_available,
     ensure_receipts_intact,
+    integer,
     logical_id,
     make_receipt,
     new_receipt_id,
@@ -45,6 +47,11 @@ class Primitive:
     start: tuple[float, float, float] | None = None
     end: tuple[float, float, float] | None = None
     size: float = 0.0
+    subdivisions: int = 0
+    major_radius: float = 0.0
+    minor_radius: float = 0.0
+    major_segments: int = 0
+    minor_segments: int = 0
 
 
 def _sphere(arguments: Mapping[str, Any], label: str) -> Primitive:
@@ -178,6 +185,100 @@ def validate_uv_sphere(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
     return primitives
 
 
+def validate_icosphere(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
+    fields = {"resourceId", "objectName", "subdivisions", "radius", "location"}
+    require_keys(arguments, fields, fields, "arguments")
+    primitives = (
+        Primitive(
+            kind="icosphere",
+            logical_id=logical_id(arguments["resourceId"], "arguments.resourceId"),
+            object_name=text(
+                arguments["objectName"],
+                "arguments.objectName",
+                prefix="OperatingLine.",
+            ),
+            subdivisions=integer(
+                arguments["subdivisions"],
+                "arguments.subdivisions",
+                minimum=1,
+                maximum=5,
+            ),
+            radius=number(
+                arguments["radius"],
+                "arguments.radius",
+                minimum=0.0001,
+                maximum=1000.0,
+            ),
+            location=vector(
+                arguments["location"],
+                "arguments.location",
+                3,
+                minimum=-1000.0,
+                maximum=1000.0,
+            ),
+        ),
+    )
+    ensure_logical_ids_available({}, _created_logical_ids(primitives))
+    return primitives
+
+
+def validate_torus(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
+    fields = {
+        "resourceId",
+        "objectName",
+        "majorSegments",
+        "minorSegments",
+        "majorRadius",
+        "minorRadius",
+        "location",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    primitives = (
+        Primitive(
+            kind="torus",
+            logical_id=logical_id(arguments["resourceId"], "arguments.resourceId"),
+            object_name=text(
+                arguments["objectName"],
+                "arguments.objectName",
+                prefix="OperatingLine.",
+            ),
+            major_segments=integer(
+                arguments["majorSegments"],
+                "arguments.majorSegments",
+                minimum=3,
+                maximum=128,
+            ),
+            minor_segments=integer(
+                arguments["minorSegments"],
+                "arguments.minorSegments",
+                minimum=3,
+                maximum=64,
+            ),
+            major_radius=number(
+                arguments["majorRadius"],
+                "arguments.majorRadius",
+                minimum=0.0001,
+                maximum=1000.0,
+            ),
+            minor_radius=number(
+                arguments["minorRadius"],
+                "arguments.minorRadius",
+                minimum=0.0001,
+                maximum=1000.0,
+            ),
+            location=vector(
+                arguments["location"],
+                "arguments.location",
+                3,
+                minimum=-1000.0,
+                maximum=1000.0,
+            ),
+        ),
+    )
+    ensure_logical_ids_available({}, _created_logical_ids(primitives))
+    return primitives
+
+
 def validate_cone(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
     primitives = (_cone(arguments, "arguments"),)
     ensure_logical_ids_available({}, _created_logical_ids(primitives))
@@ -196,6 +297,37 @@ def validate_plane(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
     primitives = (
         Primitive(
             kind="plane",
+            logical_id=logical_id(arguments["resourceId"], "arguments.resourceId"),
+            object_name=text(
+                arguments["objectName"],
+                "arguments.objectName",
+                prefix="OperatingLine.",
+            ),
+            size=number(
+                arguments["size"],
+                "arguments.size",
+                minimum=0.0001,
+                maximum=1000.0,
+            ),
+            location=vector(
+                arguments["location"],
+                "arguments.location",
+                3,
+                minimum=-1000.0,
+                maximum=1000.0,
+            ),
+        ),
+    )
+    ensure_logical_ids_available({}, _created_logical_ids(primitives))
+    return primitives
+
+
+def validate_cube(arguments: Mapping[str, Any]) -> tuple[Primitive, ...]:
+    fields = {"resourceId", "objectName", "size", "location"}
+    require_keys(arguments, fields, fields, "arguments")
+    primitives = (
+        Primitive(
+            kind="cube",
             logical_id=logical_id(arguments["resourceId"], "arguments.resourceId"),
             object_name=text(
                 arguments["objectName"],
@@ -303,6 +435,48 @@ def _fill_mesh(mesh: bpy.types.Mesh, primitive: Primitive) -> None:
     try:
         if primitive.kind == "uv_sphere":
             bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=16, radius=primitive.radius)
+        elif primitive.kind == "icosphere":
+            bmesh.ops.create_icosphere(
+                bm,
+                subdivisions=primitive.subdivisions,
+                radius=primitive.radius,
+            )
+        elif primitive.kind == "cube":
+            bmesh.ops.create_cube(bm, size=primitive.size)
+        elif primitive.kind == "torus":
+            rings = []
+            for major_index in range(primitive.major_segments):
+                major_angle = tau * major_index / primitive.major_segments
+                major_cos = cos(major_angle)
+                major_sin = sin(major_angle)
+                ring = []
+                for minor_index in range(primitive.minor_segments):
+                    minor_angle = tau * minor_index / primitive.minor_segments
+                    radial = primitive.major_radius + primitive.minor_radius * cos(
+                        minor_angle
+                    )
+                    ring.append(
+                        bm.verts.new(
+                            (
+                                radial * major_cos,
+                                radial * major_sin,
+                                primitive.minor_radius * sin(minor_angle),
+                            )
+                        )
+                    )
+                rings.append(ring)
+            for major_index, ring in enumerate(rings):
+                next_ring = rings[(major_index + 1) % primitive.major_segments]
+                for minor_index, vertex in enumerate(ring):
+                    next_minor = (minor_index + 1) % primitive.minor_segments
+                    bm.faces.new(
+                        (
+                            vertex,
+                            next_ring[minor_index],
+                            next_ring[next_minor],
+                            ring[next_minor],
+                        )
+                    )
         elif primitive.kind in {"cone", "cylinder"}:
             assert primitive.start is not None and primitive.end is not None
             depth = (Vector(primitive.end) - Vector(primitive.start)).length
@@ -315,7 +489,7 @@ def _fill_mesh(mesh: bpy.types.Mesh, primitive: Primitive) -> None:
                 radius2=primitive.radius_end,
                 depth=depth,
             )
-        else:
+        elif primitive.kind == "plane":
             half = primitive.size / 2.0
             coordinates = (
                 (-half, -half, 0),
@@ -325,6 +499,8 @@ def _fill_mesh(mesh: bpy.types.Mesh, primitive: Primitive) -> None:
             )
             vertices = [bm.verts.new(co) for co in coordinates]
             bm.faces.new(vertices)
+        else:  # pragma: no cover - validators define the closed primitive set
+            raise ValueError(f"Unsupported primitive kind: {primitive.kind}")
         bm.to_mesh(mesh)
     finally:
         bm.free()

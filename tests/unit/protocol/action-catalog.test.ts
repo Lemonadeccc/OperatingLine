@@ -19,13 +19,16 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.4.0');
+    expect(catalog.catalogVersion).toBe('1.7.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
+      'blender.mesh.create_cube',
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
+      'blender.mesh.create_torus',
       'blender.mesh.create_primitive_batch',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
@@ -56,7 +59,7 @@ describe('action catalog protocol', () => {
     ]);
     expect(
       blenderActionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
-    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0']);
+    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0']);
   });
 
   it('rejects duplicate actions and required argument names absent from properties', () => {
@@ -138,12 +141,101 @@ describe('action catalog protocol', () => {
     expect(
       validateActionArguments(
         {
+          resourceId: 'icosphere-boundary',
+          objectName: 'OperatingLine.BoundaryIcosphere',
+          subdivisions: 5,
+          radius: 1,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_icosphere'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'integral-float-torus',
+          objectName: 'OperatingLine.IntegralFloatTorus',
+          majorSegments: 16.0,
+          minorSegments: 8.0,
+          majorRadius: 2,
+          minorRadius: 0.5,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_torus'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'fractional-torus',
+          objectName: 'OperatingLine.FractionalTorus',
+          majorSegments: 16.5,
+          minorSegments: 8.5,
+          majorRadius: 2,
+          minorRadius: 0.5,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_torus'),
+      ),
+    ).toEqual(['majorSegments must be integer', 'minorSegments must be integer']);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'i'.repeat(181),
+          objectName: 'OperatingLine.InvalidIcosphere',
+          subdivisions: 6,
+          radius: 0.00001,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_icosphere'),
+      ),
+    ).toEqual([
+      'resourceId must have length at most 180',
+      'subdivisions must be at most 5',
+      'radius must be at least 0.0001',
+    ]);
+    expect(
+      validateActionArguments(
+        {
           resourceId: 'flat-plane',
           objectName: 'OperatingLine.FlatPlane',
           size: 0.00001,
           location: [0, 0, 0],
         },
         schemaFor('blender.mesh.create_plane'),
+      ),
+    ).toContain('size must be at least 0.0001');
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'c'.repeat(180),
+          objectName: 'OperatingLine.BoundaryCube',
+          size: 1,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_cube'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'c'.repeat(181),
+          objectName: 'OperatingLine.TooLongCube',
+          size: 1,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_cube'),
+      ),
+    ).toContain('resourceId must have length at most 180');
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 'tiny-cube',
+          objectName: 'OperatingLine.TinyCube',
+          size: 0.00001,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_cube'),
       ),
     ).toContain('size must be at least 0.0001');
     expect(
@@ -174,6 +266,40 @@ describe('action catalog protocol', () => {
         schemaFor('blender.mesh.create_cylinder'),
       ),
     ).toEqual(['radius must be at least 0.0001', 'arguments properties start and end must differ']);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 't'.repeat(180),
+          objectName: 'OperatingLine.BoundaryTorus',
+          majorSegments: 128,
+          minorSegments: 64,
+          majorRadius: 2,
+          minorRadius: 0.5,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_torus'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          resourceId: 't'.repeat(181),
+          objectName: 'OperatingLine.InvalidTorus',
+          majorSegments: 129,
+          minorSegments: 65,
+          majorRadius: 0.00001,
+          minorRadius: 0.00001,
+          location: [0, 0, 0],
+        },
+        schemaFor('blender.mesh.create_torus'),
+      ),
+    ).toEqual([
+      'resourceId must have length at most 180',
+      'majorSegments must be at most 128',
+      'minorSegments must be at most 64',
+      'majorRadius must be at least 0.0001',
+      'minorRadius must be at least 0.0001',
+    ]);
   });
 
   it('accepts strict catalog capability coverage with unique structural ids', () => {

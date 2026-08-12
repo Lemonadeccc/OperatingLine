@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.1.0",
+  "catalogVersion": "1.4.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.4.0",
+  "actionCatalogVersion": "1.7.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
-  "hostVersionRange": ">=4.5.0 <5.2.0",
+  "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.4.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.7.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -83,6 +83,80 @@
       }
     },
     {
+      "id": "blender.mesh.create_icosphere.native",
+      "actionName": "blender.mesh.create_icosphere",
+      "title": "Add one Icosphere from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.icosphere",
+            "order": 4,
+            "label": "Ico Sphere",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_ico_sphere_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.icosphere",
+          "operatorId": "mesh.primitive_ico_sphere_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html#icosphere"
+      }
+    },
+    {
       "id": "blender.mesh.create_plane.native",
       "actionName": "blender.mesh.create_plane",
       "title": "Add one plane from the 3D Viewport",
@@ -151,6 +225,80 @@
         "execution": {
           "stepId": "operator.plane",
           "operatorId": "mesh.primitive_plane_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.mesh.create_cube.native",
+      "actionName": "blender.mesh.create_cube",
+      "title": "Add one cube from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.cube",
+            "order": 4,
+            "label": "Cube",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_cube_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.cube",
+          "operatorId": "mesh.primitive_cube_add",
           "binding": "accepted_plan_action"
         },
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
@@ -302,6 +450,80 @@
           "binding": "accepted_plan_action"
         },
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.mesh.create_torus.native",
+      "actionName": "blender.mesh.create_torus",
+      "title": "Add one torus from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.torus",
+            "order": 4,
+            "label": "Torus",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_torus_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.torus",
+          "operatorId": "mesh.primitive_torus_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html#torus"
       }
     },
     {
