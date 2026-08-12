@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from dataclasses import replace
 from typing import Any
 import uuid
 
@@ -16,6 +17,7 @@ from mathutils import Matrix
 from ...application import ActionReceipt
 from ...application.session import (
     ArtifactIdentity,
+    DataBlockReference,
     ModifierState,
     MutationRecord,
     ParentIdentity,
@@ -229,9 +231,42 @@ def tag_resource(
         logical_id=logical_id,
         display_name=resource.name,
         pointer=resource.as_pointer(),
+        session_uid=resource.session_uid,
         receipt_token=receipt_id,
         step_id=step_id,
         action_name=action_name,
+    )
+
+
+def reference_data_block(resource: Any) -> DataBlockReference:
+    """Freeze an unowned Blender ID reference across native Undo reconstruction."""
+    resource_type = next(
+        (
+            kind
+            for kind, blender_type in (
+                ("OBJECT", bpy.types.Object),
+                ("MESH", bpy.types.Mesh),
+                ("MATERIAL", bpy.types.Material),
+                ("COLLECTION", bpy.types.Collection),
+                ("SCENE", bpy.types.Scene),
+                ("WORLD", bpy.types.World),
+                ("LIGHT", bpy.types.Light),
+                ("CAMERA", bpy.types.Camera),
+                ("ARMATURE", bpy.types.Armature),
+                ("ACTION", bpy.types.Action),
+                ("NODE_GROUP", bpy.types.NodeTree),
+            )
+            if isinstance(resource, blender_type)
+        ),
+        "",
+    )
+    if not resource_type:
+        raise TypeError(f"Unsupported Blender data-block type: {type(resource).__name__}")
+    return DataBlockReference(
+        resource_type=resource_type,
+        display_name=resource.name,
+        pointer=resource.as_pointer(),
+        session_uid=resource.session_uid,
     )
 
 
@@ -379,7 +414,7 @@ def mesh_content_signature(mesh: bpy.types.Mesh) -> tuple[Any, ...]:
         None
         if mesh.shape_keys is None
         else (
-            mesh.shape_keys.as_pointer(),
+            mesh.shape_keys.session_uid,
             tuple(
                 (
                     block.name,
@@ -495,14 +530,128 @@ def resolve_resource(identity: ResourceIdentity) -> Any | None:
     return None
 
 
-def _resource_at_pointer(identity: ResourceIdentity) -> Any | None:
+def _data_block_at_identity(
+    identity: ResourceIdentity | DataBlockReference,
+) -> Any | None:
     collection_factory = _RESOURCE_COLLECTIONS.get(identity.resource_type)
     if collection_factory is None:
         return None
-    for resource in collection_factory():
+    resources = tuple(collection_factory())
+    for resource in resources:
+        if resource.session_uid == identity.session_uid:
+            return resource
+    for resource in resources:
         if resource.as_pointer() == identity.pointer:
             return resource
     return None
+
+
+def _resource_at_pointer(identity: ResourceIdentity) -> Any | None:
+    return _data_block_at_identity(identity)
+
+
+def resolve_data_block(reference: DataBlockReference) -> Any | None:
+    collection_factory = _RESOURCE_COLLECTIONS.get(reference.resource_type)
+    if collection_factory is None:
+        return None
+    resources = tuple(collection_factory())
+    for resource in resources:
+        if resource.session_uid == reference.session_uid:
+            return resource
+    return None
+
+
+def _rebind_value(value: Any) -> Any:
+    if isinstance(value, ResourceIdentity):
+        resource = resolve_resource(value)
+        if resource is None:
+            raise RuntimeError(
+                f"Native history resource is unavailable: {value.logical_id}"
+            )
+        return replace(
+            value,
+            display_name=resource.name,
+            pointer=resource.as_pointer(),
+            session_uid=resource.session_uid,
+        )
+    if isinstance(value, DataBlockReference):
+        resource = resolve_data_block(value)
+        if resource is None:
+            raise RuntimeError(
+                f"Native history data-block is unavailable: {value.display_name}"
+            )
+        return replace(
+            value,
+            display_name=resource.name,
+            pointer=resource.as_pointer(),
+            session_uid=resource.session_uid,
+        )
+    if isinstance(value, tuple):
+        return tuple(_rebind_value(item) for item in value)
+    if isinstance(value, list):
+        return [_rebind_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _rebind_value(item) for key, item in value.items()}
+    return value
+
+
+def _rebind_modifier_state(target: bpy.types.Object, state: ModifierState) -> ModifierState:
+    if not 0 <= state.stack_index < len(target.modifiers):
+        raise RuntimeError(f"Native history modifier is unavailable: {state.logical_id}")
+    candidate = target.modifiers[state.stack_index]
+    rebound_properties = tuple(
+        (name, _rebind_value(value)) for name, value in state.properties
+    )
+    rebound = replace(
+        state,
+        pointer=candidate.as_pointer(),
+        properties=rebound_properties,
+    )
+    if not _modifier_matches_state(target, rebound):
+        raise RuntimeError(f"Native history modifier changed: {state.logical_id}")
+    return rebound
+
+
+def rebind_receipts_after_native_restore(
+    receipts: Mapping[str, ActionReceipt],
+) -> dict[str, ActionReceipt]:
+    """Rebind RNA pointers after Blender reconstructs IDs during Undo/Redo."""
+    rebound_receipts: dict[str, ActionReceipt] = {}
+    for step_id, receipt in receipts.items():
+        created = tuple(_rebind_value(identity) for identity in receipt.created)
+        mutations: list[MutationRecord] = []
+        for mutation in receipt.mutations:
+            resource_identity = _rebind_value(mutation.resource)
+            before = _rebind_value(mutation.before)
+            after = _rebind_value(mutation.after)
+            if isinstance(after, ModifierState):
+                target = resolve_resource(resource_identity)
+                if not isinstance(target, bpy.types.Object):
+                    raise RuntimeError(
+                        f"Native history modifier owner is unavailable: {after.logical_id}"
+                    )
+                after = _rebind_modifier_state(target, after)
+            if isinstance(before, ModifierState):
+                target = resolve_resource(resource_identity)
+                if not isinstance(target, bpy.types.Object):
+                    raise RuntimeError(
+                        f"Native history modifier owner is unavailable: {before.logical_id}"
+                    )
+                before = _rebind_modifier_state(target, before)
+            mutations.append(
+                MutationRecord(resource_identity, mutation.attribute, before, after)
+            )
+        rebound_receipts[step_id] = replace(
+            receipt,
+            created=created,
+            mutations=tuple(mutations),
+            anchor=(
+                _rebind_value(receipt.anchor)
+                if receipt.anchor is not None
+                else None
+            ),
+        )
+    return rebound_receipts
 
 
 def build_resource_registry(
@@ -597,6 +746,8 @@ def _same_value(current: Any, expected: Any) -> bool:
     if isinstance(expected, ResourceIdentity):
         resolved = resolve_resource(expected)
         return current is resolved
+    if isinstance(expected, DataBlockReference):
+        return current is resolve_data_block(expected)
     if isinstance(expected, tuple):
         return tuple(current) == expected
     return current == expected
@@ -605,6 +756,8 @@ def _same_value(current: Any, expected: Any) -> bool:
 def _resolve_stored(value: Any) -> Any:
     if isinstance(value, ResourceIdentity):
         return resolve_resource(value)
+    if isinstance(value, DataBlockReference):
+        return resolve_data_block(value)
     return value
 
 

@@ -10,8 +10,8 @@
 - `Panel` / `UILayout`：可折叠 Revision Workspace，包含活动树/待审树节点 `Ref`、逐条移除、
   独立修订正文、Provider 选择/披露、异步 Run 状态、历史、Plan diff 与 Accept/Reject。
 - `Operator` / 原生 dialog：每次 Provider Run 的明确确认；不保存长期 consent、模型或 Provider 凭据。
-- `Operator`：宿主数据操作。当前演示使用自有 `Back` 补偿回退，不声明 Blender 原生 Undo，
-  因为模块内会话状态尚未接入 `undo_post`/`redo_post` 重建。
+- `Operator`：宿主数据操作。`Back` 保留 receipt 补偿语义；Start、Next、Recheck、原生菜单动作和
+  Back 同时接入 Blender 原生 Undo，`undo_post`/`redo_post` 会恢复模块 Session 并重绑定 RNA identity。
 - `Menu` / `UILayout` / `Operator`：从版本化 InteractionCatalog 读取活动叶节点配方；在 Guidance
   可见期间，为经过版本测试的真实 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 菜单项显示序号与状态，并把
   最终项路由到同一个受控计划动作。
@@ -225,11 +225,20 @@ Revision Workspace、Accept/Reject 或 `Start`/`Next`。它只证明 provider �
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
 注册表按步骤 ID 绑定 action，而不是假设 action 名唯一。一个步骤的 receipt 可以同时记录多个
-Blender datablock、mutation 和渲染产物；资源解析同时核对 pointer、receipt token、logical ID、
+Blender datablock、mutation 和渲染产物；资源解析同时核对 `session_uid`、pointer、receipt token、logical ID、
 步骤 ID 和 action 名。复合动作先对整批对象、数据和逻辑 ID 做预检，执行异常时补偿已经创建或
 修改的部分。回退 mutation 前执行 compare-and-restore：当前值不再等于该动作写入的值时拒绝
 覆盖，并保留当前步骤和 receipt。`Next`/`Back` 因而可以完成 25 步正向执行与完整反向补偿，
-但这种补偿不是 Blender 原生 Undo。
+这种 Plan 补偿与 Blender 原生 Undo 是两层并存语义。
+
+原生历史在每个成功或明确保留现场的 Operator 内写入一个随机 Scene checkpoint，并在进程内保存
+对应 Session 快照。Undo/Redo 恢复 marker 后，handler 以 `session_uid` 和 action ownership 标签重新
+绑定 ID；Modifier 使用所属对象、stack index、名称、类型和允许属性精确匹配。即使普通用户 Undo
+没有改变 marker，也会静默刷新可能已重建的 pointer，但不会发送步骤 transition。PNG 不属于 Blender
+历史，journal 只在内容哈希仍匹配 receipt 时删除或原子恢复有界字节；冲突会锁住新的 walkthrough
+操作，直到 Undo/Redo 回到一致 checkpoint 或文件重载。完整文件加载和 Plan 替换会放弃 journal，
+不会从可复制 Scene 标签接管旧执行。Back 仍执行 compare-and-restore 补偿，只是该补偿操作本身也
+可以 Ctrl-Z/Redo。见 [ADR 0031](../adr/0031-blender-native-undo-history.md)。
 
 Edit/Modifier/Geometry Nodes 首个切片只开放三个有界动作：Subdivide 复制源 Mesh、对整网格执行
 `1..8` cuts 后把对象换链到新 Mesh，源数据保留至回退；Bevel 创建一个不应用的 modifier；Geometry

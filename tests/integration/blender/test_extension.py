@@ -39,6 +39,12 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
     remove_factory_startup_objects,
     validate_companion_url,
 )
+from operating_line_extension.operating_line.infrastructure.native_history import (  # noqa: E402
+    NATIVE_HISTORY_MARKER_KEY,
+    _load_post,
+    _redo_post,
+    _undo_post,
+)
 from operating_line_extension.operating_line.infrastructure import (  # noqa: E402
     observations as observation_module,
 )
@@ -3200,7 +3206,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion.install_plan(retain_gate_plan) is True
         retain_gate_session = operating_line.get_session()
         retain_gate_session.start()
-        assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        assert bpy.ops.operating_line.next() == {"FINISHED"}
         retained_pointer = bpy.data.objects[EXPECTED[0]].as_pointer()
         assert retain_gate_session.observation_blocked is True
         assert retain_gate_session.active_index == 0
@@ -3516,8 +3522,15 @@ def main() -> None:
     assert_edit_modifier_geometry_nodes_round_trip()
 
     session_before_registration = operating_line.get_session()
+    assert _undo_post not in bpy.app.handlers.undo_post
+    assert _redo_post not in bpy.app.handlers.redo_post
+    assert _load_post not in bpy.app.handlers.load_post
     operating_line.register()
     operating_line.register()
+    assert bpy.app.handlers.undo_post.count(_undo_post) == 1
+    assert bpy.app.handlers.redo_post.count(_redo_post) == 1
+    assert bpy.app.handlers.load_post.count(_load_post) == 1
+    assert NATIVE_HISTORY_MARKER_KEY not in bpy.context.scene
     assert native_menu_guidance_enabled() is False
     assert bpy.types.VIEW3D_MT_editor_menus.draw is original_editor_draw
     assert bpy.types.VIEW3D_MT_add.draw is original_add_draw
@@ -3861,12 +3874,13 @@ def main() -> None:
 
     registered_companion._transport = None
     assert all(
-        "UNDO" not in operator.bl_options
+        "UNDO" in operator.bl_options
         for operator in (
             OPERATINGLINE_OT_start,
             OPERATINGLINE_OT_next,
             OPERATINGLINE_OT_recheck_observations,
             OPERATINGLINE_OT_back,
+            OPERATINGLINE_OT_guided_menu_action,
         )
     )
     try:
@@ -4249,6 +4263,12 @@ def main() -> None:
     assert not hasattr(bpy.types, "OPERATINGLINE_PT_sidebar")
     assert not registered_companion.timer_registered
     assert not bpy.app.timers.is_registered(registered_companion.timer_callback)
+    assert _undo_post not in bpy.app.handlers.undo_post
+    assert _redo_post not in bpy.app.handlers.redo_post
+    assert _load_post not in bpy.app.handlers.load_post
+    assert all(
+        NATIVE_HISTORY_MARKER_KEY not in scene for scene in bpy.data.scenes
+    )
     print("OperatingLine Blender integration test passed")
 
 

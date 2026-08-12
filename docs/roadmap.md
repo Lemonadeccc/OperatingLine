@@ -142,6 +142,12 @@
       的单次 observation。内置雪人 revision 6 的 25 个叶节点全部启用自动回滚门，并在 Blender
       4.5.3/5.1.1 验证。旧 `1.0.0`/`1.1.0` 仍保持遥测。见
       [ADR 0030](adr/0030-observation-success-gates-and-recovery.md)。
+- [x] Blender 原生 Undo/Redo：Start、Next、Recheck、原生菜单动作与 Back 进入宿主历史；Scene
+      checkpoint 同步进程内 Session，`session_uid` 重绑定 ID，Modifier 以精确 stack/property 状态
+      重绑定，PNG 以哈希保护字节备份恢复。普通用户 Undo 只静默刷新 pointer，不伪造步骤事件；冲突
+      会锁住引导并允许通过反向 Undo/Redo 恢复。Blender 4.5.3/5.1.1 foreground E2E 已覆盖对象、
+      Bevel、Geometry Nodes、外部 Undo 与 Back 往返。见
+      [ADR 0031](adr/0031-blender-native-undo-history.md)。
 
 ## 后续里程碑
 

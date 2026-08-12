@@ -3,6 +3,7 @@
 from .common import (
     build_resource_registry,
     find_artifact,
+    rebind_receipts_after_native_restore,
     resolve_receipt_anchor,
     resolve_resource,
     rollback_receipt,
@@ -13,6 +14,7 @@ __all__ = (
     "build_action_registry",
     "build_resource_registry",
     "find_artifact",
+    "rebind_receipts_after_native_restore",
     "resolve_receipt_anchor",
     "resolve_resource",
     "rollback_receipt",

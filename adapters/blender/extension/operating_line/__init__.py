@@ -11,16 +11,22 @@ from .domain import (
     bundled_plan_data,
 )
 from .infrastructure import (
+    NativeHistoryRestore,
     action_registry,
     disable_overlay,
+    discard_native_history,
     forget_managed_collection,
+    register_native_history,
+    unregister_native_history,
 )
 from .infrastructure.observations import evaluate_observations
 from .presentation import CLASSES
 from .presentation.native_menu_guidance import (
     disable_native_menu_guidance,
+    enable_native_menu_guidance,
     reset_native_menu_guidance,
 )
+from .presentation.native_menu_guidance import interaction_guidance_snapshot
 
 _session: DemoSession | None = None
 _companion: CompanionController | None = None
@@ -47,6 +53,7 @@ def replace_session(replacement: DemoSession) -> None:
         raise ValueError(
             "A plan update is pending; use Back to roll the walkthrough to its start first"
         )
+    discard_native_history()
     _session = replacement
     reset_native_menu_guidance()
 
@@ -56,6 +63,74 @@ def get_companion() -> CompanionController:
     if _companion is None:
         _companion = CompanionController()
     return _companion
+
+
+def _native_history_restored(restore: NativeHistoryRestore) -> None:
+    """Refresh guide reporting after Blender has restored a checkpoint."""
+    session = get_session()
+    reset_native_menu_guidance()
+    companion = get_companion()
+    before = restore.before
+    after = restore.after
+
+    if after.started and not before.started:
+        enable_native_menu_guidance(get_session)
+        enable_overlay(get_session, interaction_guidance_snapshot)
+        for window_manager in bpy.data.window_managers:
+            if hasattr(window_manager, "operating_line_overlay_enabled"):
+                window_manager.operating_line_overlay_enabled = True
+    elif not after.started and before.started:
+        disable_native_menu_guidance()
+        disable_overlay()
+        for window_manager in bpy.data.window_managers:
+            if hasattr(window_manager, "operating_line_overlay_enabled"):
+                window_manager.operating_line_overlay_enabled = False
+
+    try:
+        if after.execution_id != before.execution_id:
+            companion.report("walkthrough_started" if after.started else "plan_loaded")
+            return
+        gate = after.observation_gate
+        if gate is not None and gate.status != "recovered":
+            step = session.find_node(gate.step_id)
+            companion.report(
+                "step_observation_failed",
+                step=step,
+                observations_override=gate.observation_copy(),
+                observation_gate_override=gate,
+            )
+            return
+        if gate is not None and gate.status == "recovered":
+            step = session.find_node(gate.step_id)
+            companion.report(
+                "observation_recovered",
+                step=step,
+                observations_override=gate.observation_copy(),
+                observation_gate_override=gate,
+            )
+            return
+        if after.active_index < before.active_index:
+            step = session.steps[before.active_index]
+            companion.report("step_rolled_back", step=step)
+            return
+        if after.active_index > before.active_index:
+            step = session.steps[after.active_index]
+            companion.report("step_succeeded", step=step)
+            return
+        companion.report("walkthrough_started" if after.started else "plan_loaded")
+    except (IndexError, OSError, RuntimeError, ValueError) as error:
+        companion.error = f"Native Undo reporting failed: {error}"
+
+
+def _native_history_file_loaded() -> None:
+    disable_native_menu_guidance()
+    disable_overlay()
+    reset_native_menu_guidance()
+    if _companion is not None:
+        try:
+            _companion.report("plan_loaded")
+        except (OSError, RuntimeError, ValueError) as error:
+            _companion.error = f"File-load reporting failed: {error}"
 
 
 def register() -> None:
@@ -159,6 +234,11 @@ def register() -> None:
             source_plan=bundled_plan_data(),
             observation_evaluator=evaluate_observations,
         )
+    register_native_history(
+        get_session,
+        _native_history_restored,
+        _native_history_file_loaded,
+    )
     get_companion().register_timer()
 
 
@@ -166,6 +246,7 @@ def unregister() -> None:
     global _companion, _session
     if _companion is not None:
         _companion.unregister_timer()
+    unregister_native_history()
     disable_native_menu_guidance()
     disable_overlay()
     reset_completed = True

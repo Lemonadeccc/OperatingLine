@@ -103,10 +103,21 @@ class ResourceIdentity:
     logical_id: str
     display_name: str
     pointer: int
+    session_uid: int
     receipt_token: str
     step_id: str = ""
     action_name: str = ""
     parent_links: tuple[ParentIdentity, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DataBlockReference:
+    """Stable reference to a Blender ID that is not owned by the action."""
+
+    resource_type: str
+    display_name: str
+    pointer: int
+    session_uid: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +230,20 @@ class ObservationGateError(RuntimeError):
         super().__init__(gate.message)
         self.step = step
         self.gate = gate
+
+
+@dataclass(frozen=True, slots=True)
+class SessionSnapshot:
+    """Immutable Python state paired with one Blender native-history checkpoint."""
+
+    plan_id: str | None
+    revision: int | None
+    active_index: int
+    started: bool
+    execution_id: str | None
+    receipts: tuple[tuple[str, ActionReceipt], ...]
+    observation_gate: ObservationGateState | None
+    last_success_gate_result: tuple[str, tuple[dict[str, Any], ...]] | None
 
 
 class DemoSession:
@@ -341,6 +366,50 @@ class DemoSession:
         if result is None or result[0] != step_id:
             return None
         return deepcopy(list(result[1]))
+
+    def snapshot_state(self) -> SessionSnapshot:
+        """Capture module state without copying Blender RNA values in receipts."""
+        return SessionSnapshot(
+            plan_id=self.plan_id,
+            revision=self.revision,
+            active_index=self.active_index,
+            started=self.started,
+            execution_id=self.execution_id,
+            receipts=tuple(self.receipts.items()),
+            observation_gate=deepcopy(self.observation_gate),
+            last_success_gate_result=deepcopy(self._last_success_gate_result),
+        )
+
+    def restore_state(
+        self,
+        snapshot: SessionSnapshot,
+        *,
+        receipts: Mapping[str, ActionReceipt] | None = None,
+    ) -> None:
+        """Restore a checkpoint after Blender has restored its matching ID state."""
+        if snapshot.plan_id != self.plan_id or snapshot.revision != self.revision:
+            raise ValueError("Native history checkpoint belongs to a different plan")
+        if not -1 <= snapshot.active_index < len(self.steps):
+            raise ValueError("Native history checkpoint has an invalid active step")
+        restored_receipts = dict(snapshot.receipts) if receipts is None else dict(receipts)
+        known_step_ids = {step.id for step in self.steps}
+        if not set(restored_receipts).issubset(known_step_ids):
+            raise ValueError("Native history checkpoint contains unknown receipt steps")
+        self.active_index = snapshot.active_index
+        self.started = snapshot.started
+        self.execution_id = snapshot.execution_id
+        self.receipts = restored_receipts
+        self.observation_gate = deepcopy(snapshot.observation_gate)
+        self._last_success_gate_result = deepcopy(snapshot.last_success_gate_result)
+
+    def abandon_state(self) -> None:
+        """Forget Python receipts when Blender replaces the entire loaded file."""
+        self.receipts.clear()
+        self.active_index = -1
+        self.started = False
+        self.execution_id = None
+        self.observation_gate = None
+        self._last_success_gate_result = None
 
     def start(self) -> None:
         self.reset()

@@ -16,6 +16,7 @@ from .common import (
     ensure_receipts_intact,
     logical_id,
     make_receipt,
+    reference_data_block,
     new_receipt_id,
     number,
     owned_resource,
@@ -200,7 +201,12 @@ def execute_materials(
             material.metallic = definition.metallic
             _configure_material_nodes(material, definition)
             for object_identity, obj in targets:
-                before = tuple(slot.material for slot in obj.material_slots)
+                before = tuple(
+                    reference_data_block(slot.material)
+                    if slot.material is not None
+                    else None
+                    for slot in obj.material_slots
+                )
                 obj.data.materials.clear()
                 obj.data.materials.append(material)
                 mutations.append(

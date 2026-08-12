@@ -3,6 +3,7 @@
 import bpy
 
 from ..application import GuidanceState, node_state
+from ..infrastructure import native_history_error
 from ..visual_theme import STATE_ICONS, STATE_SYMBOLS
 from .revision_workspace import draw_revision_workspace, draw_wrapped_text
 
@@ -47,10 +48,16 @@ def _draw_node(layout, node, session, companion, depth: int = 0) -> None:
             _draw_node(layout, child, session, companion, depth + 1)
 
 
-def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> None:
+def _draw_walkthrough_controls(
+    layout,
+    session,
+    *,
+    proposal_pending: bool,
+    history_error: str,
+) -> None:
     start = layout.row()
     start.scale_y = 1.15
-    start.enabled = not proposal_pending
+    start.enabled = not proposal_pending and not history_error
     start.operator(
         "operating_line.start",
         text="Restart Walkthrough" if session.started else "Start Walkthrough",
@@ -64,7 +71,7 @@ def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> No
     controls = layout.row(align=True)
     controls.scale_y = 1.35
     back = controls.row(align=True)
-    back.enabled = active is not None
+    back.enabled = active is not None and not history_error
     back.alert = active is not None
     back.operator(
         "operating_line.back",
@@ -76,6 +83,7 @@ def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> No
         next_step is not None
         and not proposal_pending
         and not session.observation_blocked
+        and not history_error
     )
     forward.operator(
         "operating_line.next",
@@ -96,7 +104,9 @@ def _draw_walkthrough_controls(layout, session, *, proposal_pending: bool) -> No
                 else "Scene retained for repair; recheck before continuing or use Back"
             )
             draw_wrapped_text(gate_box, strategy, icon="RECOVER_LAST")
-            gate_box.operator(
+            recheck = gate_box.row()
+            recheck.enabled = not history_error
+            recheck.operator(
                 "operating_line.recheck_observations",
                 text="Recheck Observations",
                 icon="FILE_REFRESH",
@@ -351,10 +361,22 @@ class OPERATINGLINE_PT_sidebar(bpy.types.Panel):
         _draw_goal_workspace(layout, context, companion)
         draw_revision_workspace(layout, context, companion, session)
         layout.prop(context.scene, "operating_line_replace_factory_scene")
+        history_error = native_history_error()
+        if history_error:
+            history = layout.box()
+            history.alert = True
+            history.label(text="Native Undo history is out of sync", icon="ERROR")
+            draw_wrapped_text(history, history_error)
+            draw_wrapped_text(
+                history,
+                "Use Undo/Redo to return to a consistent checkpoint, or reload the file.",
+                icon="RECOVER_LAST",
+            )
         _draw_walkthrough_controls(
             layout,
             session,
             proposal_pending=companion.proposed_plan is not None,
+            history_error=history_error,
         )
 
         overlay = layout.row()

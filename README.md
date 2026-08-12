@@ -224,10 +224,13 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   Bevel Modifier 和固定 Transform Geometry Nodes 图三个动作。Mesh、modifier 与 node group 都进入
   receipt 和专用 observation；若用户在执行后修改其拓扑、属性或节点图，`Back` 会保留现场与 receipt
   并拒绝覆盖，恢复到动作写入状态后可重试。当前只提供灰色 `semantic_path`，不伪装成原生控件点击。
+- **Blender 原生 Undo/Redo**：Start、Next、Recheck、菜单动作与 Back 共享 Scene checkpoint 和
+  进程内 Session journal；Undo 重建数据后会重绑定 ID、Modifier 与 Geometry Nodes receipt，PNG
+  产物按哈希安全删除或恢复。Back 仍保留可审查补偿语义。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
   触发 OperatingLine 控件。
 
-Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测试。
+Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测试与真实 GUI Undo/Redo E2E。
 
 ![OperatingLine 在 Blender 内的彩色任务树、前进回退按钮、步骤序号与雪人引导线](docs/assets/blender-guidance.png)
 
@@ -656,6 +659,14 @@ Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。
 遇到同名残留时会停止并要求用户明确处理，避免误删用户复制或修改过的内容。若资源在执行后被
 外部修改，compare-and-restore 检查会拒绝用旧值覆盖该修改，并保留 receipt 供用户处理冲突。
 
+同一进程内，Start、Next、Recheck、原生菜单动作和 Back 已接入 Blender 原生 Undo/Redo。每个宿主
+历史点用 Scene marker 对应一份内存 Session checkpoint；handler 以 `session_uid` 与 ownership 标签
+重绑定 Undo 后重建的 ID，Modifier 使用精确 stack/property 状态，PNG 则只在 SHA-256 匹配时删除或
+从有界字节备份原子恢复。普通用户 Undo 即使 marker 不变也会静默刷新 pointer，但不会伪造步骤报告。
+冲突时引导会锁住，直到 Undo/Redo 回到一致 checkpoint 或重新加载文件。`Back` 仍是 Plan receipt
+补偿而非原生 Undo 的别名；保存重开、Extension 重载与 Plan 替换仍是 journal 边界。详见
+[ADR 0031](docs/adr/0031-blender-native-undo-history.md)。
+
 revision 6 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `pose_animation_ready`、`render_scene_ready`、`render_rig_ready` 和
 `render_artifact_exists` 七类 observation 检查资源、材质、骨架绑定、关键帧、场景、灯光相机
@@ -699,8 +710,8 @@ OperatingLine Bridge 只允许 `start`、`next`、`back` 和 `toggle_overlay` �
 当前功能不需要向 Blender Core 提交 PR。Blender 公开 Extension API 已能注册：
 
 - `Panel` / `UILayout`：Sidebar 任务树和控制按钮。
-- `Operator`：宿主数据操作；当前雪人垂直切片使用受控 `Back` 补偿回退，不接入 Blender
-  原生 Undo 栈，避免 Python 会话状态与 ID datablock 撤销状态脱节。
+- `Operator`：宿主数据操作；受控 `Back` 继续执行 receipt 补偿，Operator 同时通过 Session
+  checkpoint、`undo_post`/`redo_post` 和 identity 重绑定接入 Blender 原生 Undo 栈。
 - `SpaceView3D.draw_handler_add`：`POST_PIXEL` 卡片、数字和引导线。
 - `gpu` / `blf`：形状与文字绘制。
 - `GizmoGroup`：后续可交互三维锚点。
@@ -739,6 +750,7 @@ annotation 和 0 个 adjudication；report 会把全部案例标记为缺少 liv
 ```bash
 pnpm test:blender
 pnpm test:blender:companion
+pnpm test:blender:undo
 pnpm test:blender:visual
 pnpm package:blender
 pnpm package:claude-desktop
@@ -753,6 +765,10 @@ Mesh/Material/Collection/Armature/Action 引用会安全阻止回退、320 × 32
 Planner Packet、evaluate、实例定向初版 Proposal、Blender 节点引用与修订请求、
 两轮线性 thread、MCP 请求关联重规划、精确 Plan diff、完整修订历史、实例定向 Proposal、三次人工接受、
 Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube 不被删除以及跨进程闭环。
+`pnpm test:blender:undo` 在每个检测到的 Blender 4.5/5.1 GUI 中真实执行
+Cube → Subdivide → Bevel → Geometry Nodes → Material，验证 Ctrl-Z/Redo 的 Session 恢复、
+ID/Modifier/外部材质引用重绑定、不相关用户 Undo 的静默同步、Back 往返，以及哈希保护的文件产物
+删除/恢复/冲突拒绝。
 `pnpm test:blender:visual` 会为二十一个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-goal-request.png`、`guidance-revision-request.png`、
 `guidance-revision-collapsed.png`、`guidance-proposal-review.png`、
@@ -809,8 +825,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
-MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片，以及 Codex/Claude 本地配置与
-Claude Desktop MCPB。当前仍未完成：
+MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、Observation 成功门、Blender 原生
+Undo/Redo，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
@@ -820,13 +836,11 @@ Claude Desktop MCPB。当前仍未完成：
    选择/调用或自动语义重规划。OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的线性多轮 revision thread、Plan diff 和结构化消息历史上增加显式分支/合并策略和
    用户可编辑参数表单。
-3. 把 observation 从 `0.1.0` 遥测升级为可配置的成功门与恢复策略，并在接入 Blender
-   `undo_post`/`redo_post` 后再声明原生 Undo 能力。
-4. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
+3. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
    Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。
-5. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
-6. 在首个稳定发布前引入 Changesets 与自动发布流程。
+4. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
+5. 在首个稳定发布前引入 Changesets 与自动发布流程。
 
 首版只保证自有面板控件、三维对象和世界坐标锚点，不承诺精确标注任意 Blender 内置按钮。
 对没有官方扩展 API 的宿主，只提供能力画像明确允许的降级体验。

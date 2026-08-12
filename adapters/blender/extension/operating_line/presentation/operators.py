@@ -4,9 +4,13 @@ import bpy
 
 from ..application import ObservationGateError
 from ..infrastructure import (
+    cancel_native_history,
+    commit_native_history,
     disable_overlay,
     enable_overlay,
     overlay_enabled,
+    prepare_native_history,
+    prepared_native_history_changed,
     remove_factory_startup_objects,
 )
 from .native_menu_guidance import (
@@ -31,7 +35,39 @@ def _companion():
     return get_companion()
 
 
-def _execute_next(operator):
+def _prepare_history(operator, context, session, operation: str) -> bool:
+    try:
+        prepare_native_history(session, context.scene, operation)
+    except (OSError, RuntimeError, ValueError) as error:
+        _companion().report("error", step=session.active_step, error=str(error))
+        operator.report({"ERROR"}, str(error))
+        return False
+    return True
+
+
+def _commit_history(operator, session) -> bool:
+    try:
+        commit_native_history(session)
+    except (OSError, RuntimeError, ValueError) as error:
+        _companion().report("error", step=session.active_step, error=str(error))
+        operator.report({"ERROR"}, str(error))
+        return False
+    return True
+
+
+def _finish_failed_operation(operator, session, candidate, error):
+    """Keep a coherent partial reset undoable; cancel atomic failures."""
+    changed = prepared_native_history_changed(session)
+    if changed:
+        _commit_history(operator, session)
+    else:
+        cancel_native_history()
+    _companion().report("error", step=candidate, error=str(error))
+    operator.report({"ERROR"}, str(error))
+    return {"FINISHED"} if changed else {"CANCELLED"}
+
+
+def _execute_next(operator, context):
     """Run the canonical next action for both control and native-menu entry."""
 
     if _companion().proposed_plan is not None:
@@ -41,6 +77,8 @@ def _execute_next(operator):
     session = _session()
     next_index = session.active_index + 1
     candidate = session.steps[next_index] if next_index < len(session.steps) else None
+    if not _prepare_history(operator, context, session, "next"):
+        return {"CANCELLED"}
     try:
         step = session.next()
     except ObservationGateError as error:
@@ -52,16 +90,21 @@ def _execute_next(operator):
         )
         operator.report({"WARNING"}, str(error))
         refresh_native_menu_guidance()
+        if error.gate.blocking and prepared_native_history_changed(session):
+            _commit_history(operator, session)
+            return {"FINISHED"}
+        cancel_native_history()
         return {"CANCELLED"}
     except (OSError, RuntimeError, ValueError) as error:
-        _companion().report("error", step=candidate, error=str(error))
-        operator.report({"ERROR"}, str(error))
         refresh_native_menu_guidance()
-        return {"CANCELLED"}
+        return _finish_failed_operation(operator, session, candidate, error)
     if step is None:
+        cancel_native_history()
         operator.report({"INFO"}, "All demo steps are complete")
         refresh_native_menu_guidance()
         return {"CANCELLED"}
+    if not _commit_history(operator, session):
+        return {"FINISHED"}
     _companion().report("step_succeeded", step=step)
     refresh_native_menu_guidance()
     return {"FINISHED"}
@@ -102,7 +145,7 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
     bl_idname = "operating_line.start"
     bl_label = "Start"
     bl_description = "Reset and start the active walkthrough"
-    bl_options = {"REGISTER"}
+    bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         if _companion().proposed_plan is not None:
@@ -110,16 +153,17 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
             self.report({"WARNING"}, message)
             return {"CANCELLED"}
         session = _session()
+        if not _prepare_history(self, context, session, "start"):
+            return {"CANCELLED"}
         try:
             session.start()
         except (OSError, RuntimeError, ValueError) as error:
-            _companion().report(
-                "error",
-                step=session.active_step,
-                error=str(error),
+            return _finish_failed_operation(
+                self,
+                session,
+                session.active_step,
+                error,
             )
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
         if context.scene.operating_line_replace_factory_scene:
             removed = remove_factory_startup_objects(context.scene)
             if not removed:
@@ -127,6 +171,8 @@ class OPERATINGLINE_OT_start(bpy.types.Operator):
                     {"WARNING"},
                     "Factory scene fingerprint did not match; no existing object was deleted",
                 )
+        if not _commit_history(self, session):
+            return {"FINISHED"}
         context.window_manager.operating_line_overlay_enabled = True
         enable_native_menu_guidance(_session)
         enable_overlay(_session, interaction_guidance_snapshot)
@@ -138,21 +184,23 @@ class OPERATINGLINE_OT_next(bpy.types.Operator):
     bl_idname = "operating_line.next"
     bl_label = "Next"
     bl_description = "Execute the next accepted plan step"
-    bl_options = {"REGISTER"}
+    bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, _context):
-        return _execute_next(self)
+    def execute(self, context):
+        return _execute_next(self, context)
 
 
 class OPERATINGLINE_OT_recheck_observations(bpy.types.Operator):
     bl_idname = "operating_line.recheck_observations"
     bl_label = "Recheck Observations"
     bl_description = "Re-evaluate the blocked step without executing it again"
-    bl_options = {"REGISTER"}
+    bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, _context):
+    def execute(self, context):
         session = _session()
         candidate = session.active_step
+        if not _prepare_history(self, context, session, "recheck"):
+            return {"CANCELLED"}
         try:
             step = session.recheck_observations()
         except ObservationGateError as error:
@@ -164,19 +212,24 @@ class OPERATINGLINE_OT_recheck_observations(bpy.types.Operator):
             )
             self.report({"WARNING"}, str(error))
             refresh_native_menu_guidance()
+            cancel_native_history()
             return {"CANCELLED"}
         except ValueError as error:
+            cancel_native_history()
             self.report({"WARNING"}, str(error))
             refresh_native_menu_guidance()
             return {"CANCELLED"}
         except (OSError, RuntimeError) as error:
-            _companion().report("error", step=candidate, error=str(error))
-            self.report({"ERROR"}, str(error))
             refresh_native_menu_guidance()
-            return {"CANCELLED"}
+            return _finish_failed_operation(self, session, candidate, error)
         gate = session.observation_gate
         if gate is None:
-            raise RuntimeError("Recovered observation gate was not retained for reporting")
+            error = RuntimeError(
+                "Recovered observation gate was not retained for reporting"
+            )
+            return _finish_failed_operation(self, session, candidate, error)
+        if not _commit_history(self, session):
+            return {"FINISHED"}
         _companion().report(
             "observation_recovered",
             step=step,
@@ -211,37 +264,40 @@ class OPERATINGLINE_OT_guided_menu_action(bpy.types.Operator):
     bl_description = (
         "Execute this exact accepted leaf using its planned parameters and shared Back receipt"
     )
-    bl_options = {"INTERNAL"}
+    bl_options = {"INTERNAL", "UNDO"}
 
     step_id: bpy.props.StringProperty()
     operator_id: bpy.props.StringProperty()
 
-    def execute(self, _context):
+    def execute(self, context):
         if not guided_menu_action_matches(self.step_id, self.operator_id):
             message = "This menu item does not match the accepted next step"
             self.report({"ERROR"}, message)
             return {"CANCELLED"}
-        return _execute_next(self)
+        return _execute_next(self, context)
 
 
 class OPERATINGLINE_OT_back(bpy.types.Operator):
     bl_idname = "operating_line.back"
     bl_label = "Back"
     bl_description = "Compensate the active action-owned plan step"
-    bl_options = {"REGISTER"}
+    bl_options = {"REGISTER", "UNDO"}
 
-    def execute(self, _context):
+    def execute(self, context):
         session = _session()
         candidate = session.active_step
+        if not _prepare_history(self, context, session, "back"):
+            return {"CANCELLED"}
         try:
             step = session.back()
         except (OSError, RuntimeError, ValueError) as error:
-            _companion().report("error", step=candidate, error=str(error))
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
+            return _finish_failed_operation(self, session, candidate, error)
         if step is None:
+            cancel_native_history()
             self.report({"INFO"}, "No active step to roll back")
             return {"CANCELLED"}
+        if not _commit_history(self, session):
+            return {"FINISHED"}
         _companion().report("step_rolled_back", step=step)
         refresh_native_menu_guidance()
         return {"FINISHED"}

@@ -429,6 +429,52 @@ class ObservationGateSessionTests(unittest.TestCase):
         self.assertEqual(session.active_index, -1)
         self.assertEqual(calls, ["rollback", "rollback"])
 
+    def test_native_history_snapshot_round_trips_session_state(self) -> None:
+        session, _calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(True),
+        )
+        session.start()
+        completed = session.next()
+        snapshot = session.snapshot_state()
+        execution_id = session.execution_id
+
+        self.assertEqual(session.back(), completed)
+        self.assertEqual(session.active_index, -1)
+        session.restore_state(snapshot)
+
+        self.assertEqual(session.active_index, 0)
+        self.assertEqual(session.execution_id, execution_id)
+        self.assertEqual(tuple(session.receipts), ("step-gated",))
+        self.assertEqual(session.completed_step_ids, ("step-gated",))
+        self.assertEqual(
+            session.success_gate_observation_copy("step-gated"),
+            self.result(True),
+        )
+
+        session.abandon_state()
+        self.assertFalse(session.started)
+        self.assertIsNone(session.execution_id)
+        self.assertEqual(session.active_index, -1)
+        self.assertEqual(session.receipts, {})
+
+    def test_native_history_snapshot_rejects_a_different_plan(self) -> None:
+        session, _calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(True),
+        )
+        snapshot = session.snapshot_state()
+        foreign = DemoSession(
+            session.root,
+            session._actions,
+            plan_id="different-plan",
+            revision=session.revision,
+            observation_evaluator=lambda _expectations, _receipts: self.result(True),
+        )
+
+        with self.assertRaisesRegex(ValueError, "different plan"):
+            foreign.restore_state(snapshot)
+
     def test_success_gated_session_requires_an_evaluator(self) -> None:
         with self.assertRaisesRegex(ValueError, "observation evaluator"):
             self.gated_session("rollback_step", None)

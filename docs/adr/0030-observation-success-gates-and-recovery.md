@@ -73,5 +73,6 @@ Blender Sidebar 会禁用 blocked 状态下的 `Next`、保留 `Back`，展示�
 
 ## 后续
 
-本决策不接入 Blender 原生 Undo。当前 Back 仍使用可审查 receipt 补偿；原生 Undo/Redo 同步需要单独
-处理 Blender undo stack 与 Python session receipt 的一致性，作为下一项独立状态机变更。
+本决策发布时不接入 Blender 原生 Undo，Back 仍使用可审查 receipt 补偿。后续独立状态机已经在
+[ADR 0031](0031-blender-native-undo-history.md) 接入 `undo_post`/`redo_post`、Session checkpoint、
+RNA pointer 重绑定和文件产物恢复；该宿主历史层没有改写本 ADR 的成功门或补偿语义。
