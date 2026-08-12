@@ -396,7 +396,7 @@ def configure_state():
             "targetInstanceId": companion.instance_id,
             "revisionRequestId": request_id,
             "revisionThread": revision_thread,
-            "catalogVersion": "1.8.0",
+            "catalogVersion": "1.9.0",
             "plan": plan,
             "planDiff": plan_diff,
             "proposedAt": "2026-08-04T12:00:00Z",
@@ -406,7 +406,7 @@ def configure_state():
             "protocolVersion": "1.1.0",
             "requestId": request_id,
             "adapterId": "blender",
-            "catalogVersion": "1.8.0",
+            "catalogVersion": "1.9.0",
             "instanceId": companion.instance_id,
             "basePlan": base_plan,
             "references": [

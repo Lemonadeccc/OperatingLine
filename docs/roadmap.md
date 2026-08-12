@@ -9,7 +9,8 @@
 - [x] Blender 原生任务树、彩色数字/引导线、Show/Hide、Next/Back。
 - [x] 可执行并逐步补偿回退的雪人建模、材质、灯光、相机与预览渲染垂直切片。
 - [x] AI GuideProposal 的宿主内只读预览、接受/拒绝和幂等决策。
-- [x] Blender 刚性骨骼动画：版本化 rig/pose action、三段关键帧、指定帧渲染和可补偿回退。
+- [x] Blender 骨骼动画：刚性 rig/pose 基线加上显式归一化蒙皮权重、Armature Modifier、
+      location/rotation/scale 关键帧、插值/外推、指定帧渲染和可补偿回退。
 - [x] 本地 AI 客户端分发：Codex/Claude CLI 一键 MCP 配置、跨客户端 connection instructions、
       Claude Desktop MCPB stdio→loopback HTTP 连接器，以及真实跨传输 Tool/Prompt 集成验证。见
       [ADR 0022](adr/0022-local-ai-client-distribution.md)。
@@ -23,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.5.0` 与 ActionCatalog `1.8.0` 一一覆盖 18 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.6.0` 与 ActionCatalog `1.9.0` 一一覆盖 19 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十一个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -57,6 +58,12 @@
       group 图签名都进入 receipt；外部修改会阻止 `Back` 覆盖。执行、观察、冲突恢复和完整回退均在
       Blender 4.5.3/5.1.1 验证。历史 ActionCatalog `1.7.0` 与 InteractionCatalog `1.4.0` 保持可回放。
       见 [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md)。
+- [x] Blender 蒙皮、权重与 pose transform 动画：ActionCatalog `1.9.0` 新增
+      `blender.rig.bind_skin_weights`，要求最多 8192 顶点完整覆盖、每点 1–8 个唯一骨骼影响且权重和为
+      1；Vertex Group、Armature Modifier 和骨骼 deform 标志均进入 receipt。pose action 可选写入
+      location/scale 并声明统一 interpolation/extrapolation。Blender 4.5.3/5.1.1 测试覆盖中途失败、
+      18 条 transform FCurve、真实网格变形、observation、外部权重冲突与完整回退。见
+      [ADR 0032](adr/0032-bounded-skin-weights-and-pose-transforms.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -74,7 +81,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.8.0` 提供十项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.9.0` 提供十一项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -174,8 +181,6 @@
       Proposal 审批和场景执行门禁。
 - [ ] 修订工作区增强：在完整线性消息历史和 Plan diff 基础上增加明确的分支/合并策略与参数表单
       编辑，不把异步请求伪装成实时聊天。
-- [ ] 骨骼与动画深化：在当前四骨骼刚性绑定和三段姿态关键帧之外，扩展可审查 rig、蒙皮/权重、动画
-      编辑、观察与安全回退能力。
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。

@@ -1,8 +1,8 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.6.0",
+  "catalogVersion": "1.5.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.9.0",
+  "actionCatalogVersion": "1.8.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
@@ -858,71 +858,9 @@
       }
     },
     {
-      "id": "blender.rig.bind_skin_weights.semantic",
-      "actionName": "blender.rig.bind_skin_weights",
-      "title": "Bind explicit skin weights",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": {
-              "kind": "workspace",
-              "hostId": "Layout"
-            }
-          },
-          {
-            "id": "panel.object_data",
-            "order": 2,
-            "label": "Vertex Groups",
-            "intent": "configure",
-            "target": {
-              "kind": "panel",
-              "hostId": "PROPERTIES_DATA"
-            }
-          },
-          {
-            "id": "mode.weight_paint",
-            "order": 3,
-            "label": "Weight Paint",
-            "intent": "configure",
-            "target": {
-              "kind": "mode",
-              "hostId": "PAINT_WEIGHT"
-            }
-          },
-          {
-            "id": "semantic.normalized_weights",
-            "order": 4,
-            "label": "Normalized Weights",
-            "intent": "configure",
-            "target": {
-              "kind": "semantic",
-              "hostId": "operatingline.blender.explicit_skin_weights"
-            }
-          },
-          {
-            "id": "semantic.armature_modifier",
-            "order": 5,
-            "label": "Armature Modifier",
-            "intent": "execute",
-            "target": {
-              "kind": "semantic",
-              "hostId": "operatingline.blender.armature_modifier"
-            }
-          }
-        ],
-        "reason": "The accepted action validates and assigns a complete bounded per-vertex weight table plus an Armature modifier atomically; Blender has no single native control representing that transaction.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/properties/vertex_groups/vertex_groups.html"
-      }
-    },
-    {
       "id": "blender.animation.create_pose_keyframes.semantic",
       "actionName": "blender.animation.create_pose_keyframes",
-      "title": "Create pose transform keyframes",
+      "title": "Create rigid pose keyframes",
       "guidance": {
         "kind": "semantic_path",
         "steps": [
@@ -967,7 +905,7 @@
             }
           }
         ],
-        "reason": "The accepted action writes a bounded set of exact frames, pose transforms, interpolation, and extrapolation atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
+        "reason": "The accepted action writes a bounded set of exact frames and bone rotations atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/animation/keyframes/introduction.html"
       }
     },

@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.8.0",
+  "catalogVersion": "1.9.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make one bounded whole-mesh Subdivide edit; add an owned Bevel modifier; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make one bounded whole-mesh Subdivide edit; add an owned Bevel modifier; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -51,9 +51,13 @@
       "id": "animation",
       "order": 3,
       "title": "Rig and animation",
-      "description": "Create a bounded rigid armature and pose keyframes for owned parts.",
-      "selectionGuidance": "Select only when the goal requests motion or a reusable rigid pose; deform animation is unsupported.",
-      "actionNames": ["blender.rig.create_armature", "blender.animation.create_pose_keyframes"]
+      "description": "Create a bounded armature, optional explicit deform weights, and pose transform keyframes for owned parts.",
+      "selectionGuidance": "Select only when the goal requests motion or a reusable pose. Use explicit skin weights only for bounded meshes; automatic weights remain unsupported.",
+      "actionNames": [
+        "blender.rig.create_armature",
+        "blender.rig.bind_skin_weights",
+        "blender.animation.create_pose_keyframes"
+      ]
     },
     {
       "id": "render_setup",
@@ -134,10 +138,17 @@
       "actionNames": ["blender.rig.create_armature"]
     },
     {
+      "id": "animation.deform_skin_weights",
+      "title": "Explicit deform skin weights",
+      "description": "Bind every vertex of an owned bounded mesh to an owned armature with normalized explicit weights and an Armature modifier.",
+      "selectionGuidance": "Select when the goal needs inspectable mesh deformation and the provider can declare complete per-vertex weights; never infer or auto-generate weights.",
+      "actionNames": ["blender.rig.bind_skin_weights"]
+    },
+    {
       "id": "animation.rigid_pose_keyframes",
-      "title": "Rigid pose keyframes",
-      "description": "Author explicit pose keyframes for an owned rigid armature.",
-      "selectionGuidance": "Select when the goal requests bounded rigid motion or poses at named frames.",
+      "title": "Pose transform keyframes",
+      "description": "Author explicit rotation plus optional location and scale keyframes for an owned armature with bounded interpolation.",
+      "selectionGuidance": "Select when the goal requests bounded rigid or deform motion at named frames.",
       "actionNames": ["blender.animation.create_pose_keyframes"]
     },
     {
@@ -1249,9 +1260,133 @@
       }
     },
     {
+      "name": "blender.rig.bind_skin_weights",
+      "title": "Bind explicit armature skin weights",
+      "description": "Creates normalized vertex groups for every vertex of one owned bounded mesh and attaches an owned Armature modifier to a previously created owned armature.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": [
+          "targetId",
+          "armatureId",
+          "modifierId",
+          "modifierName",
+          "preserveVolume",
+          "weights"
+        ],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "armatureId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "preserveVolume": {
+            "type": "boolean",
+            "description": "Enables Blender's preserve-volume deformation on the owned Armature modifier."
+          },
+          "weights": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8192,
+            "uniqueItems": true,
+            "uniqueVertexIndices": true,
+            "items": {
+              "type": "object",
+              "required": ["vertexIndex", "influences"],
+              "properties": {
+                "vertexIndex": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8191
+                },
+                "influences": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "uniqueBoneNames": true,
+                  "weightsSumToOne": true,
+                  "items": {
+                    "type": "object",
+                    "required": ["boneName", "weight"],
+                    "properties": {
+                      "boneName": {
+                        "type": "string",
+                        "pattern": "^OperatingLine\\.",
+                        "maxLength": 180
+                      },
+                      "weight": {
+                        "type": "number",
+                        "minimum": 0.000001,
+                        "maximum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "Bone names must be unique and weights must sum to 1 for this vertex."
+                }
+              },
+              "additionalProperties": false
+            },
+            "description": "Must contain every mesh vertex index exactly once. Automatic, partial, negative, or non-normalized weights are rejected at execution."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "read",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Requires one previously created owned, unparented mesh with at most 8192 vertices."
+        },
+        {
+          "access": "read",
+          "resourceType": "ARMATURE_OBJECT",
+          "argumentPath": "armatureId",
+          "derivedResourceTypes": [],
+          "description": "Requires one previously created owned armature containing every referenced bone."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT_VERTEX_GROUPS",
+          "argumentPath": "weights",
+          "derivedResourceTypes": [],
+          "description": "Creates exact per-bone vertex groups and records their complete bounded assignment state."
+        },
+        {
+          "access": "mutate",
+          "resourceType": "ARMATURE_MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Adds one owned Armature modifier and enables deformation only on the referenced bones."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["skin_weights_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
       "name": "blender.animation.create_pose_keyframes",
-      "title": "Create armature pose keyframes",
-      "description": "Creates one owned Action and inserts bounded Euler-rotation keyframes on bones of a previously created owned armature.",
+      "title": "Create armature pose transform keyframes",
+      "description": "Creates one owned Action and inserts bounded Euler-rotation plus optional location and scale keyframes on bones of a previously created owned armature.",
       "argumentsSchema": {
         "type": "object",
         "required": ["actionId", "actionName", "armatureId", "keyframes"],
@@ -1264,6 +1399,14 @@
           "armatureId": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "interpolation": {
+            "enum": ["BEZIER", "LINEAR", "CONSTANT"],
+            "description": "Optional interpolation applied to every authored keyframe; defaults to BEZIER."
+          },
+          "extrapolation": {
+            "enum": ["CONSTANT", "LINEAR"],
+            "description": "Optional FCurve extrapolation applied to every authored channel; defaults to CONSTANT."
           },
           "keyframes": {
             "type": "array",
@@ -1298,6 +1441,28 @@
                         },
                         "minItems": 3,
                         "maxItems": 3
+                      },
+                      "location": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": -1000,
+                          "maximum": 1000
+                        },
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional pose-bone local translation keyed at this frame."
+                      },
+                      "scale": {
+                        "type": "array",
+                        "items": {
+                          "type": "number",
+                          "minimum": 0.0001,
+                          "maximum": 1000
+                        },
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "description": "Optional positive pose-bone local scale keyed at this frame."
                       }
                     },
                     "additionalProperties": false
@@ -1330,7 +1495,7 @@
           "resourceType": "POSE_BONE[]",
           "argumentPath": "keyframes[].poses[]",
           "derivedResourceTypes": [],
-          "description": "Assigns the owned action and inserts bounded pose rotations with compensating rollback."
+          "description": "Assigns the owned action and inserts bounded pose transforms with explicit interpolation and compensating rollback."
         }
       ],
       "supportedAnchorKinds": ["object", "operator", "unavailable"],

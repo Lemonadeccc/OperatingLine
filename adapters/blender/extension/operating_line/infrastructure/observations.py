@@ -16,6 +16,7 @@ from .snowman_actions.common import (
     build_resource_registry,
     find_artifact,
     find_owned_modifier,
+    find_owned_skin_weights,
     resolve_resource,
 )
 
@@ -222,6 +223,7 @@ def _pose_animation_ready(
     action_id = parameters.get("actionId")
     raw_frames = parameters.get("frames")
     raw_bone_names = parameters.get("boneNames")
+    raw_channels = parameters.get("channels")
     frames = (
         tuple(raw_frames)
         if isinstance(raw_frames, list)
@@ -234,6 +236,20 @@ def _pose_animation_ready(
         and all(isinstance(item, str) and item for item in raw_bone_names)
         else ()
     )
+    if raw_channels is None:
+        channels = ("rotation_euler",)
+    elif (
+        isinstance(raw_channels, list)
+        and raw_channels
+        and all(
+            item in {"location", "rotation_euler", "scale"}
+            for item in raw_channels
+        )
+        and len(set(raw_channels)) == len(raw_channels)
+    ):
+        channels = tuple(raw_channels)
+    else:
+        channels = ()
     registry = build_resource_registry(receipts)
 
     def resolve_id(value: Any) -> Any | None:
@@ -270,16 +286,41 @@ def _pose_animation_ready(
             for curve in action_fcurves(animation)
         }
     expected_frames = {float(frame) for frame in frames}
+    component_counts = {"location": 3, "rotation_euler": 3, "scale": 3}
     channels_complete = (
         isinstance(armature, bpy.types.Object)
         and armature.type == "ARMATURE"
         and len(available_bones) == len(bone_names)
         and all(
-            curve_frames.get((armature.pose.bones[name].path_from_id("rotation_euler"), index))
+            curve_frames.get((armature.pose.bones[name].path_from_id(channel), index))
             == expected_frames
             for name in bone_names
-            for index in range(3)
+            for channel in channels
+            for index in range(component_counts[channel])
         )
+    )
+    curves = action_fcurves(animation) if isinstance(animation, bpy.types.Action) else ()
+    expected_interpolation = parameters.get("interpolation")
+    interpolation_valid = expected_interpolation is None or (
+        isinstance(expected_interpolation, str)
+        and expected_interpolation in {"BEZIER", "LINEAR", "CONSTANT"}
+    )
+    interpolation_matches = interpolation_valid and (
+        expected_interpolation is None
+        or all(
+            point.interpolation == expected_interpolation
+            for curve in curves
+            for point in curve.keyframe_points
+        )
+    )
+    expected_extrapolation = parameters.get("extrapolation")
+    extrapolation_valid = expected_extrapolation is None or (
+        isinstance(expected_extrapolation, str)
+        and expected_extrapolation in {"CONSTANT", "LINEAR"}
+    )
+    extrapolation_matches = extrapolation_valid and (
+        expected_extrapolation is None
+        or all(curve.extrapolation == expected_extrapolation for curve in curves)
     )
     satisfied = (
         isinstance(animation, bpy.types.Action)
@@ -287,7 +328,10 @@ def _pose_animation_ready(
         and bool(bone_names)
         and len(available_bones) == len(bone_names)
         and actual_range == expected_range
+        and bool(channels)
         and channels_complete
+        and interpolation_matches
+        and extrapolation_matches
     )
     return satisfied, {
         "armatureId": armature_id if isinstance(armature_id, str) else None,
@@ -296,7 +340,107 @@ def _pose_animation_ready(
         "frameRange": list(actual_range),
         "expectedFrameRange": list(expected_range),
         "availableBoneNames": available_bones,
+        "channels": list(channels),
         "channelsComplete": channels_complete,
+        "interpolationValid": interpolation_valid,
+        "interpolationMatches": interpolation_matches,
+        "extrapolationValid": extrapolation_valid,
+        "extrapolationMatches": extrapolation_matches,
+    }
+
+
+def _skin_weights_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    target_id = parameters.get("targetId")
+    armature_id = parameters.get("armatureId")
+    modifier_id = parameters.get("modifierId")
+    raw_bone_names = parameters.get("boneNames")
+    bone_names = (
+        tuple(raw_bone_names)
+        if isinstance(raw_bone_names, list)
+        and raw_bone_names
+        and all(isinstance(item, str) and item for item in raw_bone_names)
+        else ()
+    )
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if isinstance(target_id, str) else None
+    armature_identity = (
+        registry.get(armature_id) if isinstance(armature_id, str) else None
+    )
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    armature = (
+        resolve_resource(armature_identity)
+        if armature_identity is not None
+        else None
+    )
+    found_weights = (
+        find_owned_skin_weights(receipts, modifier_id)
+        if isinstance(modifier_id, str)
+        else None
+    )
+    weight_owner, weight_state = (
+        found_weights if found_weights is not None else (None, None)
+    )
+    found_modifier = (
+        find_owned_modifier(receipts, modifier_id)
+        if isinstance(modifier_id, str)
+        else None
+    )
+    modifier_owner, modifier = (
+        found_modifier if found_modifier is not None else (None, None)
+    )
+    actual_bone_names = (
+        tuple(group.display_name for group in weight_state.groups)
+        if weight_state is not None
+        else ()
+    )
+    deform_bones = (
+        [
+            name
+            for name in bone_names
+            if armature.data.bones.get(name) is not None
+            and armature.data.bones[name].use_deform
+        ]
+        if isinstance(armature, bpy.types.Object) and armature.type == "ARMATURE"
+        else []
+    )
+    preserve_volume = parameters.get("preserveVolume")
+    preserve_volume_valid = preserve_volume is None or isinstance(
+        preserve_volume, bool
+    )
+    preserve_volume_matches = preserve_volume_valid and (
+        preserve_volume is None
+        or bool(
+            modifier is not None
+            and modifier.use_deform_preserve_volume == preserve_volume
+        )
+    )
+    satisfied = bool(
+        isinstance(target, bpy.types.Object)
+        and target.type == "MESH"
+        and isinstance(armature, bpy.types.Object)
+        and armature.type == "ARMATURE"
+        and weight_owner is target
+        and modifier_owner is target
+        and modifier is not None
+        and modifier.type == "ARMATURE"
+        and modifier.object is armature
+        and modifier.use_vertex_groups
+        and not modifier.use_bone_envelopes
+        and bone_names
+        and actual_bone_names == bone_names
+        and len(deform_bones) == len(bone_names)
+        and preserve_volume_matches
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "armatureId": armature_id if isinstance(armature_id, str) else None,
+        "modifierId": modifier_id if isinstance(modifier_id, str) else None,
+        "boneNames": list(actual_bone_names),
+        "deformBoneNames": deform_bones,
+        "vertexCount": weight_state.vertex_count if weight_state is not None else None,
+        "preserveVolumeMatches": preserve_volume_matches,
     }
 
 
@@ -525,6 +669,7 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "material_assigned": _material_assigned,
     "armature_ready": _armature_ready,
     "pose_animation_ready": _pose_animation_ready,
+    "skin_weights_ready": _skin_weights_ready,
     "render_scene_ready": _render_scene_ready,
     "render_rig_ready": _render_rig_ready,
     "render_artifact_exists": _render_artifact_exists,

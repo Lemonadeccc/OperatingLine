@@ -22,6 +22,8 @@ const schemaKeywords = new Set([
   'uniqueObjectNames',
   'uniqueBoneNames',
   'uniqueTargetIds',
+  'uniqueVertexIndices',
+  'weightsSumToOne',
   'acyclicParents',
   'strictlyIncreasingFrames',
   'distinctPropertyValues',
@@ -42,6 +44,8 @@ const customArrayKeywords = [
   'uniqueObjectNames',
   'uniqueBoneNames',
   'uniqueTargetIds',
+  'uniqueVertexIndices',
+  'weightsSumToOne',
   'acyclicParents',
   'strictlyIncreasingFrames',
 ] as const;
@@ -170,6 +174,7 @@ function validateCustomArraySchema(schema: SchemaRecord, path: string): void {
     ['uniqueObjectNames', 'objectName'],
     ['uniqueBoneNames', 'boneName'],
     ['uniqueTargetIds', 'targetId'],
+    ['uniqueVertexIndices', 'vertexIndex'],
   ] as const;
   for (const [keyword, field] of uniquenessFields) {
     if (schema[keyword] === true) {
@@ -179,10 +184,24 @@ function validateCustomArraySchema(schema: SchemaRecord, path: string): void {
         keyword,
         field,
         path,
-        (fieldSchema) => fieldSchema.type === 'string',
-        'type string',
+        (fieldSchema) =>
+          keyword === 'uniqueVertexIndices'
+            ? fieldSchema.type === 'integer'
+            : fieldSchema.type === 'string',
+        keyword === 'uniqueVertexIndices' ? 'type integer' : 'type string',
       );
     }
+  }
+  if (schema.weightsSumToOne === true) {
+    const itemSchemas = customObjectItemSchemas(items, 'weightsSumToOne', path);
+    requireCustomItemField(
+      itemSchemas,
+      'weightsSumToOne',
+      'weight',
+      path,
+      (fieldSchema) => fieldSchema.type === 'number',
+      'type number',
+    );
   }
   if (schema.acyclicParents === true) {
     if (schema.uniqueBoneNames !== true) {
@@ -497,6 +516,7 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
     ['uniqueObjectNames', 'objectName'],
     ['uniqueBoneNames', 'boneName'],
     ['uniqueTargetIds', 'targetId'],
+    ['uniqueVertexIndices', 'vertexIndex'],
   ] as const;
   for (const [keyword, field] of uniquenessFields) {
     if (schema[keyword] === true) {
@@ -511,6 +531,15 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
         }
         seen.add(fieldValue);
       });
+    }
+  }
+  if (schema.weightsSumToOne === true) {
+    const total = value.reduce<number>(
+      (sum, item) => sum + (isRecord(item) && typeof item.weight === 'number' ? item.weight : 0),
+      0,
+    );
+    if (!Number.isFinite(total) || Math.abs(total - 1) > 1e-6) {
+      errors.push(`${path || 'arguments'} weights must sum to 1`);
     }
   }
   if (schema.strictlyIncreasingFrames === true) {

@@ -38,8 +38,10 @@ from .render import (
 from .rigging import (
     execute_armature,
     execute_pose_animation,
+    execute_skin_weights,
     validate_armature,
     validate_pose_animation,
+    validate_skin_weights,
 )
 
 Execute = Callable[[Mapping[str, ActionReceipt]], ActionReceipt]
@@ -160,6 +162,14 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             reserve(step.id, (definition.logical_id,))
             execute = _bind_action(
                 execute_pose_animation,
+                step.id,
+                action,
+                definition,
+            )
+        elif action.name == "blender.rig.bind_skin_weights":
+            definition = validate_skin_weights(arguments)
+            execute = _bind_action(
+                execute_skin_weights,
                 step.id,
                 action,
                 definition,

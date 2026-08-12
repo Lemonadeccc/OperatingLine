@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.8.0');
+    expect(catalog.catalogVersion).toBe('1.9.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -36,6 +36,7 @@ describe('action catalog protocol', () => {
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
       'blender.rig.create_armature',
+      'blender.rig.bind_skin_weights',
       'blender.animation.create_pose_keyframes',
       'blender.render_scene.create',
       'blender.render_rig.create',
@@ -59,13 +60,25 @@ describe('action catalog protocol', () => {
       'geometry_nodes.transform',
       'appearance.principled_palette',
       'animation.rigid_armature',
+      'animation.deform_skin_weights',
       'animation.rigid_pose_keyframes',
       'render.scene_setup',
       'output.png_preview',
     ]);
     expect(
       blenderActionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
-    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0', '1.8.0']);
+    ).toEqual([
+      '1.0.0',
+      '1.1.0',
+      '1.2.0',
+      '1.3.0',
+      '1.4.0',
+      '1.5.0',
+      '1.6.0',
+      '1.7.0',
+      '1.8.0',
+      '1.9.0',
+    ]);
   });
 
   it('rejects duplicate actions and required argument names absent from properties', () => {
@@ -373,6 +386,55 @@ describe('action catalog protocol', () => {
         schemaFor('blender.geometry_nodes.create_transform'),
       ),
     ).toContain('scale[0] must be at least 0.0001');
+  });
+
+  it('rejects duplicate vertices and non-normalized skin weights before execution', () => {
+    const skinAction = blenderActionCatalog.actions.find(
+      (candidate) => candidate.name === 'blender.rig.bind_skin_weights',
+    );
+    expect(skinAction).toBeDefined();
+
+    const skinArguments = {
+      targetId: 'model.body',
+      armatureId: 'model.rig',
+      modifierId: 'model.body.skin',
+      modifierName: 'OperatingLine.Body.Skin',
+      preserveVolume: true,
+      weights: [
+        {
+          vertexIndex: 0,
+          influences: [
+            { boneName: 'OperatingLine.Root', weight: 0.25 },
+            { boneName: 'OperatingLine.Tip', weight: 0.75 },
+          ],
+        },
+      ],
+    };
+
+    expect(validateActionArguments(skinArguments, skinAction!.argumentsSchema)).toEqual([]);
+    expect(
+      validateActionArguments(
+        { ...skinArguments, weights: [...skinArguments.weights, skinArguments.weights[0]] },
+        skinAction!.argumentsSchema,
+      ),
+    ).toContain('weights[1].vertexIndex must be unique');
+    expect(
+      validateActionArguments(
+        {
+          ...skinArguments,
+          weights: [
+            {
+              vertexIndex: 0,
+              influences: [
+                { boneName: 'OperatingLine.Root', weight: 0.25 },
+                { boneName: 'OperatingLine.Tip', weight: 0.5 },
+              ],
+            },
+          ],
+        },
+        skinAction!.argumentsSchema,
+      ),
+    ).toContain('weights[0].influences weights must sum to 1');
   });
 
   it('accepts strict catalog capability coverage with unique structural ids', () => {

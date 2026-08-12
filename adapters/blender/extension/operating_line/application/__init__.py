@@ -27,7 +27,10 @@ from .session import (
     DemoSession,
     ObservationGateError,
     ObservationGateState,
+    PoseBoneState,
     SessionSnapshot,
+    SkinWeightsState,
+    VertexGroupState,
 )
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import InitialPlanRunState, ReplanRunState, validate_provider_list
@@ -45,7 +48,10 @@ __all__ = (
     "DemoSession",
     "ObservationGateError",
     "ObservationGateState",
+    "PoseBoneState",
     "SessionSnapshot",
+    "SkinWeightsState",
+    "VertexGroupState",
     "GuidanceState",
     "GuidanceStep",
     "GoalRequestState",

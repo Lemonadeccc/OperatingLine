@@ -106,6 +106,39 @@ describe('action argument schemas', () => {
     ]);
   });
 
+  it('enforces unique vertex indices and normalized weights', () => {
+    const verticesSchema = {
+      type: 'array',
+      uniqueVertexIndices: true,
+      items: {
+        type: 'object',
+        required: ['vertexIndex'],
+        properties: { vertexIndex: { type: 'integer' } },
+        additionalProperties: false,
+      },
+    } as const;
+    expect(
+      validateActionArguments([{ vertexIndex: 0 }, { vertexIndex: 0 }], verticesSchema),
+    ).toEqual(['[1].vertexIndex must be unique']);
+
+    const influencesSchema = {
+      type: 'array',
+      weightsSumToOne: true,
+      items: {
+        type: 'object',
+        required: ['weight'],
+        properties: { weight: { type: 'number' } },
+        additionalProperties: false,
+      },
+    } as const;
+    expect(validateActionArguments([{ weight: 0.25 }, { weight: 0.75 }], influencesSchema)).toEqual(
+      [],
+    );
+    expect(validateActionArguments([{ weight: 0.25 }, { weight: 0.5 }], influencesSchema)).toEqual([
+      'arguments weights must sum to 1',
+    ]);
+  });
+
   it('rejects cyclic bone parents and non-increasing frames', () => {
     const bonesSchema = {
       type: 'array',
@@ -202,6 +235,30 @@ describe('action argument schemas', () => {
         items: { type: 'object', properties: {}, additionalProperties: false },
       }),
     ).toThrow('strictlyIncreasingFrames requires a required frame field with numeric schema');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        uniqueVertexIndices: true,
+        items: {
+          type: 'object',
+          required: ['vertexIndex'],
+          properties: { vertexIndex: { type: 'number' } },
+          additionalProperties: false,
+        },
+      }),
+    ).toThrow('uniqueVertexIndices requires a required vertexIndex field with type integer schema');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        weightsSumToOne: true,
+        items: {
+          type: 'object',
+          required: [],
+          properties: { weight: { type: 'number' } },
+          additionalProperties: false,
+        },
+      }),
+    ).toThrow('weightsSumToOne requires a required weight field with type number schema');
     expect(() =>
       validateActionArgumentsSchema({
         type: 'array',

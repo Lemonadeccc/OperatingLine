@@ -21,7 +21,10 @@ from ...application.session import (
     ModifierState,
     MutationRecord,
     ParentIdentity,
+    PoseBoneState,
     ResourceIdentity,
+    SkinWeightsState,
+    VertexGroupState,
 )
 
 COLLECTION_LOGICAL_ID = "snowman.collection"
@@ -147,6 +150,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",
         "blender.rig.create_armature",
+        "blender.rig.bind_skin_weights",
         "blender.animation.create_pose_keyframes",
         "blender.render_scene.create",
         "blender.render_rig.create",
@@ -361,6 +365,88 @@ def find_owned_modifier(
             if modifier is None or not _modifier_matches_state(target, state):
                 return None
             return target, modifier
+    return None
+
+
+def _vertex_group_assignments(
+    target: bpy.types.Object,
+    group_index: int,
+) -> tuple[tuple[int, float], ...]:
+    assignments: list[tuple[int, float]] = []
+    for vertex in target.data.vertices:
+        membership = next(
+            (item for item in vertex.groups if item.group == group_index),
+            None,
+        )
+        if membership is not None:
+            assignments.append((vertex.index, float(membership.weight)))
+    return tuple(assignments)
+
+
+def snapshot_skin_weights(
+    target: bpy.types.Object,
+    groups: Iterable[Any],
+    logical_id: str,
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+) -> SkinWeightsState:
+    """Snapshot action-created vertex groups without relying on RNA pointers."""
+    states = tuple(
+        VertexGroupState(
+            display_name=group.name,
+            stack_index=group.index,
+            lock_weight=bool(group.lock_weight),
+            assignments=_vertex_group_assignments(target, group.index),
+        )
+        for group in groups
+    )
+    if not states:
+        raise RuntimeError("Skin binding must create at least one vertex group")
+    return SkinWeightsState(
+        logical_id=logical_id,
+        receipt_token=receipt_id,
+        step_id=step_id,
+        action_name=action_name,
+        vertex_count=len(target.data.vertices),
+        groups=states,
+    )
+
+
+def skin_weights_state_matches(
+    target: bpy.types.Object,
+    state: SkinWeightsState,
+) -> bool:
+    """Compare current vertex groups to an exact bounded weight snapshot."""
+    if target.type != "MESH" or len(target.data.vertices) != state.vertex_count:
+        return False
+    for expected in state.groups:
+        if not 0 <= expected.stack_index < len(target.vertex_groups):
+            return False
+        group = target.vertex_groups[expected.stack_index]
+        if (
+            group.name != expected.display_name
+            or bool(group.lock_weight) != expected.lock_weight
+            or _vertex_group_assignments(target, group.index) != expected.assignments
+        ):
+            return False
+    return True
+
+
+def find_owned_skin_weights(
+    receipts: Mapping[str, ActionReceipt], logical_id: str
+) -> tuple[bpy.types.Object, SkinWeightsState] | None:
+    for receipt in receipts.values():
+        for mutation in receipt.mutations:
+            state = mutation.after
+            if not isinstance(state, SkinWeightsState) or state.logical_id != logical_id:
+                continue
+            target = resolve_resource(mutation.resource)
+            if not isinstance(target, bpy.types.Object):
+                return None
+            if not skin_weights_state_matches(target, state):
+                return None
+            return target, state
     return None
 
 
@@ -851,13 +937,35 @@ def _pose_bone_matches(
         return False
     if isinstance(recorded, ResourceIdentity):
         return _animation_action_matches(target, recorded)
-    if not isinstance(recorded, tuple) or len(recorded) != 2:
+    if not isinstance(recorded, PoseBoneState):
         return False
-    rotation_mode, rotation_euler = recorded
     return (
-        pose_bone.rotation_mode == rotation_mode
+        pose_bone.rotation_mode == recorded.rotation_mode
+        and tuple(float(value) for value in pose_bone.location)
+        == recorded.location
         and tuple(float(value) for value in pose_bone.rotation_euler)
-        == rotation_euler
+        == recorded.rotation_euler
+        and tuple(float(value) for value in pose_bone.scale) == recorded.scale
+    )
+
+
+def _armature_bone_deform_matches(target: Any, attribute: str, recorded: Any) -> bool:
+    bone_name = attribute.partition(":")[2]
+    bone = target.bones.get(bone_name) if isinstance(target, bpy.types.Armature) else None
+    return bone is not None and isinstance(recorded, bool) and bone.use_deform is recorded
+
+
+def _skin_weights_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
+    target = resolve_resource(mutation.resource)
+    if not isinstance(target, bpy.types.Object) or target.type != "MESH":
+        return False
+    state = mutation.after
+    if not isinstance(state, SkinWeightsState):
+        return False
+    if recorded is None:
+        return all(target.vertex_groups.get(group.display_name) is None for group in state.groups)
+    return isinstance(recorded, SkinWeightsState) and skin_weights_state_matches(
+        target, recorded
     )
 
 
@@ -908,8 +1016,12 @@ def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
     target = resolve_resource(mutation.resource)
     if target is None:
         return False
+    if mutation.attribute.startswith("skin_weights:"):
+        return _skin_weights_matches_value(mutation, recorded)
     if mutation.attribute.startswith("modifier:"):
         return _modifier_matches_value(mutation, recorded)
+    if mutation.attribute.startswith("armature_bone_use_deform:"):
+        return _armature_bone_deform_matches(target, mutation.attribute, recorded)
     if mutation.attribute == "mesh_content":
         return (
             isinstance(target, bpy.types.Mesh)
@@ -970,6 +1082,27 @@ def _restore_mutation(mutation: MutationRecord) -> None:
         raise RuntimeError(
             f"Mutation target is unavailable: {mutation.resource.logical_id}"
         )
+    if mutation.attribute.startswith("skin_weights:"):
+        if mutation.before is not None or not isinstance(
+            mutation.after, SkinWeightsState
+        ):
+            raise RuntimeError("Only action-created skin weights can be restored")
+        if not isinstance(target, bpy.types.Object) or target.type != "MESH":
+            raise RuntimeError("Skin weight mutation target is not a mesh object")
+        for expected in sorted(
+            mutation.after.groups,
+            key=lambda item: item.stack_index,
+            reverse=True,
+        ):
+            if not 0 <= expected.stack_index < len(target.vertex_groups):
+                raise RuntimeError(
+                    f"Vertex group is unavailable: {expected.display_name}"
+                )
+            group = target.vertex_groups[expected.stack_index]
+            if group.name != expected.display_name:
+                raise RuntimeError(f"Vertex group changed: {expected.display_name}")
+            target.vertex_groups.remove(group)
+        return
     if mutation.attribute.startswith("modifier:"):
         if mutation.before is not None or not isinstance(
             mutation.after, ModifierState
@@ -980,6 +1113,15 @@ def _restore_mutation(mutation: MutationRecord) -> None:
         modifier = _modifier_at_pointer(target, mutation.after.pointer)
         if modifier is not None:
             target.modifiers.remove(modifier)
+        return
+    if mutation.attribute.startswith("armature_bone_use_deform:"):
+        if not isinstance(target, bpy.types.Armature):
+            raise RuntimeError("Bone deform mutation target is not armature data")
+        bone_name = mutation.attribute.partition(":")[2]
+        bone = target.bones.get(bone_name)
+        if bone is None:
+            raise RuntimeError(f"Armature bone is unavailable: {bone_name}")
+        bone.use_deform = mutation.before
         return
     if mutation.attribute in {"mesh_content", "node_tree_signature"}:
         return
@@ -1036,9 +1178,12 @@ def _restore_mutation(mutation: MutationRecord) -> None:
         pose_bone = target.pose.bones.get(bone_name)
         if pose_bone is None:
             raise RuntimeError(f"Pose bone is unavailable: {bone_name}")
-        rotation_mode, rotation_euler = mutation.before
-        pose_bone.rotation_mode = rotation_mode
-        pose_bone.rotation_euler = rotation_euler
+        if not isinstance(mutation.before, PoseBoneState):
+            raise RuntimeError(f"Pose bone state is invalid: {bone_name}")
+        pose_bone.rotation_mode = mutation.before.rotation_mode
+        pose_bone.location = mutation.before.location
+        pose_bone.rotation_euler = mutation.before.rotation_euler
+        pose_bone.scale = mutation.before.scale
         return
     if mutation.attribute == "action_keyframes":
         return

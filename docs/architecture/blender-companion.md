@@ -32,12 +32,12 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.5.0` 与 ActionCatalog `1.8.0` 一一绑定 18 个 action，并由活动叶节点的 `actionName` 选择配方。
+`1.6.0` 与 ActionCatalog `1.9.0` 一一绑定 19 个 action，并由活动叶节点的 `actionName` 选择配方。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
-材质、骨骼、动画和渲染等十一条
+材质、骨骼、显式蒙皮权重、动画和渲染等十二条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
 菜单项。未来只有新的版本专用 recipe 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
@@ -102,7 +102,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.8.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.9.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -189,8 +189,8 @@ Provider Proposal。队列为活动/已知 Provider 结果保留容量；队列�
 ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
 稳定资源名 `resources/snowman.plan.json`。
 
-当前动作目录 `1.8.0` 允许以下 18 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0`、`1.3.0`、`1.4.0`、`1.5.0`、`1.6.0`、`1.7.0` 供精确回放：
+当前动作目录 `1.9.0` 允许以下 19 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0`、`1.3.0`、`1.4.0`、`1.5.0`、`1.6.0`、`1.7.0`、`1.8.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_cube`
@@ -206,14 +206,15 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、
 - `blender.material.create_and_assign`
 - `blender.material.create_palette_and_assign`
 - `blender.rig.create_armature`
+- `blender.rig.bind_skin_weights`
 - `blender.animation.create_pose_keyframes`
 - `blender.render_scene.create`
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.8.0` 提供十项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
+`1.9.0` 提供十一项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
 subdivide、Bevel Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
-rigid pose keyframes、render scene setup 和 PNG preview output。
+explicit deform skin weights、pose transform keyframes、render scene setup 和 PNG preview output。
 Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
 再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
 action 不匹配或范围外的映射使 quality baseline `1.1.0` 失败并返回 `needs_revision`，不会产生
@@ -253,11 +254,16 @@ Collection/Scene 增加了未跟踪内容时，回退以零写入失败并保留
 冲突后可以原地重试。扩展在同一 Blender 进程内被禁用时也不会因为该冲突而卸载失败或丢弃
 receipt。模块重载后仍不会仅凭可复制标签接管旧资源。
 
-骨架 action 只接受 1–32 个具名骨骼和 1–64 个既有自有对象绑定；父骨引用必须存在且无环，
-绑定目标必须未被父级占用。当前使用 rigid bone parenting，不做权重绘制或网格变形，并在绑定时
-保留对象世界矩阵。动画 action 只接受 2–64 个严格递增帧和范围在 ±2π 内的 Euler 旋转，创建
-一个自有 Action 后写入 pose keyframe。失败补偿会先解除 Action，再恢复 pose 与父子关系，最后
-删除自有 Action、Armature object 和 data；不会调用任意 Python 或任意 Blender operator。
+Armature 创建 action 只接受 1–32 个具名骨骼和 1–64 个既有自有对象刚性绑定；父骨引用必须存在且
+无环，绑定目标必须未被父级占用，并在 bone parenting 时保留对象世界矩阵。独立 skin action 只接受
+最多 8192 顶点的自有未父级 Mesh、已有自有 Armature、完整且唯一的顶点索引，以及每点 1–8 个唯一
+骨骼影响；执行时再次要求每点权重和为 1，不调用自动权重。它创建按骨名命名的 Vertex Group、一个
+Armature Modifier，并只把引用骨骼设为 deform。动画 action 仍只接受 2–64 个严格递增帧和范围在
+±2π 内的 Euler 旋转，同时可选写入有界 local location/正 scale，并统一声明 Bezier/Linear/Constant
+插值与 Constant/Linear 外推。失败补偿会解除 Action/Modifier、恢复 pose、deform 标志、顶点组与
+父子关系，再删除自有 Action、Armature object 和 data；任何外部权重、modifier 或关键帧修改都会
+以零写入失败并保留 receipt。见
+[ADR 0032](../adr/0032-bounded-skin-weights-and-pose-transforms.md)。
 
 隔离渲染 Scene 只链接 OperatingLine 自有 Collection。默认启动文件中的 Cube、Camera 和 Light
 既不会被删除，也不会进入该渲染 Scene；创建的相机和两盏 Area Light 只属于这次执行记录。

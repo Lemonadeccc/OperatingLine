@@ -157,6 +157,38 @@ class ModifierState:
 
 
 @dataclass(frozen=True, slots=True)
+class VertexGroupState:
+    """Exact state of one action-created Blender vertex group."""
+
+    display_name: str
+    stack_index: int
+    lock_weight: bool
+    assignments: tuple[tuple[int, float], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SkinWeightsState:
+    """Bounded vertex-group state created by one deform-binding action."""
+
+    logical_id: str
+    receipt_token: str
+    step_id: str
+    action_name: str
+    vertex_count: int
+    groups: tuple[VertexGroupState, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PoseBoneState:
+    """Restorable local pose transform for one animated bone."""
+
+    rotation_mode: str
+    location: tuple[float, float, float]
+    rotation_euler: tuple[float, float, float]
+    scale: tuple[float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
 class ActionReceipt:
     """All reversible effects produced by one executable plan step."""
 

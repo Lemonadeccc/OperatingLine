@@ -9,24 +9,29 @@ import bpy
 from mathutils import Vector
 
 from ...application import ActionReceipt
-from ...application.session import MutationRecord, ResourceIdentity
+from ...application.session import MutationRecord, PoseBoneState, ResourceIdentity
 from ...domain import ActionSpec
 from .common import (
     COLLECTION_LOGICAL_ID,
+    action_fcurves,
     action_keyframe_signature,
     build_resource_registry,
     ensure_collection_contents_tracked,
     ensure_logical_ids_available,
+    ensure_modifier_id_available,
     ensure_name_available,
     ensure_receipts_intact,
     integer,
     logical_id,
     make_receipt,
     new_receipt_id,
+    number,
     owned_resource,
     require_keys,
     require_object,
     rollback_partial,
+    snapshot_modifier,
+    snapshot_skin_weights,
     tag_resource,
     text,
     vector,
@@ -36,6 +41,8 @@ MAX_BONES = 32
 MAX_BINDINGS = 64
 MAX_KEYFRAMES = 64
 MAX_FRAME = 100_000
+MAX_WEIGHT_VERTICES = 8192
+MAX_INFLUENCES = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +70,33 @@ class ArmatureDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class InfluenceDefinition:
+    bone_name: str
+    weight: float
+
+
+@dataclass(frozen=True, slots=True)
+class VertexWeightDefinition:
+    vertex_index: int
+    influences: tuple[InfluenceDefinition, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SkinWeightsDefinition:
+    target_id: str
+    armature_id: str
+    modifier_id: str
+    modifier_name: str
+    preserve_volume: bool
+    weights: tuple[VertexWeightDefinition, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class PoseDefinition:
     bone_name: str
     rotation_euler: tuple[float, float, float]
+    location: tuple[float, float, float] | None
+    scale: tuple[float, float, float] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +111,8 @@ class PoseAnimationDefinition:
     name: str
     armature_id: str
     keyframes: tuple[KeyframeDefinition, ...]
+    interpolation: str
+    extrapolation: str
 
 
 def _validate_acyclic_bones(bones: tuple[BoneDefinition, ...]) -> None:
@@ -213,9 +246,109 @@ def validate_armature(arguments: Mapping[str, Any]) -> ArmatureDefinition:
     return definition
 
 
-def _pose(raw: Mapping[str, Any], label: str) -> PoseDefinition:
-    fields = {"boneName", "rotationEuler"}
+def _influence(raw: Mapping[str, Any], label: str) -> InfluenceDefinition:
+    fields = {"boneName", "weight"}
     require_keys(raw, fields, fields, label)
+    return InfluenceDefinition(
+        bone_name=text(
+            raw["boneName"],
+            f"{label}.boneName",
+            prefix="OperatingLine.",
+        ),
+        weight=number(
+            raw["weight"],
+            f"{label}.weight",
+            minimum=0.000001,
+            maximum=1.0,
+        ),
+    )
+
+
+def _vertex_weight(raw: Mapping[str, Any], label: str) -> VertexWeightDefinition:
+    fields = {"vertexIndex", "influences"}
+    require_keys(raw, fields, fields, label)
+    raw_influences = raw["influences"]
+    if (
+        not isinstance(raw_influences, list)
+        or not 1 <= len(raw_influences) <= MAX_INFLUENCES
+    ):
+        raise ValueError(
+            f"{label}.influences must contain 1 to {MAX_INFLUENCES} definitions"
+        )
+    influences = tuple(
+        _influence(
+            require_object(item, f"{label}.influences[{index}]"),
+            f"{label}.influences[{index}]",
+        )
+        for index, item in enumerate(raw_influences)
+    )
+    names = [influence.bone_name for influence in influences]
+    if len(set(names)) != len(names):
+        raise ValueError(f"{label}.influences boneName values must be unique")
+    total = sum(influence.weight for influence in influences)
+    if not math.isclose(total, 1.0, abs_tol=1e-6):
+        raise ValueError(f"{label}.influences weights must sum to 1")
+    return VertexWeightDefinition(
+        vertex_index=integer(
+            raw["vertexIndex"],
+            f"{label}.vertexIndex",
+            minimum=0,
+            maximum=MAX_WEIGHT_VERTICES - 1,
+        ),
+        influences=influences,
+    )
+
+
+def validate_skin_weights(arguments: Mapping[str, Any]) -> SkinWeightsDefinition:
+    fields = {
+        "targetId",
+        "armatureId",
+        "modifierId",
+        "modifierName",
+        "preserveVolume",
+        "weights",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    raw_weights = arguments["weights"]
+    if (
+        not isinstance(raw_weights, list)
+        or not 1 <= len(raw_weights) <= MAX_WEIGHT_VERTICES
+    ):
+        raise ValueError(
+            "arguments.weights must contain 1 to "
+            f"{MAX_WEIGHT_VERTICES} definitions"
+        )
+    weights = tuple(
+        _vertex_weight(
+            require_object(item, f"arguments.weights[{index}]"),
+            f"arguments.weights[{index}]",
+        )
+        for index, item in enumerate(raw_weights)
+    )
+    vertex_indices = [item.vertex_index for item in weights]
+    if len(set(vertex_indices)) != len(vertex_indices):
+        raise ValueError("arguments.weights vertexIndex values must be unique")
+    preserve_volume = arguments["preserveVolume"]
+    if not isinstance(preserve_volume, bool):
+        raise ValueError("arguments.preserveVolume must be a boolean")
+    return SkinWeightsDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        armature_id=logical_id(arguments["armatureId"], "arguments.armatureId"),
+        modifier_id=logical_id(arguments["modifierId"], "arguments.modifierId"),
+        modifier_name=text(
+            arguments["modifierName"],
+            "arguments.modifierName",
+            prefix="OperatingLine.",
+        ),
+        preserve_volume=preserve_volume,
+        weights=weights,
+    )
+
+
+def _pose(raw: Mapping[str, Any], label: str) -> PoseDefinition:
+    required = {"boneName", "rotationEuler"}
+    allowed = required | {"location", "scale"}
+    require_keys(raw, required, allowed, label)
     return PoseDefinition(
         bone_name=text(
             raw["boneName"],
@@ -228,6 +361,28 @@ def _pose(raw: Mapping[str, Any], label: str) -> PoseDefinition:
             3,
             minimum=-2.0 * math.pi,
             maximum=2.0 * math.pi,
+        ),
+        location=(
+            vector(
+                raw["location"],
+                f"{label}.location",
+                3,
+                minimum=-1000.0,
+                maximum=1000.0,
+            )
+            if "location" in raw
+            else None
+        ),
+        scale=(
+            vector(
+                raw["scale"],
+                f"{label}.scale",
+                3,
+                minimum=0.0001,
+                maximum=1000.0,
+            )
+            if "scale" in raw
+            else None
         ),
     )
 
@@ -257,8 +412,9 @@ def _keyframe(raw: Mapping[str, Any], label: str) -> KeyframeDefinition:
 def validate_pose_animation(
     arguments: Mapping[str, Any],
 ) -> PoseAnimationDefinition:
-    fields = {"actionId", "actionName", "armatureId", "keyframes"}
-    require_keys(arguments, fields, fields, "arguments")
+    required = {"actionId", "actionName", "armatureId", "keyframes"}
+    allowed = required | {"interpolation", "extrapolation"}
+    require_keys(arguments, required, allowed, "arguments")
     raw_keyframes = arguments["keyframes"]
     if (
         not isinstance(raw_keyframes, list)
@@ -277,6 +433,21 @@ def validate_pose_animation(
     frames = [keyframe.frame for keyframe in keyframes]
     if any(current <= previous for previous, current in zip(frames, frames[1:])):
         raise ValueError("arguments.keyframes frames must be strictly increasing")
+    interpolation = arguments.get("interpolation", "BEZIER")
+    if not isinstance(interpolation, str) or interpolation not in {
+        "BEZIER",
+        "LINEAR",
+        "CONSTANT",
+    }:
+        raise ValueError(
+            "arguments.interpolation must be BEZIER, LINEAR, or CONSTANT"
+        )
+    extrapolation = arguments.get("extrapolation", "CONSTANT")
+    if not isinstance(extrapolation, str) or extrapolation not in {
+        "CONSTANT",
+        "LINEAR",
+    }:
+        raise ValueError("arguments.extrapolation must be CONSTANT or LINEAR")
     definition = PoseAnimationDefinition(
         logical_id=logical_id(arguments["actionId"], "arguments.actionId"),
         name=text(
@@ -286,6 +457,8 @@ def validate_pose_animation(
         ),
         armature_id=logical_id(arguments["armatureId"], "arguments.armatureId"),
         keyframes=keyframes,
+        interpolation=interpolation,
+        extrapolation=extrapolation,
     )
     if definition.logical_id == definition.armature_id:
         raise ValueError("Action and armature logical IDs must differ")
@@ -460,17 +633,184 @@ def execute_armature(
         raise
 
 
-def _pose_state(pose_bone: Any) -> tuple[str, tuple[float, float, float]]:
-    return (
-        pose_bone.rotation_mode,
-        tuple(float(value) for value in pose_bone.rotation_euler),
+def _add_vertex_weight(group: Any, vertex_index: int, weight: float) -> None:
+    group.add((vertex_index,), weight, "REPLACE")
+
+
+def execute_skin_weights(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: SkinWeightsDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target = owned_resource(registry, definition.target_id, "OBJECT")
+    if not isinstance(target, bpy.types.Object) or target.type != "MESH":
+        raise ValueError(f"Skin target is not an owned mesh: {definition.target_id}")
+    armature_identity, armature = owned_resource(
+        registry,
+        definition.armature_id,
+        "OBJECT",
+    )
+    if not isinstance(armature, bpy.types.Object) or armature.type != "ARMATURE":
+        raise ValueError(
+            f"Skin armature is not an owned armature: {definition.armature_id}"
+        )
+    armature_data_identity, armature_data = owned_resource(
+        registry,
+        f"{definition.armature_id}.data",
+        "ARMATURE",
+    )
+    if armature.data is not armature_data:
+        raise RuntimeError("Skin armature data identity is inconsistent")
+    if target.parent is not None:
+        raise RuntimeError("Skin target must be unparented")
+    if any(modifier.type == "ARMATURE" for modifier in target.modifiers):
+        raise RuntimeError("Skin target already has an Armature modifier")
+    ensure_modifier_id_available(receipts, definition.modifier_id)
+    if target.modifiers.get(definition.modifier_name) is not None:
+        raise RuntimeError(
+            f"Cannot replace existing modifier: {definition.modifier_name}"
+        )
+
+    vertex_count = len(target.data.vertices)
+    if vertex_count > MAX_WEIGHT_VERTICES:
+        raise RuntimeError(
+            f"Skin target exceeds the {MAX_WEIGHT_VERTICES} vertex limit"
+        )
+    actual_indices = {item.vertex_index for item in definition.weights}
+    expected_indices = set(range(vertex_count))
+    if actual_indices != expected_indices:
+        raise ValueError("Skin weights must cover every target vertex exactly once")
+    bone_names = tuple(
+        dict.fromkeys(
+            influence.bone_name
+            for item in definition.weights
+            for influence in item.influences
+        )
+    )
+    bones: dict[str, Any] = {}
+    for bone_name in bone_names:
+        bone = armature.data.bones.get(bone_name)
+        if bone is None:
+            raise ValueError(f"Skin weights reference unknown bone: {bone_name}")
+        if target.vertex_groups.get(bone_name) is not None:
+            raise RuntimeError(f"Cannot replace existing vertex group: {bone_name}")
+        bones[bone_name] = bone
+
+    receipt_id = new_receipt_id()
+    mutations: list[MutationRecord] = []
+    created_groups: list[Any] = []
+    skin_state_recorded = False
+    modifier = None
+    modifier_recorded = False
+    try:
+        for bone_name in bone_names:
+            bone = bones[bone_name]
+            before = bool(bone.use_deform)
+            bone.use_deform = True
+            mutations.append(
+                MutationRecord(
+                    armature_data_identity,
+                    f"armature_bone_use_deform:{bone_name}",
+                    before,
+                    True,
+                )
+            )
+
+        groups = {
+            bone_name: target.vertex_groups.new(name=bone_name)
+            for bone_name in bone_names
+        }
+        created_groups.extend(groups.values())
+        for item in definition.weights:
+            for influence in item.influences:
+                _add_vertex_weight(
+                    groups[influence.bone_name],
+                    item.vertex_index,
+                    influence.weight,
+                )
+        skin_state = snapshot_skin_weights(
+            target,
+            created_groups,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"skin_weights:{definition.modifier_id}",
+                None,
+                skin_state,
+            )
+        )
+        skin_state_recorded = True
+
+        modifier = target.modifiers.new(definition.modifier_name, "ARMATURE")
+        modifier.object = armature
+        modifier.use_vertex_groups = True
+        modifier.use_bone_envelopes = False
+        modifier.use_deform_preserve_volume = definition.preserve_volume
+        modifier_state = snapshot_modifier(
+            target,
+            modifier,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+            {"object": armature_identity},
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"modifier:{definition.modifier_id}",
+                None,
+                modifier_state,
+            )
+        )
+        modifier_recorded = True
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            [],
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        if modifier is not None and not modifier_recorded:
+            target.modifiers.remove(modifier)
+        if not skin_state_recorded:
+            for group in reversed(created_groups):
+                current = target.vertex_groups.get(group.name)
+                if current is not None:
+                    target.vertex_groups.remove(current)
+        rollback_partial(receipt_id, step_id, action.name, [], mutations, [])
+        raise
+
+
+def _pose_state(pose_bone: Any) -> PoseBoneState:
+    return PoseBoneState(
+        rotation_mode=pose_bone.rotation_mode,
+        location=tuple(float(value) for value in pose_bone.location),
+        rotation_euler=tuple(float(value) for value in pose_bone.rotation_euler),
+        scale=tuple(float(value) for value in pose_bone.scale),
     )
 
 
-def _insert_pose_keyframe(pose_bone: Any, frame: int, bone_name: str) -> bool:
+def _insert_pose_keyframe(
+    pose_bone: Any,
+    frame: int,
+    bone_name: str,
+    data_path: str = "rotation_euler",
+) -> bool:
     return bool(
         pose_bone.keyframe_insert(
-            data_path="rotation_euler",
+            data_path=data_path,
             frame=frame,
             group=bone_name,
         )
@@ -565,6 +905,34 @@ def execute_pose_animation(
                     raise RuntimeError(
                         f"Blender rejected keyframe {keyframe.frame} for {pose.bone_name}"
                     )
+                if pose.location is not None:
+                    pose_bone.location = pose.location
+                    if not _insert_pose_keyframe(
+                        pose_bone,
+                        keyframe.frame,
+                        pose.bone_name,
+                        "location",
+                    ):
+                        raise RuntimeError(
+                            "Blender rejected location keyframe "
+                            f"{keyframe.frame} for {pose.bone_name}"
+                        )
+                if pose.scale is not None:
+                    pose_bone.scale = pose.scale
+                    if not _insert_pose_keyframe(
+                        pose_bone,
+                        keyframe.frame,
+                        pose.bone_name,
+                        "scale",
+                    ):
+                        raise RuntimeError(
+                            "Blender rejected scale keyframe "
+                            f"{keyframe.frame} for {pose.bone_name}"
+                        )
+        for curve in action_fcurves(animation):
+            curve.extrapolation = definition.extrapolation
+            for point in curve.keyframe_points:
+                point.interpolation = definition.interpolation
         mutations.append(
             MutationRecord(
                 action_identity,
