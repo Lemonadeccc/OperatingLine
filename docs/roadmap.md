@@ -24,8 +24,8 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.6.0` 与 ActionCatalog `1.9.0` 一一覆盖 19 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
-      4.5/5.1 验证的 `native_path`，其他十一个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      `1.7.0` 与 ActionCatalog `1.10.0` 一一覆盖 20 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      4.5/5.1 验证的 `native_path`，其他十三个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
@@ -64,6 +64,12 @@
       location/scale 并声明统一 interpolation/extrapolation。Blender 4.5.3/5.1.1 测试覆盖中途失败、
       18 条 transform FCurve、真实网格变形、observation、外部权重冲突与完整回退。见
       [ADR 0032](adr/0032-bounded-skin-weights-and-pose-transforms.md)。
+- [x] Blender 有界 Solidify Modifier：ActionCatalog `1.10.0` 新增
+      `blender.modifier.add_solidify`，仅开放 `thickness` (`0.0001..100`) 与 `offset` (`-1..1`)；目标
+      只接受 receipt-tracked 前置 Modifier，源与求值 topology 上限均为 8192 vertices、16384 edges、8192 polygons，模式固定 `EXTRUDE`，并固定
+      `use_even_offset=true`、`use_rim=true`、`use_rim_only=false`。InteractionCatalog `1.7.0` 提供独立
+      `semantic_path`，历史 ActionCatalog `1.9.0` 与 InteractionCatalog `1.6.0` 保持可回放。见
+      [ADR 0037](adr/0037-bounded-solidify-modifier.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -81,7 +87,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.9.0` 提供十一项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.10.0` 提供十二项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；

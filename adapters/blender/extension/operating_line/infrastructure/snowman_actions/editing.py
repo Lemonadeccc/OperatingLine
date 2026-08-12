@@ -9,7 +9,7 @@ import bmesh
 import bpy
 
 from ...application import ActionReceipt
-from ...application.session import MutationRecord, ResourceIdentity
+from ...application.session import ModifierState, MutationRecord, ResourceIdentity
 from ...domain import ActionSpec
 from .common import (
     build_resource_registry,
@@ -34,6 +34,10 @@ from .common import (
     vector,
 )
 
+MAX_SOLIDIFY_VERTICES = 8192
+MAX_SOLIDIFY_EDGES = 16384
+MAX_SOLIDIFY_POLYGONS = 8192
+
 
 @dataclass(frozen=True, slots=True)
 class SubdivideDefinition:
@@ -52,6 +56,15 @@ class BevelModifierDefinition:
     width: float
     segments: int
     angle_limit: float
+
+
+@dataclass(frozen=True, slots=True)
+class SolidifyModifierDefinition:
+    target_id: str
+    modifier_id: str
+    modifier_name: str
+    thickness: float
+    offset: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +137,38 @@ def validate_bevel(arguments: Mapping[str, Any]) -> BevelModifierDefinition:
             "arguments.angleLimit",
             minimum=0.0,
             maximum=pi,
+        ),
+    )
+
+
+def validate_solidify(arguments: Mapping[str, Any]) -> SolidifyModifierDefinition:
+    fields = {
+        "targetId",
+        "modifierId",
+        "modifierName",
+        "thickness",
+        "offset",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    return SolidifyModifierDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        modifier_id=logical_id(arguments["modifierId"], "arguments.modifierId"),
+        modifier_name=text(
+            arguments["modifierName"],
+            "arguments.modifierName",
+            prefix="OperatingLine.",
+        ),
+        thickness=number(
+            arguments["thickness"],
+            "arguments.thickness",
+            minimum=0.0001,
+            maximum=100.0,
+        ),
+        offset=number(
+            arguments["offset"],
+            "arguments.offset",
+            minimum=-1.0,
+            maximum=1.0,
         ),
     )
 
@@ -201,6 +246,72 @@ def _owned_mesh_target(
     if mesh_identity is None:
         raise RuntimeError(f"Owned mesh data is unavailable: {target_id}")
     return target_identity, target, mesh_identity
+
+
+def _tracked_modifier_pointers(
+    receipts: Mapping[str, ActionReceipt], target: bpy.types.Object
+) -> set[int]:
+    return {
+        mutation.after.pointer
+        for receipt in receipts.values()
+        for mutation in receipt.mutations
+        if isinstance(mutation.after, ModifierState)
+        and resolve_resource(mutation.resource) is target
+    }
+
+
+def _ensure_solidify_input_is_bounded(
+    receipts: Mapping[str, ActionReceipt], target: bpy.types.Object
+) -> None:
+    tracked_pointers = _tracked_modifier_pointers(receipts, target)
+    untracked = tuple(
+        modifier.name
+        for modifier in target.modifiers
+        if modifier.as_pointer() not in tracked_pointers
+    )
+    if untracked:
+        raise RuntimeError(
+            "Solidify target has untracked existing modifiers: " + ", ".join(untracked)
+        )
+
+    source_topology = (
+        len(target.data.vertices),
+        len(target.data.edges),
+        len(target.data.polygons),
+    )
+    topology_limits = (
+        MAX_SOLIDIFY_VERTICES,
+        MAX_SOLIDIFY_EDGES,
+        MAX_SOLIDIFY_POLYGONS,
+    )
+    if any(
+        actual > limit for actual, limit in zip(source_topology, topology_limits)
+    ):
+        raise ValueError(
+            "Solidify target exceeds the supported topology limits: "
+            f"vertices <= {MAX_SOLIDIFY_VERTICES}, "
+            f"edges <= {MAX_SOLIDIFY_EDGES}, "
+            f"polygons <= {MAX_SOLIDIFY_POLYGONS}"
+        )
+
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.data
+    if not isinstance(evaluated_mesh, bpy.types.Mesh):
+        raise RuntimeError("Solidify target did not evaluate to mesh geometry")
+    evaluated_topology = (
+        len(evaluated_mesh.vertices),
+        len(evaluated_mesh.edges),
+        len(evaluated_mesh.polygons),
+    )
+    if any(
+        actual > limit for actual, limit in zip(evaluated_topology, topology_limits)
+    ):
+        raise ValueError(
+            "Solidify evaluated input exceeds the supported topology limits: "
+            f"vertices <= {MAX_SOLIDIFY_VERTICES}, "
+            f"edges <= {MAX_SOLIDIFY_EDGES}, "
+            f"polygons <= {MAX_SOLIDIFY_POLYGONS}"
+        )
 
 
 def execute_subdivide(
@@ -300,6 +411,86 @@ def execute_bevel(
         modifier.segments = definition.segments
         modifier.limit_method = "ANGLE"
         modifier.angle_limit = definition.angle_limit
+        state = snapshot_modifier(
+            target,
+            modifier,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+            {},
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"modifier:{definition.modifier_id}",
+                None,
+                state,
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            [],
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        if modifier is not None and not mutations:
+            target.modifiers.remove(modifier)
+        rollback_partial(receipt_id, step_id, action.name, [], mutations, [])
+        raise
+
+
+def execute_solidify(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: SolidifyModifierDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, _mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    _ensure_solidify_input_is_bounded(receipts, target)
+    ensure_modifier_id_available(receipts, definition.modifier_id)
+    if target.modifiers.get(definition.modifier_name) is not None:
+        raise RuntimeError(
+            f"Cannot replace existing modifier: {definition.modifier_name}"
+        )
+    receipt_id = new_receipt_id()
+    mutations: list[MutationRecord] = []
+    modifier = None
+    try:
+        modifier = target.modifiers.new(definition.modifier_name, "SOLIDIFY")
+        modifier.solidify_mode = "EXTRUDE"
+        modifier.thickness = definition.thickness
+        modifier.thickness_clamp = 0.0
+        modifier.use_thickness_angle_clamp = False
+        modifier.thickness_vertex_group = 0.0
+        modifier.offset = definition.offset
+        modifier.edge_crease_inner = 0.0
+        modifier.edge_crease_outer = 0.0
+        modifier.edge_crease_rim = 0.0
+        modifier.material_offset = 0
+        modifier.material_offset_rim = 0
+        modifier.vertex_group = ""
+        modifier.shell_vertex_group = ""
+        modifier.rim_vertex_group = ""
+        modifier.use_even_offset = True
+        modifier.use_rim = True
+        modifier.use_rim_only = False
+        modifier.use_quality_normals = False
+        modifier.invert_vertex_group = False
+        modifier.use_flat_faces = False
+        modifier.use_flip_normals = False
+        modifier.nonmanifold_thickness_mode = "CONSTRAINTS"
+        modifier.nonmanifold_boundary_mode = "NONE"
+        modifier.nonmanifold_merge_threshold = 0.0001
+        modifier.bevel_convex = 0.0
         state = snapshot_modifier(
             target,
             modifier,

@@ -146,6 +146,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.create_plane",
         "blender.mesh.edit_subdivide",
         "blender.modifier.add_bevel",
+        "blender.modifier.add_solidify",
         "blender.geometry_nodes.create_transform",
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",

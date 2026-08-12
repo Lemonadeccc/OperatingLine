@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.9.0');
+    expect(catalog.catalogVersion).toBe('1.10.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -32,6 +32,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.create_primitive_batch',
       'blender.mesh.edit_subdivide',
       'blender.modifier.add_bevel',
+      'blender.modifier.add_solidify',
       'blender.geometry_nodes.create_transform',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
@@ -57,6 +58,7 @@ describe('action catalog protocol', () => {
       'geometry.primitive_assembly',
       'geometry.edit_subdivide',
       'geometry.bevel_modifier',
+      'geometry.solidify_modifier',
       'geometry_nodes.transform',
       'appearance.principled_palette',
       'animation.rigid_armature',
@@ -78,6 +80,7 @@ describe('action catalog protocol', () => {
       '1.7.0',
       '1.8.0',
       '1.9.0',
+      '1.10.0',
     ]);
   });
 
@@ -356,6 +359,58 @@ describe('action catalog protocol', () => {
         schemaFor('blender.modifier.add_bevel'),
       ),
     ).toEqual([]);
+    const solidifySchema = schemaFor('blender.modifier.add_solidify');
+    expect(solidifySchema.additionalProperties).toBe(false);
+    expect(solidifySchema.required).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'thickness',
+      'offset',
+    ]);
+    expect(Object.keys(solidifySchema.properties)).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'thickness',
+      'offset',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.solidify',
+          modifierName: 'OperatingLine.Body.Solidify',
+          thickness: 0.0001,
+          offset: -1,
+        },
+        solidifySchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.solidify',
+          modifierName: 'OperatingLine.Body.Solidify',
+          thickness: 100,
+          offset: 1,
+        },
+        solidifySchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.solidify',
+          modifierName: 'OperatingLine.Body.Solidify',
+          thickness: 0,
+          offset: -1.1,
+        },
+        solidifySchema,
+      ),
+    ).toEqual(['thickness must be at least 0.0001', 'offset must be at least -1']);
     expect(
       validateActionArguments(
         {

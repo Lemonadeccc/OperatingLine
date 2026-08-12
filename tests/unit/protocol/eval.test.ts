@@ -100,7 +100,7 @@ describe('eval export protocol', () => {
     };
     const parsed = evalExportBundleSchema.parse(currentBundle);
 
-    expect(parsed.catalogs[0]?.catalogVersion).toBe('1.9.0');
+    expect(parsed.catalogs[0]?.catalogVersion).toBe('1.10.0');
 
     const legacy = evalExportBundleSchema.parse({
       ...currentBundle,

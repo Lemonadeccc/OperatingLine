@@ -98,6 +98,7 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
     validate_bevel,
     validate_geometry_nodes_transform,
+    validate_solidify,
     validate_subdivide,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.model import (  # noqa: E402
@@ -467,6 +468,524 @@ def assert_edit_modifier_geometry_nodes_round_trip() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def assert_solidify_round_trip_and_conflicts() -> None:
+    object_name = "OperatingLine.SolidifyCube"
+    modifier_name = "OperatingLine.SolidifyCube.Solidify"
+    solidify_arguments = {
+        "targetId": "solidify.cube",
+        "modifierId": "solidify.cube.modifier",
+        "modifierName": modifier_name,
+        "thickness": 0.25,
+        "offset": -0.5,
+    }
+    steps = [
+        step("root", None, 0),
+        step(
+            "solidify.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "solidify.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "solidify.modifier",
+            "root",
+            2,
+            depends_on=["solidify.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_solidify",
+                "arguments": solidify_arguments,
+            },
+        ),
+    ]
+    root = load_temporary_plan(steps)
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    cube = bpy.data.objects[object_name]
+    source_mesh = cube.data
+    source_topology = (
+        len(source_mesh.vertices),
+        len(source_mesh.edges),
+        len(source_mesh.polygons),
+    )
+    assert source_topology == (8, 12, 6)
+
+    assert session.next() is not None
+    modifier = cube.modifiers[modifier_name]
+    assert modifier.type == "SOLIDIFY"
+    assert modifier.solidify_mode == "EXTRUDE"
+    assert math.isclose(modifier.thickness, 0.25, abs_tol=1e-6)
+    assert math.isclose(modifier.offset, -0.5, abs_tol=1e-6)
+    assert modifier.use_even_offset is True
+    assert modifier.use_rim is True
+    assert modifier.use_rim_only is False
+    assert cube.data is source_mesh
+    assert (
+        len(source_mesh.vertices),
+        len(source_mesh.edges),
+        len(source_mesh.polygons),
+    ) == source_topology
+    evaluated = cube.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        assert (
+            len(evaluated_mesh.vertices),
+            len(evaluated_mesh.edges),
+            len(evaluated_mesh.polygons),
+        ) == (16, 24, 12)
+    finally:
+        evaluated.to_mesh_clear()
+    observation = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "modifier_ready",
+                "parameters": {
+                    "targetId": "solidify.cube",
+                    "modifierId": "solidify.cube.modifier",
+                    "modifierType": "SOLIDIFY",
+                    "thickness": 0.25,
+                    "offset": -0.5,
+                    "solidifyMode": "EXTRUDE",
+                    "useEvenOffset": True,
+                    "useRim": True,
+                    "useRimOnly": False,
+                },
+            },
+        ),
+        session.receipts,
+    )
+    assert observation[0]["satisfied"] is True
+    exact_observation_parameters = observation[0]["details"]["parameters"]
+    for field, wrong_value in (
+        ("thickness", "0.25"),
+        ("offset", "-0.5"),
+        ("solidifyMode", 1),
+        ("useEvenOffset", 1),
+        ("useRim", "true"),
+        ("useRimOnly", 0),
+        ("unexpected", True),
+    ):
+        malformed = observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "modifier_ready",
+                    "parameters": {
+                        **exact_observation_parameters,
+                        field: wrong_value,
+                    },
+                },
+            ),
+            session.receipts,
+        )
+        assert malformed[0]["satisfied"] is False, field
+
+    modifier.thickness = 0.5
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Externally edited Solidify modifiers must block rollback")
+    assert session.active_index == 1
+    assert "solidify.modifier" in session.receipts
+    modifier.thickness = 0.25
+    assert session.back() is not None
+    assert cube.modifiers.get(modifier_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+
+    unowned_name = "OperatingLine.UnownedSolidifyTarget"
+    unowned_mesh = bpy.data.meshes.new(f"{unowned_name}.Mesh")
+    unowned_target = bpy.data.objects.new(unowned_name, unowned_mesh)
+    bpy.context.scene.collection.objects.link(unowned_target)
+    unowned_root = load_temporary_plan(
+        [
+            step("root", None, 0),
+            step(
+                "solidify.unowned",
+                "root",
+                1,
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.modifier.add_solidify",
+                    "arguments": {**solidify_arguments, "targetId": "unowned.target"},
+                },
+            ),
+        ]
+    )
+    unowned_session = DemoSession(unowned_root, action_registry(unowned_root))
+    unowned_session.start()
+    try:
+        unowned_session.next()
+    except (RuntimeError, ValueError) as error:
+        assert "unowned.target" in str(error)
+    else:
+        raise AssertionError("Solidify must reject unowned target IDs")
+    bpy.data.objects.remove(unowned_target, do_unlink=True)
+    if unowned_mesh.users == 0:
+        bpy.data.meshes.remove(unowned_mesh)
+
+    conflict_root = load_temporary_plan(steps)
+    conflict_session = DemoSession(conflict_root, action_registry(conflict_root))
+    conflict_session.start()
+    assert conflict_session.next() is not None
+    conflict_cube = bpy.data.objects[object_name]
+    external_modifier = conflict_cube.modifiers.new(modifier_name, "SOLIDIFY")
+    try:
+        conflict_session.next()
+    except RuntimeError as error:
+        assert "untracked existing modifiers" in str(error)
+    else:
+        raise AssertionError("Solidify must reject existing untracked modifier names")
+    conflict_cube.modifiers.remove(external_modifier)
+    assert conflict_session.next() is not None
+    assert conflict_session.back() is not None
+    assert conflict_session.back() is not None
+
+    duplicate_id_steps = deepcopy(steps)
+    duplicate_id_steps.insert(
+        2,
+        step(
+            "solidify.bevel",
+            "root",
+            2,
+            depends_on=["solidify.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "solidify.cube",
+                    "modifierId": "solidify.cube.modifier",
+                    "modifierName": "OperatingLine.SolidifyCube.Bevel",
+                    "width": 0.1,
+                    "segments": 2,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    duplicate_id_steps[3]["order"] = 3
+    duplicate_id_steps[3]["dependsOn"] = ["solidify.bevel"]
+    duplicate_id_root = load_temporary_plan(duplicate_id_steps)
+    try:
+        action_registry(duplicate_id_root)
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Solidify must reject duplicate logical modifier IDs")
+
+    topology_root = load_temporary_plan(steps)
+    topology_session = DemoSession(topology_root, action_registry(topology_root))
+    topology_session.start()
+    assert topology_session.next() is not None
+    topology_cube = bpy.data.objects[object_name]
+    topology_cube.data.clear_geometry()
+    topology_cube.data.from_pydata(
+        [(float(index), 0.0, 0.0) for index in range(8193)], [], []
+    )
+    topology_cube.data.update()
+    assert len(topology_cube.modifiers) == 0
+    try:
+        topology_session.next()
+    except ValueError as error:
+        assert "topology" in str(error).lower()
+    else:
+        raise AssertionError("Solidify must reject source topology above its bound")
+    assert topology_session.active_index == 0
+    assert "solidify.modifier" not in topology_session.receipts
+    assert len(topology_cube.modifiers) == 0
+    assert topology_session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.meshes.get(f"{object_name}.Mesh") is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_solidify_evaluated_topology_and_untracked_modifier_guards() -> None:
+    object_name = "OperatingLine.SolidifyTopologyCube"
+    bevel_name = "OperatingLine.SolidifyTopologyCube.Bevel"
+    solidify_name = "OperatingLine.SolidifyTopologyCube.Solidify"
+    steps = [
+        step("root", None, 0),
+        step(
+            "solidify.topology.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "solidify.topology.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "solidify.topology.subdivide",
+            "root",
+            2,
+            depends_on=["solidify.topology.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_subdivide",
+                "arguments": {
+                    "targetId": "solidify.topology.cube",
+                    "resultMeshId": "solidify.topology.mesh",
+                    "resultMeshName": "OperatingLine.SolidifyTopologyCube.SubdividedMesh",
+                    "cuts": 8,
+                    "smooth": 0.0,
+                },
+            },
+        ),
+        step(
+            "solidify.topology.bevel",
+            "root",
+            3,
+            depends_on=["solidify.topology.subdivide"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "solidify.topology.cube",
+                    "modifierId": "solidify.topology.bevel",
+                    "modifierName": bevel_name,
+                    "width": 0.1,
+                    "segments": 16,
+                    "angleLimit": 0.0,
+                },
+            },
+        ),
+        step(
+            "solidify.topology.solidify",
+            "root",
+            4,
+            depends_on=["solidify.topology.bevel"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_solidify",
+                "arguments": {
+                    "targetId": "solidify.topology.cube",
+                    "modifierId": "solidify.topology.solidify",
+                    "modifierName": solidify_name,
+                    "thickness": 0.1,
+                    "offset": 0.0,
+                },
+            },
+        ),
+    ]
+    root = load_temporary_plan(steps)
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    assert session.next() is not None
+    assert session.next() is not None
+    cube = bpy.data.objects[object_name]
+    assert tuple(modifier.name for modifier in cube.modifiers) == (bevel_name,)
+    evaluated = cube.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        evaluated_topology = (
+            len(evaluated_mesh.vertices),
+            len(evaluated_mesh.edges),
+            len(evaluated_mesh.polygons),
+        )
+    finally:
+        evaluated.to_mesh_clear()
+    assert evaluated_topology == (31336, 62668, 31334), evaluated_topology
+    try:
+        session.next()
+    except ValueError as error:
+        assert "evaluated input exceeds" in str(error).lower()
+    else:
+        raise AssertionError("Solidify must reject excessive evaluated topology")
+    assert session.active_index == 2
+    assert "solidify.topology.solidify" not in session.receipts
+    assert tuple(modifier.name for modifier in cube.modifiers) == (bevel_name,)
+    assert session.back() is not None
+    assert session.back() is not None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.meshes.get("OperatingLine.SolidifyTopologyCube.SubdividedMesh") is None
+
+    guard_name = "OperatingLine.SolidifyUntrackedCube"
+    guard_steps = [
+        step("root", None, 0),
+        step(
+            "solidify.untracked.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "solidify.untracked.cube",
+                    "objectName": guard_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "solidify.untracked.solidify",
+            "root",
+            2,
+            depends_on=["solidify.untracked.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_solidify",
+                "arguments": {
+                    "targetId": "solidify.untracked.cube",
+                    "modifierId": "solidify.untracked.solidify",
+                    "modifierName": f"{guard_name}.Solidify",
+                    "thickness": 0.1,
+                    "offset": 0.0,
+                },
+            },
+        ),
+    ]
+    guard_root = load_temporary_plan(guard_steps)
+    guard_session = DemoSession(guard_root, action_registry(guard_root))
+    guard_session.start()
+    assert guard_session.next() is not None
+    guard_cube = bpy.data.objects[guard_name]
+    untracked = guard_cube.modifiers.new(f"{guard_name}.External", "BEVEL")
+    try:
+        guard_session.next()
+    except RuntimeError as error:
+        assert "untracked existing modifiers" in str(error).lower()
+    else:
+        raise AssertionError("Solidify must reject an existing untracked modifier")
+    assert guard_session.active_index == 0
+    assert "solidify.untracked.solidify" not in guard_session.receipts
+    assert tuple(guard_cube.modifiers) == (untracked,)
+    guard_cube.modifiers.remove(untracked)
+    assert guard_session.back() is not None
+    assert bpy.data.objects.get(guard_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_solidify_observation_success_gate() -> None:
+    object_name = "OperatingLine.SolidifyGateCube"
+    modifier_name = "OperatingLine.SolidifyGateCube.Solidify"
+
+    def gated_steps(*, solidify_mode: str) -> list[dict]:
+        result = [
+            step("root", None, 0),
+            step(
+                "solidify.gate.cube",
+                "root",
+                1,
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.mesh.create_cube",
+                    "arguments": {
+                        "resourceId": "solidify.gate.cube",
+                        "objectName": object_name,
+                        "size": 2.0,
+                        "location": [0.0, 0.0, 0.0],
+                    },
+                },
+            ),
+            step(
+                "solidify.gate.modifier",
+                "root",
+                2,
+                depends_on=["solidify.gate.cube"],
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.modifier.add_solidify",
+                    "arguments": {
+                        "targetId": "solidify.gate.cube",
+                        "modifierId": "solidify.gate.modifier",
+                        "modifierName": modifier_name,
+                        "thickness": 0.25,
+                        "offset": -0.5,
+                    },
+                },
+            ),
+        ]
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "modifier_ready",
+                "parameters": {
+                    "targetId": "solidify.gate.cube",
+                    "modifierId": "solidify.gate.modifier",
+                    "modifierType": "SOLIDIFY",
+                    "thickness": 0.25,
+                    "offset": -0.5,
+                    "solidifyMode": solidify_mode,
+                    "useEvenOffset": True,
+                    "useRim": True,
+                    "useRimOnly": False,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    passing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(solidify_mode="EXTRUDE"),
+        }
+    )
+    passing_session = DemoSession(
+        passing_root,
+        action_registry(passing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    passing_session.start()
+    assert passing_session.next() is not None
+    assert passing_session.next() is not None
+    assert passing_session.active_index == 1
+    assert "solidify.gate.modifier" in passing_session.receipts
+    assert bpy.data.objects[object_name].modifiers.get(modifier_name) is not None
+    assert passing_session.back() is not None
+    assert passing_session.back() is not None
+
+    failing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(solidify_mode="NON_MANIFOLD"),
+        }
+    )
+    failing_session = DemoSession(
+        failing_root,
+        action_registry(failing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    failing_session.start()
+    assert failing_session.next() is not None
+    try:
+        failing_session.next()
+    except RuntimeError as error:
+        assert "Observation gate failed" in str(error)
+    else:
+        raise AssertionError("Wrong fixed Solidify properties must fail the success gate")
+    assert failing_session.active_index == 0
+    assert "solidify.gate.modifier" not in failing_session.receipts
+    assert bpy.data.objects[object_name].modifiers.get(modifier_name) is None
+    assert failing_session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
 def assert_editing_argument_boundaries() -> None:
     assert validate_subdivide(
         {
@@ -487,6 +1006,26 @@ def assert_editing_argument_boundaries() -> None:
             "angleLimit": math.pi,
         }
     ).segments == 16
+    assert validate_solidify(
+        {
+            "targetId": "edit.target",
+            "modifierId": "edit.solidify",
+            "modifierName": "OperatingLine.Solidify",
+            "thickness": 0.0001,
+            "offset": -1.0,
+        }
+    ).offset == -1.0
+    maximum_solidify = validate_solidify(
+        {
+            "targetId": "edit.target",
+            "modifierId": "edit.solidify",
+            "modifierName": "OperatingLine.Solidify",
+            "thickness": 100.0,
+            "offset": 1.0,
+        }
+    )
+    assert maximum_solidify.thickness == 100.0
+    assert maximum_solidify.offset == 1.0
     geometry_nodes = validate_geometry_nodes_transform(
         {
             "targetId": "edit.target",
@@ -524,6 +1063,28 @@ def assert_editing_argument_boundaries() -> None:
                 "angleLimit": 0.5,
             },
             "arguments.width",
+        ),
+        (
+            validate_solidify,
+            {
+                "targetId": "edit.target",
+                "modifierId": "edit.solidify",
+                "modifierName": "OperatingLine.Solidify",
+                "thickness": 0.0,
+                "offset": 0.0,
+            },
+            "arguments.thickness",
+        ),
+        (
+            validate_solidify,
+            {
+                "targetId": "edit.target",
+                "modifierId": "edit.solidify",
+                "modifierName": "OperatingLine.Solidify",
+                "thickness": 0.1,
+                "offset": 1.0001,
+            },
+            "arguments.offset",
         ),
         (
             validate_geometry_nodes_transform,
@@ -4047,6 +4608,9 @@ def main() -> None:
     assert_cube_action_round_trip()
     assert_editing_argument_boundaries()
     assert_edit_modifier_geometry_nodes_round_trip()
+    assert_solidify_round_trip_and_conflicts()
+    assert_solidify_evaluated_topology_and_untracked_modifier_guards()
+    assert_solidify_observation_success_gate()
 
     session_before_registration = operating_line.get_session()
     assert _undo_post not in bpy.app.handlers.undo_post

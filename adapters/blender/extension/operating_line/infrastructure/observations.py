@@ -571,6 +571,19 @@ def _mesh_topology_matches(
 def _modifier_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
+    allowed_parameters = {
+        "targetId",
+        "modifierId",
+        "modifierType",
+        "width",
+        "segments",
+        "thickness",
+        "offset",
+        "useEvenOffset",
+        "useRim",
+        "useRimOnly",
+        "solidifyMode",
+    }
     target_id = parameters.get("targetId")
     modifier_id = parameters.get("modifierId")
     modifier_type = parameters.get("modifierType")
@@ -583,19 +596,68 @@ def _modifier_ready(
         else None
     )
     owner, modifier = found if found is not None else (None, None)
-    properties_match = True
+    properties_match = not bool(set(parameters).difference(allowed_parameters))
+    solidify_parameters = {
+        "thickness",
+        "offset",
+        "solidifyMode",
+        "useEvenOffset",
+        "useRim",
+        "useRimOnly",
+    }
+    if modifier_type == "SOLIDIFY":
+        properties_match = properties_match and solidify_parameters.issubset(
+            parameters
+        )
     if modifier is not None:
-        if isinstance(parameters.get("width"), (int, float)) and not isinstance(
-            parameters["width"], bool
-        ):
-            properties_match = properties_match and math.isclose(
-                float(modifier.width), float(parameters["width"]), abs_tol=1e-6
-            )
-        if isinstance(parameters.get("segments"), int) and not isinstance(
-            parameters["segments"], bool
-        ):
+        numeric_properties = {
+            "width": "width",
+            "thickness": "thickness",
+            "offset": "offset",
+        }
+        for parameter_name, property_name in numeric_properties.items():
+            if parameter_name not in parameters:
+                continue
+            expected = parameters[parameter_name]
             properties_match = properties_match and (
-                int(modifier.segments) == parameters["segments"]
+                isinstance(expected, (int, float))
+                and not isinstance(expected, bool)
+                and math.isfinite(float(expected))
+                and hasattr(modifier, property_name)
+                and math.isclose(
+                    float(getattr(modifier, property_name)),
+                    float(expected),
+                    abs_tol=1e-6,
+                )
+            )
+        if "segments" in parameters:
+            expected_segments = parameters["segments"]
+            properties_match = properties_match and (
+                isinstance(expected_segments, int)
+                and not isinstance(expected_segments, bool)
+                and hasattr(modifier, "segments")
+                and int(modifier.segments) == expected_segments
+            )
+        boolean_properties = {
+            "useEvenOffset": "use_even_offset",
+            "useRim": "use_rim",
+            "useRimOnly": "use_rim_only",
+        }
+        for parameter_name, property_name in boolean_properties.items():
+            if parameter_name not in parameters:
+                continue
+            expected = parameters[parameter_name]
+            properties_match = properties_match and (
+                isinstance(expected, bool)
+                and hasattr(modifier, property_name)
+                and bool(getattr(modifier, property_name)) is expected
+            )
+        if "solidifyMode" in parameters:
+            expected_mode = parameters["solidifyMode"]
+            properties_match = properties_match and (
+                isinstance(expected_mode, str)
+                and hasattr(modifier, "solidify_mode")
+                and str(modifier.solidify_mode) == expected_mode
             )
     satisfied = bool(
         isinstance(target, bpy.types.Object)

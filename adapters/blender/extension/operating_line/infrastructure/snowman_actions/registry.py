@@ -9,9 +9,11 @@ from .common import COLLECTION_LOGICAL_ID, rollback_receipt, validate_adapter
 from .editing import (
     execute_bevel,
     execute_geometry_nodes_transform,
+    execute_solidify,
     execute_subdivide,
     validate_bevel,
     validate_geometry_nodes_transform,
+    validate_solidify,
     validate_subdivide,
 )
 from .material import execute_materials, validate_palette, validate_single
@@ -138,6 +140,10 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definition = validate_bevel(arguments)
             reserve(step.id, (definition.modifier_id,))
             execute = _bind_action(execute_bevel, step.id, action, definition)
+        elif action.name == "blender.modifier.add_solidify":
+            definition = validate_solidify(arguments)
+            reserve(step.id, (definition.modifier_id,))
+            execute = _bind_action(execute_solidify, step.id, action, definition)
         elif action.name == "blender.geometry_nodes.create_transform":
             definition = validate_geometry_nodes_transform(arguments)
             reserve(

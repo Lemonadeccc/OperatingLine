@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.7.0",
+  "catalogVersion": "1.6.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.10.0",
+  "actionCatalogVersion": "1.9.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.10.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.8.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -656,46 +656,6 @@
         ],
         "reason": "The action must bind exact width, segment, angle, ownership, and compensation state; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/bevel.html"
-      }
-    },
-    {
-      "id": "blender.modifier.add_solidify.semantic",
-      "actionName": "blender.modifier.add_solidify",
-      "title": "Add a bounded Solidify modifier",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "panel.modifier_properties",
-            "order": 2,
-            "label": "Modifiers",
-            "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
-          },
-          {
-            "id": "control.add_modifier",
-            "order": 3,
-            "label": "Add Modifier",
-            "intent": "execute",
-            "target": { "kind": "control", "hostId": "object.modifier_add" }
-          },
-          {
-            "id": "semantic.solidify_parameters",
-            "order": 4,
-            "label": "Solidify Settings",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.solidify_modifier" }
-          }
-        ],
-        "reason": "The action must bind exact thickness, offset, ownership, bounded topology, and compensation state while fixing mode to EXTRUDE, even offset and rim on, and rim-only off; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/solidify.html"
       }
     },
     {
