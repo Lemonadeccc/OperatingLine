@@ -167,6 +167,12 @@
       会锁住引导并允许通过反向 Undo/Redo 恢复。Blender 4.5.3/5.1.1 foreground E2E 已覆盖对象、
       Bevel、Geometry Nodes、外部 Undo 与 Back 往返。见
       [ADR 0031](adr/0031-blender-native-undo-history.md)。
+- [x] 流式模型对话与授权内自动语义重规划：Blender 明确选择 Provider 并逐轮确认一次最多两次调用；
+      首次调用的助手文本由 Runtime 持久化为 append-only revision，再由 Blender 短轮询显示。无 replan
+      tool 或置信度低于固定 `0.8` 时只回答且不保存 revision request；达到阈值才原子保存候选请求并调用
+      既有类型化 local replan。所有成功路径最多创建只读 Proposal，仍需 Accept/Reject，场景固定不变。
+      默认不选择 Provider、不保存长期授权、不自动重试、接受或执行。见
+      [ADR 0035](adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 
 ## 后续里程碑
 
@@ -187,15 +193,13 @@
         `collecting` 推进到 `released` 并发布 comparison。
   - [ ] 让 Runtime 对 Provider/model/settings 与生成 artifact hash 提供不可变 attestation；在此之前，
         operator-attested capture 固定 `not_reproducible`，手工附加 PNG 不能满足 released visual evidence。
-- [ ] 实时模型对话与自动语义重规划：当前已完成 Revision Workspace 节点引用 UI、类型化 provider
-      local replan、逐次授权的异步 Run 和完整 Proposal 审批，但仍是显式工具链；尚无流式助手回复、
-      provider 自动选择/调用，或基于语义置信度的自动重规划。自动化若引入，仍不得绕过数据披露、
-      Proposal 审批和场景执行门禁。
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。
-- [ ] 补做 OMX 正式双通道审查：执行说明见
-      [OMX 正式双通道代码审查待办](quality/omx-code-review.md)。
+- [x] 完成正式双通道代码审查：当前 Codex 表面明确提供文档化原生角色路由，独立
+      `code-reviewer` 与 `architect` 已对最终流式对话工作树给出 `APPROVE` / `CLEAR`；确认的阻断问题
+      均已修复，关键边界已补回归。OMX runtime 预检仍不支持 documented leader proof，因此没有伪造 runtime 状态。
+      见 [正式双通道代码审查记录](quality/omx-code-review.md)。
 
 ## 设计约束
 

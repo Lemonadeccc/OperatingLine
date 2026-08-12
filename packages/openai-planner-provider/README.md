@@ -1,7 +1,7 @@
 # `@operatingline/openai-planner-provider`
 
-可选的 OpenAI Responses API Planner Provider。它同时实现初始 `generate()` 和类型化局部
-`replan()`，只依赖
+可选的 OpenAI Responses API Planner Provider。它同时实现初始 `generate()`、类型化局部
+`replan()` 和流式 `dialogue()`，只依赖
 `@operatingline/planner-provider-sdk` 的边缘接口，不是 Orchestrator 核心依赖，也不会被默认
 `pnpm dev` 自动加载。
 
@@ -33,9 +33,11 @@ await startRuntime({
 - 未显式传 `baseURL` 时固定使用 `https://api.openai.com/v1`；不会继承
   `OPENAI_BASE_URL`、`OPENAI_ORG_ID`、`OPENAI_PROJECT_ID` 或 `OPENAI_CUSTOM_HEADERS`。若调用方
   显式配置自定义 `baseURL`，它就是新的远端数据接收方，必须同步更新 provider identity 与披露。
-- 请求固定为非流式、`store: false`、最多 `32,768` 个输出 token，官方 SDK `maxRetries` 固定为
-  `0`，SDK `logLevel` 固定为 `off`；OperatingLine 的持久化 request ID 才是防止重复费用的重试
-  边界，Planner Packet 不会因环境中的 `OPENAI_LOG=debug` 进入 SDK 日志。
+- `generate()` / `replan()` 固定为非流式 JSON Object 请求；`dialogue()` 使用 Responses SSE stream，
+  `parallel_tool_calls: false` 和唯一 strict `request_replan({ confidence })` tool。三者都固定
+  `store: false`、最多 `32,768` 个输出 token，官方 SDK `maxRetries: 0`、`logLevel: off`；
+  OperatingLine 的持久 request ID 才是防止重复费用的重试边界，Planner Packet 不会因环境中的
+  `OPENAI_LOG=debug` 进入 SDK 日志。
 - 当前使用 JSON Object 模式。Planner Packet 仍携带完整响应 Schema，但其中目录驱动的动态 action
   和 observation 参数不满足 OpenAI Strict Structured Outputs 的受限 Schema 子集。返回 JSON 必须
   再经过核心的严格 Schema、identity、ActionCatalog、capability coverage 与规划质量验证；局部重规划还要通过
@@ -44,6 +46,10 @@ await startRuntime({
   `ReplanningPromptPacket.renderedPrompt`。Blender `1.8.0` 的 capability-aware packet 格式为 `1.1.0`，
   并要求模型返回 `requirement -> catalog capability -> executable leaf` 映射；历史目录继续使用
   packet `1.0.0`。两者使用相同 Responses 请求、取消和错误清洗边界。
+- `dialogue()` 只转发经过类型检查的 `response.output_text.delta`，并把完整流与最终 assistant 文本精确
+  对账。无 tool call 为 answer；tool confidence 由 Runtime 再与固定 `0.8` 阈值比较。拒绝、不完整、重复
+  tool、错误参数、超限输出或中断都 fail closed，不公开原始 Provider payload。一次 Blender 确认最多
+  授权这次 dialogue 调用和一个随后发生的 typed replan；结果最多进入待审 Proposal。
 - Provider 只返回未经信任的 JSON 值，不调用 `guide.propose` 或 `replan.propose`，不投递 Companion，
   也不操作 Blender。局部生成结果必须由调用方携带 canonical `generationRequestId` 另行送审。
 - Provider 是进程内可信依赖，不是插件沙箱；目标、宿主状态和 ActionCatalog 会发送到远端。
@@ -53,4 +59,5 @@ await startRuntime({
 机器约束且 coverage 可追溯。缺失、未知、action 不匹配或局部范围外的 coverage 会得到
 `needs_revision`，不会创建 Proposal；它不能证明模型正确理解了任意目标或节点修改，也不会授权自动
 provider 选择、宿主审批或 Blender 场景修改。完整决策见
-[ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。
+[ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md) 与
+[ADR 0035](../../docs/adr/0035-streamed-dialogue-and-semantic-replanning.md)。

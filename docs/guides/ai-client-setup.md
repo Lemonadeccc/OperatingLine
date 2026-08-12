@@ -30,8 +30,10 @@ pnpm dev
 - `pnpm dev:clients`：Blender 内逐次确认后，由 Runtime 启动本机 Codex/Claude CLI 生成计划；
 - `pnpm dev:openai`：Blender 内逐次确认后，Runtime 直接调用明确配置的 OpenAI Responses API。
 
-三者都不会自动选择 Provider、自动调用模型或绕过 Blender Proposal 审批。Codex/Claude 桌面 GUI 没有
-稳定的本机 headless 调用 API，因此 Blender 内启动只支持可执行的 CLI；桌面 GUI 继续走外部 MCP 路径。
+三者都不会自动选择 Provider、后台调用模型或绕过 Blender Proposal 审批。只有 `dev:openai` 的
+Dialogue Turn 在用户逐轮确认的最多两次调用授权内，才可能于固定 `0.8` 阈值后自动执行第二次严格
+replan。Codex/Claude 桌面 GUI 没有稳定的本机 headless 调用 API，因此 Blender 内启动只支持可执行的
+CLI；桌面 GUI 继续走外部 MCP 路径。
 
 ## 2. 连接 Blender
 
@@ -158,6 +160,11 @@ packet；命令参数不包含目标、Token 或模型输出。Codex 在临时�
 Claude 默认每次最多 1 USD，可在 0.01–100 USD 内调整；Codex 费用由其 CLI 登录、订阅、模型和 provider
 配置决定，OperatingLine 无法估价或强制美元上限。每次 Run 都必须重新确认，失败不会自动重试。
 
+CLI Provider 当前只实现初始规划与局部 replan，不出现在 dialogue provider 列表。若使用
+`pnpm dev:openai`，Revision Workspace 可另行刷新 `Streamed model dialogue`，选择 OpenAI Provider 并
+逐轮确认最多两次调用。首次调用流式返回助手文字；只有严格 replan 决策达到固定 `0.8` 才在同一授权
+内执行第二次 replan。Blender 读取 Runtime 的 durable 短轮询状态；结果最多创建待审 Proposal。
+
 ## 7. 从外部 MCP 客户端发起任务
 
 Runtime 会通过现代 MCP `server/discover` 或旧版 `initialize` 自动告诉支持 instructions 的客户端正确
@@ -183,4 +190,5 @@ Proposal 到达后，在 Blender：
 - Web/云任务访问不到回环 Runtime。
 - 当前 Blender ActionCatalog 只允许已验证动作；目录外工作必须保持 actionless/manual。
 - MCPB 是连接器，不包含 Runtime 或 Blender，不扩大场景执行权限。
-- 不自动选择 Planner Provider，不自动产生额外 API 费用。
+- 不自动选择 Planner Provider，也不在逐次确认范围外产生额外 API 调用；Dialogue Turn 的确认会明确
+  披露其最多两次调用和可能费用。

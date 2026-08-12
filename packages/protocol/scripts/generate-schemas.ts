@@ -6,6 +6,9 @@ import { z } from 'zod';
 import {
   actionCatalogSchema,
   adapterStatusSchema,
+  companionDialogueRunCreateRequestSchema,
+  companionDialogueRunSchema,
+  companionDialogueRunStatusRequestSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
   companionInitialPlanRunCreateRequestSchema,
@@ -64,6 +67,21 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'companion-dialogue-run-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-dialogue-run-create-request.json',
+    companionDialogueRunCreateRequestSchema,
+  ],
+  [
+    'companion-dialogue-run-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-dialogue-run-status-request.json',
+    companionDialogueRunStatusRequestSchema,
+  ],
+  [
+    'companion-dialogue-run.schema.json',
+    'https://operatingline.dev/schema/v1/companion-dialogue-run.json',
+    companionDialogueRunSchema,
+  ],
   [
     'guide-goal-request.schema.json',
     'https://operatingline.dev/schema/v1/guide-goal-request.json',

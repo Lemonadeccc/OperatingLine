@@ -35,6 +35,8 @@ OUTPUT_NAMES = {
     "initial-provider-failed": "guidance-initial-provider-failed.png",
     "provider-disclosure": "guidance-provider-disclosure.png",
     "provider-generating": "guidance-provider-generating.png",
+    "dialogue-disclosure": "guidance-dialogue-disclosure.png",
+    "dialogue-streaming": "guidance-dialogue-streaming.png",
     "forward": "guidance-mid-forward.png",
     "back": "guidance-after-back.png",
     "hidden": "guidance-hidden.png",
@@ -98,6 +100,7 @@ class StrictFakeTransport:
         self.running = True
         self.last_delivered_sequence = 0
         self.replan_run_requests = []
+        self.dialogue_run_requests = []
         self.initial_plan_run_requests = []
         self.goal_requests = []
 
@@ -106,6 +109,9 @@ class StrictFakeTransport:
 
     def start_initial_plan_run(self, request):
         self.initial_plan_run_requests.append(json.loads(json.dumps(request)))
+
+    def start_dialogue_run(self, request):
+        self.dialogue_run_requests.append(json.loads(json.dumps(request)))
 
     def submit_goal_request(self, request):
         self.goal_requests.append(json.loads(json.dumps(request)))
@@ -196,6 +202,56 @@ def configure_provider_handoff(*, generating):
     else:
         assert companion.provider_handoff.can_run
         assert not fake_transport.replan_run_requests
+    assert_active_session_preserved()
+
+
+def configure_dialogue_handoff(*, streaming):
+    companion = extension.get_companion()
+    fake_transport = StrictFakeTransport()
+    companion._transport = fake_transport
+    companion.status = "Connected"
+    companion.dialogue_handoff.set_providers(visual_provider_list())
+    companion.select_dialogue_provider("visual.remote-planner")
+    companion.add_revision_reference("active", "snowman.model.head")
+    message = "Explain this head step and prepare a larger version if needed"
+    bpy.context.window_manager.operating_line_revision_message = message
+    if streaming:
+        run = companion.begin_dialogue_run(message)
+        bpy.context.window_manager.operating_line_revision_message = ""
+        companion.dialogue_handoff.apply_status(
+            {
+                "contractVersion": "1.0.0",
+                "dialogueRequestId": run["dialogueRequestId"],
+                "revisionRequestId": run["revisionRequest"]["requestId"],
+                "replanGenerationRequestId": run["replanGenerationRequestId"],
+                "targetAdapterId": "blender",
+                "targetInstanceId": companion.instance_id,
+                "provider": {
+                    "id": "visual.remote-planner",
+                    "version": "1.0.0",
+                    "displayName": "Remote Snowman Planner",
+                },
+                "status": "streaming",
+                "terminal": False,
+                "sceneChanged": False,
+                "assistantMessage": (
+                    "The selected step creates the snowman head. I am checking "
+                    "whether the requested size change needs a reviewable Plan revision..."
+                ),
+                "assistantMessageRevision": 1,
+                "semanticDecision": None,
+                "revisionRequestRecorded": False,
+                "proposalId": None,
+                "error": None,
+                "needsRevision": None,
+                "updatedAt": "2026-08-12T12:00:00Z",
+            }
+        )
+        assert fake_transport.dialogue_run_requests == [run]
+        assert companion.dialogue_handoff.phase == "streaming"
+    else:
+        assert companion.dialogue_handoff.can_run
+        assert not fake_transport.dialogue_run_requests
     assert_active_session_preserved()
 
 
@@ -453,6 +509,8 @@ def configure_state():
         )
     elif STATE in {"provider-disclosure", "provider-generating"}:
         configure_provider_handoff(generating=STATE == "provider-generating")
+    elif STATE in {"dialogue-disclosure", "dialogue-streaming"}:
+        configure_dialogue_handoff(streaming=STATE == "dialogue-streaming")
     elif STATE == "forward":
         for _ in range(9):
             assert bpy.ops.operating_line.next() == {"FINISHED"}
@@ -618,6 +676,8 @@ def configure_state():
         "initial-provider-failed",
         "provider-disclosure",
         "provider-generating",
+        "dialogue-disclosure",
+        "dialogue-streaming",
     }:
         assert_active_session_preserved()
 
@@ -687,6 +747,8 @@ def prepare_view():
         "provider-generating",
     }:
         bpy.app.timers.register(scroll_provider_panel, first_interval=0.35)
+    elif STATE in {"dialogue-disclosure", "dialogue-streaming"}:
+        bpy.app.timers.register(scroll_dialogue_panel, first_interval=0.35)
     else:
         bpy.app.timers.register(capture_and_quit, first_interval=0.75)
     return None
@@ -699,6 +761,23 @@ def scroll_provider_panel():
         bpy.context.window.event_simulate(
             type="WHEELDOWNMOUSE", value="PRESS", x=1100, y=500
         )
+    bpy.app.timers.register(capture_and_quit, first_interval=0.75)
+    return None
+
+
+_dialogue_scroll_remaining = 32 if STATE == "dialogue-disclosure" else 80
+
+
+def scroll_dialogue_panel():
+    """Reveal the dialogue disclosure or durable assistant stream."""
+
+    global _dialogue_scroll_remaining
+    if _dialogue_scroll_remaining > 0:
+        bpy.context.window.event_simulate(
+            type="WHEELDOWNMOUSE", value="PRESS", x=1100, y=500
+        )
+        _dialogue_scroll_remaining -= 1
+        return 0.01
     bpy.app.timers.register(capture_and_quit, first_interval=0.75)
     return None
 
@@ -722,6 +801,8 @@ def capture_and_quit():
         "initial-provider-failed",
         "provider-disclosure",
         "provider-generating",
+        "dialogue-disclosure",
+        "dialogue-streaming",
     }:
         assert_factory_objects_preserved()
         assert_active_session_preserved()
@@ -781,6 +862,8 @@ def assert_guidance_pixels():
         "initial-provider-failed",
         "provider-disclosure",
         "provider-generating",
+        "dialogue-disclosure",
+        "dialogue-streaming",
     }:
         assert next_step > 0.0003
         assert locked > 0.0001

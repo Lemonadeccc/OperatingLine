@@ -59,4 +59,5 @@ Blender Revision Workspace 显示活动 branch 和所有 heads。Fork 只选择�
 - Branch Plan revision 仍使用同一 Plan ID 的全局严格递增水位；切换可查看较旧的已接受 head，但不能把
   旧 revision 重新发布成新内容。
 - Branch 列表是持久事实而非在线状态；Companion 心跳、租约和多人实时协作仍属后续能力。
-- 异步请求、Provider Run 和 Proposal 仍不是流式聊天；没有自动 Provider 选择、自动调用或自动接受。
+- 本 ADR 落地时异步请求、Provider Run 和 Proposal 仍不是流式聊天；后续 ADR 0035 增加了逐轮授权、
+  最多两次调用且固定阈值的 dialogue/replan 路径，但仍没有自动 Provider 选择、后台调用或自动接受。

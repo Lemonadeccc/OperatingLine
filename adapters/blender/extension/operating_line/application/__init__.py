@@ -34,7 +34,12 @@ from .session import (
     VertexGroupState,
 )
 from .goal_request import GoalRequestState, build_goal_request
-from .provider_handoff import InitialPlanRunState, ReplanRunState, validate_provider_list
+from .provider_handoff import (
+    DialogueRunState,
+    InitialPlanRunState,
+    ReplanRunState,
+    validate_provider_list,
+)
 from .revision_review import (
     RevisionLineage,
     lineage_from_proposal,
@@ -49,6 +54,7 @@ from .revision_review import (
 __all__ = (
     "ActionReceipt",
     "DemoSession",
+    "DialogueRunState",
     "ObservationGateError",
     "ObservationGateState",
     "PoseBoneState",

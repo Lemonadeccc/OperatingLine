@@ -3635,6 +3635,290 @@ def assert_companion_and_plan_semantics() -> None:
     )
 
 
+def assert_dialogue_proposal_round_trip() -> None:
+    """Exercise proposal-first delivery through the Blender main-thread boundary."""
+    base_session = operating_line.get_session()
+    base_plan = base_session.source_plan_copy()
+    assert base_plan is not None
+    controller = CompanionController()
+    provider_payload = {
+        "contractVersion": "1.0.0",
+        "generationAvailable": True,
+        "providers": [
+            {
+                "contractVersion": "1.0.0",
+                "id": "dialogue-planner",
+                "version": "0.1.0",
+                "displayName": "Dialogue Planner",
+                "description": "Deterministic streamed dialogue integration provider.",
+                "availability": {"available": True},
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "local",
+                    "dataTransmission": "none",
+                    "credentialManagement": "provider_managed",
+                },
+            }
+        ],
+    }
+    controller.dialogue_handoff.set_providers(provider_payload)
+    controller.select_dialogue_provider("dialogue-planner")
+    controller.add_revision_reference("active", base_session.root.id)
+    queued_runs = []
+    decisions = []
+
+    class DialogueTransport:
+        running = True
+
+        def __init__(self):
+            self.incoming = Queue()
+
+        def start_dialogue_run(self, request):
+            queued_runs.append(request)
+
+        def submit_proposal_decision(self, decision):
+            decisions.append(decision)
+
+        def accept_plan(self, _plan_id, _revision, _plan_content_sha256):
+            pass
+
+        def follow_revision_thread(self, _thread_id):
+            pass
+
+        def send_report(self, _report):
+            pass
+
+    transport = DialogueTransport()
+    controller._transport = transport
+    scene_before = {item.as_pointer() for item in bpy.data.objects}
+    run_request = controller.begin_dialogue_run(
+        "Make this guide clearer and prepare a revision if needed"
+    )
+    assert queued_runs == [run_request]
+    assert run_request["authorization"]["authorizedProviderCallLimit"] == 2
+    assert run_request["authorization"]["automaticReplanAcknowledged"] is True
+    assert run_request["authorization"]["proposalCreationAcknowledged"] is True
+    revision_request = run_request["revisionRequest"]
+
+    proposed_plan = deepcopy(base_plan)
+    proposed_plan["revision"] = base_session.revision + 1
+    proposal_id = str(uuid.uuid4())
+    proposal = {
+        "protocolVersion": "1.4.0",
+        "proposalId": proposal_id,
+        "targetAdapterId": "blender",
+        "targetInstanceId": controller.instance_id,
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+        "revisionRequestId": revision_request["requestId"],
+        "revisionThread": revision_request["revisionThread"],
+        "revisionOperation": {"kind": "revise"},
+        "plan": proposed_plan,
+        "planDiff": {
+            "basePlan": {
+                "id": base_session.plan_id,
+                "revision": base_session.revision,
+            },
+            "targetPlan": {
+                "id": proposed_plan["id"],
+                "revision": proposed_plan["revision"],
+            },
+            "summary": {
+                "planFields": 0,
+                "addedSteps": 0,
+                "removedSteps": 0,
+                "updatedSteps": 0,
+                "movedSteps": 0,
+            },
+            "planChanges": [],
+            "stepChanges": [],
+        },
+        "proposedAt": "2026-08-12T12:00:03Z",
+    }
+    status = {
+        "contractVersion": "1.0.0",
+        "dialogueRequestId": run_request["dialogueRequestId"],
+        "revisionRequestId": revision_request["requestId"],
+        "replanGenerationRequestId": run_request["replanGenerationRequestId"],
+        "targetAdapterId": "blender",
+        "targetInstanceId": controller.instance_id,
+        "provider": {
+            "id": "dialogue-planner",
+            "version": "0.1.0",
+            "displayName": "Dialogue Planner",
+        },
+        "status": "proposal_created",
+        "terminal": True,
+        "sceneChanged": False,
+        "assistantMessage": "I prepared a reviewable revision.",
+        "assistantMessageRevision": 1,
+        "semanticDecision": {
+            "kind": "replan",
+            "confidence": 0.91,
+            "threshold": 0.8,
+        },
+        "revisionRequestRecorded": True,
+        "proposalId": proposal_id,
+        "error": None,
+        "needsRevision": None,
+        "updatedAt": "2026-08-12T12:00:02Z",
+    }
+
+    transport.incoming.put({"kind": "proposal", "proposal": proposal})
+    transport.incoming.put({"kind": "dialogue_run_status", "run": status})
+    controller.pump()
+    assert controller.proposed_plan is proposal
+    assert controller.dialogue_handoff.phase == "proposal_created"
+    assert controller.dialogue_handoff.blocks_plan_work
+    assert controller.last_revision_request_id == revision_request["requestId"]
+    assert operating_line.get_session() is base_session
+    assert {item.as_pointer() for item in bpy.data.objects} == scene_before
+
+    assert controller.accept_proposal()
+    assert decisions[-1]["proposalId"] == proposal_id
+    assert decisions[-1]["decision"] == "accepted"
+    assert controller.dialogue_handoff.phase == "idle"
+    assert not controller.dialogue_handoff.blocks_plan_work
+    assert controller.dialogue_handoff.history[-1] == {
+        "role": "assistant",
+        "message": "I prepared a reviewable revision.",
+    }
+    assert operating_line.get_session().revision == base_session.revision + 1
+    assert {item.as_pointer() for item in bpy.data.objects} == scene_before
+
+    controller._transport = None
+    replace_operating_line_session(base_session)
+
+
+def assert_dialogue_proposal_first_failure_promotes_review() -> None:
+    """Reveal a cached same-request Proposal after the Dialogue terminal fails."""
+    base_session = operating_line.get_session()
+    base_plan = base_session.source_plan_copy()
+    assert base_plan is not None
+    controller = CompanionController()
+    provider_payload = {
+        "contractVersion": "1.0.0",
+        "generationAvailable": True,
+        "providers": [
+            {
+                "contractVersion": "1.0.0",
+                "id": "dialogue-planner",
+                "version": "0.1.0",
+                "displayName": "Dialogue Planner",
+                "description": "Deterministic dialogue race provider.",
+                "availability": {"available": True},
+                "limits": {"maxConcurrency": 1},
+                "dataHandling": {
+                    "executionLocation": "local",
+                    "dataTransmission": "none",
+                    "credentialManagement": "provider_managed",
+                },
+            }
+        ],
+    }
+    controller.dialogue_handoff.set_providers(provider_payload)
+    controller.select_dialogue_provider("dialogue-planner")
+    controller.add_revision_reference("active", base_session.root.id)
+
+    class DialogueRaceTransport:
+        running = True
+
+        def __init__(self):
+            self.incoming = Queue()
+
+        def start_dialogue_run(self, _request):
+            pass
+
+        def submit_proposal_decision(self, _decision):
+            pass
+
+        def follow_revision_thread(self, _thread_id):
+            pass
+
+        def send_report(self, _report):
+            pass
+
+    transport = DialogueRaceTransport()
+    controller._transport = transport
+    run_request = controller.begin_dialogue_run("Prepare a bounded review revision")
+    revision_request = run_request["revisionRequest"]
+    proposed_plan = deepcopy(base_plan)
+    proposed_plan["revision"] = base_session.revision + 1
+    proposal = {
+        "protocolVersion": "1.4.0",
+        "proposalId": str(uuid.uuid4()),
+        "targetAdapterId": "blender",
+        "targetInstanceId": controller.instance_id,
+        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+        "revisionRequestId": revision_request["requestId"],
+        "revisionThread": revision_request["revisionThread"],
+        "revisionOperation": {"kind": "revise"},
+        "plan": proposed_plan,
+        "planDiff": {
+            "basePlan": {
+                "id": base_session.plan_id,
+                "revision": base_session.revision,
+            },
+            "targetPlan": {
+                "id": proposed_plan["id"],
+                "revision": proposed_plan["revision"],
+            },
+            "summary": {
+                "planFields": 0,
+                "addedSteps": 0,
+                "removedSteps": 0,
+                "updatedSteps": 0,
+                "movedSteps": 0,
+            },
+            "planChanges": [],
+            "stepChanges": [],
+        },
+        "proposedAt": "2026-08-12T12:00:03Z",
+    }
+    failed = {
+        "contractVersion": "1.0.0",
+        "dialogueRequestId": run_request["dialogueRequestId"],
+        "revisionRequestId": revision_request["requestId"],
+        "replanGenerationRequestId": run_request["replanGenerationRequestId"],
+        "targetAdapterId": "blender",
+        "targetInstanceId": controller.instance_id,
+        "provider": {
+            "id": "dialogue-planner",
+            "version": "0.1.0",
+            "displayName": "Dialogue Planner",
+        },
+        "status": "failed",
+        "terminal": True,
+        "sceneChanged": False,
+        "assistantMessage": "I prepared the requested bounded revision.",
+        "assistantMessageRevision": 1,
+        "semanticDecision": {
+            "kind": "replan",
+            "confidence": 0.91,
+            "threshold": 0.8,
+        },
+        "revisionRequestRecorded": True,
+        "proposalId": None,
+        "error": {
+            "code": "planner_generation_conflict",
+            "retryMode": "new_request_id",
+            "message": "An external Proposal won the review slot.",
+        },
+        "needsRevision": None,
+        "updatedAt": "2026-08-12T12:00:04Z",
+    }
+
+    assert controller.stage_proposal(proposal)
+    assert controller.proposed_plan is None
+    transport.incoming.put({"kind": "dialogue_run_status", "run": failed})
+    controller.pump()
+    assert controller.dialogue_handoff.phase == "failed"
+    assert controller.proposed_plan is proposal
+    assert controller.provider_handoff.acknowledged_revision_request_id == revision_request[
+        "requestId"
+    ]
+    controller._transport = None
+
+
 def main() -> None:
     original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
     original_add_draw = bpy.types.VIEW3D_MT_add.draw
@@ -3796,6 +4080,8 @@ def main() -> None:
     assert_cube_guided_menu_round_trip()
     assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
     assert_companion_and_plan_semantics()
+    assert_dialogue_proposal_round_trip()
+    assert_dialogue_proposal_first_failure_promotes_review()
 
     # Initial goal entry uses the same nonblocking transport boundary and keeps
     # the accepted session/scene untouched until the linked proposal is accepted.

@@ -1,15 +1,22 @@
 import type {
   PlannerProvider,
+  PlannerProviderDialogueInput,
   PlannerProviderGenerateInput,
   PlannerProviderReplanInput,
 } from '@operatingline/planner-provider-sdk';
 import {
+  plannerDialogueProviderResultSchema,
+  plannerDialogueMaximumMessageCharacters,
   plannerProviderContractVersion,
   plannerProviderDescriptorSchema,
+  type PlannerDialogueProviderResult,
   type PlannerProviderDescriptor,
 } from '@operatingline/protocol';
 import type { ClientOptions as OpenAISDKClientOptions } from 'openai';
-import type { ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
+import type {
+  ResponseCreateParamsNonStreaming,
+  ResponseCreateParamsStreaming,
+} from 'openai/resources/responses/responses';
 
 const providerVersion = '0.1.0' as const;
 const defaultApiKeyEnvironmentVariable = 'OPENAI_API_KEY';
@@ -29,6 +36,36 @@ export interface OpenAIResponsesRequest {
   };
 }
 
+export interface OpenAIDialogueResponsesRequest {
+  readonly model: string;
+  readonly input: string;
+  readonly max_output_tokens: typeof openAIPlannerMaximumOutputTokens;
+  readonly store: false;
+  readonly stream: true;
+  readonly parallel_tool_calls: false;
+  readonly tool_choice: 'auto';
+  readonly tools: readonly [
+    {
+      readonly type: 'function';
+      readonly name: 'request_replan';
+      readonly description: string;
+      readonly strict: true;
+      readonly parameters: {
+        readonly type: 'object';
+        readonly properties: {
+          readonly confidence: {
+            readonly type: 'number';
+            readonly minimum: 0;
+            readonly maximum: 1;
+          };
+        };
+        readonly required: readonly ['confidence'];
+        readonly additionalProperties: false;
+      };
+    },
+  ];
+}
+
 export interface OpenAIResponsesResult {
   readonly status: string;
   readonly output_text?: string;
@@ -41,9 +78,9 @@ export interface OpenAIResponsesResult {
 export interface OpenAIResponsesClient {
   readonly responses: {
     create(
-      request: OpenAIResponsesRequest,
+      request: OpenAIResponsesRequest | OpenAIDialogueResponsesRequest,
       options: { readonly signal: AbortSignal },
-    ): Promise<OpenAIResponsesResult>;
+    ): Promise<OpenAIResponsesResult | AsyncIterable<unknown>>;
   };
 }
 
@@ -149,6 +186,162 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
     return this.requestJson(input.packet.renderedPrompt, input.signal);
   }
 
+  async dialogue(input: PlannerProviderDialogueInput): Promise<PlannerDialogueProviderResult> {
+    if (this.apiKey === undefined) {
+      throw new OpenAIPlannerProviderError(
+        'not_configured',
+        'The OpenAI planner provider is not configured.',
+      );
+    }
+    if (input.signal.aborted) {
+      throw abortedError();
+    }
+
+    let stream: AsyncIterable<unknown>;
+    try {
+      const client = await this.getClient();
+      const request = {
+        model: this.model,
+        input: input.packet.renderedPrompt,
+        max_output_tokens: openAIPlannerMaximumOutputTokens,
+        store: false,
+        stream: true,
+        parallel_tool_calls: false,
+        tool_choice: 'auto',
+        tools: [
+          {
+            type: 'function',
+            name: 'request_replan',
+            description:
+              'Request a bounded OperatingLine Plan revision only when the latest user message clearly asks to change the referenced Plan scope. Provide semantic confidence from 0 to 1.',
+            strict: true,
+            parameters: {
+              type: 'object',
+              properties: {
+                confidence: { type: 'number', minimum: 0, maximum: 1 },
+              },
+              required: ['confidence'],
+              additionalProperties: false,
+            },
+          },
+        ],
+      } satisfies OpenAIDialogueResponsesRequest;
+      request satisfies ResponseCreateParamsStreaming;
+      const response = await client.responses.create(request, { signal: input.signal });
+      if (!isAsyncIterable(response)) {
+        throw new Error('The OpenAI dialogue request did not return a stream.');
+      }
+      stream = response;
+    } catch {
+      if (input.signal.aborted) {
+        throw abortedError();
+      }
+      throw new OpenAIPlannerProviderError('request_failed', 'The OpenAI dialogue request failed.');
+    }
+
+    let assistantMessage = '';
+    let toolArguments: string | null = null;
+    let completed = false;
+    try {
+      for await (const rawEvent of stream) {
+        if (input.signal.aborted) {
+          throw abortedError();
+        }
+        if (completed) {
+          throw invalidDialogueResponse();
+        }
+        const event = recordValue(rawEvent);
+        if (event === null) {
+          throw invalidDialogueResponse();
+        }
+        const type = event['type'];
+        if (type === 'response.output_text.delta') {
+          const delta = event['delta'];
+          if (typeof delta !== 'string' || delta.length === 0) {
+            throw invalidDialogueResponse();
+          }
+          assistantMessage += delta;
+          if (assistantMessage.length > plannerDialogueMaximumMessageCharacters) {
+            throw invalidDialogueResponse();
+          }
+          input.emit({ type: 'assistant_text_delta', delta });
+        } else if (type === 'response.function_call_arguments.done') {
+          if (
+            event['name'] !== 'request_replan' ||
+            typeof event['arguments'] !== 'string' ||
+            toolArguments !== null
+          ) {
+            throw invalidDialogueResponse();
+          }
+          toolArguments = event['arguments'];
+        } else if (type === 'response.refusal.delta' || type === 'response.refusal.done') {
+          throw new OpenAIPlannerProviderError(
+            'response_refused',
+            'The OpenAI planner refused the request.',
+          );
+        } else if (type === 'response.incomplete') {
+          throw new OpenAIPlannerProviderError(
+            'response_incomplete',
+            'The OpenAI planner returned an incomplete response.',
+          );
+        } else if (type === 'response.failed' || type === 'error') {
+          throw new OpenAIPlannerProviderError(
+            'request_failed',
+            'The OpenAI dialogue request failed.',
+          );
+        } else if (type === 'response.completed') {
+          const response = recordValue(event['response']);
+          if (response?.['status'] !== 'completed') {
+            throw new OpenAIPlannerProviderError(
+              'request_failed',
+              'The OpenAI dialogue request did not complete.',
+            );
+          }
+          const output = response['output'];
+          if (!Array.isArray(output) || containsRefusal(output)) {
+            throw invalidDialogueResponse();
+          }
+          const finalAssistantMessage = collectOutputText(output);
+          if (finalAssistantMessage !== assistantMessage) {
+            throw invalidDialogueResponse();
+          }
+          const finalToolArguments = collectFunctionCallArguments(output);
+          if (toolArguments !== null && finalToolArguments !== toolArguments) {
+            throw invalidDialogueResponse();
+          }
+          toolArguments = finalToolArguments;
+          completed = true;
+        }
+      }
+    } catch (error) {
+      if (error instanceof OpenAIPlannerProviderError) {
+        throw error;
+      }
+      if (input.signal.aborted) {
+        throw abortedError();
+      }
+      throw new OpenAIPlannerProviderError('request_failed', 'The OpenAI dialogue request failed.');
+    }
+    if (!completed) {
+      throw new OpenAIPlannerProviderError(
+        'response_incomplete',
+        'The OpenAI planner returned an incomplete response.',
+      );
+    }
+
+    try {
+      return plannerDialogueProviderResultSchema.parse({
+        assistantMessage,
+        decision:
+          toolArguments === null
+            ? { kind: 'answer' }
+            : { kind: 'replan', confidence: parseReplanConfidence(toolArguments) },
+      });
+    } catch {
+      throw invalidDialogueResponse();
+    }
+  }
+
   private async requestJson(renderedPrompt: string, signal: AbortSignal): Promise<unknown> {
     if (this.apiKey === undefined) {
       throw new OpenAIPlannerProviderError(
@@ -172,7 +365,11 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
         text: { format: { type: 'json_object' } },
       } satisfies OpenAIResponsesRequest;
       request satisfies ResponseCreateParamsNonStreaming;
-      response = await client.responses.create(request, { signal });
+      const result = await client.responses.create(request, { signal });
+      if (isAsyncIterable(result)) {
+        throw new Error('The OpenAI planning request unexpectedly returned a stream.');
+      }
+      response = result;
     } catch {
       if (signal.aborted) {
         throw abortedError();
@@ -357,6 +554,71 @@ function visitContent(
     }
   }
   return false;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    Symbol.asyncIterator in value &&
+    typeof (value as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function'
+  );
+}
+
+function collectFunctionCallArguments(output: unknown): string | null {
+  if (!Array.isArray(output)) {
+    return null;
+  }
+  let argumentsValue: string | null = null;
+  for (const value of output) {
+    const item = recordValue(value);
+    if (item?.['type'] !== 'function_call') {
+      continue;
+    }
+    if (
+      item['name'] !== 'request_replan' ||
+      typeof item['arguments'] !== 'string' ||
+      argumentsValue !== null
+    ) {
+      throw invalidDialogueResponse();
+    }
+    argumentsValue = item['arguments'];
+  }
+  return argumentsValue;
+}
+
+function parseReplanConfidence(argumentsJson: string): number {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(argumentsJson);
+  } catch {
+    throw invalidDialogueResponse();
+  }
+  const candidate = recordValue(parsed);
+  if (
+    candidate === null ||
+    Object.keys(candidate).length !== 1 ||
+    typeof candidate['confidence'] !== 'number' ||
+    !Number.isFinite(candidate['confidence']) ||
+    candidate['confidence'] < 0 ||
+    candidate['confidence'] > 1
+  ) {
+    throw invalidDialogueResponse();
+  }
+  return candidate['confidence'];
+}
+
+function invalidDialogueResponse(): OpenAIPlannerProviderError {
+  return new OpenAIPlannerProviderError(
+    'response_invalid_json',
+    'The OpenAI planner returned an invalid dialogue result.',
+  );
 }
 
 function abortedError(): OpenAIPlannerProviderError {

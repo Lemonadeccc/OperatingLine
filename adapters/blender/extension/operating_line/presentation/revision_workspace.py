@@ -59,7 +59,7 @@ def draw_wrapped_text(layout, value, *, icon: str | None = None) -> None:
 def _reference_button(row, companion, *, scope: str, node_id: str):
     referenced = companion.has_revision_reference(scope, node_id)
     button = row.row(align=True)
-    button.enabled = not referenced
+    button.enabled = not referenced and not companion.dialogue_handoff.blocks_plan_work
     operator = button.operator(
         "operating_line.reference_node",
         text="Referenced" if referenced else "Ref",
@@ -125,6 +125,7 @@ def _draw_parameter_form(layout, companion, node) -> None:
     form.label(text=node.action.name)
     for field in fields:
         row = form.row(align=True)
+        row.enabled = not companion.dialogue_handoff.blocks_plan_work
         changed = field.value != field.original_value
         row.label(
             text=(
@@ -268,7 +269,9 @@ def draw_proposal_review(layout, companion, active_session) -> None:
 
     decisions = review.row(align=True)
     decisions.enabled = not (
-        companion.provider_handoff.active or companion.initial_plan_handoff.active
+        companion.provider_handoff.active
+        or companion.initial_plan_handoff.active
+        or companion.dialogue_handoff.active
     )
     accept = decisions.row(align=True)
     missing_verifiable_base = _proposal_accept_requires_verifiable_base(proposal)
@@ -282,7 +285,11 @@ def draw_proposal_review(layout, companion, active_session) -> None:
         )
     elif active_session.receipts:
         review.label(text="Use Back to reach the start before accepting", icon="ERROR")
-    elif companion.provider_handoff.active or companion.initial_plan_handoff.active:
+    elif (
+        companion.provider_handoff.active
+        or companion.initial_plan_handoff.active
+        or companion.dialogue_handoff.active
+    ):
         review.label(
             text="Wait for the active provider run before deciding",
             icon="TIME",
@@ -351,7 +358,9 @@ def _draw_revision_request(layout, context, companion) -> None:
                 f"@{node.number}  {node.title}",
                 icon="LINKED",
             )
-            remove = reference.operator(
+            remove_row = reference.row()
+            remove_row.enabled = not companion.dialogue_handoff.blocks_plan_work
+            remove = remove_row.operator(
                 "operating_line.remove_revision_reference",
                 text="Remove Reference",
                 icon="X",
@@ -366,11 +375,14 @@ def _draw_revision_request(layout, context, companion) -> None:
         text="",
     )
     clear = composer.row()
-    clear.enabled = bool(
-        base
-        or companion.revision_parameter_edit_count
-        or operation_kind != "revise"
-        or context.window_manager.operating_line_revision_message
+    clear.enabled = (
+        not companion.dialogue_handoff.blocks_plan_work
+        and bool(
+            base
+            or companion.revision_parameter_edit_count
+            or operation_kind != "revise"
+            or context.window_manager.operating_line_revision_message
+        )
     )
     clear.operator(
         "operating_line.clear_revision_request",
@@ -382,6 +394,7 @@ def _draw_revision_request(layout, context, companion) -> None:
         companion.connected
         and not companion.goal_request.active
         and not companion.provider_handoff.active
+        and not companion.dialogue_handoff.blocks_plan_work
         and bool(references)
         and bool(
             context.window_manager.operating_line_revision_message.strip()
@@ -407,7 +420,13 @@ def _draw_revision_request(layout, context, companion) -> None:
             text=f"Structured edits: {companion.revision_parameter_edit_count}",
             icon="PREFERENCES",
         )
-    if companion.provider_handoff.active:
+    if companion.dialogue_handoff.blocks_plan_work:
+        _draw_wrapped_text(
+            composer,
+            "The authorized dialogue turn owns this draft until it finishes review delivery.",
+            icon="TIME",
+        )
+    elif companion.provider_handoff.active:
         _draw_wrapped_text(
             composer,
             "Wait for the active provider run before sending another request.",
@@ -441,7 +460,12 @@ def _draw_provider_handoff(layout, companion) -> None:
     header = provider_box.row(align=True)
     header.label(text="Optional AI provider", icon="NETWORK_DRIVE")
     refresh = header.row(align=True)
-    refresh.enabled = companion.connected and not handoff.active
+    refresh.enabled = (
+        companion.connected
+        and not handoff.active
+        and not companion.dialogue_handoff.blocks_plan_work
+        and not companion.initial_plan_handoff.active
+    )
     refresh.operator(
         "operating_line.refresh_replan_providers",
         text="",
@@ -467,7 +491,12 @@ def _draw_provider_handoff(layout, companion) -> None:
         selected = provider["id"] == handoff.selected_provider_id
         item = provider_box.box()
         row = item.row(align=True)
-        row.enabled = available and not handoff.active
+        row.enabled = (
+            available
+            and not handoff.active
+            and not companion.dialogue_handoff.blocks_plan_work
+            and not companion.initial_plan_handoff.active
+        )
         select = row.operator(
             "operating_line.select_replan_provider",
             text=provider["displayName"],
@@ -526,7 +555,11 @@ def _draw_provider_handoff(layout, companion) -> None:
         )
 
     run = provider_box.row()
-    run.enabled = handoff.can_run
+    run.enabled = (
+        handoff.can_run
+        and not companion.dialogue_handoff.blocks_plan_work
+        and not companion.initial_plan_handoff.active
+    )
     label = (
         "Confirm New Provider Run"
         if handoff.phase in {"needs_revision", "failed", "interrupted"}
@@ -571,6 +604,181 @@ def _draw_provider_handoff(layout, companion) -> None:
     )
 
 
+def _draw_dialogue_handoff(layout, context, companion) -> None:
+    """Draw explicit streamed dialogue with a fixed semantic replan gate."""
+    handoff = companion.dialogue_handoff
+    dialogue_box = layout.box()
+    header = dialogue_box.row(align=True)
+    header.label(text="Streamed model dialogue", icon="COMMUNITY")
+    refresh = header.row(align=True)
+    refresh.enabled = (
+        companion.connected
+        and not handoff.blocks_plan_work
+        and not companion.provider_handoff.active
+        and not companion.initial_plan_handoff.active
+        and not companion.goal_request.active
+    )
+    refresh.operator(
+        "operating_line.refresh_dialogue_providers",
+        text="",
+        icon="FILE_REFRESH",
+    )
+    _draw_wrapped_text(
+        dialogue_box,
+        "Select a provider and confirm each turn. One confirmation permits at most two calls.",
+        icon="INFO",
+    )
+    _draw_wrapped_text(
+        dialogue_box,
+        "The first call streams a reply. A second replan call starts automatically only at 80%+ confidence.",
+    )
+
+    if not companion.connected:
+        dialogue_box.label(text="Connect the runtime to list providers", icon="UNLINKED")
+    elif handoff.loading_providers:
+        dialogue_box.label(text="Refreshing dialogue providers...", icon="TIME")
+    elif not handoff.providers:
+        dialogue_box.label(text="No streamed dialogue provider configured", icon="INFO")
+
+    for provider in handoff.providers:
+        availability = provider["availability"]
+        available = availability["available"]
+        selected = provider["id"] == handoff.selected_provider_id
+        item = dialogue_box.box()
+        row = item.row(align=True)
+        row.enabled = (
+            available
+            and not handoff.blocks_plan_work
+            and not companion.provider_handoff.active
+            and not companion.initial_plan_handoff.active
+            and not companion.goal_request.active
+        )
+        select = row.operator(
+            "operating_line.select_dialogue_provider",
+            text=provider["displayName"],
+            icon="RADIOBUT_ON" if selected else "RADIOBUT_OFF",
+            depress=selected,
+        )
+        select.provider_id = provider["id"]
+        row.label(text=f"v{provider['version']}")
+        _draw_wrapped_text(item, provider["description"])
+        location = provider["dataHandling"]["executionLocation"]
+        if location == "remote":
+            _draw_wrapped_text(
+                item,
+                "Remote: provider-managed transmission and credentials.",
+                icon="URL",
+            )
+        else:
+            item.label(text="Local: no provider data transmission", icon="HOME")
+        if not available:
+            _draw_wrapped_text(
+                item,
+                str(availability.get("message", "Provider unavailable")),
+                icon="ERROR",
+            )
+
+    selected = handoff.selected_provider
+    if selected is not None:
+        disclosure = dialogue_box.box()
+        disclosure.label(text=f"Selected: {selected['displayName']}", icon="CHECKMARK")
+        if selected["dataHandling"]["executionLocation"] == "remote":
+            _draw_wrapped_text(
+                disclosure,
+                "A confirmed turn sends the message, recent dialogue, candidate revision, full base Plan, references, ActionCatalog, and latest state.",
+                icon="URL",
+            )
+        else:
+            _draw_wrapped_text(
+                disclosure,
+                "The provider runs locally with no provider data transmission.",
+                icon="HOME",
+            )
+        _draw_wrapped_text(
+            disclosure,
+            "The provider may charge. OperatingLine cannot estimate fees or store its credentials.",
+            icon="ERROR",
+        )
+        _draw_wrapped_text(
+            disclosure,
+            "A qualifying replan stops at a read-only Proposal; Accept remains manual.",
+        )
+
+    references = companion.revision_reference_nodes()
+    user_message = context.window_manager.operating_line_revision_message.strip()
+    run = dialogue_box.row()
+    run.enabled = bool(
+        companion.connected
+        and handoff.can_run
+        and references
+        and user_message
+        and companion.revision_operation_kind == "revise"
+        and not companion.goal_request.active
+        and not companion.provider_handoff.active
+        and not companion.initial_plan_handoff.active
+        and companion.proposed_plan is None
+    )
+    run.operator(
+        "operating_line.run_dialogue_provider",
+        text="Confirm Streamed Turn",
+        icon="PLAY",
+    )
+    if not references or not user_message:
+        _draw_wrapped_text(
+            dialogue_box,
+            "Use the revision composer above to reference nodes and enter this turn's message.",
+            icon="GREASEPENCIL",
+        )
+    elif companion.revision_operation_kind != "revise":
+        dialogue_box.label(text="Dialogue supports ordinary revise mode only", icon="ERROR")
+
+    if handoff.history:
+        history_box = dialogue_box.box()
+        history_box.label(text="Recent dialogue", icon="TEXT")
+        for message in handoff.history[-4:]:
+            speaker = "You" if message["role"] == "user" else "Assistant"
+            _draw_wrapped_text(history_box, f"{speaker}: {message['message']}")
+    if handoff.active and handoff.assistant_message:
+        stream_box = dialogue_box.box()
+        stream_box.label(text="Assistant (streaming)", icon="TIME")
+        _draw_wrapped_text(stream_box, handoff.assistant_message)
+    if handoff.semantic_decision is not None:
+        decision = handoff.semantic_decision
+        if decision["kind"] == "replan":
+            dialogue_box.label(
+                text=f"Semantic replan {decision['confidence']:.0%} >= 80%",
+                icon="FILE_REFRESH",
+            )
+        else:
+            confidence = decision["replanConfidence"]
+            label = (
+                "Answer only"
+                if confidence is None
+                else f"Answer only; replan confidence {confidence:.0%}"
+            )
+            dialogue_box.label(text=label, icon="CHECKMARK")
+    if handoff.message:
+        status_icon = (
+            "ERROR"
+            if handoff.phase in {"needs_revision", "failed", "interrupted"}
+            else "TIME" if handoff.active else "INFO"
+        )
+        _draw_wrapped_text(dialogue_box, handoff.message, icon=status_icon)
+    if handoff.needs_revision_summary:
+        _draw_wrapped_text(
+            dialogue_box,
+            f"Validation: {handoff.needs_revision_summary}",
+            icon="ERROR",
+        )
+        for finding in handoff.needs_revision_findings:
+            _draw_wrapped_text(dialogue_box, f"- {finding}")
+    if handoff.dialogue_request_id is not None:
+        dialogue_box.label(
+            text=f"Turn {handoff.dialogue_request_id[:8]}  {handoff.phase}",
+            icon="TIME" if handoff.active else "INFO",
+        )
+
+
 def _compact_history_message(value, limit: int = 76) -> str:
     rendered = " ".join(str(value).split())
     return rendered if len(rendered) <= limit else f"{rendered[: limit - 3]}..."
@@ -586,6 +794,7 @@ def _draw_revision_branches(layout, companion, active_session) -> None:
         or companion.goal_request.active
         or companion.provider_handoff.active
         or companion.initial_plan_handoff.active
+        or companion.dialogue_handoff.blocks_plan_work
     )
     fork = header.row(align=True)
     fork.enabled = lineage is not None and can_prepare
@@ -797,6 +1006,7 @@ def draw_revision_workspace(layout, context, companion, active_session) -> None:
     draw_proposal_review(workspace, companion, active_session)
     _draw_revision_branches(workspace, companion, active_session)
     _draw_revision_request(workspace, context, companion)
+    _draw_dialogue_handoff(workspace, context, companion)
     _draw_provider_handoff(workspace, companion)
     _draw_revision_history(workspace, context, companion)
     if companion.proposal_session is not None:

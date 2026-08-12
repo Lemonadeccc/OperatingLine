@@ -108,6 +108,20 @@ export interface CompanionInitialPlanRunInput {
 
 export type RecordCompanionInitialPlanRunResult = 'accepted' | 'duplicate' | 'conflict';
 
+export interface CompanionDialogueRunInput {
+  dialogueRequestId: string;
+  revisionRequestId: string;
+  replanGenerationRequestId: string;
+  targetAdapterId: string;
+  targetInstanceId: string;
+  status: string;
+  assistantMessage: string;
+  assistantMessageRevision: number;
+  updatedAt: string;
+}
+
+export type RecordCompanionDialogueRunResult = 'accepted' | 'duplicate' | 'conflict';
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -123,6 +137,27 @@ function canonicalJson(value: unknown): string {
     return candidate;
   };
   return JSON.stringify(normalize(value));
+}
+
+const companionDialogueMutablePayloadFields = new Set([
+  'status',
+  'terminal',
+  'assistantMessage',
+  'assistantMessageRevision',
+  'semanticDecision',
+  'revisionRequestRecorded',
+  'proposalId',
+  'error',
+  'needsRevision',
+  'updatedAt',
+]);
+
+function companionDialogueImmutablePayload(run: CompanionDialogueRunInput): string {
+  return canonicalJson(
+    Object.fromEntries(
+      Object.entries(run).filter(([key]) => !companionDialogueMutablePayloadFields.has(key)),
+    ),
+  );
 }
 
 export interface OperatingLineDatabase {
@@ -195,6 +230,23 @@ export interface OperatingLineDatabase {
     expectedStatuses: readonly string[],
   ): boolean;
   listNonterminalCompanionInitialPlanRuns(): unknown[];
+  recordCompanionDialogueRun<T extends CompanionDialogueRunInput>(
+    run: T,
+  ): RecordCompanionDialogueRunResult;
+  getCompanionDialogueRun(dialogueRequestId: string): unknown | null;
+  transitionCompanionDialogueRun<T extends CompanionDialogueRunInput>(
+    run: T,
+    expectedStatuses: readonly string[],
+  ): boolean;
+  transitionCompanionDialogueRunWithRevisionRequest<
+    TRun extends CompanionDialogueRunInput,
+    TRequest extends GuideRevisionRequestInput,
+  >(
+    run: TRun,
+    request: TRequest,
+    expectedStatuses: readonly string[],
+  ): boolean;
+  listNonterminalCompanionDialogueRuns(): unknown[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -456,6 +508,37 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (10, datetime('now'));
+  `);
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS companion_dialogue_runs (
+      dialogue_request_id TEXT PRIMARY KEY,
+      revision_request_id TEXT NOT NULL UNIQUE,
+      replan_generation_request_id TEXT NOT NULL UNIQUE,
+      target_adapter_id TEXT NOT NULL,
+      target_instance_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'queued',
+          'streaming',
+          'replanning',
+          'answered',
+          'needs_revision',
+          'proposal_created',
+          'failed',
+          'interrupted'
+        )
+      ),
+      assistant_message_revision INTEGER NOT NULL CHECK (assistant_message_revision >= 0),
+      updated_at TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS companion_dialogue_runs_active_target
+    ON companion_dialogue_runs (target_adapter_id, target_instance_id)
+    WHERE status IN ('queued', 'streaming', 'replanning');
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (11, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -803,6 +886,53 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT payload
     FROM companion_initial_plan_runs
     WHERE status IN ('queued', 'generating')
+    ORDER BY rowid
+  `);
+  const findCompanionDialogueRun = sqlite.prepare(`
+    SELECT status, payload
+    FROM companion_dialogue_runs
+    WHERE dialogue_request_id = ?
+  `);
+  const findCompanionDialogueRunByRevisionRequest = sqlite.prepare(`
+    SELECT dialogue_request_id
+    FROM companion_dialogue_runs
+    WHERE revision_request_id = ?
+  `);
+  const findCompanionDialogueRunByReplanGenerationRequest = sqlite.prepare(`
+    SELECT dialogue_request_id
+    FROM companion_dialogue_runs
+    WHERE replan_generation_request_id = ?
+  `);
+  const findActiveCompanionDialogueRun = sqlite.prepare(`
+    SELECT dialogue_request_id, revision_request_id
+    FROM companion_dialogue_runs
+    WHERE target_adapter_id = ?
+      AND target_instance_id = ?
+      AND status IN ('queued', 'streaming', 'replanning')
+    LIMIT 1
+  `);
+  const insertCompanionDialogueRun = sqlite.prepare(`
+    INSERT INTO companion_dialogue_runs (
+      dialogue_request_id,
+      revision_request_id,
+      replan_generation_request_id,
+      target_adapter_id,
+      target_instance_id,
+      status,
+      assistant_message_revision,
+      updated_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateCompanionDialogueRun = sqlite.prepare(`
+    UPDATE companion_dialogue_runs
+    SET status = ?, assistant_message_revision = ?, updated_at = ?, payload = ?
+    WHERE dialogue_request_id = ? AND status = ?
+  `);
+  const listNonterminalCompanionDialogueRunRows = sqlite.prepare(`
+    SELECT payload
+    FROM companion_dialogue_runs
+    WHERE status IN ('queued', 'streaming', 'replanning')
     ORDER BY rowid
   `);
 
@@ -1193,6 +1323,10 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
               payload: string;
             }
           | undefined;
+        if (findCompanionDialogueRunByRevisionRequest.get(request.requestId) !== undefined) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
         if (existing !== undefined) {
           sqlite.exec('COMMIT;');
           return existing.adapter_id === request.adapterId &&
@@ -1202,6 +1336,12 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             existing.payload === payload
             ? 'duplicate'
             : 'conflict';
+        }
+        if (
+          findActiveCompanionDialogueRun.get(request.adapterId, request.instanceId) !== undefined
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
         }
         insertRevisionRequest.run(
           request.requestId,
@@ -1382,6 +1522,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           findActiveCompanionReplanRun.get(request.adapterId, request.instanceId) !== undefined ||
           findActiveCompanionInitialPlanRun.get(request.adapterId, request.instanceId) !==
             undefined ||
+          findActiveCompanionDialogueRun.get(request.adapterId, request.instanceId) !== undefined ||
           findPendingGuideProposal.get(
             request.adapterId,
             request.instanceId,
@@ -1477,6 +1618,8 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         if (
           active !== undefined ||
           activeInitial !== undefined ||
+          findActiveCompanionDialogueRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
           pendingGoal !== undefined ||
           findPendingGuideProposal.get(
             run.targetAdapterId,
@@ -1592,6 +1735,8 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             undefined ||
           findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId) !==
             undefined ||
+          findActiveCompanionDialogueRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
           findPendingGuideProposal.get(
             run.targetAdapterId,
             run.targetInstanceId,
@@ -1685,6 +1830,237 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         const payload = (row as { payload?: unknown }).payload;
         if (typeof payload !== 'string') {
           throw new Error('SQLite returned an invalid companion initial plan run payload');
+        }
+        return JSON.parse(payload) as unknown;
+      });
+    },
+    recordCompanionDialogueRun(run) {
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionDialogueRun.get(run.dialogueRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.payload === payload ? 'duplicate' : 'conflict';
+        }
+        if (
+          findRevisionRequest.get(run.revisionRequestId) !== undefined ||
+          findCompanionDialogueRunByRevisionRequest.get(run.revisionRequestId) !== undefined ||
+          findCompanionDialogueRunByReplanGenerationRequest.get(run.replanGenerationRequestId) !==
+            undefined ||
+          findActiveCompanionDialogueRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findActiveCompanionInitialPlanRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findActiveCompanionReplanRun.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findPendingGoalRequestForTarget.get(run.targetAdapterId, run.targetInstanceId) !==
+            undefined ||
+          findPendingGuideProposal.get(
+            run.targetAdapterId,
+            run.targetInstanceId,
+            run.targetAdapterId,
+            run.targetInstanceId,
+          ) !== undefined
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+        insertCompanionDialogueRun.run(
+          run.dialogueRequestId,
+          run.revisionRequestId,
+          run.replanGenerationRequestId,
+          run.targetAdapterId,
+          run.targetInstanceId,
+          run.status,
+          run.assistantMessageRevision,
+          run.updatedAt,
+          payload,
+        );
+        insertEvent.run(
+          `companion-dialogue-run:${run.dialogueRequestId}:authorized`,
+          'companion.dialogue-run.authorized',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getCompanionDialogueRun(dialogueRequestId) {
+      const row = findCompanionDialogueRun.get(dialogueRequestId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid companion dialogue run payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    transitionCompanionDialogueRun(run, expectedStatuses) {
+      if (expectedStatuses.length === 0) {
+        throw new Error('Companion dialogue run transition requires an expected status');
+      }
+      const payload = canonicalJson(run);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findCompanionDialogueRun.get(run.dialogueRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existing === undefined || !expectedStatuses.includes(existing.status)) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const stored = JSON.parse(existing.payload) as CompanionDialogueRunInput;
+        const assistantProgressIsValid =
+          run.assistantMessageRevision === stored.assistantMessageRevision
+            ? run.assistantMessage === stored.assistantMessage
+            : run.assistantMessageRevision === stored.assistantMessageRevision + 1 &&
+              run.assistantMessage.startsWith(stored.assistantMessage);
+        if (
+          stored.revisionRequestId !== run.revisionRequestId ||
+          stored.replanGenerationRequestId !== run.replanGenerationRequestId ||
+          stored.targetAdapterId !== run.targetAdapterId ||
+          stored.targetInstanceId !== run.targetInstanceId ||
+          companionDialogueImmutablePayload(stored) !== companionDialogueImmutablePayload(run) ||
+          !assistantProgressIsValid
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const updated = updateCompanionDialogueRun.run(
+          run.status,
+          run.assistantMessageRevision,
+          run.updatedAt,
+          payload,
+          run.dialogueRequestId,
+          existing.status,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Companion dialogue run transition lost its expected state');
+        }
+        insertEvent.run(
+          `companion-dialogue-run:${run.dialogueRequestId}:${run.status}:${run.assistantMessageRevision}`,
+          'companion.dialogue-run.transitioned',
+          payload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return true;
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    transitionCompanionDialogueRunWithRevisionRequest(run, request, expectedStatuses) {
+      if (expectedStatuses.length === 0) {
+        throw new Error('Companion dialogue replan transition requires an expected status');
+      }
+      const runPayload = canonicalJson(run);
+      const requestPayload = canonicalJson(request);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingRun = findCompanionDialogueRun.get(run.dialogueRequestId) as
+          { status: string; payload: string } | undefined;
+        if (existingRun === undefined || !expectedStatuses.includes(existingRun.status)) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const storedRun = JSON.parse(existingRun.payload) as CompanionDialogueRunInput & {
+          request?: { revisionRequest?: unknown };
+        };
+        const assistantProgressIsValid =
+          run.assistantMessageRevision === storedRun.assistantMessageRevision
+            ? run.assistantMessage === storedRun.assistantMessage
+            : run.assistantMessageRevision === storedRun.assistantMessageRevision + 1 &&
+              run.assistantMessage.startsWith(storedRun.assistantMessage);
+        if (
+          storedRun.revisionRequestId !== run.revisionRequestId ||
+          storedRun.replanGenerationRequestId !== run.replanGenerationRequestId ||
+          storedRun.targetAdapterId !== run.targetAdapterId ||
+          storedRun.targetInstanceId !== run.targetInstanceId ||
+          companionDialogueImmutablePayload(storedRun) !== companionDialogueImmutablePayload(run) ||
+          !assistantProgressIsValid ||
+          request.requestId !== run.revisionRequestId ||
+          request.adapterId !== run.targetAdapterId ||
+          request.instanceId !== run.targetInstanceId ||
+          canonicalJson(storedRun.request?.revisionRequest) !== requestPayload
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+
+        const existingRequest = findRevisionRequest.get(request.requestId) as
+          | {
+              adapter_id: string;
+              instance_id: string;
+              base_plan_id: string;
+              base_revision: number;
+              payload: string;
+            }
+          | undefined;
+        if (
+          existingRequest !== undefined &&
+          (existingRequest.adapter_id !== request.adapterId ||
+            existingRequest.instance_id !== request.instanceId ||
+            existingRequest.base_plan_id !== request.basePlan.id ||
+            existingRequest.base_revision !== request.basePlan.revision ||
+            existingRequest.payload !== requestPayload)
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        if (existingRequest === undefined) {
+          insertRevisionRequest.run(
+            request.requestId,
+            request.adapterId,
+            request.instanceId,
+            request.basePlan.id,
+            request.basePlan.revision,
+            request.occurredAt,
+            requestPayload,
+          );
+          insertEvent.run(
+            `guide-revision-request:${request.requestId}`,
+            'guide.revision.requested',
+            requestPayload,
+            new Date().toISOString(),
+          );
+        }
+
+        const updated = updateCompanionDialogueRun.run(
+          run.status,
+          run.assistantMessageRevision,
+          run.updatedAt,
+          runPayload,
+          run.dialogueRequestId,
+          existingRun.status,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Companion dialogue replan transition lost its expected state');
+        }
+        insertEvent.run(
+          `companion-dialogue-run:${run.dialogueRequestId}:${run.status}:${run.assistantMessageRevision}`,
+          'companion.dialogue-run.transitioned',
+          runPayload,
+          run.updatedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return true;
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    listNonterminalCompanionDialogueRuns() {
+      return listNonterminalCompanionDialogueRunRows.all().map((row) => {
+        const payload = (row as { payload?: unknown }).payload;
+        if (typeof payload !== 'string') {
+          throw new Error('SQLite returned an invalid companion dialogue run payload');
         }
         return JSON.parse(payload) as unknown;
       });

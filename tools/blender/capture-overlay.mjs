@@ -40,6 +40,8 @@ try {
     'initial-provider-failed',
     'provider-disclosure',
     'provider-generating',
+    'dialogue-disclosure',
+    'dialogue-streaming',
     'forward',
     'back',
     'hidden',

@@ -11,6 +11,8 @@ import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
   actionCatalogRequestSchema,
   adapterStatusSchema,
+  companionDialogueRunCreateRequestSchema,
+  companionDialogueRunStatusRequestSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
   companionInitialPlanRunCreateRequestSchema,
@@ -59,6 +61,11 @@ import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
 import {
+  CompanionDialogueRunRequestError,
+  createCompanionDialogueRunCoordinator,
+  type CompanionDialogueRunCoordinator,
+} from './companion-dialogue-run.js';
+import {
   CompanionInitialPlanRunRequestError,
   createCompanionInitialPlanRunCoordinator,
   type CompanionInitialPlanRunCoordinator,
@@ -75,12 +82,10 @@ import {
   readExecutionEventLedger,
 } from './eval-export.js';
 import { computeGuidePlanDiff } from './guide-plan-diff.js';
+import { createGuideRevisionRequestService } from './guide-revision-requests.js';
 import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
-import {
-  createGuideRevisionBranchList,
-  validateGuideRevisionOperation,
-} from './guide-revision-branches.js';
+import { createGuideRevisionBranchList } from './guide-revision-branches.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import {
@@ -104,8 +109,6 @@ import {
 import { createReplanningService } from './replanning-service.js';
 import {
   validateGuidePlanAgainstActionCatalog,
-  validateGuideRevisionRequest,
-  validateGuideRevisionThread,
   validateGuidePlanStructure,
   validateProposalTarget,
 } from './guide-validation.js';
@@ -162,15 +165,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   ]);
   const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
   const database = openOperatingLineDatabase(options.databasePath);
+  const guideRevisionRequestService = createGuideRevisionRequestService({
+    database,
+    actionCatalogRegistry,
+  });
   let app: ReturnType<typeof createMcpFastifyApp> | undefined;
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
+  let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
     () => companionInitialPlanRunCoordinator?.beginClose(),
     () => companionReplanRunCoordinator?.beginClose(),
+    () => companionDialogueRunCoordinator?.beginClose(),
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
         await plannerGenerationCoordinator.close();
@@ -180,6 +189,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     },
     () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
+    () => companionDialogueRunCoordinator?.close(),
     () => plannerProviderRegistry.close(),
     () => app?.close(),
     () => mcpHandler?.close(),
@@ -630,6 +640,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       providerRegistry: plannerProviderRegistry,
       generationCoordinator: plannerReplanGenerationCoordinator,
       replanningService,
+    });
+    companionDialogueRunCoordinator = createCompanionDialogueRunCoordinator({
+      database,
+      providerRegistry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      generationCoordinator: plannerReplanGenerationCoordinator,
+      replanningService,
+      revisionRequestService: guideRevisionRequestService,
     });
     companionInitialPlanRunCoordinator = createCompanionInitialPlanRunCoordinator({
       database,
@@ -1287,6 +1305,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     });
     runtimeApp.get('/api/v1/planner/providers', async () => plannerProviderRegistry.list());
+    runtimeApp.get('/api/v1/dialogue/providers', async () =>
+      plannerProviderRegistry.listDialogueReplanners(),
+    );
     runtimeApp.post('/api/v1/planner/generate', async (request, reply) => {
       const parsedRequest = plannerGenerateRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -1356,6 +1377,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(500).send({
           error: 'initial_plan_run_unavailable',
           message: 'The initial plan run status could not be read safely',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/companion/dialogue-run', async (request, reply) => {
+      const parsedRequest = companionDialogueRunCreateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion dialogue authorization violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionDialogueRunCoordinator!.create(parsedRequest.data);
+        return reply.code(202).send(run);
+      } catch (error) {
+        if (error instanceof CompanionDialogueRunRequestError) {
+          return reply.code(error.statusCode).send({
+            error: error.code,
+            message: error.message,
+          });
+        }
+        return reply.code(500).send({
+          error: 'dialogue_run_failed',
+          message: 'The dialogue run could not be safely authorized',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/companion/dialogue-run', async (request, reply) => {
+      const parsedRequest = companionDialogueRunStatusRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          message: 'Companion dialogue status request violates the strict public contract',
+        });
+      }
+      try {
+        const run = companionDialogueRunCoordinator!.get(parsedRequest.data.dialogueRequestId);
+        return run === null
+          ? reply.code(404).send({
+              error: 'dialogue_run_not_found',
+              message: 'The requested companion dialogue run was not found',
+            })
+          : run;
+      } catch {
+        return reply.code(500).send({
+          error: 'dialogue_run_unavailable',
+          message: 'The dialogue run status could not be read safely',
         });
       }
     });
@@ -1576,45 +1644,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send({ error: 'invalid_revision_request', issues: parsedRequest.error.issues });
       }
       try {
-        const catalog = actionCatalogRegistry.get({
-          targetAdapterId: parsedRequest.data.adapterId,
-          catalogVersion: parsedRequest.data.catalogVersion,
-        });
-        validateGuideRevisionRequest(parsedRequest.data, catalog);
-        if (database.getGuideRevisionRequest(parsedRequest.data.requestId) === null) {
-          const thread = parsedRequest.data.revisionThread;
-          const rawHead =
-            thread === undefined ? null : database.getGuideRevisionThreadHead(thread.threadId);
-          const head = rawHead === null ? null : guideRevisionRequestSchema.parse(rawHead);
-          const parentProposalId = thread?.parentRequestId;
-          const rawParentProposal =
-            parentProposalId == null
-              ? null
-              : database.getGuideReplanProposalForRequest(parentProposalId);
-          const parentProposal =
-            rawParentProposal === null ? null : guideProposalSchema.parse(rawParentProposal);
-          const rawParentDecision =
-            parentProposal === null
-              ? null
-              : database.getGuideProposalDecision(
-                  parentProposal.proposalId,
-                  parsedRequest.data.adapterId,
-                  parsedRequest.data.instanceId,
-                );
-          const parentDecision =
-            rawParentDecision === null
-              ? null
-              : guideProposalDecisionSchema.parse(rawParentDecision);
-          validateGuideRevisionThread(parsedRequest.data, head, parentProposal, parentDecision);
-          validateGuideRevisionOperation(database, parsedRequest.data, catalog);
-        }
+        guideRevisionRequestService.validate(parsedRequest.data);
       } catch (error) {
         return reply.code(422).send({
           error: 'invalid_revision_request',
           message: error instanceof Error ? error.message : 'Unknown revision request error',
         });
       }
-      const result = database.recordGuideRevisionRequest(parsedRequest.data);
+      const result = guideRevisionRequestService.record(parsedRequest.data);
       if (result === 'conflict') {
         return reply.code(409).send({ result });
       }

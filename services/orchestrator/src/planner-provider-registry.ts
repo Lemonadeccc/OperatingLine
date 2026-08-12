@@ -16,11 +16,17 @@ export interface RegisteredReplanningProvider extends RegisteredPlannerProvider 
   readonly provider: PlannerProvider & Required<Pick<PlannerProvider, 'replan'>>;
 }
 
+export interface RegisteredDialogueReplanningProvider extends RegisteredPlannerProvider {
+  readonly provider: PlannerProvider & Required<Pick<PlannerProvider, 'dialogue' | 'replan'>>;
+}
+
 export interface PlannerProviderRegistry {
   find(providerId: string): RegisteredPlannerProvider | null;
   findReplanner(providerId: string): RegisteredReplanningProvider | null;
+  findDialogueReplanner(providerId: string): RegisteredDialogueReplanningProvider | null;
   list(): PlannerProviderList;
   listReplanners(): PlannerProviderList;
+  listDialogueReplanners(): PlannerProviderList;
   close(): Promise<void>;
 }
 
@@ -76,11 +82,27 @@ export function createPlannerProviderRegistry(
         ? (candidate as RegisteredReplanningProvider)
         : null;
     },
+    findDialogueReplanner: (providerId) => {
+      const candidate = registered.get(providerId);
+      return candidate !== undefined &&
+        typeof candidate.provider.dialogue === 'function' &&
+        typeof candidate.provider.replan === 'function'
+        ? (candidate as RegisteredDialogueReplanningProvider)
+        : null;
+    },
     list: () => listProviders([...registered.values()]),
     listReplanners: () =>
       listProviders(
         [...registered.values()].filter(
           (candidate): candidate is RegisteredReplanningProvider =>
+            typeof candidate.provider.replan === 'function',
+        ),
+      ),
+    listDialogueReplanners: () =>
+      listProviders(
+        [...registered.values()].filter(
+          (candidate): candidate is RegisteredDialogueReplanningProvider =>
+            typeof candidate.provider.dialogue === 'function' &&
             typeof candidate.provider.replan === 'function',
         ),
       ),

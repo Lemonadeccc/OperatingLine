@@ -156,7 +156,12 @@ def _draw_initial_plan_handoff(layout, companion) -> None:
     header = provider_box.row(align=True)
     header.label(text="Optional initial AI planner", icon="NETWORK_DRIVE")
     refresh = header.row(align=True)
-    refresh.enabled = companion.connected and not handoff.active
+    refresh.enabled = (
+        companion.connected
+        and not handoff.active
+        and not companion.dialogue_handoff.blocks_plan_work
+        and not companion.provider_handoff.active
+    )
     refresh.operator(
         "operating_line.refresh_initial_plan_providers",
         text="",
@@ -177,7 +182,12 @@ def _draw_initial_plan_handoff(layout, companion) -> None:
         selected = provider["id"] == handoff.selected_provider_id
         item = provider_box.box()
         row = item.row(align=True)
-        row.enabled = available and not handoff.active
+        row.enabled = (
+            available
+            and not handoff.active
+            and not companion.dialogue_handoff.blocks_plan_work
+            and not companion.provider_handoff.active
+        )
         select = row.operator(
             "operating_line.select_initial_plan_provider",
             text=provider["displayName"],
@@ -233,7 +243,12 @@ def _draw_initial_plan_handoff(layout, companion) -> None:
             "No API key, model, or provider endpoint is stored by this Blender add-on.",
         )
     run = provider_box.row()
-    run.enabled = handoff.can_run and companion.proposed_plan is None
+    run.enabled = (
+        handoff.can_run
+        and companion.proposed_plan is None
+        and not companion.dialogue_handoff.blocks_plan_work
+        and not companion.provider_handoff.active
+    )
     label = (
         "Confirm New Initial Run"
         if handoff.phase in {"needs_revision", "failed", "interrupted"}

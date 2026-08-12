@@ -186,7 +186,7 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 供应商无关 PlanningPromptPacket。客户端先 evaluate 完整 draft，再把 draft 与 `goalRequestId` 交给
 既有 `operatingline.guide.propose`；Orchestrator 核对请求身份并把 Proposal 只投递给原实例。请求提交、
 packet 获取、规划、Proposal 到达和 Reject 都不改变宿主场景；Accept 只安装，`Next` 才可能执行动作。
-同一实例只保留一个 pending goal request，并在 Initial Plan Run、Replan Run 与未决 Proposal 之间执行
+同一实例只保留一个 pending goal request，并在 Initial Plan Run、Replan Run、Dialogue Run 与未决 Proposal 之间执行
 目标级互斥。Goal 来源 PlanningContext 只携带发起实例的状态；规划事件在 packet 外层保存
 request/instance 来源，实例范围 Eval 不接受无来源或其他实例的 context、prompt、quality 证据。
 完整请求边界见 [ADR 0020](../adr/0020-host-initiated-goal-to-guidance.md)。
@@ -211,6 +211,16 @@ Plan 或场景。
 并发、Plan identity 变化、无唯一共同祖先或空 source contribution 都会在创建请求或 prompt 时失败。
 Provider 收到完整 ancestor/source/target 与权威 `expectedMergedPlan`，输出必须与其深度相等；它不能自行
 解决冲突。Merge Proposal 保存 `mergeBaseRequestId`，仍经过同一 diff 与 Accept/Reject 门。
+
+`CompanionDialogueRun 1.0.0` 为 Revision Workspace 增加一条独立、逐轮授权的模型对话路径。用户必须
+明确选择支持 dialogue/replan 的 Provider，并确认数据处理、可能费用、最多两次 Provider 调用、固定
+`0.8` 自动重规划阈值以及只创建 Proposal 的边界。第一次调用把助手文本增量持久化为 append-only
+revision，并只返回严格的 `answer` 或 `replan(confidence)` 决策；没有 replan 决策或置信度低于阈值时
+只结束回答。达到阈值时，Runtime 才把预先授权的普通 `revise` 候选原子保存为 GuideRevisionRequest，
+再以第二次调用复用既有类型化 replan、quality/locality gate 与 canonical propose。Blender 不直接消费
+Provider SSE，只短轮询 durable Run 状态；任何成功重规划最多进入只读 Proposal，Accept 前不安装计划，
+`Next` 前不修改场景。完整边界见
+[ADR 0035](../adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 
 `operatingline.replan.thread.get` 与 `/api/v1/replan/thread` 从现有请求、Proposal 和决策表派生只读
 消息历史，不复制一份可变聊天日志。查询以 thread、adapter 和 instance 隔离，默认返回最新页并用
@@ -449,9 +459,10 @@ negotiation，下游使用 `serveStdio`：现代客户端协商 `2026-07-28` 的
 继续使用 `initialize`。当前业务没有 Sampling/Roots/Elicitation/Tasks consumer，因此只声明实际使用的
 Tool、Prompt 与 Resource 转发能力。
 
-OpenAI 请求固定 `store: false`、`stream: false` 与 32,768 个输出 token 上限，SDK client 固定
-`maxRetries: 0`，并接收协调器的 `AbortSignal`。这使核心的显式重试和 at-most-once request ID 语义
-不被 SDK 隐式重试绕过，但取消仍是协作式的。当前 Proposal Schema 的 action arguments 与
+OpenAI 请求固定 `store: false` 与 32,768 个输出 token 上限，SDK client 固定 `maxRetries: 0`，并接收
+协调器的 `AbortSignal`。初始 `generate()` 与局部 `replan()` 固定 `stream: false`；dialogue 使用
+`stream: true`、禁用并行 tool call，并只转发 `response.output_text.delta`。这使核心的显式重试和
+at-most-once request ID 语义不被 SDK 隐式重试绕过，但取消仍是协作式的。当前 Proposal Schema 的 action arguments 与
 observation parameters 是由版本化
 ActionCatalog 约束的动态 records，不符合厂商严格 Structured Outputs 支持的 JSON Schema 子集；插件
 因此使用 JSON Object mode，只要求厂商返回可解析 JSON。JSON Object mode 不是 OperatingLine 信任
@@ -461,7 +472,8 @@ ActionCatalog 约束的动态 records，不符合厂商严格 Structured Outputs
 该 provider 的公开 descriptor 声明 `executionLocation: remote`、
 `dataTransmission: provider_managed` 与 `credentialManagement: provider_managed`。它不公开模型凭据；
 模型只存在于 provider 配置和描述文本，不进入通用 generate wire request。该实现用同一清洗后的
-Responses JSON 边界支持初始 `generate()` 与局部 `replan()`；两者都不会自动创建 Proposal，也不证明
+Responses 边界支持初始 `generate()`、局部 `replan()` 与 streamed dialogue；前两者不会自动创建
+Proposal，dialogue 也只有在逐次授权且语义阈值通过后才可能组合一个待审 Proposal。这些路径都不证明
 任意目标或节点修改的语义规划质量。具体厂商决策见
 [ADR 0014](../adr/0014-openai-responses-planner-provider.md)，类型化局部重规划决策见
 [ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
@@ -614,6 +626,8 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
 宿主授权的异步 Initial Plan Run 见
 [ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
+流式模型对话与授权内语义重规划见
+[ADR 0035](../adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 本机 CLI Planner、现代 MCP 协商与 MCPB 签名边界见
 [ADR 0023](../adr/0023-local-cli-planners-and-modern-mcp.md)。
 节点引用与重规划决策见

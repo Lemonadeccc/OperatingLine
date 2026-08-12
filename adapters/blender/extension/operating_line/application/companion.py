@@ -24,7 +24,7 @@ from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession, ObservationGateState
 from .goal_request import GoalRequestState, build_goal_request
-from .provider_handoff import InitialPlanRunState, ReplanRunState
+from .provider_handoff import DialogueRunState, InitialPlanRunState, ReplanRunState
 from .parameter_form import ParameterField, action_parameter_fields
 from .revision_review import (
     RevisionLineage,
@@ -82,7 +82,9 @@ class CompanionController:
         self.revision_request_status = ""
         self.last_revision_request_id: str | None = None
         self.provider_handoff = ReplanRunState()
+        self.dialogue_handoff = DialogueRunState()
         self.initial_plan_handoff = InitialPlanRunState()
+        self._dialogue_run_request: dict[str, Any] | None = None
         self._initial_plan_run_request: dict[str, Any] | None = None
         self.goal_request = GoalRequestState()
         self._pending_revision_request_ids: set[str] = set()
@@ -137,6 +139,7 @@ class CompanionController:
             preserve_active_revision_draft=False,
             preserve_proposal_review=False,
             preserve_initial_plan_handoff=False,
+            preserve_dialogue_handoff=False,
         )
         if self._timer_registered and bpy.app.timers.is_registered(self._timer_callback):
             bpy.app.timers.unregister(self._timer_callback)
@@ -185,6 +188,8 @@ class CompanionController:
             transport.submit_proposal_decision(decision)
         if self.initial_plan_handoff.active and self._initial_plan_run_request is not None:
             transport.start_initial_plan_run(self._initial_plan_run_request)
+        if self.dialogue_handoff.active and self._dialogue_run_request is not None:
+            transport.start_dialogue_run(self._dialogue_run_request)
         self.status = "Connected"
         self.report("connected")
 
@@ -196,6 +201,7 @@ class CompanionController:
         preserve_active_revision_draft: bool = True,
         preserve_proposal_review: bool = True,
         preserve_initial_plan_handoff: bool = True,
+        preserve_dialogue_handoff: bool = True,
     ) -> None:
         transport = self._transport
         self._transport = None
@@ -224,6 +230,9 @@ class CompanionController:
             self.clear_revision_draft()
         self._pending_revision_request_ids.clear()
         self.provider_handoff.clear()
+        if not preserve_dialogue_handoff:
+            self.dialogue_handoff.clear()
+            self._dialogue_run_request = None
         if not preserve_initial_plan_handoff:
             self.initial_plan_handoff.clear()
             self._initial_plan_run_request = None
@@ -272,6 +281,7 @@ class CompanionController:
             or self.provider_handoff.pending_revision_request_id is not None
             or self.provider_handoff.acknowledged_revision_request_id is not None
             or self.initial_plan_handoff.active
+            or self.dialogue_handoff.blocks_plan_work
         )
 
     def submit_goal_request(self, goal: str) -> dict[str, Any]:
@@ -409,6 +419,8 @@ class CompanionController:
             raise ValueError("Review the pending Proposal before forking")
         if self.provider_handoff.active:
             raise ValueError("Wait for the active provider run before forking")
+        if self.dialogue_handoff.blocks_plan_work:
+            raise ValueError("Finish the streamed dialogue workflow before forking")
         if (
             self._revision_base_session is not None
             and self._revision_reference_scope != "active"
@@ -417,6 +429,7 @@ class CompanionController:
         self._revision_operation_kind = "fork"
         self._revision_source_thread_id = lineage.thread_id
         self._revision_source_request_id = lineage.request_id
+        self.dialogue_handoff.abandon_rejected_for_fork()
         self.revision_request_status = (
             f"Forking branch {lineage.thread_id[:8]}; compose the first new turn"
         )
@@ -438,6 +451,8 @@ class CompanionController:
             raise ValueError("Finish the active goal workflow before merging")
         if self.provider_handoff.active:
             raise ValueError("Wait for the active provider run before merging")
+        if self.dialogue_handoff.blocks_plan_work:
+            raise ValueError("Finish the streamed dialogue workflow before merging")
         session = get_session()
         if session.receipts:
             raise ValueError("Use Back to return the active walkthrough to its start")
@@ -468,7 +483,11 @@ class CompanionController:
             raise ValueError("Review the pending Proposal before switching branches")
         if self.goal_request.active:
             raise ValueError("Finish the active goal workflow before switching branches")
-        if self.provider_handoff.active or self.initial_plan_handoff.active:
+        if (
+            self.provider_handoff.active
+            or self.initial_plan_handoff.active
+            or self.dialogue_handoff.blocks_plan_work
+        ):
             raise ValueError("Wait for the active provider run before switching branches")
         current = get_session()
         if current.receipts:
@@ -766,6 +785,30 @@ class CompanionController:
         return self.provider_handoff.select(provider_id)
 
     @property
+    def dialogue_provider_descriptors(self) -> tuple[dict[str, Any], ...]:
+        return self.dialogue_handoff.providers
+
+    @property
+    def selected_dialogue_provider_id(self) -> str | None:
+        return self.dialogue_handoff.selected_provider_id
+
+    def refresh_dialogue_providers(self) -> None:
+        if self.provider_handoff.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active provider workflow first")
+        self.dialogue_handoff.ensure_provider_refresh_allowed()
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect the runtime before refreshing dialogue providers")
+        self.dialogue_handoff.loading_providers = True
+        self.dialogue_handoff.message = "Refreshing streamed dialogue providers"
+        transport.refresh_dialogue_providers()
+
+    def select_dialogue_provider(self, provider_id: str) -> dict[str, Any]:
+        if self.provider_handoff.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active provider workflow first")
+        return self.dialogue_handoff.select(provider_id)
+
+    @property
     def initial_plan_provider_descriptors(self) -> tuple[dict[str, Any], ...]:
         return self.initial_plan_handoff.providers
 
@@ -799,14 +842,29 @@ class CompanionController:
         )
         if self.proposed_plan is not None:
             raise ValueError("Review the current proposal before running an initial planner")
+        if self.provider_handoff.active or self.dialogue_handoff.blocks_plan_work:
+            raise ValueError("Finish the active revision provider workflow first")
         request = self.initial_plan_handoff.begin(target_instance_id=self.instance_id)
         self._initial_plan_run_request = request
         transport.start_initial_plan_run(request)
         return request
 
-    def _invalidate_handoff_for_plan_install(self) -> None:
-        if self.provider_handoff.invalidate_for_plan_install():
+    def _invalidate_handoff_for_plan_install(
+        self,
+        *,
+        preserve_provider_handoff: bool = False,
+        preserve_dialogue_handoff: bool = False,
+    ) -> None:
+        if (
+            not preserve_provider_handoff
+            and self.provider_handoff.invalidate_for_plan_install()
+        ):
             self.last_revision_request_id = None
+        if (
+            not preserve_dialogue_handoff
+            and self.dialogue_handoff.invalidate_for_plan_install()
+        ):
+            self._dialogue_run_request = None
 
     def _acknowledge_revision_request(self, request_id: str) -> None:
         self._pending_revision_request_ids.discard(request_id)
@@ -824,6 +882,10 @@ class CompanionController:
 
     def begin_replan_run(self) -> dict[str, Any]:
         """Queue one authorized provider run without changing plan or scene state."""
+        if self.dialogue_handoff.blocks_plan_work:
+            raise ValueError("Finish the streamed dialogue workflow first")
+        if self.goal_request.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active goal workflow first")
         transport = self._transport
         if transport is None or not transport.running:
             raise ValueError("Connect the runtime before running a provider")
@@ -831,19 +893,54 @@ class CompanionController:
         transport.start_replan_run(request)
         return request
 
-    def submit_revision_request(self, message: str) -> dict[str, Any]:
-        if self.goal_request.active:
-            raise ValueError("Finish the active goal request before sending a revision")
-        self.provider_handoff.ensure_revision_submission_allowed()
+    def begin_dialogue_run(self, message: str) -> dict[str, Any]:
+        """Stream one assistant turn and optionally create a review-only replan."""
+        if self.goal_request.active or self.initial_plan_handoff.active:
+            raise ValueError("Finish the active goal workflow before starting dialogue")
+        if self.provider_handoff.active:
+            raise ValueError("Wait for the active replan provider run")
+        if (
+            self.provider_handoff.pending_revision_request_id is not None
+            or self.provider_handoff.acknowledged_revision_request_id is not None
+        ):
+            raise ValueError("Finish the current revision provider workflow first")
+        if self.proposed_plan is not None:
+            raise ValueError("Review the current Proposal before starting dialogue")
         transport = self._transport
         if transport is None or not transport.running:
-            raise ValueError("Connect to the OperatingLine runtime before sending a request")
+            raise ValueError("Connect the runtime before starting model dialogue")
+        fresh_thread = self.dialogue_handoff.phase == "proposal_rejected"
+        request = self._build_revision_request(
+            message,
+            dialogue=True,
+            fresh_thread=fresh_thread,
+        )
+        run_request = self.dialogue_handoff.begin(
+            revision_request=request,
+            target_instance_id=self.instance_id,
+        )
+        self._dialogue_run_request = run_request
+        transport.start_dialogue_run(run_request)
+        self.revision_request_status = (
+            f"Dialogue {run_request['dialogueRequestId'][:8]} queued; scene unchanged"
+        )
+        return run_request
+
+    def _build_revision_request(
+        self,
+        message: str,
+        *,
+        dialogue: bool = False,
+        fresh_thread: bool = False,
+    ) -> dict[str, Any]:
         base = self._revision_base_session
         references = self.revision_reference_nodes()
         if base is None or not references:
             raise ValueError("Select at least one task-node reference")
         normalized_message = message.strip() if isinstance(message, str) else ""
         parameter_edits = self.revision_parameter_edits()
+        if dialogue and not normalized_message:
+            raise ValueError("Streamed dialogue requires a non-empty user message")
         if not normalized_message and not parameter_edits:
             raise ValueError(
                 "Revision request requires a message or structured parameter edit"
@@ -856,7 +953,14 @@ class CompanionController:
         request_id = str(uuid.uuid4())
         lineage = self.revision_draft_lineage
         operation_kind = self._revision_operation_kind
-        if operation_kind == "fork":
+        if dialogue and operation_kind != "revise":
+            raise ValueError("Semantic dialogue supports ordinary revise requests only")
+        if fresh_thread:
+            if not dialogue:
+                raise ValueError("Only dialogue may explicitly open a fresh thread here")
+            revision_thread = new_revision_thread(request_id, None)
+            revision_operation = {"kind": "revise"}
+        elif operation_kind == "fork":
             if (
                 lineage is None
                 or lineage.thread_id != self._revision_source_thread_id
@@ -894,7 +998,7 @@ class CompanionController:
         else:
             revision_thread = new_revision_thread(request_id, lineage)
             revision_operation = {"kind": "revise"}
-        request = {
+        return {
             "protocolVersion": PROTOCOL_VERSION,
             "requestId": request_id,
             "adapterId": "blender",
@@ -916,6 +1020,20 @@ class CompanionController:
             .isoformat()
             .replace("+00:00", "Z"),
         }
+
+    def submit_revision_request(self, message: str) -> dict[str, Any]:
+        if self.goal_request.active:
+            raise ValueError("Finish the active goal request before sending a revision")
+        if self.initial_plan_handoff.active:
+            raise ValueError("Finish the active initial planner run first")
+        if self.dialogue_handoff.blocks_plan_work:
+            raise ValueError("Finish the streamed dialogue workflow first")
+        self.provider_handoff.ensure_revision_submission_allowed()
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Connect to the OperatingLine runtime before sending a request")
+        request = self._build_revision_request(message)
+        request_id = request["requestId"]
         transport.submit_revision_request(request)
         self._pending_revision_request_ids.add(request_id)
         self.provider_handoff.revision_submitted(request_id)
@@ -932,6 +1050,7 @@ class CompanionController:
         *,
         plan_content_sha256: str | None = None,
         preserve_provider_handoff: bool = False,
+        preserve_dialogue_handoff: bool = False,
     ) -> bool:
         """Validate fully before replacing the active session."""
         from .. import get_session, replace_session
@@ -1012,8 +1131,10 @@ class CompanionController:
         if self._transport is not None:
             self._transport.follow_revision_thread(None)
         replace_session(replacement)
-        if not preserve_provider_handoff:
-            self._invalidate_handoff_for_plan_install()
+        self._invalidate_handoff_for_plan_install(
+            preserve_provider_handoff=preserve_provider_handoff,
+            preserve_dialogue_handoff=preserve_dialogue_handoff,
+        )
         if (
             self.pending_plan is not None
             and self.pending_plan.get("id") == plan_id
@@ -1218,25 +1339,32 @@ class CompanionController:
             )
             expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
             expected_initial_key = (None, expected_initial_proposal_id)
+            expected_dialogue_proposal_id = self.dialogue_handoff.proposal_id
+            expected_dialogue_key = (
+                self.dialogue_handoff.revision_request_id,
+                expected_dialogue_proposal_id,
+            )
             expected_keys = {
                 key
                 for expected_id, key in (
                     (expected_provider_proposal_id, expected_provider_key),
                     (expected_initial_proposal_id, expected_initial_key),
+                    (expected_dialogue_proposal_id, expected_dialogue_key),
                 )
                 if expected_id is not None
             }
-            is_expected_provider = candidate_key in expected_keys
-            reserve_provider_slot = (
+            is_expected_handoff = candidate_key in expected_keys
+            reserve_handoff_slot = (
                 self.provider_handoff.active
                 or self.initial_plan_handoff.active
+                or self.dialogue_handoff.blocks_plan_work
                 or any(
                     key not in self._proposal_candidates for key in expected_keys
                 )
             )
             candidate_limit = (
                 MAX_DEFERRED_PROPOSALS
-                if is_expected_provider or not reserve_provider_slot
+                if is_expected_handoff or not reserve_handoff_slot
                 else MAX_DEFERRED_PROPOSALS - 1
             )
             if len(self._proposal_candidates) >= candidate_limit:
@@ -1257,6 +1385,13 @@ class CompanionController:
 
         expected_provider_proposal_id = self.provider_handoff.proposal_id
         expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
+        expected_dialogue_proposal_id = self.dialogue_handoff.proposal_id
+        if (
+            self.dialogue_handoff.active
+            and revision_request_id == self.dialogue_handoff.revision_request_id
+            and expected_dialogue_proposal_id is None
+        ):
+            return True
         if (
             self.initial_plan_handoff.active
             and goal_request_id
@@ -1286,6 +1421,16 @@ class CompanionController:
             return True
         if expected_provider_proposal_id is not None:
             return self._bind_provider_proposal()
+        if (
+            expected_dialogue_proposal_id is not None
+            and (
+                proposal_id != expected_dialogue_proposal_id
+                or revision_request_id != self.dialogue_handoff.revision_request_id
+            )
+        ):
+            return True
+        if expected_dialogue_proposal_id is not None:
+            return self._bind_dialogue_proposal()
         self._show_proposal(proposal, replacement)
         return True
 
@@ -1348,6 +1493,16 @@ class CompanionController:
             self.provider_handoff.message = (
                 "Proposal delivered; review it before Accept or Reject"
             )
+        if (
+            not self.dialogue_handoff.active
+            and revision_request_id is not None
+            and revision_request_id == self.dialogue_handoff.revision_request_id
+            and self.dialogue_handoff.phase == "proposal_created"
+            and proposal_id == self.dialogue_handoff.proposal_id
+        ):
+            self.dialogue_handoff.message = (
+                "Proposal delivered; review it before Accept or Reject"
+            )
 
     def _bind_provider_proposal(self) -> bool:
         proposal_id = self.provider_handoff.proposal_id
@@ -1400,6 +1555,35 @@ class CompanionController:
         self._show_proposal(*candidate)
         return True
 
+    def _bind_dialogue_proposal(self) -> bool:
+        proposal_id = self.dialogue_handoff.proposal_id
+        revision_request_id = self.dialogue_handoff.revision_request_id
+        if proposal_id is None or revision_request_id is None:
+            return False
+        candidate = self._proposal_candidates.get(
+            (revision_request_id, proposal_id)
+        )
+        if candidate is None:
+            if (
+                self.proposed_plan is not None
+                and (
+                    self.proposed_plan.get("proposalId") != proposal_id
+                    or self.proposed_plan.get("revisionRequestId")
+                    != revision_request_id
+                )
+            ):
+                self.proposed_plan = None
+                self.proposal_session = None
+            return False
+        for candidate_key in tuple(self._proposal_candidates):
+            if candidate_key[1] == proposal_id and candidate_key != (
+                revision_request_id,
+                proposal_id,
+            ):
+                self._proposal_candidates.pop(candidate_key)
+        self._show_proposal(*candidate)
+        return True
+
     def _promote_deferred_goal_proposal(self) -> bool:
         """Reveal an external Goal proposal after an Initial Run ends without one."""
         goal_request_id = self.initial_plan_handoff.acknowledged_goal_request_id
@@ -1417,11 +1601,33 @@ class CompanionController:
                 return True
         return False
 
+    def _promote_deferred_dialogue_proposal(self) -> bool:
+        """Reveal a same-request Proposal after Dialogue ends without binding one."""
+        revision_request_id = self.dialogue_handoff.revision_request_id
+        if (
+            revision_request_id is None
+            or not self.dialogue_handoff.revision_request_recorded
+            or self.dialogue_handoff.active
+            or self.dialogue_handoff.phase == "proposal_created"
+        ):
+            return False
+        for proposal, replacement in reversed(
+            tuple(self._proposal_candidates.values())
+        ):
+            if proposal.get("revisionRequestId") == revision_request_id:
+                self._show_proposal(proposal, replacement)
+                return True
+        return False
+
     def _finish_proposal_review(
         self, proposal_id: str, revision_request_id: str | None
     ) -> None:
         self._proposal_candidates.pop((revision_request_id, proposal_id), None)
-        if self._bind_initial_plan_proposal() or self._bind_provider_proposal():
+        if (
+            self._bind_initial_plan_proposal()
+            or self._bind_provider_proposal()
+            or self._bind_dialogue_proposal()
+        ):
             return
         if self._proposal_candidates:
             self._show_proposal(*next(reversed(self._proposal_candidates.values())))
@@ -1434,7 +1640,11 @@ class CompanionController:
         if proposal is None or self.proposal_session is None:
             self.error = "No plan proposal is awaiting review"
             return False
-        if self.provider_handoff.active or self.initial_plan_handoff.active:
+        if (
+            self.provider_handoff.active
+            or self.initial_plan_handoff.active
+            or self.dialogue_handoff.active
+        ):
             self.error = "Wait for the active provider run before deciding a proposal"
             return False
         expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
@@ -1458,6 +1668,17 @@ class CompanionController:
             )
         ):
             self.error = "Wait for the provider proposal before deciding deferred work"
+            return False
+        expected_dialogue_proposal_id = self.dialogue_handoff.proposal_id
+        if (
+            expected_dialogue_proposal_id is not None
+            and (
+                proposal["proposalId"] != expected_dialogue_proposal_id
+                or proposal.get("revisionRequestId")
+                != self.dialogue_handoff.revision_request_id
+            )
+        ):
+            self.error = "Wait for the dialogue Proposal before deciding deferred work"
             return False
         revision_request_id = proposal.get("revisionRequestId")
         if revision_request_id is not None:
@@ -1495,6 +1716,12 @@ class CompanionController:
             return False
 
         proposal_id = proposal["proposalId"]
+        completes_dialogue_proposal = (
+            self.dialogue_handoff.revision_request_recorded
+            and proposal.get("revisionRequestId")
+            == self.dialogue_handoff.revision_request_id
+            and expected_dialogue_proposal_id in {None, proposal_id}
+        )
         completes_goal_request = (
             self.goal_request.active
             and proposal.get("goalRequestId") == self.goal_request.request_id
@@ -1509,6 +1736,7 @@ class CompanionController:
                 and proposal.get("revisionRequestId")
                 == self.provider_handoff.acknowledged_revision_request_id
             ),
+            preserve_dialogue_handoff=completes_dialogue_proposal,
         ):
             return False
         transport = self._transport
@@ -1537,6 +1765,10 @@ class CompanionController:
         self.initial_plan_handoff.complete_proposal_review(
             proposal.get("goalRequestId"), proposal_id
         )
+        if self.dialogue_handoff.complete_proposal_review(
+            proposal.get("revisionRequestId"), proposal_id, accepted=True
+        ):
+            self._dialogue_run_request = None
         self._initial_plan_run_request = None
         self._finish_proposal_review(
             proposal_id, proposal.get("revisionRequestId")
@@ -1553,7 +1785,11 @@ class CompanionController:
         if proposal is None:
             self.error = "No plan proposal is awaiting review"
             return False
-        if self.provider_handoff.active or self.initial_plan_handoff.active:
+        if (
+            self.provider_handoff.active
+            or self.initial_plan_handoff.active
+            or self.dialogue_handoff.active
+        ):
             self.error = "Wait for the active provider run before deciding a proposal"
             return False
         expected_initial_proposal_id = self.initial_plan_handoff.proposal_id
@@ -1577,6 +1813,17 @@ class CompanionController:
             )
         ):
             self.error = "Wait for the provider proposal before deciding deferred work"
+            return False
+        expected_dialogue_proposal_id = self.dialogue_handoff.proposal_id
+        if (
+            expected_dialogue_proposal_id is not None
+            and (
+                proposal["proposalId"] != expected_dialogue_proposal_id
+                or proposal.get("revisionRequestId")
+                != self.dialogue_handoff.revision_request_id
+            )
+        ):
+            self.error = "Wait for the dialogue Proposal before deciding deferred work"
             return False
         rejected_session = self.proposal_session
         completes_goal_request = (
@@ -1607,6 +1854,12 @@ class CompanionController:
         self.initial_plan_handoff.complete_proposal_review(
             proposal.get("goalRequestId"), proposal["proposalId"]
         )
+        if self.dialogue_handoff.complete_proposal_review(
+            proposal.get("revisionRequestId"),
+            proposal["proposalId"],
+            accepted=False,
+        ):
+            self._dialogue_run_request = None
         self._initial_plan_run_request = None
         self._finish_proposal_review(
             proposal["proposalId"], proposal.get("revisionRequestId")
@@ -1781,6 +2034,63 @@ class CompanionController:
                         )
                     except (TypeError, ValueError) as error:
                         self.provider_handoff.message = str(error)
+                        self.error = str(error)
+                elif message.get("kind") == "dialogue_provider_list":
+                    try:
+                        self.dialogue_handoff.set_providers(message.get("providers"))
+                    except (TypeError, ValueError) as error:
+                        self.dialogue_handoff.loading_providers = False
+                        self.dialogue_handoff.message = str(error)
+                elif message.get("kind") == "dialogue_provider_list_unavailable":
+                    self.dialogue_handoff.loading_providers = False
+                    self.dialogue_handoff.message = str(
+                        message.get(
+                            "message",
+                            "Streamed dialogue provider discovery is unavailable",
+                        )
+                    )
+                elif message.get("kind") == "dialogue_run_status":
+                    try:
+                        self.dialogue_handoff.apply_status(message.get("run"))
+                        if self.dialogue_handoff.revision_request_recorded:
+                            revision_request_id = (
+                                self.dialogue_handoff.revision_request_id
+                            )
+                            self.last_revision_request_id = revision_request_id
+                            if revision_request_id is not None:
+                                self.revision_request_status = (
+                                    f"Dialogue revision {revision_request_id[:8]} "
+                                    "stored in runtime"
+                                )
+                                if self.dialogue_handoff.phase in {
+                                    "needs_revision",
+                                    "failed",
+                                    "interrupted",
+                                }:
+                                    self.provider_handoff.adopt_dialogue_revision(
+                                        revision_request_id
+                                    )
+                        if self.dialogue_handoff.phase == "proposal_created":
+                            self._bind_dialogue_proposal()
+                        elif not self.dialogue_handoff.active:
+                            self._promote_deferred_dialogue_proposal()
+                        if not self.dialogue_handoff.active:
+                            self._dialogue_run_request = None
+                    except (TypeError, ValueError) as error:
+                        self.dialogue_handoff.phase = "failed"
+                        self.dialogue_handoff.retry_mode = "never"
+                        self.dialogue_handoff.message = str(error)
+                        self._dialogue_run_request = None
+                        self.error = str(error)
+                elif message.get("kind") == "dialogue_run_rejected":
+                    try:
+                        self.dialogue_handoff.reject_authorization(
+                            message.get("dialogueRequestId"),
+                            message.get("message"),
+                        )
+                        self._dialogue_run_request = None
+                    except (TypeError, ValueError) as error:
+                        self.dialogue_handoff.message = str(error)
                         self.error = str(error)
                 elif message.get("kind") == "initial_plan_provider_list":
                     try:

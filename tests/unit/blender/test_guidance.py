@@ -20,6 +20,7 @@ application = import_module(f"{PACKAGE_NAME}.application")
 domain = import_module(f"{PACKAGE_NAME}.domain")
 visual_theme = import_module(f"{PACKAGE_NAME}.visual_theme")
 GuidanceState = application.GuidanceState
+DialogueRunState = application.DialogueRunState
 InitialPlanRunState = application.InitialPlanRunState
 DemoSession = application.DemoSession
 ActionReceipt = application.ActionReceipt
@@ -135,6 +136,55 @@ def initial_plan_run_status(
         "error": error,
         "needsRevision": needs_revision,
         "updatedAt": "2026-08-09T12:00:01.000Z",
+    }
+
+
+def dialogue_revision_request(instance_id: str, message: str = "Make the brim wider") -> dict:
+    return {
+        "requestId": str(uuid.uuid4()),
+        "adapterId": "blender",
+        "instanceId": instance_id,
+        "message": message,
+    }
+
+
+def dialogue_run_status(
+    state: DialogueRunState,
+    status: str,
+    *,
+    assistant_message: str = "",
+    assistant_revision: int = 0,
+    semantic_decision: dict | None = None,
+    revision_request_recorded: bool = False,
+    proposal_id: str | None = None,
+    error: dict | None = None,
+    needs_revision: dict | None = None,
+) -> dict:
+    provider = state.selected_provider
+    assert provider is not None
+    return {
+        "contractVersion": "1.0.0",
+        "dialogueRequestId": state.dialogue_request_id,
+        "revisionRequestId": state.revision_request_id,
+        "replanGenerationRequestId": state.replan_generation_request_id,
+        "targetAdapterId": "blender",
+        "targetInstanceId": state.target_instance_id,
+        "provider": {
+            "id": provider["id"],
+            "version": provider["version"],
+            "displayName": provider["displayName"],
+        },
+        "status": status,
+        "terminal": status not in {"queued", "streaming", "replanning"},
+        "sceneChanged": False,
+        "assistantMessage": assistant_message,
+        "assistantMessageRevision": assistant_revision,
+        "semanticDecision": semantic_decision,
+        "revisionRequestRecorded": revision_request_recorded,
+        "proposalId": proposal_id,
+        "error": error,
+        "needsRevision": needs_revision,
+        "updatedAt": "2026-08-12T12:00:01.000Z",
     }
 
 
@@ -1006,6 +1056,371 @@ class ProviderHandoffTests(unittest.TestCase):
         self.assertIsNone(state.acknowledged_revision_request_id)
         self.assertIsNone(state.generation_request_id)
         self.assertFalse(state.can_run)
+
+
+class DialogueProviderHandoffTests(unittest.TestCase):
+    def ready_state(self) -> tuple[DialogueRunState, str, dict]:
+        state = DialogueRunState()
+        state.set_providers(provider_list())
+        state.select("fake-planner")
+        instance_id = str(uuid.uuid4())
+        request = dialogue_revision_request(instance_id)
+        return state, instance_id, request
+
+    def test_authorization_is_explicit_bounded_and_uses_distinct_ids(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+
+        request = state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+
+        self.assertEqual(request["providerId"], "fake-planner")
+        self.assertEqual(request["providerVersion"], "0.1.0")
+        self.assertEqual(request["revisionRequest"], revision_request)
+        self.assertEqual(request["history"], [])
+        self.assertEqual(
+            request["authorization"],
+            {
+                "disclosureVersion": "1.0.0",
+                "dataHandlingAcknowledged": True,
+                "possibleChargesAcknowledged": True,
+                "authorizedProviderCallLimit": 2,
+                "automaticReplanAcknowledged": True,
+                "proposalCreationAcknowledged": True,
+                "authorizedAt": request["authorization"]["authorizedAt"],
+            },
+        )
+        self.assertEqual(
+            len(
+                {
+                    request["dialogueRequestId"],
+                    request["replanGenerationRequestId"],
+                    revision_request["requestId"],
+                }
+            ),
+            3,
+        )
+        self.assertTrue(state.active)
+        self.assertTrue(state.blocks_plan_work)
+
+    def test_streaming_text_is_append_only_and_answer_records_history(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "streaming",
+                assistant_message="Wider",
+                assistant_revision=1,
+            )
+        )
+        unchanged_revision = dialogue_run_status(
+            state,
+            "streaming",
+            assistant_message="Changed",
+            assistant_revision=1,
+        )
+        with self.assertRaisesRegex(ValueError, "without a new revision"):
+            state.apply_status(unchanged_revision)
+        nonappend = dialogue_run_status(
+            state,
+            "streaming",
+            assistant_message="Narrower",
+            assistant_revision=2,
+        )
+        with self.assertRaisesRegex(ValueError, "append-only"):
+            state.apply_status(nonappend)
+        unversioned = dialogue_run_status(
+            state,
+            "streaming",
+            assistant_message="Wider but unversioned",
+            assistant_revision=0,
+        )
+        with self.assertRaisesRegex(ValueError, "moved backwards"):
+            state.apply_status(unversioned)
+
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "answered",
+                assistant_message="Wider brim needs no Plan change.",
+                assistant_revision=2,
+                semantic_decision={
+                    "kind": "answer",
+                    "replanConfidence": 0.42,
+                    "threshold": 0.8,
+                },
+            )
+        )
+
+        self.assertFalse(state.active)
+        self.assertFalse(state.blocks_plan_work)
+        self.assertTrue(state.can_run)
+        self.assertEqual(
+            state.history,
+            (
+                {"role": "user", "message": "Make the brim wider"},
+                {
+                    "role": "assistant",
+                    "message": "Wider brim needs no Plan change.",
+                },
+            ),
+        )
+
+    def test_largest_legal_reply_round_trips_into_the_next_turn(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        maximum_reply = "A" * 4_000
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "answered",
+                assistant_message=maximum_reply,
+                assistant_revision=1,
+                semantic_decision={
+                    "kind": "answer",
+                    "replanConfidence": None,
+                    "threshold": 0.8,
+                },
+            )
+        )
+
+        second = state.begin(
+            revision_request=dialogue_revision_request(instance_id),
+            target_instance_id=instance_id,
+        )
+        self.assertEqual(second["history"], list(state.history))
+        self.assertEqual(second["history"][-1]["message"], maximum_reply)
+        oversized = dialogue_run_status(
+            state,
+            "streaming",
+            assistant_message="B" * 4_001,
+            assistant_revision=1,
+        )
+        with self.assertRaisesRegex(ValueError, "assistant message is invalid"):
+            state.apply_status(oversized)
+
+    def test_threshold_approved_replan_owns_review_until_exact_proposal(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        decision = {"kind": "replan", "confidence": 0.8, "threshold": 0.8}
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "replanning",
+                assistant_message="I will prepare a reviewable revision.",
+                assistant_revision=1,
+                semantic_decision=decision,
+                revision_request_recorded=True,
+            )
+        )
+        self.assertTrue(state.active)
+        proposal_id = str(uuid.uuid4())
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "proposal_created",
+                assistant_message="I will prepare a reviewable revision.",
+                assistant_revision=1,
+                semantic_decision=decision,
+                revision_request_recorded=True,
+                proposal_id=proposal_id,
+            )
+        )
+
+        self.assertFalse(state.active)
+        self.assertTrue(state.blocks_plan_work)
+        self.assertFalse(state.can_run)
+        with self.assertRaisesRegex(ValueError, "locked until review completes"):
+            state.select("fake-planner")
+        with self.assertRaisesRegex(ValueError, "Finish the dialogue workflow"):
+            state.ensure_provider_refresh_allowed()
+        self.assertFalse(
+            state.complete_proposal_review(
+                revision_request["requestId"],
+                str(uuid.uuid4()),
+                accepted=True,
+            )
+        )
+        self.assertTrue(state.blocks_plan_work)
+        self.assertTrue(
+            state.complete_proposal_review(
+                revision_request["requestId"], proposal_id, accepted=True
+            )
+        )
+        self.assertEqual(state.phase, "idle")
+        self.assertFalse(state.blocks_plan_work)
+
+    def test_recorded_failure_requires_same_request_provider_recovery(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "failed",
+                assistant_message="Partial streamed reply",
+                assistant_revision=1,
+                semantic_decision={
+                    "kind": "replan",
+                    "confidence": 0.9,
+                    "threshold": 0.8,
+                },
+                revision_request_recorded=True,
+                error={
+                    "code": "planner_provider_failed",
+                    "retryMode": "new_request_id",
+                    "message": "Revision generation failed safely.",
+                },
+            )
+        )
+
+        self.assertFalse(state.can_run)
+        with self.assertRaisesRegex(ValueError, "ordinary Provider replan"):
+            state.begin(
+                revision_request=dialogue_revision_request(instance_id),
+                target_instance_id=instance_id,
+            )
+        recovery = ReplanRunState()
+        recovery.set_providers(provider_list())
+        recovery.select("fake-planner")
+        recovery.adopt_dialogue_revision(revision_request["requestId"])
+        recovered_request = recovery.begin(target_instance_id=instance_id)
+        self.assertEqual(
+            recovered_request["revisionRequestId"], revision_request["requestId"]
+        )
+
+    def test_partial_failed_stream_does_not_enter_later_history(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "failed",
+                assistant_message="Incomplete reply",
+                assistant_revision=1,
+                error={
+                    "code": "planner_provider_failed",
+                    "retryMode": "new_request_id",
+                    "message": "Provider stream failed safely.",
+                },
+            )
+        )
+
+        self.assertEqual(state.history, ())
+
+    def test_rejected_proposal_requires_fresh_thread_before_dialogue_continues(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        proposal_id = str(uuid.uuid4())
+        state.apply_status(
+            dialogue_run_status(
+                state,
+                "proposal_created",
+                assistant_message="I prepared a reviewable revision.",
+                assistant_revision=1,
+                semantic_decision={
+                    "kind": "replan",
+                    "confidence": 0.9,
+                    "threshold": 0.8,
+                },
+                revision_request_recorded=True,
+                proposal_id=proposal_id,
+            )
+        )
+
+        self.assertTrue(
+            state.complete_proposal_review(
+                revision_request["requestId"], proposal_id, accepted=False
+            )
+        )
+        self.assertEqual(state.phase, "proposal_rejected")
+        self.assertTrue(state.can_run)
+        next_request = state.begin(
+            revision_request=dialogue_revision_request(instance_id),
+            target_instance_id=instance_id,
+        )
+        self.assertNotEqual(
+            next_request["revisionRequest"]["requestId"],
+            revision_request["requestId"],
+        )
+
+    def test_replan_and_needs_revision_evidence_fail_closed(self) -> None:
+        state, instance_id, revision_request = self.ready_state()
+        state.begin(
+            revision_request=revision_request,
+            target_instance_id=instance_id,
+        )
+        below_threshold = dialogue_run_status(
+            state,
+            "replanning",
+            assistant_message="Preparing a revision.",
+            assistant_revision=1,
+            semantic_decision={
+                "kind": "replan",
+                "confidence": 0.79,
+                "threshold": 0.8,
+            },
+            revision_request_recorded=True,
+        )
+        with self.assertRaisesRegex(ValueError, "replan confidence"):
+            state.apply_status(below_threshold)
+
+        missing_record = deepcopy(below_threshold)
+        missing_record["semanticDecision"]["confidence"] = 0.9
+        missing_record["revisionRequestRecorded"] = False
+        with self.assertRaisesRegex(ValueError, "durable revision request"):
+            state.apply_status(missing_record)
+
+        inconsistent_counts = dialogue_run_status(
+            state,
+            "needs_revision",
+            assistant_message="A revision was attempted.",
+            assistant_revision=1,
+            semantic_decision={
+                "kind": "replan",
+                "confidence": 0.9,
+                "threshold": 0.8,
+            },
+            revision_request_recorded=True,
+            needs_revision={
+                "planning": {
+                    "errorCount": 0,
+                    "warningCount": 0,
+                    "findings": [
+                        {
+                            "code": "missing_required_phase",
+                            "severity": "error",
+                            "message": "Required phase missing",
+                            "stepIds": [],
+                            "phaseIds": [],
+                        }
+                    ],
+                },
+                "locality": {"valid": True, "findings": []},
+                "planDiffAvailable": False,
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "counts are inconsistent"):
+            state.apply_status(inconsistent_counts)
 
 
 class InitialPlanProviderHandoffTests(unittest.TestCase):

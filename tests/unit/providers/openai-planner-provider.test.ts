@@ -8,6 +8,7 @@ import {
   createOpenAIResponsesPlannerProvider,
   createOpenAIResponsesPlannerProviderFromEnv,
   OpenAIPlannerProviderError,
+  type OpenAIDialogueResponsesRequest,
   type OpenAIResponsesClient,
   type OpenAIResponsesRequest,
   type OpenAIResponsesResult,
@@ -19,6 +20,11 @@ const packet = {
 const replanPacket = {
   renderedPrompt: 'Return a complete local replan as JSON.',
 } as ReplanningPromptPacket;
+const dialoguePacket = {
+  renderedPrompt: 'Answer and call request_replan only for a clear Plan change.',
+} as Parameters<
+  NonNullable<ReturnType<typeof createOpenAIResponsesPlannerProvider>['dialogue']>
+>[0]['packet'];
 
 function makeClient(response: OpenAIResponsesResult): {
   client: OpenAIResponsesClient;
@@ -29,6 +35,20 @@ function makeClient(response: OpenAIResponsesResult): {
     client: { responses: { create } },
     create,
   };
+}
+
+function makeStreamingClient(events: readonly unknown[]): {
+  client: OpenAIResponsesClient;
+  create: ReturnType<typeof vi.fn>;
+} {
+  const create = vi.fn(async () => ({
+    async *[Symbol.asyncIterator]() {
+      for (const event of events) {
+        yield event;
+      }
+    },
+  }));
+  return { client: { responses: { create } }, create };
 }
 
 function input(signal = new AbortController().signal) {
@@ -97,6 +117,276 @@ describe('OpenAI Responses planner provider', () => {
       }),
       { signal },
     );
+  });
+
+  it('streams assistant text and returns an answer without a replan tool call', async () => {
+    const { client, create } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'The current ' },
+      { type: 'response.output_text.delta', delta: 'Plan already does that.' },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'The current Plan already does that.' }],
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+    const emit = vi.fn();
+    const signal = new AbortController().signal;
+
+    await expect(
+      provider.dialogue?.({
+        requestId: '487665f9-297d-4118-9fe9-a13a1ef64bf3',
+        packet: dialoguePacket,
+        signal,
+        emit,
+      }),
+    ).resolves.toEqual({
+      assistantMessage: 'The current Plan already does that.',
+      decision: { kind: 'answer' },
+    });
+    expect(emit.mock.calls).toEqual([
+      [{ type: 'assistant_text_delta', delta: 'The current ' }],
+      [{ type: 'assistant_text_delta', delta: 'Plan already does that.' }],
+    ]);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: dialoguePacket.renderedPrompt,
+        store: false,
+        stream: true,
+        parallel_tool_calls: false,
+        tool_choice: 'auto',
+        tools: [expect.objectContaining({ name: 'request_replan', strict: true })],
+      } satisfies Partial<OpenAIDialogueResponsesRequest>),
+      { signal },
+    );
+  });
+
+  it('returns one bounded semantic replan decision from streamed function arguments', async () => {
+    const { client } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'I can prepare that change for review.' },
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_replan',
+        arguments: '{"confidence":0.94}',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'I can prepare that change for review.',
+                },
+              ],
+            },
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: '{"confidence":0.94}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.dialogue?.({
+        requestId: '0e914ce4-950c-47b1-9301-3edb81f948db',
+        packet: dialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).resolves.toEqual({
+      assistantMessage: 'I can prepare that change for review.',
+      decision: { kind: 'replan', confidence: 0.94 },
+    });
+  });
+
+  it('rejects malformed or duplicate replan calls without exposing provider payloads', async () => {
+    const secret = 'sk-provider-secret';
+    const { client } = makeStreamingClient([
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_replan',
+        arguments: JSON.stringify({ confidence: 0.9, secret }),
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: JSON.stringify({ confidence: 0.9, secret }),
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    const error = await provider
+      .dialogue?.({
+        requestId: 'db328003-9973-4adf-8df6-f2af48a6bd2f',
+        packet: dialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      })
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'response_invalid_json' });
+    expect(String(error)).not.toContain(secret);
+  });
+
+  it('rejects duplicate replan calls in the completed response', async () => {
+    const { client } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'Reviewable change.' },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'Reviewable change.' }],
+            },
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: '{"confidence":0.9}',
+            },
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: '{"confidence":0.91}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.dialogue?.({
+        requestId: '2bb8a746-1cab-4a0c-bea0-161b291483eb',
+        packet: dialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'response_invalid_json' });
+  });
+
+  it('rejects final assistant text that does not exactly match the streamed text', async () => {
+    const { client } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'Reviewable change.' },
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_replan',
+        arguments: '{"confidence":0.9}',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'Different final text.' }],
+            },
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: '{"confidence":0.9}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.dialogue?.({
+        requestId: '695d3194-ecff-4bf6-ad05-0dab69766c8f',
+        packet: dialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'response_invalid_json' });
+  });
+
+  it('rejects a whitespace-only streamed replan reply at the provider boundary', async () => {
+    const whitespace = ' '.repeat(4_000);
+    const { client } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: whitespace },
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_replan',
+        arguments: '{"confidence":0.9}',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: whitespace }],
+            },
+            {
+              type: 'function_call',
+              name: 'request_replan',
+              arguments: '{"confidence":0.9}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.dialogue?.({
+        requestId: '948d816b-3acf-4c38-8583-8c5a7520b497',
+        packet: dialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'response_invalid_json' });
   });
 
   it('rejects refusals without exposing refusal text', async () => {

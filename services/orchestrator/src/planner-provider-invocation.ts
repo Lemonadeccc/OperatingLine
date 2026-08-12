@@ -16,7 +16,7 @@ const maximumProviderTimeoutMs = 120_000;
 const maximumProviderOutputBytes = 2 * 1024 * 1024;
 const maximumGlobalConcurrency = 4;
 
-export type PlannerProviderOperation = 'initial_plan' | 'local_replan';
+export type PlannerProviderOperation = 'initial_plan' | 'local_replan' | 'semantic_dialogue';
 
 interface InvocationIdentity {
   readonly operation: PlannerProviderOperation;
@@ -51,6 +51,7 @@ export interface PlannerProviderInvocationRequest<TResult> extends InvocationIde
     | readonly [targetAdapterId: string, planId: string]
     | (() => readonly [targetAdapterId: string, planId: string]);
   readonly requiresReplan: boolean;
+  readonly requiresDialogue?: boolean;
   readonly attempt: (context: PlannerProviderAttemptContext) => Promise<TResult>;
 }
 
@@ -267,6 +268,13 @@ export function createPlannerProviderInvocationManager(
         throw new PlannerGenerationRuntimeError(
           'planner_replan_not_supported',
           `Planner provider ${request.providerId} does not support local replanning`,
+          'same_request_id',
+        );
+      }
+      if (request.requiresDialogue && typeof registered.provider.dialogue !== 'function') {
+        throw new PlannerGenerationRuntimeError(
+          'planner_dialogue_not_supported',
+          `Planner provider ${request.providerId} does not support streamed semantic dialogue`,
           'same_request_id',
         );
       }

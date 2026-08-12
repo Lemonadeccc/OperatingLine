@@ -1,6 +1,7 @@
 import type { AdapterCapabilities, AppAdapter } from '@operatingline/adapter-sdk';
 import type {
   PlannerProvider,
+  PlannerProviderDialogueInput,
   PlannerProviderGenerateInput,
   PlannerProviderReplanInput,
 } from '@operatingline/planner-provider-sdk';
@@ -53,12 +54,17 @@ export type FakePlannerProviderHandler = (
 export type FakePlannerProviderReplanHandler = (
   input: PlannerProviderReplanInput,
 ) => unknown | Promise<unknown>;
+export type FakePlannerProviderDialogueHandler = (
+  input: PlannerProviderDialogueInput,
+) => ReturnType<NonNullable<PlannerProvider['dialogue']>>;
 
 export class FakePlannerProvider implements PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
   readonly inputs: PlannerProviderGenerateInput[] = [];
   readonly replanInputs: PlannerProviderReplanInput[] = [];
+  readonly dialogueInputs: PlannerProviderDialogueInput[] = [];
   readonly replan?: (input: PlannerProviderReplanInput) => Promise<unknown>;
+  readonly dialogue?: NonNullable<PlannerProvider['dialogue']>;
   closeCalls = 0;
   private readonly handler: FakePlannerProviderHandler;
 
@@ -79,6 +85,7 @@ export class FakePlannerProvider implements PlannerProvider {
       },
     },
     replanHandler?: FakePlannerProviderReplanHandler,
+    dialogueHandler?: FakePlannerProviderDialogueHandler,
   ) {
     this.handler = handler;
     this.descriptor = descriptor;
@@ -86,6 +93,12 @@ export class FakePlannerProvider implements PlannerProvider {
       this.replan = async (input) => {
         this.replanInputs.push(input);
         return replanHandler(input);
+      };
+    }
+    if (dialogueHandler !== undefined) {
+      this.dialogue = async (input) => {
+        this.dialogueInputs.push(input);
+        return dialogueHandler(input);
       };
     }
   }

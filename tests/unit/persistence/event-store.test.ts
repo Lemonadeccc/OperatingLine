@@ -188,7 +188,247 @@ function companionInitialPlanRun(
   };
 }
 
+function companionDialogueRun(
+  revision = revisionRequest(),
+  overrides: Record<string, unknown> = {},
+) {
+  const dialogueRequestId = randomUUID();
+  const replanGenerationRequestId = randomUUID();
+  return {
+    contractVersion: '1.0.0',
+    dialogueRequestId,
+    revisionRequestId: revision.requestId,
+    replanGenerationRequestId,
+    targetAdapterId: revision.adapterId,
+    targetInstanceId: revision.instanceId,
+    provider: {
+      id: 'fake-dialogue-planner',
+      version: '0.1.0',
+      displayName: 'Fake Dialogue Planner',
+    },
+    status: 'queued',
+    terminal: false,
+    sceneChanged: false,
+    assistantMessage: '',
+    assistantMessageRevision: 0,
+    semanticDecision: null,
+    revisionRequestRecorded: false,
+    proposalId: null,
+    error: null,
+    needsRevision: null,
+    updatedAt: '2026-08-12T12:00:00.000Z',
+    request: {
+      dialogueRequestId,
+      replanGenerationRequestId,
+      revisionRequest: revision,
+      authorization: {
+        disclosureVersion: '1.0.0',
+        dataHandlingAcknowledged: true,
+        possibleChargesAcknowledged: true,
+        authorizedProviderCallLimit: 2,
+        automaticReplanAcknowledged: true,
+        proposalCreationAcknowledged: true,
+        authorizedAt: '2026-08-12T12:00:00.000Z',
+      },
+    },
+    authorizedProvider: {
+      contractVersion: '1.0.0',
+      id: 'fake-dialogue-planner',
+      version: '0.1.0',
+      displayName: 'Fake Dialogue Planner',
+      description: 'Persistence fixture dialogue provider.',
+      availability: { available: true },
+      limits: { maxConcurrency: 1 },
+      dataHandling: {
+        executionLocation: 'local',
+        dataTransmission: 'none',
+        credentialManagement: 'provider_managed',
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('OperatingLine persistence', () => {
+  it('atomically records a semantic revision request with its dialogue transition', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const revision = revisionRequest();
+    const queued = companionDialogueRun(revision);
+
+    expect(database.recordCompanionDialogueRun(queued)).toBe('accepted');
+    expect(database.recordCompanionDialogueRun(queued)).toBe('duplicate');
+    expect(database.recordGuideRevisionRequest(revision)).toBe('conflict');
+    expect(database.listNonterminalCompanionDialogueRuns()).toEqual([queued]);
+    const streaming = {
+      ...queued,
+      status: 'streaming',
+      assistantMessage: 'Preparing a reviewable revision.',
+      assistantMessageRevision: 1,
+      updatedAt: '2026-08-12T12:00:01.000Z',
+    };
+    expect(database.transitionCompanionDialogueRun(streaming, ['queued'])).toBe(true);
+    const replanning = {
+      ...streaming,
+      status: 'replanning',
+      semanticDecision: { kind: 'replan', confidence: 0.94, threshold: 0.8 },
+      revisionRequestRecorded: true,
+      updatedAt: '2026-08-12T12:00:02.000Z',
+    };
+    expect(
+      database.transitionCompanionDialogueRunWithRevisionRequest(replanning, revision, [
+        'streaming',
+      ]),
+    ).toBe(true);
+    expect(database.getGuideRevisionRequest(revision.requestId)).toEqual(revision);
+    expect(database.recordGuideRevisionRequest(revision)).toBe('conflict');
+    expect(database.getCompanionDialogueRun(queued.dialogueRequestId)).toEqual(replanning);
+    expect(database.listNonterminalCompanionDialogueRuns()).toEqual([replanning]);
+    database.close();
+  });
+
+  it('rejects non-append-only dialogue progress at the persistence boundary', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const queued = companionDialogueRun();
+    expect(database.recordCompanionDialogueRun(queued)).toBe('accepted');
+    const streaming = {
+      ...queued,
+      status: 'streaming',
+      assistantMessage: 'First durable text',
+      assistantMessageRevision: 1,
+      updatedAt: '2026-08-12T12:00:01.000Z',
+    };
+    expect(database.transitionCompanionDialogueRun(streaming, ['queued'])).toBe(true);
+    expect(
+      database.transitionCompanionDialogueRun(
+        {
+          ...streaming,
+          assistantMessage: 'Rewritten text',
+          assistantMessageRevision: 2,
+          updatedAt: '2026-08-12T12:00:02.000Z',
+        },
+        ['streaming'],
+      ),
+    ).toBe(false);
+    expect(
+      database.transitionCompanionDialogueRun(
+        {
+          ...streaming,
+          assistantMessage: 'First durable text with a skipped revision',
+          assistantMessageRevision: 3,
+          updatedAt: '2026-08-12T12:00:03.000Z',
+        },
+        ['streaming'],
+      ),
+    ).toBe(false);
+    expect(database.getCompanionDialogueRun(queued.dialogueRequestId)).toEqual(streaming);
+    database.close();
+  });
+
+  it('permanently reserves an unrecorded dialogue candidate request id after termination', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const revision = revisionRequest();
+    const queued = companionDialogueRun(revision);
+    expect(database.recordCompanionDialogueRun(queued)).toBe('accepted');
+    const answered = {
+      ...queued,
+      status: 'answered',
+      terminal: true,
+      assistantMessage: 'No revision is needed.',
+      assistantMessageRevision: 1,
+      semanticDecision: { kind: 'answer', replanConfidence: null, threshold: 0.8 },
+      updatedAt: '2026-08-12T12:00:01.000Z',
+    };
+
+    expect(database.transitionCompanionDialogueRun(answered, ['queued'])).toBe(true);
+    expect(database.recordGuideRevisionRequest(revision)).toBe('conflict');
+    expect(database.getGuideRevisionRequest(revision.requestId)).toBeNull();
+    expect(
+      database.recordCompanionDialogueRun(
+        companionDialogueRun(revision, {
+          dialogueRequestId: randomUUID(),
+          replanGenerationRequestId: randomUUID(),
+        }),
+      ),
+    ).toBe('conflict');
+    expect(
+      database.recordCompanionDialogueRun(
+        companionDialogueRun(revisionRequest(), {
+          replanGenerationRequestId: queued.replanGenerationRequestId,
+        }),
+      ),
+    ).toBe('conflict');
+    database.close();
+  });
+
+  it('rejects dialogue transitions that mutate request, provider, or authorization evidence', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const revision = revisionRequest();
+    const queued = companionDialogueRun(revision);
+    expect(database.recordCompanionDialogueRun(queued)).toBe('accepted');
+
+    const mutations = [
+      {
+        request: {
+          ...queued.request,
+          revisionRequest: { ...revision, message: 'Mutated after authorization.' },
+        },
+      },
+      {
+        provider: { ...queued.provider, version: '9.9.9' },
+      },
+      {
+        request: {
+          ...queued.request,
+          authorization: {
+            ...queued.request.authorization,
+            authorizedProviderCallLimit: 3,
+          },
+        },
+      },
+    ];
+
+    for (const mutation of mutations) {
+      expect(
+        database.transitionCompanionDialogueRun(
+          {
+            ...queued,
+            ...mutation,
+            status: 'streaming',
+            updatedAt: '2026-08-12T12:00:01.000Z',
+          },
+          ['queued'],
+        ),
+      ).toBe(false);
+    }
+    expect(database.getCompanionDialogueRun(queued.dialogueRequestId)).toEqual(queued);
+    database.close();
+  });
+
+  it('rolls back a dialogue replan transition when its candidate request changes', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const revision = revisionRequest();
+    const queued = companionDialogueRun(revision);
+    expect(database.recordCompanionDialogueRun(queued)).toBe('accepted');
+    const replanning = {
+      ...queued,
+      status: 'replanning',
+      semanticDecision: { kind: 'replan', confidence: 0.94, threshold: 0.8 },
+      revisionRequestRecorded: true,
+      updatedAt: '2026-08-12T12:00:02.000Z',
+    };
+
+    expect(
+      database.transitionCompanionDialogueRunWithRevisionRequest(
+        replanning,
+        { ...revision, message: 'A different request.' },
+        ['queued'],
+      ),
+    ).toBe(false);
+    expect(database.getGuideRevisionRequest(revision.requestId)).toBeNull();
+    expect(database.getCompanionDialogueRun(queued.dialogueRequestId)).toEqual(queued);
+    database.close();
+  });
+
   it('stores and compare-and-set transitions one authorized initial plan run per target', () => {
     const database = openOperatingLineDatabase(':memory:');
     const goal = goalRequest();
@@ -971,7 +1211,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 10,
+        count: 11,
       });
       expect(
         inspected

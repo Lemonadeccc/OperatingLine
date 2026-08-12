@@ -85,6 +85,7 @@ export interface ReplanProposalResult {
 
 export interface ReplanningService {
   getPrompt(request: ReplanningPromptRequest, recordEvents?: boolean): ReplanningPromptPacket;
+  buildCandidatePrompt(revisionRequest: GuideRevisionRequest): ReplanningPromptPacket;
   propose(submission: GuideReplanSubmission): ReplanProposalResult;
 }
 
@@ -154,11 +155,10 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
     return revisionRequest;
   };
 
-  const getPrompt = (
-    request: ReplanningPromptRequest,
-    recordEvents = true,
+  const buildCandidatePrompt = (
+    revisionRequestInput: GuideRevisionRequest,
   ): ReplanningPromptPacket => {
-    const revisionRequest = getPendingRevisionRequest(request.revisionRequestId);
+    const revisionRequest = guideRevisionRequestSchema.parse(revisionRequestInput);
     let catalog;
     try {
       catalog = options.actionCatalogRegistry.get({
@@ -194,7 +194,7 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
       catalog,
       targetRevision,
     );
-    const packet = buildReplanningPromptPacket({
+    return buildReplanningPromptPacket({
       revisionRequest,
       targetRevision,
       catalog,
@@ -202,6 +202,14 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
       scope: createLocalReplanScope(revisionRequest),
       ...(merge === null ? {} : { merge }),
     });
+  };
+
+  const getPrompt = (
+    request: ReplanningPromptRequest,
+    recordEvents = true,
+  ): ReplanningPromptPacket => {
+    const revisionRequest = getPendingRevisionRequest(request.revisionRequestId);
+    const packet = buildCandidatePrompt(revisionRequest);
     if (recordEvents) {
       options.database.appendEvent({
         id: randomUUID(),
@@ -463,5 +471,5 @@ export function createReplanningService(options: ReplanningServiceOptions): Repl
     return proposalResult(proposal, planningQuality, false);
   };
 
-  return { getPrompt, propose };
+  return { getPrompt, buildCandidatePrompt, propose };
 }

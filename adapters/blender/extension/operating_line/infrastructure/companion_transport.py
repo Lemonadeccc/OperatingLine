@@ -36,6 +36,23 @@ REPLAN_RUN_STATUSES = frozenset(
 TERMINAL_REPLAN_RUN_STATUSES = REPLAN_RUN_STATUSES - {"queued", "generating"}
 INITIAL_PLAN_RUN_STATUSES = REPLAN_RUN_STATUSES
 TERMINAL_INITIAL_PLAN_RUN_STATUSES = TERMINAL_REPLAN_RUN_STATUSES
+DIALOGUE_RUN_STATUSES = frozenset(
+    {
+        "queued",
+        "streaming",
+        "replanning",
+        "answered",
+        "needs_revision",
+        "proposal_created",
+        "failed",
+        "interrupted",
+    }
+)
+TERMINAL_DIALOGUE_RUN_STATUSES = DIALOGUE_RUN_STATUSES - {
+    "queued",
+    "streaming",
+    "replanning",
+}
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
@@ -110,6 +127,7 @@ class CompanionTransport:
         self.revision_requests: Queue[dict[str, Any]] = Queue()
         self.goal_requests: Queue[dict[str, Any]] = Queue()
         self.replan_runs: Queue[dict[str, Any]] = Queue()
+        self.dialogue_runs: Queue[dict[str, Any]] = Queue()
         self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
@@ -264,6 +282,15 @@ class CompanionTransport:
             "Replan generation request id",
         )
         self.replan_runs.put(request)
+
+    def refresh_dialogue_providers(self) -> None:
+        """Queue streamed-dialogue provider discovery on the worker."""
+        self.control.put({"kind": "refresh_dialogue_providers"})
+
+    def start_dialogue_run(self, request: dict[str, Any]) -> None:
+        dialogue_request_id = request.get("dialogueRequestId")
+        self._validated_optional_uuid(dialogue_request_id, "Dialogue request id")
+        self.dialogue_runs.put(request)
 
     def refresh_initial_plan_providers(self) -> None:
         """Queue an explicit initial-planner provider discovery request."""
@@ -610,6 +637,17 @@ class CompanionTransport:
             raise ValueError("Runtime returned the wrong replan run")
         return response
 
+    def _poll_dialogue_run(self, dialogue_request_id: str) -> dict[str, Any]:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/dialogue-run?"
+            + urlencode({"dialogueRequestId": dialogue_request_id}),
+            abort_on_stop=True,
+        )
+        if response.get("dialogueRequestId") != dialogue_request_id:
+            raise ValueError("Runtime returned the wrong dialogue run")
+        return response
+
     def _poll_initial_plan_run(self, generation_request_id: str) -> dict[str, Any]:
         response = self._request_json(
             "GET",
@@ -632,6 +670,21 @@ class CompanionTransport:
             raise ValueError("Runtime returned an unsupported replan run status")
         if response.get("terminal") is not (status in TERMINAL_REPLAN_RUN_STATUSES):
             raise ValueError("Runtime returned an inconsistent replan run status")
+        return status
+
+    @staticmethod
+    def _validate_dialogue_run_response(
+        response: dict[str, Any], dialogue_request_id: Any
+    ) -> str:
+        if response.get("dialogueRequestId") != dialogue_request_id:
+            raise ValueError("Runtime returned the wrong dialogue run")
+        status = response.get("status")
+        if status not in DIALOGUE_RUN_STATUSES:
+            raise ValueError("Runtime returned an unsupported dialogue status")
+        if response.get("terminal") is not (
+            status in TERMINAL_DIALOGUE_RUN_STATUSES
+        ):
+            raise ValueError("Runtime returned an inconsistent dialogue status")
         return status
 
     @staticmethod
@@ -658,10 +711,14 @@ class CompanionTransport:
         pending_replan_run: dict[str, Any] | None = None
         active_replan_run_id: str | None = None
         replan_run_signature: str | None = None
+        pending_dialogue_run: dict[str, Any] | None = None
+        active_dialogue_run_id: str | None = None
+        dialogue_run_signature: str | None = None
         pending_initial_plan_run: dict[str, Any] | None = None
         active_initial_plan_run_id: str | None = None
         initial_plan_run_signature: str | None = None
         refresh_replan_providers = True
+        refresh_dialogue_providers = False
         refresh_initial_plan_providers = False
         decision_retry_at = 0.0
         decision_retry_delay = 0.05
@@ -674,10 +731,12 @@ class CompanionTransport:
             or pending_decision is not None
             or pending_revision_request is not None
             or pending_goal_request is not None
+            or pending_dialogue_run is not None
             or not self.outgoing.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
             or not self.goal_requests.empty()
+            or not self.dialogue_runs.empty()
         ):
             if self._stop.is_set() and time.monotonic() >= self._flush_deadline:
                 break
@@ -706,6 +765,8 @@ class CompanionTransport:
                         self._revision_history_signature = None
                     elif control.get("kind") == "refresh_replan_providers":
                         refresh_replan_providers = True
+                    elif control.get("kind") == "refresh_dialogue_providers":
+                        refresh_dialogue_providers = True
                     elif control.get("kind") == "refresh_initial_plan_providers":
                         refresh_initial_plan_providers = True
                 if refresh_replan_providers and not self._stop.is_set():
@@ -738,6 +799,37 @@ class CompanionTransport:
                             {"kind": "replan_provider_list", "providers": providers}
                         )
                     refresh_replan_providers = False
+                    request_succeeded = True
+                if refresh_dialogue_providers and not self._stop.is_set():
+                    try:
+                        providers = self._request_json(
+                            "GET", "/api/v1/dialogue/providers"
+                        )
+                    except (
+                        HTTPError,
+                        HTTPException,
+                        OSError,
+                        ValueError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        status_code = getattr(error, "code", None)
+                        suffix = (
+                            f" (HTTP {status_code})"
+                            if isinstance(status_code, int)
+                            else ""
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "dialogue_provider_list_unavailable",
+                                "message": "Streamed dialogue provider discovery is unavailable"
+                                + suffix,
+                            }
+                        )
+                    else:
+                        self.incoming.put(
+                            {"kind": "dialogue_provider_list", "providers": providers}
+                        )
+                    refresh_dialogue_providers = False
                     request_succeeded = True
                 if refresh_initial_plan_providers and not self._stop.is_set():
                     try:
@@ -980,6 +1072,60 @@ class CompanionTransport:
                         )
                     pending_replan_run = None
                     request_succeeded = True
+                if not self._stop.is_set() and pending_dialogue_run is None:
+                    try:
+                        pending_dialogue_run = self.dialogue_runs.get_nowait()
+                    except Empty:
+                        pass
+                if not self._stop.is_set() and pending_dialogue_run is not None:
+                    dialogue_request_id = pending_dialogue_run.get(
+                        "dialogueRequestId"
+                    )
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/dialogue-run",
+                            pending_dialogue_run,
+                        )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        error_payload = getattr(error, "runtime_payload", {})
+                        message = (
+                            error_payload.get("message")
+                            if isinstance(error_payload, dict)
+                            else None
+                        )
+                        self.incoming.put(
+                            {
+                                "kind": "dialogue_run_rejected",
+                                "dialogueRequestId": dialogue_request_id,
+                                "message": (
+                                    message
+                                    if isinstance(message, str) and message.strip()
+                                    else "Runtime rejected this dialogue authorization"
+                                ),
+                            }
+                        )
+                        pending_dialogue_run = None
+                        request_succeeded = True
+                        continue
+                    status = self._validate_dialogue_run_response(
+                        response, dialogue_request_id
+                    )
+                    self.incoming.put(
+                        {"kind": "dialogue_run_status", "run": response}
+                    )
+                    if status in TERMINAL_DIALOGUE_RUN_STATUSES:
+                        active_dialogue_run_id = None
+                        dialogue_run_signature = None
+                    else:
+                        active_dialogue_run_id = str(dialogue_request_id)
+                        dialogue_run_signature = json.dumps(
+                            response, sort_keys=True, separators=(",", ":")
+                        )
+                    pending_dialogue_run = None
+                    request_succeeded = True
                 if not self._stop.is_set() and pending_initial_plan_run is None:
                     try:
                         pending_initial_plan_run = self.initial_plan_runs.get_nowait()
@@ -1071,6 +1217,22 @@ class CompanionTransport:
                         if status in TERMINAL_REPLAN_RUN_STATUSES:
                             active_replan_run_id = None
                             replan_run_signature = None
+                    if active_dialogue_run_id is not None:
+                        run = self._poll_dialogue_run(active_dialogue_run_id)
+                        status = self._validate_dialogue_run_response(
+                            run, active_dialogue_run_id
+                        )
+                        signature = json.dumps(
+                            run, sort_keys=True, separators=(",", ":")
+                        )
+                        if signature != dialogue_run_signature:
+                            dialogue_run_signature = signature
+                            self.incoming.put(
+                                {"kind": "dialogue_run_status", "run": run}
+                            )
+                        if status in TERMINAL_DIALOGUE_RUN_STATUSES:
+                            active_dialogue_run_id = None
+                            dialogue_run_signature = None
                     if active_initial_plan_run_id is not None:
                         run = self._poll_initial_plan_run(active_initial_plan_run_id)
                         status = self._validate_initial_plan_run_response(

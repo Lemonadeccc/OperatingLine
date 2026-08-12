@@ -123,6 +123,7 @@ Blender 或模型厂商语义；Blender 只是第一个原生 Companion。Synthe
 - Blender 用户可以从宿主内开启初始 AI 引导请求，同时保留模型客户端选择权和人工审批门禁。
 - Codex、Claude 和其他 MCP 客户端消费同一 pending-request/packet/propose 协议，不需要专用 Blender
   提示词或桌面外壳。
-- 当前仍是异步操作日志，不是流式聊天；也不自动选择 Provider、判断审美质量或保证任意目标可表达。
-- 请求取消/租约、跨 Blender 进程崩溃的本地决策日志、实时助手回复、参数表单、Runtime artifact
-  attestation、第二宿主和发布级 Human Eval 数据集继续属于后续里程碑。
+- 本 ADR 落地时只有异步操作日志；后续 ADR 0035 已增加逐轮授权的流式 dialogue/replan，但仍不自动
+  选择 Provider、判断审美质量或保证任意目标可表达。
+- 请求取消/租约、跨 Blender 进程崩溃的本地决策日志、Runtime artifact attestation、第二宿主和发布级
+  Human Eval 数据集继续属于后续里程碑；参数表单已由 ADR 0033 完成。

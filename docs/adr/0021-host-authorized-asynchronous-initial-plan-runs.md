@@ -140,5 +140,6 @@ Blender 不保存 Provider API Key、模型或 endpoint；凭据继续属于显�
   与执行门禁。
 - Initial Plan Run 与 Replan Run 保持两个公开资源，只复用 Provider descriptor、调用管理、校验和小型 UI
   primitives，避免把不同 findings 和请求语义塞进巨型状态机。
-- 实时流式助手、Provider 自动选择、无需确认的自动调用、语义置信度自动重规划、第二真实软件宿主和发布级
-  Human Eval 数据集仍属于后续里程碑。
+- 本 ADR 落地时，实时流式助手与语义置信度重规划尚未实现；后续 ADR 0035 已增加逐轮确认、固定阈值且
+  最多两次调用的有界路径。Provider 自动选择、无需确认的后台调用、第二真实软件宿主和发布级 Human
+  Eval 数据集仍属于后续里程碑。

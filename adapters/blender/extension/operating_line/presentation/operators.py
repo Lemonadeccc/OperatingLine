@@ -111,7 +111,13 @@ def _execute_next(operator, context):
     return {"FINISHED"}
 
 
-def _draw_provider_authorization(layout, provider, *, initial: bool) -> None:
+def _draw_provider_authorization(
+    layout,
+    provider,
+    *,
+    initial: bool = False,
+    dialogue: bool = False,
+) -> None:
     """Draw the shared per-call data and possible-charge disclosure."""
     layout.label(
         text=f"Authorize one run with {provider['displayName']}?",
@@ -127,6 +133,9 @@ def _draw_provider_authorization(layout, provider, *, initial: bool) -> None:
                     "this exact Blender instance"
                 )
             )
+        elif dialogue:
+            layout.label(text="Sends this message, recent dialogue, and candidate revision")
+            layout.label(text="Also sends the base Plan, references, and latest state")
         else:
             layout.label(text="Sends your message, base Plan, and node references")
             layout.label(text="Also sends ActionCatalog and latest companion state")
@@ -137,6 +146,10 @@ def _draw_provider_authorization(layout, provider, *, initial: bool) -> None:
         layout.label(text="The provider description may define local execution costs")
         layout.label(text="OperatingLine cannot estimate provider charges")
     layout.separator()
+    if dialogue:
+        layout.label(text="This authorization permits at most two provider calls")
+        layout.label(text="Call 1 streams the reply and classifies semantic intent")
+        layout.label(text="At confidence 80%+, call 2 prepares a Plan revision")
     layout.label(text="The runtime may create one review proposal")
     layout.label(text="It will not Accept, execute, or change the scene")
     layout.label(text="Retrying opens a new confirmation and uses a new run ID")
@@ -825,7 +838,7 @@ class OPERATINGLINE_OT_run_replan_provider(bpy.types.Operator):
         if provider is None:
             layout.label(text="No provider selected", icon="ERROR")
             return
-        _draw_provider_authorization(layout, provider, initial=False)
+        _draw_provider_authorization(layout, provider)
 
     def execute(self, _context):
         companion = _companion()
@@ -844,6 +857,104 @@ class OPERATINGLINE_OT_run_replan_provider(bpy.types.Operator):
         self.report(
             {"INFO"},
             f"Provider run {request['generationRequestId'][:8]} queued; scene unchanged",
+        )
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_refresh_dialogue_providers(bpy.types.Operator):
+    bl_idname = "operating_line.refresh_dialogue_providers"
+    bl_label = "Refresh Dialogue Providers"
+    bl_description = "Refresh streamed-dialogue provider descriptors from the runtime"
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            companion.refresh_dialogue_providers()
+        except ValueError as error:
+            companion.dialogue_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_select_dialogue_provider(bpy.types.Operator):
+    bl_idname = "operating_line.select_dialogue_provider"
+    bl_label = "Select Dialogue Provider"
+    bl_description = "Explicitly select the provider for a future confirmed dialogue turn"
+
+    provider_id: bpy.props.StringProperty()
+
+    def execute(self, _context):
+        companion = _companion()
+        try:
+            provider = companion.select_dialogue_provider(self.provider_id)
+        except ValueError as error:
+            companion.dialogue_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Selected {provider['displayName']}")
+        return {"FINISHED"}
+
+
+class OPERATINGLINE_OT_run_dialogue_provider(bpy.types.Operator):
+    bl_idname = "operating_line.run_dialogue_provider"
+    bl_label = "Confirm Dialogue Turn"
+    bl_description = (
+        "Authorize one streamed turn and an optional threshold-gated replan; "
+        "a created Proposal still requires review"
+    )
+
+    def invoke(self, context, _event):
+        companion = _companion()
+        handoff = companion.dialogue_handoff
+        message = context.window_manager.operating_line_revision_message.strip()
+        if not handoff.can_run:
+            detail = "Select an available streamed dialogue provider"
+            handoff.message = detail
+            self.report({"ERROR"}, detail)
+            return {"CANCELLED"}
+        if not companion.revision_reference_nodes() or not message:
+            detail = "Reference at least one task node and enter a dialogue message"
+            handoff.message = detail
+            self.report({"ERROR"}, detail)
+            return {"CANCELLED"}
+        self._confirmation_opened = True
+        return context.window_manager.invoke_props_dialog(self, width=560)
+
+    def draw(self, context):
+        handoff = _companion().dialogue_handoff
+        provider = handoff.selected_provider
+        if provider is None:
+            self.layout.label(text="No dialogue provider selected", icon="ERROR")
+            return
+        _draw_provider_authorization(self.layout, provider, dialogue=True)
+        message = context.window_manager.operating_line_revision_message.strip()
+        if message:
+            self.layout.separator()
+            self.layout.label(text="Current user message", icon="GREASEPENCIL")
+            for line in (message[index : index + 72] for index in range(0, len(message), 72)):
+                self.layout.label(text=line)
+
+    def execute(self, context):
+        companion = _companion()
+        if not getattr(self, "_confirmation_opened", False):
+            message = "Open and confirm the dialogue authorization dialog first"
+            companion.dialogue_handoff.message = message
+            self.report({"ERROR"}, message)
+            return {"CANCELLED"}
+        self._confirmation_opened = False
+        try:
+            request = companion.begin_dialogue_run(
+                context.window_manager.operating_line_revision_message
+            )
+        except ValueError as error:
+            companion.dialogue_handoff.message = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        context.window_manager.operating_line_revision_message = ""
+        self.report(
+            {"INFO"},
+            f"Dialogue {request['dialogueRequestId'][:8]} queued; scene unchanged",
         )
         return {"FINISHED"}
 
@@ -898,6 +1009,9 @@ CLASSES = (
     OPERATINGLINE_OT_refresh_replan_providers,
     OPERATINGLINE_OT_select_replan_provider,
     OPERATINGLINE_OT_run_replan_provider,
+    OPERATINGLINE_OT_refresh_dialogue_providers,
+    OPERATINGLINE_OT_select_dialogue_provider,
+    OPERATINGLINE_OT_run_dialogue_provider,
     OPERATINGLINE_OT_start,
     OPERATINGLINE_OT_next,
     OPERATINGLINE_OT_recheck_observations,
