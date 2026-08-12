@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.5.0",
+  "catalogVersion": "1.4.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.8.0",
+  "actionCatalogVersion": "1.7.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.8.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.7.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -576,129 +576,6 @@
         ],
         "reason": "One accepted leaf creates multiple planned primitives atomically, so no single Blender menu item can represent the action honestly. Split meaningful parts into separate leaves for native teaching guidance.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
-      }
-    },
-    {
-      "id": "blender.mesh.edit_subdivide.semantic",
-      "actionName": "blender.mesh.edit_subdivide",
-      "title": "Subdivide an owned mesh through a bounded Edit Mode operation",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "semantic.select_owned_mesh",
-            "order": 2,
-            "label": "Owned Mesh",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
-          },
-          {
-            "id": "mode.edit_mesh",
-            "order": 3,
-            "label": "Edit Mode",
-            "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
-          },
-          {
-            "id": "operator.subdivide",
-            "order": 4,
-            "label": "Subdivide",
-            "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.subdivide" }
-          }
-        ],
-        "reason": "The accepted action subdivides every edge into a new owned mesh datablock and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/edge/subdivide.html"
-      }
-    },
-    {
-      "id": "blender.modifier.add_bevel.semantic",
-      "actionName": "blender.modifier.add_bevel",
-      "title": "Add a bounded Bevel modifier",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "panel.modifier_properties",
-            "order": 2,
-            "label": "Modifiers",
-            "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
-          },
-          {
-            "id": "control.add_modifier",
-            "order": 3,
-            "label": "Add Modifier",
-            "intent": "execute",
-            "target": { "kind": "control", "hostId": "object.modifier_add" }
-          },
-          {
-            "id": "semantic.bevel_parameters",
-            "order": 4,
-            "label": "Bevel Settings",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.bevel_modifier" }
-          }
-        ],
-        "reason": "The action must bind exact width, segment, angle, ownership, and compensation state; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/bevel.html"
-      }
-    },
-    {
-      "id": "blender.geometry_nodes.create_transform.semantic",
-      "actionName": "blender.geometry_nodes.create_transform",
-      "title": "Create an inspectable Transform Geometry node group",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.geometry_nodes",
-            "order": 1,
-            "label": "Geometry Nodes",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Geometry Nodes" }
-          },
-          {
-            "id": "semantic.new_geometry_modifier",
-            "order": 2,
-            "label": "New Modifier",
-            "intent": "execute",
-            "target": {
-              "kind": "semantic",
-              "hostId": "operatingline.blender.geometry_nodes_modifier"
-            }
-          },
-          {
-            "id": "node.transform_geometry",
-            "order": 3,
-            "label": "Transform Geometry",
-            "intent": "configure",
-            "target": { "kind": "node", "hostId": "GeometryNodeTransform" }
-          },
-          {
-            "id": "semantic.verify_node_links",
-            "order": 4,
-            "label": "Verify Links",
-            "intent": "verify",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.transform_node_links" }
-          }
-        ],
-        "reason": "The accepted action creates the node group interface, graph, values, modifier binding, and rollback receipt atomically; no single native control represents the complete graph.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/geometry_nodes/introduction.html"
       }
     },
     {

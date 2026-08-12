@@ -16,6 +16,7 @@ from mathutils import Matrix
 from ...application import ActionReceipt
 from ...application.session import (
     ArtifactIdentity,
+    ModifierState,
     MutationRecord,
     ParentIdentity,
     ResourceIdentity,
@@ -138,6 +139,9 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch",
         "blender.mesh.create_plane",
+        "blender.mesh.edit_subdivide",
+        "blender.modifier.add_bevel",
+        "blender.geometry_nodes.create_transform",
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",
         "blender.rig.create_armature",
@@ -212,6 +216,7 @@ def tag_resource(
                 ("CAMERA", bpy.types.Camera),
                 ("ARMATURE", bpy.types.Armature),
                 ("ACTION", bpy.types.Action),
+                ("NODE_GROUP", bpy.types.NodeTree),
             )
             if isinstance(resource, blender_type)
         ),
@@ -230,6 +235,236 @@ def tag_resource(
     )
 
 
+_MODIFIER_PRESENTATION_PROPERTIES = frozenset(
+    {
+        "is_active",
+        "name",
+        "rna_type",
+        "show_expanded",
+        "show_group_selector",
+        "use_pin_to_last",
+    }
+)
+
+
+def _freeze_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    try:
+        return tuple(_freeze_value(component) for component in value)
+    except TypeError:
+        return repr(value)
+
+
+def _writable_scalar_properties(
+    value: Any, *, excluded: frozenset[str]
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {}
+    for property_definition in value.bl_rna.properties:
+        name = property_definition.identifier
+        if (
+            property_definition.is_readonly
+            or property_definition.type not in {"BOOLEAN", "ENUM", "FLOAT", "INT", "STRING"}
+            or name in excluded
+            or name.startswith("open_")
+        ):
+            continue
+        properties[name] = _freeze_value(getattr(value, name))
+    return properties
+
+
+def snapshot_modifier(
+    owner: bpy.types.Object,
+    modifier: Any,
+    logical_id: str,
+    receipt_id: str,
+    step_id: str,
+    action_name: str,
+    properties: Mapping[str, Any],
+) -> ModifierState:
+    """Snapshot an action-owned modifier, which is not a Blender ID."""
+    stack_index = next(
+        (
+            index
+            for index, candidate in enumerate(owner.modifiers)
+            if candidate.as_pointer() == modifier.as_pointer()
+        ),
+        -1,
+    )
+    if stack_index < 0:
+        raise RuntimeError(f"Modifier is not attached to {owner.name}: {modifier.name}")
+    tracked_properties = _writable_scalar_properties(
+        modifier,
+        excluded=_MODIFIER_PRESENTATION_PROPERTIES,
+    )
+    tracked_properties.update(properties)
+    return ModifierState(
+        logical_id=logical_id,
+        display_name=modifier.name,
+        modifier_type=modifier.type,
+        pointer=modifier.as_pointer(),
+        stack_index=stack_index,
+        receipt_token=receipt_id,
+        step_id=step_id,
+        action_name=action_name,
+        properties=tuple(sorted(tracked_properties.items())),
+    )
+
+
+def find_owned_modifier(
+    receipts: Mapping[str, ActionReceipt], logical_id: str
+) -> tuple[bpy.types.Object, Any] | None:
+    for receipt in receipts.values():
+        for mutation in receipt.mutations:
+            state = mutation.after
+            if not isinstance(state, ModifierState) or state.logical_id != logical_id:
+                continue
+            target = resolve_resource(mutation.resource)
+            if not isinstance(target, bpy.types.Object):
+                return None
+            modifier = _modifier_at_pointer(target, state.pointer)
+            if modifier is None or not _modifier_matches_state(target, state):
+                return None
+            return target, modifier
+    return None
+
+
+def ensure_modifier_id_available(
+    receipts: Mapping[str, ActionReceipt], logical_id: str
+) -> None:
+    if any(
+        isinstance(mutation.after, ModifierState)
+        and mutation.after.logical_id == logical_id
+        for receipt in receipts.values()
+        for mutation in receipt.mutations
+    ):
+        raise RuntimeError(f"Logical modifier already exists: {logical_id}")
+
+
+def mesh_content_signature(mesh: bpy.types.Mesh) -> tuple[Any, ...]:
+    """Capture bounded mesh content so compensation fails closed after edits."""
+    attributes = tuple(
+        sorted(
+            (
+                attribute.name,
+                attribute.data_type,
+                attribute.domain,
+                tuple(
+                    _freeze_value(
+                        next(
+                            getattr(item, field)
+                            for field in (
+                                "value",
+                                "vector",
+                                "color",
+                                "byte_color",
+                                "quaternion",
+                                "matrix",
+                            )
+                            if hasattr(item, field)
+                        )
+                    )
+                    for item in attribute.data
+                ),
+            )
+            for attribute in mesh.attributes
+            if not attribute.name.startswith(".select_")
+        )
+    )
+    vertex_groups = tuple(
+        tuple(sorted((int(group.group), float(group.weight)) for group in vertex.groups))
+        for vertex in mesh.vertices
+    )
+    shape_keys = (
+        None
+        if mesh.shape_keys is None
+        else (
+            mesh.shape_keys.as_pointer(),
+            tuple(
+                (
+                    block.name,
+                    tuple(tuple(float(component) for component in item.co) for item in block.data),
+                )
+                for block in mesh.shape_keys.key_blocks
+            ),
+        )
+    )
+    return (
+        tuple(tuple(float(component) for component in vertex.co) for vertex in mesh.vertices),
+        tuple(tuple(int(index) for index in edge.vertices) for edge in mesh.edges),
+        tuple(
+            (
+                tuple(int(index) for index in polygon.vertices),
+                int(polygon.material_index),
+                bool(polygon.use_smooth),
+            )
+            for polygon in mesh.polygons
+        ),
+        attributes,
+        vertex_groups,
+        shape_keys,
+    )
+
+
+def _socket_default_value(socket: Any) -> Any:
+    if not hasattr(socket, "default_value"):
+        return None
+    value = socket.default_value
+    if isinstance(value, (bool, int, float, str)):
+        return value
+    try:
+        return tuple(float(component) for component in value)
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def node_tree_signature(node_group: bpy.types.NodeTree) -> tuple[Any, ...]:
+    """Capture the first-slice Geometry Nodes graph and public interface."""
+    interface = tuple(
+        (
+            item.item_type,
+            item.name,
+            getattr(item, "in_out", None),
+            getattr(item, "socket_type", None),
+            getattr(item, "description", None),
+            getattr(item, "hide_value", None),
+            getattr(item, "attribute_domain", None),
+            getattr(item, "default_attribute_name", None),
+        )
+        for item in node_group.interface.items_tree
+    )
+    nodes = tuple(
+        sorted(
+            (
+                node.name,
+                node.bl_idname,
+                node.label,
+                bool(node.mute),
+                bool(node.hide),
+                tuple(float(component) for component in node.location),
+                float(node.width),
+                tuple(
+                    (socket.identifier, _socket_default_value(socket))
+                    for socket in node.inputs
+                ),
+            )
+            for node in node_group.nodes
+        )
+    )
+    links = tuple(
+        sorted(
+            (
+                link.from_node.name,
+                link.from_socket.identifier,
+                link.to_node.name,
+                link.to_socket.identifier,
+            )
+            for link in node_group.links
+        )
+    )
+    return interface, nodes, links
+
+
 _RESOURCE_COLLECTIONS = {
     "OBJECT": lambda: bpy.data.objects,
     "MESH": lambda: bpy.data.meshes,
@@ -241,6 +476,7 @@ _RESOURCE_COLLECTIONS = {
     "CAMERA": lambda: bpy.data.cameras,
     "ARMATURE": lambda: bpy.data.armatures,
     "ACTION": lambda: bpy.data.actions,
+    "NODE_GROUP": lambda: bpy.data.node_groups,
 }
 
 
@@ -472,10 +708,67 @@ def _pose_bone_matches(
     )
 
 
+def _modifier_at_pointer(target: bpy.types.Object, pointer: int) -> Any | None:
+    return next(
+        (modifier for modifier in target.modifiers if modifier.as_pointer() == pointer),
+        None,
+    )
+
+
+def _modifier_property_matches(modifier: Any, name: str, expected: Any) -> bool:
+    current = modifier
+    for part in name.split("."):
+        current = getattr(current, part)
+    return _same_value(current, expected)
+
+
+def _modifier_matches_state(target: bpy.types.Object, state: ModifierState) -> bool:
+    modifier = _modifier_at_pointer(target, state.pointer)
+    return bool(
+        modifier is not None
+        and state.stack_index < len(target.modifiers)
+        and target.modifiers[state.stack_index].as_pointer() == state.pointer
+        and modifier.name == state.display_name
+        and modifier.type == state.modifier_type
+        and all(
+            _modifier_property_matches(modifier, name, expected)
+            for name, expected in state.properties
+        )
+    )
+
+
+def _modifier_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
+    target = resolve_resource(mutation.resource)
+    if not isinstance(target, bpy.types.Object):
+        return False
+    after = mutation.after
+    if recorded is None:
+        if not isinstance(after, ModifierState):
+            return False
+        return _modifier_at_pointer(target, after.pointer) is None
+    return isinstance(recorded, ModifierState) and _modifier_matches_state(
+        target, recorded
+    )
+
+
 def _mutation_matches_value(mutation: MutationRecord, recorded: Any) -> bool:
     target = resolve_resource(mutation.resource)
     if target is None:
         return False
+    if mutation.attribute.startswith("modifier:"):
+        return _modifier_matches_value(mutation, recorded)
+    if mutation.attribute == "mesh_content":
+        return (
+            isinstance(target, bpy.types.Mesh)
+            and recorded is not None
+            and mesh_content_signature(target) == recorded
+        )
+    if mutation.attribute == "node_tree_signature":
+        return (
+            isinstance(target, bpy.types.NodeTree)
+            and recorded is not None
+            and node_tree_signature(target) == recorded
+        )
     if mutation.attribute == "collection_children":
         current = tuple(target.collection.children)
         expected = tuple(_resolve_stored(item) for item in recorded)
@@ -524,6 +817,19 @@ def _restore_mutation(mutation: MutationRecord) -> None:
         raise RuntimeError(
             f"Mutation target is unavailable: {mutation.resource.logical_id}"
         )
+    if mutation.attribute.startswith("modifier:"):
+        if mutation.before is not None or not isinstance(
+            mutation.after, ModifierState
+        ):
+            raise RuntimeError("Only action-created modifiers can be restored")
+        if not isinstance(target, bpy.types.Object):
+            raise RuntimeError("Modifier mutation target is not an object")
+        modifier = _modifier_at_pointer(target, mutation.after.pointer)
+        if modifier is not None:
+            target.modifiers.remove(modifier)
+        return
+    if mutation.attribute in {"mesh_content", "node_tree_signature"}:
+        return
     if mutation.attribute == "collection_children":
         for child in tuple(target.collection.children):
             target.collection.children.unlink(child)
@@ -673,10 +979,29 @@ def _preflight_created_resources(
                     f"Cannot rollback object with replaced data: {identity.logical_id}"
                 )
         elif identity.resource_type in {"MESH", "LIGHT", "CAMERA", "ARMATURE"}:
-            internal_users = sum(obj.data is resource for obj in created_objects)
+            internal_users = sum(
+                obj.data is resource
+                for obj in bpy.data.objects
+                if obj.as_pointer() in created_object_pointers
+                or obj.as_pointer() in mutation_target_pointers
+            )
             if resource.users != internal_users:
                 raise RuntimeError(
                     f"Cannot rollback externally used data: {identity.logical_id}"
+                )
+        elif identity.resource_type == "NODE_GROUP":
+            modifier_users = {
+                obj.as_pointer()
+                for obj in bpy.data.objects
+                for modifier in obj.modifiers
+                if modifier.type == "NODES"
+                and getattr(modifier, "node_group", None) is resource
+            }
+            if not modifier_users.issubset(mutation_target_pointers) or (
+                resource.users != len(modifier_users)
+            ):
+                raise RuntimeError(
+                    f"Cannot rollback externally used node group: {identity.logical_id}"
                 )
         elif identity.resource_type == "ACTION":
             action_users = {
@@ -777,6 +1102,8 @@ def _remove_resource(identity: ResourceIdentity) -> None:
         bpy.data.armatures.remove(resource)
     elif identity.resource_type == "ACTION":
         bpy.data.actions.remove(resource)
+    elif identity.resource_type == "NODE_GROUP":
+        bpy.data.node_groups.remove(resource)
     elif identity.resource_type == "COLLECTION":
         bpy.data.collections.remove(resource)
     elif identity.resource_type == "WORLD":
@@ -824,6 +1151,7 @@ def rollback_receipt(
         "CAMERA": 1,
         "ARMATURE": 1,
         "ACTION": 1,
+        "NODE_GROUP": 1,
         "WORLD": 1,
         "COLLECTION": 2,
     }

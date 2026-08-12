@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.7.0');
+    expect(catalog.catalogVersion).toBe('1.8.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -30,6 +30,9 @@ describe('action catalog protocol', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.create_primitive_batch',
+      'blender.mesh.edit_subdivide',
+      'blender.modifier.add_bevel',
+      'blender.geometry_nodes.create_transform',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
       'blender.rig.create_armature',
@@ -51,6 +54,9 @@ describe('action catalog protocol', () => {
     expect(catalog.semanticCapabilities?.map((capability) => capability.id)).toEqual([
       'geometry.ground_plane',
       'geometry.primitive_assembly',
+      'geometry.edit_subdivide',
+      'geometry.bevel_modifier',
+      'geometry_nodes.transform',
       'appearance.principled_palette',
       'animation.rigid_armature',
       'animation.rigid_pose_keyframes',
@@ -59,7 +65,7 @@ describe('action catalog protocol', () => {
     ]);
     expect(
       blenderActionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
-    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0']);
+    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0', '1.6.0', '1.7.0', '1.8.0']);
   });
 
   it('rejects duplicate actions and required argument names absent from properties', () => {
@@ -300,6 +306,73 @@ describe('action catalog protocol', () => {
       'majorRadius must be at least 0.0001',
       'minorRadius must be at least 0.0001',
     ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.subdivided_mesh',
+          resultMeshName: 'OperatingLine.Body.SubdividedMesh',
+          cuts: 8.0,
+          smooth: 1,
+        },
+        schemaFor('blender.mesh.edit_subdivide'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.subdivided_mesh',
+          resultMeshName: 'OperatingLine.Body.SubdividedMesh',
+          cuts: 9,
+          smooth: 1.1,
+        },
+        schemaFor('blender.mesh.edit_subdivide'),
+      ),
+    ).toEqual(['cuts must be at most 8', 'smooth must be at most 1']);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.bevel',
+          modifierName: 'OperatingLine.Body.Bevel',
+          width: 0.1,
+          segments: 16.0,
+          angleLimit: Math.PI,
+        },
+        schemaFor('blender.modifier.add_bevel'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.nodes',
+          modifierName: 'OperatingLine.Body.GeometryNodes',
+          nodeGroupId: 'model.body.transform_nodes',
+          nodeGroupName: 'OperatingLine.Body.TransformNodes',
+          translation: [-1000, 1000, 0],
+          rotation: [-Math.PI * 2, Math.PI * 2, 0],
+          scale: [0.0001, 1000, 1],
+        },
+        schemaFor('blender.geometry_nodes.create_transform'),
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.nodes',
+          modifierName: 'OperatingLine.Body.GeometryNodes',
+          nodeGroupId: 'model.body.transform_nodes',
+          nodeGroupName: 'OperatingLine.Body.TransformNodes',
+          translation: [0, 0, 0],
+          rotation: [0, 0, 0],
+          scale: [0, 1, 1],
+        },
+        schemaFor('blender.geometry_nodes.create_transform'),
+      ),
+    ).toContain('scale[0] must be at least 0.0001');
   });
 
   it('accepts strict catalog capability coverage with unique structural ids', () => {

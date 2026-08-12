@@ -276,7 +276,7 @@ const proxy = createServer(async (request, response) => {
       goalWork = goalWork.then(async () => {
         assert.equal(goalRequest.goal, goal);
         assert.equal(goalRequest.adapterId, 'blender');
-        assert.equal(goalRequest.catalogVersion, '1.7.0');
+        assert.equal(goalRequest.catalogVersion, '1.8.0');
 
         const pending = await callMcpTool(
           runtime,
@@ -454,7 +454,7 @@ try {
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.7.0');
+  assert.equal(revisionRequests[0].catalogVersion, '1.8.0');
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -576,7 +576,7 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.7.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.8.0');
   assert.equal(evalBundle.page.hasMore, false);
   assert.equal(evalBundle.summary.matchedEventCount, 21 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });

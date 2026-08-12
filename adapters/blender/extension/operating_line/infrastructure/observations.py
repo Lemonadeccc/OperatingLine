@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import hashlib
+import math
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from .snowman_actions.common import (
     action_fcurves,
     build_resource_registry,
     find_artifact,
+    find_owned_modifier,
     resolve_resource,
 )
 
@@ -382,6 +384,141 @@ def _render_artifact_exists(
     }
 
 
+def _mesh_topology_matches(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    target_id = parameters.get("targetId")
+    registry = build_resource_registry(receipts)
+    identity = registry.get(target_id) if isinstance(target_id, str) else None
+    target = resolve_resource(identity) if identity is not None else None
+    counts = {
+        "vertexCount": len(target.data.vertices)
+        if isinstance(target, bpy.types.Object) and target.type == "MESH"
+        else None,
+        "edgeCount": len(target.data.edges)
+        if isinstance(target, bpy.types.Object) and target.type == "MESH"
+        else None,
+        "faceCount": len(target.data.polygons)
+        if isinstance(target, bpy.types.Object) and target.type == "MESH"
+        else None,
+    }
+    expected = {
+        key: parameters.get(key)
+        for key in ("vertexCount", "edgeCount", "faceCount")
+    }
+    declared = {
+        key: value
+        for key, value in expected.items()
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    }
+    satisfied = bool(
+        isinstance(target, bpy.types.Object)
+        and target.type == "MESH"
+        and declared
+        and all(counts[key] == value for key, value in declared.items())
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        **counts,
+        "expectedCounts": declared,
+    }
+
+
+def _modifier_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    target_id = parameters.get("targetId")
+    modifier_id = parameters.get("modifierId")
+    modifier_type = parameters.get("modifierType")
+    registry = build_resource_registry(receipts)
+    identity = registry.get(target_id) if isinstance(target_id, str) else None
+    target = resolve_resource(identity) if identity is not None else None
+    found = (
+        find_owned_modifier(receipts, modifier_id)
+        if isinstance(modifier_id, str)
+        else None
+    )
+    owner, modifier = found if found is not None else (None, None)
+    properties_match = True
+    if modifier is not None:
+        if isinstance(parameters.get("width"), (int, float)) and not isinstance(
+            parameters["width"], bool
+        ):
+            properties_match = properties_match and math.isclose(
+                float(modifier.width), float(parameters["width"]), abs_tol=1e-6
+            )
+        if isinstance(parameters.get("segments"), int) and not isinstance(
+            parameters["segments"], bool
+        ):
+            properties_match = properties_match and (
+                int(modifier.segments) == parameters["segments"]
+            )
+    satisfied = bool(
+        isinstance(target, bpy.types.Object)
+        and owner is target
+        and modifier is not None
+        and isinstance(modifier_type, str)
+        and modifier.type == modifier_type
+        and properties_match
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "modifierId": modifier_id if isinstance(modifier_id, str) else None,
+        "modifierType": modifier.type if modifier is not None else None,
+        "propertiesMatch": properties_match,
+    }
+
+
+def _geometry_nodes_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    target_id = parameters.get("targetId")
+    modifier_id = parameters.get("modifierId")
+    node_group_id = parameters.get("nodeGroupId")
+    raw_node_types = parameters.get("nodeTypes")
+    expected_node_types = (
+        tuple(raw_node_types)
+        if isinstance(raw_node_types, list)
+        and raw_node_types
+        and all(isinstance(item, str) and item for item in raw_node_types)
+        else ()
+    )
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if isinstance(target_id, str) else None
+    group_identity = (
+        registry.get(node_group_id) if isinstance(node_group_id, str) else None
+    )
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    node_group = resolve_resource(group_identity) if group_identity is not None else None
+    found = (
+        find_owned_modifier(receipts, modifier_id)
+        if isinstance(modifier_id, str)
+        else None
+    )
+    owner, modifier = found if found is not None else (None, None)
+    actual_node_types = (
+        tuple(sorted(node.bl_idname for node in node_group.nodes))
+        if isinstance(node_group, bpy.types.NodeTree)
+        else ()
+    )
+    satisfied = bool(
+        isinstance(target, bpy.types.Object)
+        and owner is target
+        and modifier is not None
+        and modifier.type == "NODES"
+        and isinstance(node_group, bpy.types.NodeTree)
+        and modifier.node_group is node_group
+        and expected_node_types
+        and tuple(sorted(expected_node_types)) == actual_node_types
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "modifierId": modifier_id if isinstance(modifier_id, str) else None,
+        "nodeGroupId": node_group_id if isinstance(node_group_id, str) else None,
+        "nodeTypes": list(actual_node_types),
+    }
+
+
 OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "object_exists": _object_exists,
     "resource_exists": _resource_exists,
@@ -391,6 +528,9 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "render_scene_ready": _render_scene_ready,
     "render_rig_ready": _render_rig_ready,
     "render_artifact_exists": _render_artifact_exists,
+    "mesh_topology_matches": _mesh_topology_matches,
+    "modifier_ready": _modifier_ready,
+    "geometry_nodes_ready": _geometry_nodes_ready,
 }
 
 

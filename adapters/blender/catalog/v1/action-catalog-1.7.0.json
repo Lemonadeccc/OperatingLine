@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.8.0",
+  "catalogVersion": "1.7.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make one bounded whole-mesh Subdivide edit; add an owned Bevel modifier; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; assign Principled materials; create and bind a rigid armature; author pose keyframes; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Prefer one meaningful part per leaf for teaching and use batches only when atomic grouped creation is intentional. Unsupported topology, sculpting, weight painting, modifiers, and arbitrary edits must remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -20,8 +20,8 @@
       "id": "geometry",
       "order": 1,
       "title": "Geometry",
-      "description": "Create and refine the model with bounded primitives, mesh edits, modifiers, and Geometry Nodes.",
-      "selectionGuidance": "Select for every object-building goal; create owned geometry before any edit, modifier, or node action that targets it.",
+      "description": "Create the model, supporting ground, and visible primitive parts.",
+      "selectionGuidance": "Select for every new object-building goal; split meaningful parts into teachable child steps or bounded batches.",
       "actionNames": [
         "blender.mesh.create_uv_sphere",
         "blender.mesh.create_icosphere",
@@ -30,10 +30,7 @@
         "blender.mesh.create_cone",
         "blender.mesh.create_cylinder",
         "blender.mesh.create_torus",
-        "blender.mesh.create_primitive_batch",
-        "blender.mesh.edit_subdivide",
-        "blender.modifier.add_bevel",
-        "blender.geometry_nodes.create_transform"
+        "blender.mesh.create_primitive_batch"
       ]
     },
     {
@@ -94,27 +91,6 @@
         "blender.mesh.create_torus",
         "blender.mesh.create_primitive_batch"
       ]
-    },
-    {
-      "id": "geometry.edit_subdivide",
-      "title": "Bounded Edit Mode subdivision",
-      "description": "Replace an owned object's mesh data with one deterministic whole-mesh subdivision result.",
-      "selectionGuidance": "Select when the goal needs uniformly denser topology before later modifiers or deformation.",
-      "actionNames": ["blender.mesh.edit_subdivide"]
-    },
-    {
-      "id": "geometry.bevel_modifier",
-      "title": "Bevel modifier",
-      "description": "Add one owned, parameterized Bevel modifier to an earlier mesh object.",
-      "selectionGuidance": "Select when the requested form needs nondestructive rounded edges.",
-      "actionNames": ["blender.modifier.add_bevel"]
-    },
-    {
-      "id": "geometry_nodes.transform",
-      "title": "Geometry Nodes transform",
-      "description": "Create one owned Transform Geometry node group and attach it through a Geometry Nodes modifier.",
-      "selectionGuidance": "Select when the goal benefits from an inspectable procedural translation, rotation, or scale stage.",
-      "actionNames": ["blender.geometry_nodes.create_transform"]
     },
     {
       "id": "appearance.principled_palette",
@@ -769,224 +745,6 @@
       ],
       "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
       "supportedObservationKinds": ["resource_exists"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.mesh.edit_subdivide",
-      "title": "Subdivide one owned mesh",
-      "description": "Creates a bounded whole-mesh subdivision result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["targetId", "resultMeshId", "resultMeshName", "cuts", "smooth"],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "description": "Logical ID of an owned mesh object created by an earlier action."
-          },
-          "resultMeshId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "description": "Plan-unique logical ID for the replacement mesh datablock."
-          },
-          "resultMeshName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "cuts": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 8,
-            "description": "Uniform cuts applied to every edge; bounded to control topology growth."
-          },
-          "smooth": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1,
-            "description": "Subdivision smoothing factor."
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Swaps the owned object's mesh link to the generated result."
-        },
-        {
-          "access": "create",
-          "resourceType": "MESH",
-          "argumentPath": "resultMeshId",
-          "derivedResourceTypes": [],
-          "description": "Creates the bounded subdivided mesh while retaining the source for compensation."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists", "mesh_topology_matches"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.modifier.add_bevel",
-      "title": "Add one Bevel modifier",
-      "description": "Adds one owned, bounded Bevel modifier to an earlier owned mesh object without applying it.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["targetId", "modifierId", "modifierName", "width", "segments", "angleLimit"],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "width": { "type": "number", "minimum": 0.0001, "maximum": 100 },
-          "segments": { "type": "integer", "minimum": 1, "maximum": 16 },
-          "angleLimit": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 3.141592653589793
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Adds a non-applied modifier to the owned target's stack."
-        },
-        {
-          "access": "create",
-          "resourceType": "MODIFIER",
-          "argumentPath": "modifierId",
-          "derivedResourceTypes": [],
-          "description": "Creates one receipt-owned Bevel modifier."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
-      "supportedObservationKinds": ["modifier_ready"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.geometry_nodes.create_transform",
-      "title": "Create one Transform Geometry node group",
-      "description": "Creates an owned Geometry Nodes group containing one Transform Geometry node and attaches it through one owned modifier.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": [
-          "targetId",
-          "modifierId",
-          "modifierName",
-          "nodeGroupId",
-          "nodeGroupName",
-          "translation",
-          "rotation",
-          "scale"
-        ],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "nodeGroupId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "nodeGroupName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "translation": {
-            "type": "array",
-            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "rotation": {
-            "type": "array",
-            "items": {
-              "type": "number",
-              "minimum": -6.283185307179586,
-              "maximum": 6.283185307179586
-            },
-            "minItems": 3,
-            "maxItems": 3
-          },
-          "scale": {
-            "type": "array",
-            "items": { "type": "number", "minimum": 0.0001, "maximum": 1000 },
-            "minItems": 3,
-            "maxItems": 3
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Adds the Geometry Nodes modifier to the owned target."
-        },
-        {
-          "access": "create",
-          "resourceType": "MODIFIER",
-          "argumentPath": "modifierId",
-          "derivedResourceTypes": [],
-          "description": "Creates one receipt-owned Geometry Nodes modifier."
-        },
-        {
-          "access": "create",
-          "resourceType": "NODE_GROUP",
-          "argumentPath": "nodeGroupId",
-          "derivedResourceTypes": [],
-          "description": "Creates one owned Transform Geometry node tree."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
-      "supportedObservationKinds": ["modifier_ready", "geometry_nodes_ready"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",

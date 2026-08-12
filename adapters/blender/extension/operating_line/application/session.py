@@ -131,6 +131,21 @@ class ArtifactIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class ModifierState:
+    """Tracked state of one action-owned non-ID Blender modifier."""
+
+    logical_id: str
+    display_name: str
+    modifier_type: str
+    pointer: int
+    stack_index: int
+    receipt_token: str
+    step_id: str
+    action_name: str
+    properties: tuple[tuple[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ActionReceipt:
     """All reversible effects produced by one executable plan step."""
 

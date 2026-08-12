@@ -14,7 +14,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.4.0');
+    expect(catalog.catalogVersion).toBe('1.5.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -35,10 +35,10 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(8);
+    ).toHaveLength(11);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
-    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0']);
+    ).toEqual(['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0', '1.5.0']);
 
     const sphere = catalog.recipes[0]!;
     expect(sphere.guidance.steps.map((step) => step.label)).toEqual([

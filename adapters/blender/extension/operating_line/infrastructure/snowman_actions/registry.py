@@ -6,6 +6,14 @@ from typing import Any
 from ...application import ActionReceipt
 from ...domain import ActionSpec, TaskNode, executable_steps
 from .common import COLLECTION_LOGICAL_ID, rollback_receipt, validate_adapter
+from .editing import (
+    execute_bevel,
+    execute_geometry_nodes_transform,
+    execute_subdivide,
+    validate_bevel,
+    validate_geometry_nodes_transform,
+    validate_subdivide,
+)
 from .material import execute_materials, validate_palette, validate_single
 from .model import (
     execute_geometry,
@@ -120,6 +128,26 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definitions = MATERIAL_VALIDATORS[action.name](arguments)
             reserve(step.id, tuple(item.logical_id for item in definitions))
             execute = _bind_action(execute_materials, step.id, action, definitions)
+        elif action.name == "blender.mesh.edit_subdivide":
+            definition = validate_subdivide(arguments)
+            reserve(step.id, (definition.result_mesh_id,))
+            execute = _bind_action(execute_subdivide, step.id, action, definition)
+        elif action.name == "blender.modifier.add_bevel":
+            definition = validate_bevel(arguments)
+            reserve(step.id, (definition.modifier_id,))
+            execute = _bind_action(execute_bevel, step.id, action, definition)
+        elif action.name == "blender.geometry_nodes.create_transform":
+            definition = validate_geometry_nodes_transform(arguments)
+            reserve(
+                step.id,
+                (definition.modifier_id, definition.node_group_id),
+            )
+            execute = _bind_action(
+                execute_geometry_nodes_transform,
+                step.id,
+                action,
+                definition,
+            )
         elif action.name == "blender.rig.create_armature":
             definition = validate_armature(arguments)
             reserve(

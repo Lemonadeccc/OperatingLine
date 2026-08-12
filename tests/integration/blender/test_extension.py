@@ -87,6 +87,11 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     COLLECTION_NAME,
     OWNER_VALUE,
 )
+from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
+    validate_bevel,
+    validate_geometry_nodes_transform,
+    validate_subdivide,
+)
 from operating_line_extension.operating_line.infrastructure.snowman_actions.model import (  # noqa: E402
     validate_cube,
     validate_icosphere,
@@ -235,6 +240,305 @@ def assert_cube_resource_id_boundaries() -> None:
         assert "arguments.resourceId" in str(error)
     else:
         raise AssertionError("Cube resourceId longer than 180 characters must fail")
+
+
+def assert_edit_modifier_geometry_nodes_round_trip() -> None:
+    object_name = "OperatingLine.EditPipelineCube"
+    steps = [
+        step("root", None, 0),
+        step(
+            "pipeline.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "pipeline.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "pipeline.subdivide",
+            "root",
+            2,
+            depends_on=["pipeline.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_subdivide",
+                "arguments": {
+                    "targetId": "pipeline.cube",
+                    "resultMeshId": "pipeline.cube.subdivided_mesh",
+                    "resultMeshName": "OperatingLine.EditPipelineCube.SubdividedMesh",
+                    "cuts": 1,
+                    "smooth": 0.0,
+                },
+            },
+        ),
+        step(
+            "pipeline.bevel",
+            "root",
+            3,
+            depends_on=["pipeline.subdivide"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "pipeline.cube",
+                    "modifierId": "pipeline.cube.bevel",
+                    "modifierName": "OperatingLine.EditPipeline.Bevel",
+                    "width": 0.1,
+                    "segments": 3,
+                    "angleLimit": 0.5235987755982988,
+                },
+            },
+        ),
+        step(
+            "pipeline.geometry_nodes",
+            "root",
+            4,
+            depends_on=["pipeline.bevel"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.geometry_nodes.create_transform",
+                "arguments": {
+                    "targetId": "pipeline.cube",
+                    "modifierId": "pipeline.cube.geometry_nodes",
+                    "modifierName": "OperatingLine.EditPipeline.GeometryNodes",
+                    "nodeGroupId": "pipeline.cube.transform_nodes",
+                    "nodeGroupName": "OperatingLine.EditPipeline.TransformNodes",
+                    "translation": [0.25, -0.5, 0.75],
+                    "rotation": [0.0, 0.0, 0.25],
+                    "scale": [1.0, 1.5, 0.5],
+                },
+            },
+        ),
+    ]
+    root = load_temporary_plan(steps)
+    session = DemoSession(root, action_registry(root))
+    session.start()
+
+    assert session.next() is not None
+    cube = bpy.data.objects.get(object_name)
+    assert cube is not None and cube.type == "MESH"
+    source_mesh = cube.data
+    assert (len(source_mesh.vertices), len(source_mesh.edges), len(source_mesh.polygons)) == (
+        8,
+        12,
+        6,
+    )
+
+    assert session.next() is not None
+    subdivided_mesh = cube.data
+    assert subdivided_mesh is not source_mesh
+    assert (
+        len(subdivided_mesh.vertices),
+        len(subdivided_mesh.edges),
+        len(subdivided_mesh.polygons),
+    ) == (26, 48, 24)
+    topology = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "mesh_topology_matches",
+                "parameters": {
+                    "targetId": "pipeline.cube",
+                    "vertexCount": 26,
+                    "edgeCount": 48,
+                    "faceCount": 24,
+                },
+            },
+        ),
+        session.receipts,
+    )
+    assert topology[0]["satisfied"] is True
+
+    assert session.next() is not None
+    bevel = cube.modifiers.get("OperatingLine.EditPipeline.Bevel")
+    assert bevel is not None and bevel.type == "BEVEL"
+    assert math.isclose(bevel.width, 0.1, abs_tol=1e-6)
+    assert bevel.segments == 3
+    modifier_observation = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "modifier_ready",
+                "parameters": {
+                    "targetId": "pipeline.cube",
+                    "modifierId": "pipeline.cube.bevel",
+                    "modifierType": "BEVEL",
+                    "width": 0.1,
+                    "segments": 3,
+                },
+            },
+        ),
+        session.receipts,
+    )
+    assert modifier_observation[0]["satisfied"] is True
+
+    assert session.next() is not None
+    nodes_modifier = cube.modifiers.get(
+        "OperatingLine.EditPipeline.GeometryNodes"
+    )
+    node_group = bpy.data.node_groups.get("OperatingLine.EditPipeline.TransformNodes")
+    assert nodes_modifier is not None and nodes_modifier.type == "NODES"
+    assert node_group is not None and nodes_modifier.node_group is node_group
+    assert {node.bl_idname for node in node_group.nodes} == {
+        "NodeGroupInput",
+        "GeometryNodeTransform",
+        "NodeGroupOutput",
+    }
+    nodes_observation = observation_module.evaluate_observations(
+        (
+            {
+                "kind": "geometry_nodes_ready",
+                "parameters": {
+                    "targetId": "pipeline.cube",
+                    "modifierId": "pipeline.cube.geometry_nodes",
+                    "nodeGroupId": "pipeline.cube.transform_nodes",
+                    "nodeTypes": [
+                        "NodeGroupInput",
+                        "GeometryNodeTransform",
+                        "NodeGroupOutput",
+                    ],
+                },
+            },
+        ),
+        session.receipts,
+    )
+    assert nodes_observation[0]["satisfied"] is True
+
+    extra_node = node_group.nodes.new("GeometryNodeJoinGeometry")
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited Geometry Nodes graphs must block rollback")
+    assert session.active_index == 3
+    assert "pipeline.geometry_nodes" in session.receipts
+    node_group.nodes.remove(extra_node)
+
+    assert session.back() is not None
+    assert cube.modifiers.get("OperatingLine.EditPipeline.GeometryNodes") is None
+    assert bpy.data.node_groups.get("OperatingLine.EditPipeline.TransformNodes") is None
+
+    original_profile = bevel.profile
+    bevel.profile = 0.75
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited modifiers must block rollback")
+    assert session.active_index == 2
+    assert "pipeline.bevel" in session.receipts
+    bevel.profile = original_profile
+
+    assert session.back() is not None
+    assert cube.modifiers.get("OperatingLine.EditPipeline.Bevel") is None
+
+    original_vertex = subdivided_mesh.vertices[0].co.copy()
+    subdivided_mesh.vertices[0].co.x += 0.25
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited subdivided meshes must block rollback")
+    assert session.active_index == 1
+    assert "pipeline.subdivide" in session.receipts
+    subdivided_mesh.vertices[0].co = original_vertex
+
+    assert session.back() is not None
+    assert cube.data is source_mesh
+    assert bpy.data.meshes.get("OperatingLine.EditPipelineCube.SubdividedMesh") is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
+def assert_editing_argument_boundaries() -> None:
+    assert validate_subdivide(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.result.mesh",
+            "resultMeshName": "OperatingLine.EditResult",
+            "cuts": 8.0,
+            "smooth": 1.0,
+        }
+    ).cuts == 8
+    assert validate_bevel(
+        {
+            "targetId": "edit.target",
+            "modifierId": "edit.bevel",
+            "modifierName": "OperatingLine.Bevel",
+            "width": 0.1,
+            "segments": 16.0,
+            "angleLimit": math.pi,
+        }
+    ).segments == 16
+    geometry_nodes = validate_geometry_nodes_transform(
+        {
+            "targetId": "edit.target",
+            "modifierId": "edit.nodes",
+            "modifierName": "OperatingLine.Nodes",
+            "nodeGroupId": "edit.nodes.group",
+            "nodeGroupName": "OperatingLine.Nodes.Group",
+            "translation": [-1000.0, 1000.0, 0.0],
+            "rotation": [-math.tau, math.tau, 0.0],
+            "scale": [0.0001, 1000.0, 1.0],
+        }
+    )
+    assert geometry_nodes.scale == (0.0001, 1000.0, 1.0)
+
+    invalid_cases = (
+        (
+            validate_subdivide,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.result.mesh",
+                "resultMeshName": "OperatingLine.EditResult",
+                "cuts": 9,
+                "smooth": 0.0,
+            },
+            "integer in [1, 8]",
+        ),
+        (
+            validate_bevel,
+            {
+                "targetId": "edit.target",
+                "modifierId": "edit.bevel",
+                "modifierName": "OperatingLine.Bevel",
+                "width": 0.0,
+                "segments": 2,
+                "angleLimit": 0.5,
+            },
+            "arguments.width",
+        ),
+        (
+            validate_geometry_nodes_transform,
+            {
+                "targetId": "edit.target",
+                "modifierId": "edit.nodes",
+                "modifierName": "OperatingLine.Nodes",
+                "nodeGroupId": "edit.nodes.group",
+                "nodeGroupName": "OperatingLine.Nodes.Group",
+                "translation": [0.0, 0.0, 0.0],
+                "rotation": [0.0, 0.0, 0.0],
+                "scale": [0.0, 1.0, 1.0],
+            },
+            "arguments.scale",
+        ),
+    )
+    for validator, arguments, expected in invalid_cases:
+        try:
+            validator(arguments)
+        except ValueError as error:
+            assert expected in str(error)
+        else:
+            raise AssertionError(f"Invalid editing arguments must fail: {arguments}")
 
 
 def assert_cube_guided_menu_round_trip() -> None:
@@ -3060,6 +3364,8 @@ def main() -> None:
     assert_icosphere_action_round_trip()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
+    assert_editing_argument_boundaries()
+    assert_edit_modifier_geometry_nodes_round_trip()
 
     session_before_registration = operating_line.get_session()
     operating_line.register()

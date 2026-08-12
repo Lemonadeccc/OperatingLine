@@ -11,7 +11,7 @@
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.7.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> Orchestrator 现在可以查询 Blender `1.8.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
 > `eval:snapshot` → `eval:capture` → `eval:blind` → `eval:review` →
@@ -19,7 +19,7 @@
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.7.0` 目录保留七项 `semanticCapabilities`，要求
+> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.8.0` 目录提供十项 `semanticCapabilities`，要求
 > provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
@@ -31,7 +31,8 @@
 > 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider、
 > 本机 Codex/Claude CLI Provider 和各自独立的 opt-in composition root；默认 standalone 仍不加载这些
 > Provider 或凭据。MCP HTTP 与 stdio bridge 已自动协商稳定版 `2026-07-28`，同时兼容旧客户端。Blender 内已有可折叠的
-> Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；流式模型对话、完成真实采集与
+> Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；ActionCatalog 还新增了
+> 有界整网格 Subdivide、非应用 Bevel Modifier 和首个 Transform Geometry Nodes 执行切片。流式模型对话、完成真实采集与
 > 独立盲审的任意目标语义数据集、自动评分/训练治理、骨骼动画深化和第二宿主仍在路线图中。
 
 OperatingLine 是一套面向 AI/MCP 软件操作的可观察引导协议与宿主适配框架。
@@ -76,15 +77,16 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.4.0` 精确绑定
-  ActionCatalog `1.7.0` 的 15 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.5.0` 精确绑定
+  ActionCatalog `1.8.0` 的 18 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
   `UI target unavailable`，不会复用无关按钮。见 [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与
   [ADR 0027](docs/adr/0027-native-icosphere-action-slice.md) 与
-  [ADR 0028](docs/adr/0028-native-torus-action-slice.md)。
-- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.7.0` 把 15 个动作划分为 Geometry、Materials、
+  [ADR 0028](docs/adr/0028-native-torus-action-slice.md) 与
+  [ADR 0029](docs/adr/0029-bounded-edit-modifier-geometry-nodes.md)。
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.8.0` 把 18 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；七项目录语义能力进一步要求 provider
   声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的
@@ -218,6 +220,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   再完成材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
   隔离渲染场景、双 Area Light、相机和帧 20 的 320 × 320 Eevee PNG；`Back` 可以逐步反向补偿
   整条执行链。
+- **有界 Edit/Modifier/Geometry Nodes 切片**：ActionCatalog 另提供整网格 Subdivide、非应用
+  Bevel Modifier 和固定 Transform Geometry Nodes 图三个动作。Mesh、modifier 与 node group 都进入
+  receipt 和专用 observation；若用户在执行后修改其拓扑、属性或节点图，`Back` 会保留现场与 receipt
+  并拒绝覆盖，恢复到动作写入状态后可重试。当前只提供灰色 `semantic_path`，不伪装成原生控件点击。
 - **Blender MCP Bridge**：可以不修改已安装的 Blender MCP 扩展，仅通过允许列表命令
   触发 OperatingLine 控件。
 
@@ -574,8 +580,8 @@ quality/locality 报告和 provenance
 ```
 
 如果只需要目录，调用 `operatingline.action_catalog.get`；可选 `catalogVersion` 用于精确重放。
-PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、权重绘制、modifier 或
-任意 Python 操作必须明确保留为人工步骤。可重放的非雪人参考输入位于
+PlanningContext 不替 AI 思考，也不会扩充宿主能力：目录未列出的雕刻、权重绘制、任意 Edit Mode
+选择/拓扑操作、任意 Modifier/Geometry Nodes 图或任意 Python 操作必须明确保留为人工步骤。可重放的非雪人参考输入位于
 [`robot-preview.benchmark.json`](protocol/fixtures/v1/planning/robot-preview.benchmark.json)。
 当前 Blender 包使用 [`snowman-teaching.plan.json`](protocol/fixtures/v1/snowman-teaching.plan.json)
 revision 5；[`snowman.plan.json`](protocol/fixtures/v1/snowman.plan.json) revision 4 仅作为已有
@@ -801,7 +807,8 @@ Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查�
 
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
-MCP Bridge，以及 Codex/Claude 本地配置与 Claude Desktop MCPB。当前仍未完成：
+MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片，以及 Codex/Claude 本地配置与
+Claude Desktop MCPB。当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
