@@ -116,6 +116,21 @@ docs: clarify live pairing status
 仓库会在提交前运行 `pnpm check`，并通过 Commitlint 检查提交信息；CI 还会检查拉取请求中的
 全部提交。
 
+## 记录版本意图
+
+改动 workspace 包的公共行为、接口或依赖契约时，使用 Changesets 记录 SemVer 意图：
+
+```bash
+pnpm changeset
+pnpm release:check
+```
+
+纯文档、测试、CI 或仓库内部维护改动可以不添加 changeset，但应在拉取请求中说明。当前发布流程是
+预发布 Phase 0：只有受保护 `main` 上的非空 changeset 才会创建或更新草稿版本 PR；当前远端
+`main` 尚未保护，所以该 job 保持 skipped。所有包仍为 private，不会发布 npm、
+创建 tag/GitHub Release 或上传产品产物。不要在发布 workflow 中加入 registry token、OIDC 或 publish
+命令。完整边界见 [ADR 0039](docs/adr/0039-changesets-release-preparation.md)。
+
 ## 提交拉取请求
 
 拉取请求应：

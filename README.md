@@ -875,6 +875,13 @@ pnpm commit
 常用类型包括 `feat`、`fix`、`docs`、`refactor`、`test`、`build`、`ci` 和 `chore`。
 Husky 会在提交前运行完整的 `pnpm check`，并使用 Commitlint 检查提交信息。
 
+workspace 包的公共行为或接口发生变化时，还应运行 `pnpm changeset` 记录 SemVer 意图，并用
+`pnpm release:check` 检查发布边界。当前 Changesets 自动化只能在受保护的 `main` 上创建或更新草稿版本
+PR；当前远端 `main` 尚未保护，因此 job 会保持 skipped。所有包仍保持 private，workflow 没有 npm
+token、OIDC、publish、tag、GitHub Release 或产物上传能力。实际
+npm 发布要等候选包提供可消费的 `dist`/声明/tarball、分支保护、registry ownership 与 Trusted
+Publisher 后再单独启用。详见 [ADR 0039](docs/adr/0039-changesets-release-preparation.md)。
+
 ## 路线图与当前边界
 
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、
@@ -895,7 +902,10 @@ Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
    Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。
 3. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
-4. 在首个稳定发布前引入 Changesets 与自动发布流程。
+4. 把已完成的 Changesets Phase 0 版本 PR 自动化推进为真实发布：为首批公开包补齐可消费构建、声明、
+   精确 tarball allowlist 和安装测试；保护 `main`、建立 npm scope/package ownership 与受保护发布
+   Environment，并通过 Trusted Publisher 启用最小权限发布。当前所有包仍为 private，发布、tag、
+   GitHub Release 与产品产物上传均保持关闭。
 
 首版只保证自有面板控件、三维对象和世界坐标锚点，不承诺精确标注任意 Blender 内置按钮。
 对没有官方扩展 API 的宿主，只提供能力画像明确允许的降级体验。
@@ -907,8 +917,8 @@ Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内
 参见 [支持说明](SUPPORT.md)。
 
 生产依赖审计可运行 `pnpm audit:prod`；已核实的精确例外与复查条件公开记录在
-[依赖审计说明](docs/security/dependency-audit.md)。本轮未引入 Changesets，版本发布流程将在稳定
-发布前单独设计。
+[依赖审计说明](docs/security/dependency-audit.md)。Changesets 当前只负责私有 workspace 包的版本意图
+和草稿版本 PR，不能解释为已建立 npm 或产品产物发布能力。
 
 ## License
 

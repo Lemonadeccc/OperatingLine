@@ -28,6 +28,7 @@
 ## 提交前确认 / Checklist
 
 - [ ] 提交信息符合 Conventional Commits。 / Commit messages follow Conventional Commits.
+- [ ] 影响 workspace 包版本时已添加 changeset；否则已说明无需 changeset。 / A changeset is included for workspace package version impact, or the omission is explained.
 - [ ] 测试、fixture 和文档已随行为变化同步更新。 / Tests, fixtures, and docs match the behavior change.
 - [ ] 没有把确定性雪人验收场景描述为可自动完成任意 AI/Blender 任务。 / The deterministic snowman scenario is not presented as general AI or arbitrary Blender automation.
 - [ ] 没有提交访问令牌、私有数据或生成的本地临时文件。 / No tokens, private data, or generated local files are included.

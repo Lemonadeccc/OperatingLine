@@ -33,6 +33,10 @@
     "format:check": "prettier --check .",
     "schema:generate": "pnpm --filter @operatingline/protocol generate:schema",
     "schema:check": "pnpm --filter @operatingline/protocol check:schema",
+    "changeset": "changeset",
+    "release:status": "changeset status",
+    "release:version": "changeset version",
+    "release:check": "tsx tools/release/check-policy.ts && changeset status",
     "audit:prod": "pnpm audit --prod",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -46,7 +50,7 @@
     "test:blender:companion": "tsx tools/blender/run-companion-e2e.mjs",
     "test:blender:undo": "node tools/blender/run-native-undo.mjs",
     "test:blender:visual": "node tools/blender/capture-overlay.mjs",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm format:check",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm release:check && pnpm format:check",
     "prepare": "husky"
   },
   "config": {
@@ -56,6 +60,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/mcpb": "2.1.2",
+    "@changesets/cli": "3.0.0",
     "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
     "@commitlint/cz-commitlint": "21.2.0",
@@ -83,6 +88,7 @@
     "tsx": "4.23.5",
     "typescript": "6.0.3",
     "typescript-eslint": "8.66.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   }
 }

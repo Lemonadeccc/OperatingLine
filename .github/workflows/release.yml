@@ -1,0 +1,63 @@
+name: Release preparation / 发布准备
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-preparation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Open draft version pull request / 创建草稿版本拉取请求
+    if: github.ref_protected == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      HUSKY: '0'
+    steps:
+      - name: Check out repository / 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pnpm / 安装 pnpm
+        uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+        with:
+          version: 10.20.0
+
+      - name: Install Node.js / 安装 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies / 安装依赖
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verify release policy / 验证发布策略
+        run: pnpm exec tsx tools/release/check-policy.ts
+
+      - name: Detect non-empty release intent / 检测非空版本意图
+        id: intent
+        run: |
+          pnpm exec changeset status --output "$RUNNER_TEMP/changeset-status.json"
+          pnpm exec tsx tools/release/report-intent.ts "$RUNNER_TEMP/changeset-status.json"
+
+      - name: Create or update draft version PR / 创建或更新草稿版本 PR
+        if: steps.intent.outputs.has-release-entries == 'true'
+        uses: changesets/action@22ccf9aa43179fe9e27dc62e575971d28cce197c # v2.0.0
+        with:
+          commit-message: 'chore(release): version packages'
+          pr-title: 'chore(release): version packages'
+          pr-draft: always
+          pr-base-branch: main
+          create-github-releases: false
+          push-git-tags: false

@@ -218,6 +218,10 @@
 - [ ] Eval 评分与训练治理：在原始证据导出之上增加显式评分器、脱敏/同意/保留策略、数据集切分、
       训练授权与可追溯训练流水线。
 - [ ] 第二软件宿主：以真实原生插件验证协议、能力降级和视觉引导的跨宿主语义。
+- [ ] 正式自动发布：在已完成的 Changesets Phase 0 草稿版本 PR 之上，为明确 allowlist 的首批公开包
+      补齐 `dist`、声明、精确 tarball/安装测试、分支保护、npm ownership、受保护 Environment 与
+      Trusted Publisher。当前全部 package 仍为 private，workflow 不含 token/OIDC/publish/tag/
+      GitHub Release/产物上传；见 [ADR 0039](adr/0039-changesets-release-preparation.md)。
 - [x] 完成正式双通道代码审查：当前 Codex 表面明确提供文档化原生角色路由，独立
       `code-reviewer` 与 `architect` 已对最终流式对话工作树给出 `APPROVE` / `CLEAR`；确认的阻断问题
       均已修复，关键边界已补回归。OMX runtime 预检仍不支持 documented leader proof，因此没有伪造 runtime 状态。
