@@ -8,6 +8,7 @@ import {
   catalogVersionSchema,
   planningQualityBaselineVersion,
   planningQualityBaselineVersionSchema,
+  stableVersionRangeSchema,
 } from './version.js';
 
 export const planningPhaseSchema = z.strictObject({
@@ -93,8 +94,8 @@ export const actionCatalogSchema = z
     protocolVersion: guideProtocolVersionSchema,
     catalogVersion: catalogVersionSchema,
     adapterId: z.string().min(1),
-    adapterVersionRange: z.string().min(1),
-    hostVersionRange: z.string().min(1),
+    adapterVersionRange: stableVersionRangeSchema,
+    hostVersionRange: stableVersionRangeSchema,
     title: z.string().min(1),
     description: z.string().min(1),
     planningNotes: z.array(z.string().min(1)),

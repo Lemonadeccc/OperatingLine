@@ -86,6 +86,12 @@ Back 按钮使用 Blender 原生 `alert` 警示背景，Next 使用绿色宿主�
 GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异步 Initial Plan Run、Replan Run
 与 Dialogue Run 状态，再把 JSON 放入队列。Provider 的对话 SSE 只在 Runtime 内消费；助手增量先写入
 durable append-only revision，Blender 始终只读取短 JSON 状态。
+网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
+ActionCatalog `1.11.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+Connected。Guide 与状态请求绑定服务端签发的 lease，线程按协商周期发送严格递增心跳；失联、过期、
+Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界
+见 [ADR 0040](../adr/0040-companion-session-leases.md)。这里的 Connected/presence 只表示后台 transport
+完成了握手和近期 HTTP 往返，不是 Blender 主线程执行就绪证明，也不是所有 Companion 端点的授权租约。
 长达 120 秒的 Provider 调用运行在 Orchestrator 后台，不占用 Blender 的短请求线程。`bpy.app.timers` 在 Blender 主线程校验
 提案、构建预览 Session、安装已接受计划、执行动作、回退并生成观察；绘制回调不访问网络、
 不修改场景，只从当前会话派生最多四个相邻步骤，并为 Back/Next 解析已记录资源的

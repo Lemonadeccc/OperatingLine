@@ -150,6 +150,36 @@ function companionReport(instanceId: string, sequence: number) {
   };
 }
 
+function companionHello(instanceId: string) {
+  return {
+    contractVersion: '1.0.0',
+    adapterId: 'blender',
+    instanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3',
+    supportedGuideProtocolVersions: ['1.1.0', '1.4.0', '1.5.0'],
+    catalogVersion,
+    capabilities: {
+      presentation: {
+        taskTree: 'native',
+        viewportOverlay: 'native',
+        interactiveAnchors: 'emulated',
+      },
+      execution: {
+        inspect: 'native',
+        invokeActions: 'native',
+        screenshot: 'native',
+        rollbackModes: ['compensating_action', 'native_undo'],
+      },
+      runtime: {
+        dispatch: 'main_thread_serial',
+        network: 'native',
+        persistentProjectState: 'native',
+      },
+    },
+  };
+}
+
 async function callMcpTool(
   runtime: RunningRuntime,
   id: number,
@@ -246,7 +276,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.adapters.list' },
             {
               name: 'operatingline.companions.list',
-              description: 'List the latest known state reported by each host companion.',
+              description:
+                'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.planning.context' },
@@ -2119,7 +2150,16 @@ describe('OperatingLine runtime', () => {
   });
 
   it('accepts, deduplicates, rejects stale state, and lists latest companions over HTTP and MCP', async () => {
-    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    let monotonicNow = 1_000;
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      companionLeases: {
+        monotonicNow: () => monotonicNow,
+        heartbeatIntervalMs: 100,
+        leaseTtlMs: 300,
+      },
+    });
     const instanceId = randomUUID();
     const first = companionReport(instanceId, 1);
     const stale = companionReport(instanceId, 1);
@@ -2140,13 +2180,6 @@ describe('OperatingLine runtime', () => {
       await expect(post(first).then((response) => response.json())).resolves.toEqual({
         result: 'duplicate',
       });
-      const conflict = await post({ ...first, hostVersion: '4.6.0' });
-      expect(conflict.status).toBe(409);
-      await expect(conflict.json()).resolves.toEqual({ result: 'conflict' });
-      await expect(post(stale).then((response) => response.json())).resolves.toEqual({
-        result: 'stale',
-      });
-
       const listResponse = await fetch(`${runtime.baseUrl}/api/v1/companions`, { headers });
       expect(listResponse.status).toBe(200);
       await expect(listResponse.json()).resolves.toEqual({ companions: [first] });
@@ -2155,8 +2188,251 @@ describe('OperatingLine runtime', () => {
       expect(mcpResponse.result?.isError).not.toBe(true);
       expect(JSON.parse(mcpResponse.result?.content?.[0]?.text ?? 'null')).toEqual([first]);
 
+      monotonicNow += 301;
+      const conflict = await post({ ...first, hostVersion: '4.6.0' });
+      expect(conflict.status).toBe(409);
+      await expect(conflict.json()).resolves.toEqual({ result: 'conflict' });
+      await expect(post(stale).then((response) => response.json())).resolves.toEqual({
+        result: 'stale',
+      });
+      await expect(
+        fetch(`${runtime.baseUrl}/api/v1/companions`, { headers }).then((response) =>
+          response.json(),
+        ),
+      ).resolves.toEqual({ companions: [] });
+
       const invalid = await post({ ...first, reportId: randomUUID(), unknown: true });
       expect(invalid.status).toBe(400);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('negotiates a companion lease, renews heartbeats, gates session traffic, and expires presence', async () => {
+    let monotonicNow = 1_000;
+    let wallClockNow = Date.parse('2026-08-13T04:00:00.000Z');
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      companionLeases: {
+        monotonicNow: () => monotonicNow,
+        wallClockNow: () => wallClockNow,
+        heartbeatIntervalMs: 100,
+        leaseTtlMs: 300,
+      },
+    });
+    const instanceId = randomUUID();
+    const authHeaders = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(companionHello(instanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as {
+        leaseId: string;
+        negotiatedGuideProtocolVersion: string;
+        heartbeatIntervalMs: number;
+        leaseTtlMs: number;
+      };
+      expect(session).toMatchObject({
+        negotiatedGuideProtocolVersion: '1.5.0',
+        heartbeatIntervalMs: 100,
+        leaseTtlMs: 300,
+      });
+
+      const negotiatedGuide = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=blender&instanceId=${instanceId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'x-operatingline-companion-lease': session.leaseId,
+          },
+        },
+      );
+      await expect(negotiatedGuide.json()).resolves.toMatchObject({ protocolVersion: '1.5.0' });
+
+      const wrongLeaseGuide = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=blender&instanceId=${instanceId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'x-operatingline-companion-lease': randomUUID(),
+          },
+        },
+      );
+      expect(wrongLeaseGuide.status).toBe(409);
+
+      const report = {
+        ...companionReport(instanceId, 1),
+        protocolVersion: '1.5.0',
+        adapterId: 'blender',
+        hostVersion: '4.5.3',
+        observationGate: null,
+        artifactAttestation: null,
+      };
+      const accepted = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'x-operatingline-companion-lease': session.leaseId,
+        },
+        body: JSON.stringify(report),
+      });
+      expect(accepted.status).toBe(200);
+      await expect(accepted.json()).resolves.toEqual({ result: 'accepted' });
+
+      await expect(
+        fetch(`${runtime.baseUrl}/api/v1/companions`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        }).then((response) => response.json()),
+      ).resolves.toEqual({ companions: [report] });
+
+      monotonicNow += 100;
+      wallClockNow += 100;
+      const heartbeat = await fetch(`${runtime.baseUrl}/api/v1/companion/heartbeat`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          contractVersion: '1.0.0',
+          leaseId: session.leaseId,
+          adapterId: 'blender',
+          instanceId,
+          sequence: 1,
+        }),
+      });
+      expect(heartbeat.status).toBe(200);
+      await expect(heartbeat.json()).resolves.toMatchObject({
+        leaseId: session.leaseId,
+        sequence: 1,
+      });
+
+      monotonicNow += 301;
+      wallClockNow += 301;
+      await expect(
+        fetch(`${runtime.baseUrl}/api/v1/companions`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        }).then((response) => response.json()),
+      ).resolves.toEqual({ companions: [] });
+      const expired = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=blender&instanceId=${instanceId}`,
+        {
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'x-operatingline-companion-lease': session.leaseId,
+          },
+        },
+      );
+      expect(expired.status).toBe(409);
+      await expect(expired.json()).resolves.toMatchObject({ error: 'lease_not_current' });
+      const downgrade = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ ...report, reportId: randomUUID(), sequence: 2 }),
+      });
+      expect(downgrade.status).toBe(409);
+      await expect(downgrade.json()).resolves.toMatchObject({ error: 'lease_not_current' });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('rejects incompatible companion session capabilities and report identity drift', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
+    const instanceId = randomUUID();
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const incompatible = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...companionHello(instanceId),
+          supportedGuideProtocolVersions: ['9.0.0'],
+        }),
+      });
+      expect(incompatible.status).toBe(422);
+
+      const incompatibleCapabilities = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          ...companionHello(instanceId),
+          capabilities: {
+            ...companionHello(instanceId).capabilities,
+            execution: {
+              ...companionHello(instanceId).capabilities.execution,
+              rollbackModes: ['native_undo'],
+            },
+          },
+        }),
+      });
+      expect(incompatibleCapabilities.status).toBe(422);
+      await expect(incompatibleCapabilities.json()).resolves.toMatchObject({
+        error: 'capability_profile_mismatch',
+      });
+
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(companionHello(instanceId)),
+      });
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const driftedReport = {
+        ...companionReport(instanceId, 1),
+        protocolVersion: '1.5.0',
+        adapterId: 'blender',
+        hostVersion: '5.1.1',
+        observationGate: null,
+        artifactAttestation: null,
+      };
+      const drifted = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: { ...headers, 'x-operatingline-companion-lease': session.leaseId },
+        body: JSON.stringify(driftedReport),
+      });
+      expect(drifted.status).toBe(409);
+      await expect(drifted.json()).resolves.toMatchObject({
+        error: 'companion_session_identity_mismatch',
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('can disable bounded legacy companion compatibility', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      companionLeases: { allowLegacyCompanions: false },
+    });
+    const instanceId = randomUUID();
+    try {
+      const guide = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=fake-blender&instanceId=${instanceId}`,
+        { headers: { authorization: `Bearer ${accessToken}` } },
+      );
+      expect(guide.status).toBe(409);
+      const state = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(companionReport(instanceId, 1)),
+      });
+      expect(state.status).toBe(409);
     } finally {
       await runtime.stop();
     }
@@ -2181,6 +2457,30 @@ describe('OperatingLine runtime', () => {
 
       const restarted = await startRuntime({ databasePath, accessToken });
       try {
+        const beforePresence = await fetch(`${restarted.baseUrl}/api/v1/companions`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        await expect(beforePresence.json()).resolves.toEqual({ companions: [] });
+        const guideUrl = new URL('/api/v1/companion/guide', restarted.baseUrl);
+        guideUrl.searchParams.set('adapterId', report.adapterId);
+        guideUrl.searchParams.set('instanceId', report.instanceId);
+        const legacyPresence = await fetch(guideUrl, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        expect(legacyPresence.status).toBe(200);
+        const stillOffline = await fetch(`${restarted.baseUrl}/api/v1/companions`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        });
+        await expect(stillOffline.json()).resolves.toEqual({ companions: [] });
+        const observed = await fetch(`${restarted.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(report),
+        });
+        expect(observed.status).toBe(200);
         const response = await fetch(`${restarted.baseUrl}/api/v1/companions`, {
           headers: { authorization: `Bearer ${accessToken}` },
         });

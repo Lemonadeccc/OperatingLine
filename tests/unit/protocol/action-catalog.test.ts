@@ -143,6 +143,15 @@ describe('action catalog protocol', () => {
     );
   });
 
+  it('rejects version ranges that the runtime cannot evaluate', () => {
+    for (const range of ['^0.1.0', '>=0.1', '>=0.1.0 ||', '>=0.1.0  <0.2.0']) {
+      expect(
+        actionCatalogSchema.safeParse({ ...blenderActionCatalog, adapterVersionRange: range })
+          .success,
+      ).toBe(false);
+    }
+  });
+
   it('rejects primitive arguments that the Blender executor cannot realize', () => {
     const schemaFor = (actionName: string) => {
       const action = blenderActionCatalog.actions.find(

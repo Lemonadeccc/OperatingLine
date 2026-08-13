@@ -6,6 +6,7 @@ export * from './companion.js';
 export * from './companion-dialogue-run.js';
 export * from './companion-initial-plan-run.js';
 export * from './companion-replan-run.js';
+export * from './companion-session.js';
 export * from './diff.js';
 export * from './eval.js';
 export * from './eval-annotation.js';

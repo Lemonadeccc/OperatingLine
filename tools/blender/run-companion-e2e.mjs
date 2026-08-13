@@ -217,6 +217,9 @@ const runtime = await startRuntime({
 });
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
+const establishedLeaseIds = new Set();
+const leaseProtectedRequests = [];
+const heartbeatRequests = [];
 const proposalDecisions = [];
 const goalRequests = [];
 const goalResults = [];
@@ -235,16 +238,45 @@ const proxy = createServer(async (request, response) => {
     if (request.method === 'GET' && request.url?.startsWith('/api/v1/companion/guide')) {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
     }
+    const companionLeaseHeader = request.headers['x-operatingline-companion-lease'];
     const upstream = await fetch(new URL(request.url ?? '/', runtime.baseUrl), {
       method: request.method,
       headers: {
         accept: 'application/json',
         authorization: request.headers.authorization ?? '',
+        ...(typeof companionLeaseHeader === 'string'
+          ? { 'x-operatingline-companion-lease': companionLeaseHeader }
+          : {}),
         ...(body.length > 0 ? { 'content-type': 'application/json' } : {}),
       },
       body: body.length > 0 ? body : undefined,
     });
     const upstreamBody = Buffer.from(await upstream.arrayBuffer());
+    if (request.method === 'POST' && request.url === '/api/v1/companion/session') {
+      assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
+      const session = JSON.parse(upstreamBody.toString('utf8'));
+      assert.equal(typeof session.leaseId, 'string');
+      assert.ok(session.leaseId.length > 0);
+      establishedLeaseIds.add(session.leaseId);
+    }
+    if (request.method === 'POST' && request.url === '/api/v1/companion/heartbeat') {
+      const heartbeat = JSON.parse(body.toString('utf8'));
+      assert.ok(establishedLeaseIds.has(heartbeat.leaseId));
+      assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
+      const acknowledgement = JSON.parse(upstreamBody.toString('utf8'));
+      assert.equal(acknowledgement.leaseId, heartbeat.leaseId);
+      assert.equal(acknowledgement.sequence, heartbeat.sequence);
+      heartbeatRequests.push(heartbeat);
+    }
+    if (
+      (request.method === 'GET' && request.url?.startsWith('/api/v1/companion/guide')) ||
+      (request.method === 'POST' && request.url === '/api/v1/companion/state')
+    ) {
+      assert.equal(typeof companionLeaseHeader, 'string');
+      assert.ok(establishedLeaseIds.has(companionLeaseHeader));
+      assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
+      leaseProtectedRequests.push({ method: request.method, url: request.url });
+    }
     if (request.method === 'POST' && request.url === '/api/v1/companion/state') {
       const report = JSON.parse(body.toString('utf8'));
       reportsById.set(report.reportId, report);
@@ -535,6 +567,18 @@ try {
     );
   }
   assert.equal(mcpVisibleReportIds.size, reportsById.size);
+  assert.ok(establishedLeaseIds.size > 0);
+  assert.ok(heartbeatRequests.length > 0);
+  assert.ok(heartbeatRequests.every((heartbeat, index) => heartbeat.sequence === index + 1));
+  assert.equal(
+    leaseProtectedRequests.filter((request) => request.url === '/api/v1/companion/state').length,
+    reportsById.size,
+  );
+  assert.ok(
+    leaseProtectedRequests.some(
+      (request) => request.method === 'GET' && request.url.startsWith('/api/v1/companion/guide'),
+    ),
+  );
 
   const companionsResponse = await fetch(`${runtime.baseUrl}/api/v1/companions`, {
     headers: { authorization: `Bearer ${accessToken}` },

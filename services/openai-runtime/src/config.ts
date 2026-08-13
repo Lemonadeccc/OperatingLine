@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 
 export interface OpenAIRuntimeConfig {
   readonly accessToken: string;
+  readonly allowLegacyCompanions: boolean;
   readonly apiKey: string;
   readonly databasePath: string;
   readonly model: string;
@@ -33,6 +34,11 @@ export function loadOpenAIRuntimeConfig(
 
   return {
     accessToken: requiredValue(environment, 'OPERATINGLINE_ACCESS_TOKEN'),
+    allowLegacyCompanions: strictBoolean(
+      environment['OPERATINGLINE_ALLOW_LEGACY_COMPANIONS'],
+      'OPERATINGLINE_ALLOW_LEGACY_COMPANIONS',
+      true,
+    ),
     apiKey: requiredValue(environment, 'OPENAI_API_KEY'),
     databasePath: resolve(
       environment['OPERATINGLINE_DATABASE_PATH']?.trim() || '.data/operating-line-openai.db',
@@ -40,4 +46,17 @@ export function loadOpenAIRuntimeConfig(
     model: requiredValue(environment, 'OPERATINGLINE_OPENAI_MODEL'),
     port,
   };
+}
+
+function strictBoolean(value: string | undefined, name: string, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  throw new Error(`${name} must be exactly true or false`);
 }

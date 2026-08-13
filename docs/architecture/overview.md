@@ -231,7 +231,12 @@ Provider SSE，只短轮询 durable Run 状态；任何成功重规划最多进�
 head。只有已接受 head 返回完整 Plan 与内容 SHA-256；Blender 可在无 receipt、无待审 Proposal/活动 Run
 时切换到它，切换只替换 Session，不执行 action 或修改场景。
 
-列表接口表示“最新已知状态”，不等同于实时在线证明；当前版本还没有 heartbeat/TTL。
+Companion Session `1.0.0` 把在线 presence 与耐久状态快照分离：列表、规划和重规划上下文只暴露仍在
+15 秒 TTL 内的最新快照；5 秒心跳续订租约，过期只从在线视图移除，不删除审计状态。新版 Companion
+还在首次投递前协商 Guide 协议、ActionCatalog 与 `AdapterCapabilities`；Phase 0 旧客户端只有由合法
+状态报告续订、且可关闭的有界隐式 presence。完整协议与兼容边界见
+[ADR 0040](../adr/0040-companion-session-leases.md)。该 presence 证明后台传输近期可达，不证明宿主
+主线程或动作执行已就绪；lease 当前只约束 Guide/state 通道，不替代全局 bearer 和端点 payload 校验。
 Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变量：
 
 - 计划投递本身不执行 action，也不删除宿主数据。

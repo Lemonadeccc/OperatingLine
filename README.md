@@ -643,8 +643,14 @@ ActionCatalog 1.3.0 Human Eval 套件的不可变哈希输入保留。
 计划安装、Start/Next/Back 和步骤观察可以通过
 `operatingline.companions.list` 或 `GET /api/v1/companions` 查询。所有 `/mcp` 和 `/api/`
 请求都需要 `Authorization: Bearer <token>`；服务与 Blender Companion 都拒绝非回环地址。
-当前查询返回的是每个 `adapterId + instanceId` 的最新已知快照，不是带心跳或超时判定的在线
-状态；关闭 Blender 后，最后一条快照仍会保留，直到未来引入租约/心跳机制。
+当前查询只返回有有效 presence 的每个 `adapterId + instanceId` 最新快照。新版 Companion 在首次
+Guide/状态通信前协商 ActionCatalog、Guide 协议和能力画像，并以 5 秒心跳续订 15 秒运行时租约；
+关闭 Blender 或 Runtime 失联后，在线列表会在 TTL 后移除该实例，但数据库中的最后快照仍作为审计
+记录保留。Phase 0 默认只给旧 Companion 的合法状态报告建立同 TTL 的隐式 presence（Guide 轮询不
+会复活历史快照，且已协商实例不能在租约过期后降级），严格部署
+可设 `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS=false` 关闭兼容路径。这里的 presence 只证明后台
+transport 近期可达，不等同于 Blender 主线程执行就绪或全 API 授权；详见
+[ADR 0040](docs/adr/0040-companion-session-leases.md)。
 
 ## Blender 内交互
 
@@ -901,7 +907,8 @@ Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内
 2. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的
    Suite、Run、annotation 和 adjudication 明确 `trainingUse: not_authorized`，也不应未经审核直接分享。
-3. 增加 Companion 心跳、租约与能力协商，再使用同一协议接入第二个开源宿主。
+3. 使用已完成的 Companion Session `1.0.0` 心跳、租约与能力协商协议接入第二个开源宿主，并在下一
+   主版本移除 Phase 0 无 lease 兼容路径。
 4. 把已完成的 Changesets Phase 0 版本 PR 自动化推进为真实发布：为首批公开包补齐可消费构建、声明、
    精确 tarball allowlist 和安装测试；保护 `main`、建立 npm scope/package ownership 与受保护发布
    Environment，并通过 Trusted Publisher 启用最小权限发布。当前所有包仍为 private，发布、tag、

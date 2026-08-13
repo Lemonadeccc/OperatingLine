@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "adapterId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "instanceId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "companionVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "hostVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "supportedGuideProtocolVersions": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+      },
+      "uniqueItems": true
+    },
+    "catalogVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "presentation": {
+          "type": "object",
+          "properties": {
+            "taskTree": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "viewportOverlay": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "interactiveAnchors": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            }
+          },
+          "required": [
+            "taskTree",
+            "viewportOverlay",
+            "interactiveAnchors"
+          ],
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "inspect": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "invokeActions": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "screenshot": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "rollbackModes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "native_undo",
+                  "checkpoint_restore",
+                  "compensating_action",
+                  "unsupported"
+                ]
+              }
+            }
+          },
+          "required": [
+            "inspect",
+            "invokeActions",
+            "screenshot",
+            "rollbackModes"
+          ],
+          "additionalProperties": false
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "dispatch": {
+              "type": "string",
+              "enum": [
+                "main_thread_serial",
+                "host_managed",
+                "external_process"
+              ]
+            },
+            "network": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            },
+            "persistentProjectState": {
+              "type": "string",
+              "enum": [
+                "native",
+                "emulated",
+                "unsupported"
+              ]
+            }
+          },
+          "required": [
+            "dispatch",
+            "network",
+            "persistentProjectState"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "presentation",
+        "execution",
+        "runtime"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contractVersion",
+    "adapterId",
+    "instanceId",
+    "companionVersion",
+    "hostVersion",
+    "supportedGuideProtocolVersions",
+    "catalogVersion",
+    "capabilities"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/companion-session-hello-request.json"
+}

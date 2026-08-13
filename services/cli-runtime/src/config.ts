@@ -4,6 +4,7 @@ const maximumPlannerProviderTimeoutMs = 120_000;
 
 export interface CliRuntimeConfig {
   readonly accessToken: string;
+  readonly allowLegacyCompanions: boolean;
   readonly databasePath: string;
   readonly port: number;
   readonly plannerProviderTimeoutMs: number;
@@ -48,6 +49,11 @@ export function loadCliRuntimeConfig(
 
   return {
     accessToken,
+    allowLegacyCompanions: strictBoolean(
+      environment['OPERATINGLINE_ALLOW_LEGACY_COMPANIONS'],
+      'OPERATINGLINE_ALLOW_LEGACY_COMPANIONS',
+      true,
+    ),
     databasePath: resolve(
       environment['OPERATINGLINE_DATABASE_PATH']?.trim() || '.data/operating-line-cli.db',
     ),
@@ -63,6 +69,19 @@ export function loadCliRuntimeConfig(
       maximumBudgetUsd,
     },
   };
+}
+
+function strictBoolean(value: string | undefined, name: string, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  if (value === 'false') {
+    return false;
+  }
+  throw new Error(`${name} must be exactly true or false`);
 }
 
 function requiredAccessToken(environment: Readonly<Record<string, string | undefined>>): string {

@@ -26,6 +26,8 @@ pnpm dev:openai
 
 - `OPERATINGLINE_DATABASE_PATH`：默认 `.data/operating-line-openai.db`。
 - `OPERATINGLINE_PORT`：默认 `0`，由系统选择空闲回环端口。
+- `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS`：默认 `true`；设为严格的 `false` 后，拒绝未先建立可续租
+  Session 的旧版 Companion。只接受精确值 `true` 或 `false`。
 
 ## 调用顺序
 

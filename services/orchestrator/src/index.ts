@@ -13,12 +13,14 @@ import {
   adapterStatusSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunStatusRequestSchema,
+  companionHeartbeatRequestSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
   companionInitialPlanRunCreateRequestSchema,
   companionInitialPlanRunStatusRequestSchema,
   companionReplanRunCreateRequestSchema,
   companionReplanRunStatusRequestSchema,
+  companionSessionHelloRequestSchema,
   companionStateReportSchema,
   evalExportRequestSchema,
   guideGoalPromptRequestSchema,
@@ -75,6 +77,11 @@ import {
   createCompanionReplanRunCoordinator,
   type CompanionReplanRunCoordinator,
 } from './companion-replan-run.js';
+import {
+  CompanionLeaseError,
+  createCompanionLeaseManager,
+  type CompanionLeaseManagerOptions,
+} from './companion-leases.js';
 import { operatingLineMcpInstructions } from './mcp-instructions.js';
 import {
   computePlanContentSha256,
@@ -121,6 +128,7 @@ export interface StartRuntimeOptions {
   actionCatalogs?: readonly ActionCatalog[];
   plannerProviders?: readonly PlannerProvider[];
   plannerProviderTimeoutMs?: number;
+  companionLeases?: CompanionLeaseManagerOptions;
   port?: number;
 }
 
@@ -163,6 +171,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ...(options.actionCatalogs ?? []),
     ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
   ]);
+  const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
   const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
   const database = openOperatingLineDatabase(options.databasePath);
   const guideRevisionRequestService = createGuideRevisionRequestService({
@@ -245,10 +254,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       })),
     });
 
-    const listCompanionStates = (): CompanionStateReport[] =>
+    const listKnownCompanionStates = (): CompanionStateReport[] =>
       database
         .listLatestCompanionStates()
         .map((report) => companionStateReportSchema.parse(report));
+    const listCompanionStates = (): CompanionStateReport[] =>
+      listKnownCompanionStates().filter((report) =>
+        companionLeaseManager.hasActivePresence(report.adapterId, report.instanceId),
+      );
 
     const getPlanningContext = (
       request: ReturnType<typeof planningContextRequestSchema.parse>,
@@ -688,7 +701,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       server.registerTool(
         'operatingline.companions.list',
         {
-          description: 'List the latest known state reported by each host companion.',
+          description: 'List the latest state snapshot for each actively present host companion.',
           inputSchema: z.strictObject({}),
         },
         async () => ({
@@ -1213,6 +1226,47 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
+    runtimeApp.post('/api/v1/companion/session', async (request, reply) => {
+      const parsedRequest = companionSessionHelloRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_companion_session',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        const catalog = actionCatalogRegistry.get({
+          targetAdapterId: parsedRequest.data.adapterId,
+          catalogVersion: parsedRequest.data.catalogVersion,
+        });
+        return companionLeaseManager.establish(parsedRequest.data, catalog);
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        return reply.code(422).send({
+          error: 'companion_session_rejected',
+          message: error instanceof Error ? error.message : 'Companion session was rejected',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/companion/heartbeat', async (request, reply) => {
+      const parsedRequest = companionHeartbeatRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_companion_heartbeat',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return companionLeaseManager.heartbeat(parsedRequest.data);
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
     runtimeApp.post('/api/v1/companion/goal-request', async (request, reply) => {
       const parsedRequest = guideGoalRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -1609,6 +1663,29 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         knownPlanContentSha256,
         knownProposalId,
       } = parsedRequest.data;
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (leaseHeader !== undefined) {
+        if (typeof leaseHeader !== 'string') {
+          return reply.code(400).send({ error: 'invalid_companion_lease' });
+        }
+        try {
+          companionLeaseManager.authorize(leaseHeader, adapterId, instanceId);
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      } else {
+        try {
+          companionLeaseManager.authorizeLegacy(adapterId, instanceId);
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      }
       const planAdapterId = activePlan?.steps.find((step) => step.action !== null)?.action
         ?.adapterId;
       const activePlanContentSha256 =
@@ -1678,9 +1755,57 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (!parsedReport.success) {
         return reply.code(400).send({ error: 'invalid_report', issues: parsedReport.error.issues });
       }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      let legacyReport = false;
+      if (leaseHeader !== undefined) {
+        if (typeof leaseHeader !== 'string') {
+          return reply.code(400).send({ error: 'invalid_companion_lease' });
+        }
+        try {
+          const session = companionLeaseManager.authorize(
+            leaseHeader,
+            parsedReport.data.adapterId,
+            parsedReport.data.instanceId,
+          );
+          if (
+            session.hello.companionVersion !== parsedReport.data.companionVersion ||
+            session.hello.hostVersion !== parsedReport.data.hostVersion ||
+            session.lease.negotiatedGuideProtocolVersion !== parsedReport.data.protocolVersion
+          ) {
+            return reply.code(409).send({
+              error: 'companion_session_identity_mismatch',
+              message: 'State report identity or protocol differs from its negotiated session',
+            });
+          }
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      } else {
+        try {
+          companionLeaseManager.authorizeLegacy(
+            parsedReport.data.adapterId,
+            parsedReport.data.instanceId,
+          );
+          legacyReport = true;
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      }
       const result = database.recordCompanionState(parsedReport.data);
       if (result === 'conflict') {
         return reply.code(409).send({ result });
+      }
+      if (legacyReport && (result === 'accepted' || result === 'duplicate')) {
+        companionLeaseManager.observeLegacy(
+          parsedReport.data.adapterId,
+          parsedReport.data.instanceId,
+        );
       }
       return { result };
     });
@@ -1744,6 +1869,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 }
 
 export { createActionCatalogRegistry };
+export {
+  CompanionLeaseError,
+  companionHeartbeatIntervalMs,
+  companionLeaseTtlMs,
+  createCompanionLeaseManager,
+  type ActiveCompanionSession,
+  type CompanionLeaseErrorCode,
+  type CompanionLeaseManager,
+  type CompanionLeaseManagerOptions,
+} from './companion-leases.js';
 export {
   canonicalizeEvalContent,
   computeEvalContentSha256,

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
-import { catalogVersionSchema } from './version.js';
+import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const interactionTargetKindSchema = z.enum([
   'workspace',
@@ -86,8 +86,8 @@ export const interactionCatalogSchema = z.strictObject({
   catalogVersion: catalogVersionSchema,
   adapterId: z.string().min(1),
   actionCatalogVersion: catalogVersionSchema,
-  adapterVersionRange: z.string().min(1),
-  hostVersionRange: z.string().min(1),
+  adapterVersionRange: stableVersionRangeSchema,
+  hostVersionRange: stableVersionRangeSchema,
   title: z.string().min(1),
   description: z.string().min(1),
   recipes: z.array(interactionRecipeSchema).min(1),

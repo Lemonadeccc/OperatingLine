@@ -5,6 +5,7 @@ from queue import Empty
 from pathlib import Path
 from types import ModuleType
 import sys
+import threading
 import time
 import unittest
 from urllib.error import HTTPError
@@ -101,6 +102,155 @@ class GoalRequestPayloadTests(unittest.TestCase):
 
 
 class GoalRequestTransportTests(unittest.TestCase):
+    def _session_response(self, path, body):
+        if path == "/api/v1/companion/session":
+            self.assertEqual(body["contractVersion"], "1.0.0")
+            self.assertEqual(body["adapterId"], "blender")
+            self.assertEqual(
+                body["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION
+            )
+            self.assertEqual(
+                body["supportedGuideProtocolVersions"],
+                sorted(domain.SUPPORTED_PROTOCOL_VERSIONS),
+            )
+            return {
+                "contractVersion": "1.0.0",
+                "leaseId": str(uuid.uuid4()),
+                "negotiatedGuideProtocolVersion": domain.PROTOCOL_VERSION,
+                "catalogVersion": body["catalogVersion"],
+                "capabilities": body["capabilities"],
+                "heartbeatIntervalMs": 60_000,
+                "leaseTtlMs": 120_000,
+                "expiresAt": "2099-01-01T00:00:00Z",
+            }
+        if path == "/api/v1/companion/heartbeat":
+            return {
+                "contractVersion": "1.0.0",
+                "leaseId": body["leaseId"],
+                "sequence": body["sequence"],
+                "expiresAt": "2099-01-01T00:00:00Z",
+            }
+        return None
+
+    def test_session_and_heartbeat_publish_atomic_immutable_snapshots(self) -> None:
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+        )
+        heartbeat_observations = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                self.assertEqual(
+                    body["capabilities"]["execution"]["rollbackModes"],
+                    ["compensating_action", "native_undo"],
+                )
+                response = self._session_response(path, body)
+                # Server timestamps are descriptive wall-clock values and may
+                # appear old to a client whose clock is ahead.
+                response["expiresAt"] = "2000-01-01T00:00:00Z"
+                return response
+            if path == "/api/v1/companion/heartbeat":
+                current = transport.session_snapshot
+                heartbeat_observations.append(
+                    (current.heartbeat_sequence, current.expires_at)
+                )
+                return {
+                    "contractVersion": "1.0.0",
+                    "leaseId": body["leaseId"],
+                    "sequence": body["sequence"],
+                    "expiresAt": "2000-01-01T00:00:01+00:00",
+                }
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._establish_session()
+        established = transport.session_snapshot
+        self.assertIsNotNone(established)
+        self.assertEqual(established.heartbeat_sequence, 0)
+
+        transport._send_heartbeat()
+        renewed = transport.session_snapshot
+        self.assertIsNot(established, renewed)
+        self.assertEqual(heartbeat_observations, [(0, "2000-01-01T00:00:00Z")])
+        self.assertEqual(established.heartbeat_sequence, 0)
+        self.assertEqual(renewed.heartbeat_sequence, 1)
+        self.assertEqual(renewed.expires_at, "2000-01-01T00:00:01+00:00")
+
+        transport._clear_session()
+        self.assertIsNone(transport.session_snapshot)
+        self.assertEqual(established.heartbeat_sequence, 0)
+
+    def test_stop_flush_never_reestablishes_a_cleared_or_existing_session(self) -> None:
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+            poll_interval=0.01,
+        )
+        session_requests = []
+        state_started = threading.Event()
+        release_state = threading.Event()
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                session_requests.append(dict(body))
+                return self._session_response(path, body)
+            if path in {"/api/v1/replan/providers", "/api/v1/initial-plan/providers"}:
+                return {
+                    "contractVersion": "1.0.0",
+                    "generationAvailable": False,
+                    "providers": [],
+                }
+            if path == "/api/v1/companion/state":
+                state_started.set()
+                release_state.wait(timeout=1.0)
+                return {"result": "accepted"}
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport._establish_session()
+        transport.send_report({"sequence": 1})
+        transport.start()
+        self.assertTrue(state_started.wait(timeout=1.0))
+        transport.stop(flush_timeout=0.5)
+        self.assertIsNotNone(transport.session_snapshot)
+        release_state.set()
+        self.assertTrue(transport.wait_stopped(1.0))
+        self.assertEqual(len(session_requests), 1)
+        self.assertIsNone(transport.session_snapshot)
+
+    def test_failed_session_establishment_uses_bounded_backoff(self) -> None:
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+            poll_interval=0.2,
+        )
+        attempts = []
+
+        def request_json(_method, path, _body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                attempts.append(time.monotonic())
+                raise OSError("runtime unavailable")
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport.start()
+        time.sleep(0.48)
+        transport.stop(flush_timeout=0.0)
+        self.assertTrue(transport.wait_stopped(1.0))
+        self.assertGreaterEqual(len(attempts), 2)
+        self.assertLessEqual(len(attempts), 3)
+        self.assertTrue(
+            all(
+                later - earlier >= 0.17
+                for earlier, later in zip(attempts, attempts[1:])
+            )
+        )
+
     def test_dialogue_run_uses_explicit_discovery_and_durable_short_polling(self) -> None:
         instance_id = str(uuid.uuid4())
         dialogue_id = str(uuid.uuid4())
@@ -134,6 +284,9 @@ class GoalRequestTransportTests(unittest.TestCase):
 
         def request_json(method, path, body=None, **_kwargs):
             calls.append((method, path, body))
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
             if path == "/api/v1/replan/providers":
                 return {
                     "contractVersion": "1.0.0",
@@ -226,6 +379,9 @@ class GoalRequestTransportTests(unittest.TestCase):
 
         def request_json(method, path, body=None, **_kwargs):
             calls.append((method, path, body))
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
             if path == "/api/v1/replan/providers":
                 return {
                     "contractVersion": "1.0.0",
@@ -297,6 +453,9 @@ class GoalRequestTransportTests(unittest.TestCase):
         goal_attempts = []
 
         def request_json(method, path, body=None, **_kwargs):
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
             if path == "/api/v1/replan/providers":
                 return {
                     "contractVersion": "1.0.0",
@@ -362,6 +521,9 @@ class GoalRequestTransportTests(unittest.TestCase):
         polls = []
 
         def request_json(method, path, body=None, **_kwargs):
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
             if path == "/api/v1/replan/providers":
                 return {
                     "contractVersion": "1.0.0",
@@ -412,6 +574,9 @@ class GoalRequestTransportTests(unittest.TestCase):
         polls = []
 
         def request_json(method, path, body=None, **_kwargs):
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
             if path == "/api/v1/replan/providers":
                 return {
                     "contractVersion": "1.0.0",

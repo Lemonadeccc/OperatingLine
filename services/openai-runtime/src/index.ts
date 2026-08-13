@@ -23,6 +23,7 @@ const runtime = await startRuntime({
   adapters: [],
   actionCatalogs: blenderActionCatalogs,
   plannerProviders: [plannerProvider],
+  companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,
 });
 

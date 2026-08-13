@@ -12,6 +12,7 @@ describe('local AI client runtime configuration', () => {
   it('uses bounded defaults and does not require provider API keys', () => {
     expect(loadCliRuntimeConfig(requiredEnvironment)).toEqual({
       accessToken: 'local-access-token-value',
+      allowLegacyCompanions: true,
       databasePath: resolve('.data/operating-line-cli.db'),
       port: 0,
       plannerProviderTimeoutMs: 120_000,
@@ -41,9 +42,11 @@ describe('local AI client runtime configuration', () => {
         OPERATINGLINE_CLAUDE_BIN: '/opt/claude/bin/claude',
         OPERATINGLINE_CLAUDE_MODEL: 'claude-explicit',
         OPERATINGLINE_CLAUDE_MAX_BUDGET_USD: '0.75',
+        OPERATINGLINE_ALLOW_LEGACY_COMPANIONS: 'false',
       }),
     ).toEqual({
       accessToken: 'local-access-token-value',
+      allowLegacyCompanions: false,
       databasePath: resolve('tmp/clients.db'),
       port: 43_123,
       plannerProviderTimeoutMs: 90_000,
@@ -84,5 +87,13 @@ describe('local AI client runtime configuration', () => {
         OPERATINGLINE_CODEX_BIN: ' codex ',
       }),
     ).toThrow('executable');
+    for (const value of ['TRUE', 'False', ' true ', '1', '']) {
+      expect(() =>
+        loadCliRuntimeConfig({
+          ...requiredEnvironment,
+          OPERATINGLINE_ALLOW_LEGACY_COMPANIONS: value,
+        }),
+      ).toThrow('OPERATINGLINE_ALLOW_LEGACY_COMPANIONS');
+    }
   });
 });

@@ -39,6 +39,9 @@ from operating_line_extension.operating_line.infrastructure import (  # noqa: E4
     remove_factory_startup_objects,
     validate_companion_url,
 )
+from operating_line_extension.operating_line.infrastructure.companion_transport import (  # noqa: E402
+    CompanionSessionSnapshot,
+)
 from operating_line_extension.operating_line.infrastructure.native_history import (  # noqa: E402
     NATIVE_HISTORY_MARKER_KEY,
     _load_post,
@@ -85,7 +88,9 @@ from operating_line_extension.operating_line.presentation.revision_workspace imp
     _wrap_history_message,
 )
 from operating_line_extension.operating_line.domain import (  # noqa: E402
+    PROTOCOL_VERSION,
     RESOURCE_PATH,
+    SUPPORTED_PROTOCOL_VERSIONS,
     executable_steps,
     load_task_tree,
     load_task_tree_data,
@@ -109,6 +114,13 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.mode
     validate_icosphere,
     validate_torus,
 )
+
+
+class FakeSessionView:
+    negotiated_guide_protocol_version = PROTOCOL_VERSION
+
+
+FAKE_SESSION_VIEW = FakeSessionView()
 
 
 with RESOURCE_PATH.open(encoding="utf-8") as resource:
@@ -2025,6 +2037,14 @@ def assert_companion_and_plan_semantics() -> None:
         "proposal": None,
         "proposalPlanContentSha256": None,
     }
+    delivery_transport._session_snapshot = CompanionSessionSnapshot(
+        lease_id=str(uuid.uuid4()),
+        negotiated_guide_protocol_version="1.1.0",
+        heartbeat_interval_seconds=60.0,
+        expires_at="2099-01-01T00:00:00Z",
+        next_heartbeat_at=time.monotonic() + 60.0,
+        heartbeat_sequence=0,
+    )
     delivery_transport._poll()
     assert delivery_transport.incoming.get_nowait() == {
         "kind": "plan",
@@ -2063,6 +2083,8 @@ def assert_companion_and_plan_semantics() -> None:
     goal_requests: list[dict] = []
     proposal_decisions: list[dict] = []
     replan_runs: list[dict] = []
+    companion_sessions: list[dict] = []
+    companion_heartbeats: list[dict] = []
     replan_post_attempts: list[dict] = []
     invoked_generation_ids: set[str] = set()
     replan_run_polls = [0]
@@ -2127,6 +2149,8 @@ def assert_companion_and_plan_semantics() -> None:
         def do_GET(self):
             assert self.headers.get("Authorization") == f"Bearer {token}"
             parsed_path = urlsplit(self.path)
+            if parsed_path.path == "/api/v1/companion/guide":
+                assert self.headers.get("x-operatingline-companion-lease") is not None
             if parsed_path.path == "/redirect":
                 self.send_response(302)
                 self.send_header("Location", "http://192.0.2.1/credential-leak")
@@ -2256,7 +2280,36 @@ def assert_companion_and_plan_semantics() -> None:
             assert self.headers.get("Authorization") == f"Bearer {token}"
             length = int(self.headers["Content-Length"])
             payload = json.loads(self.rfile.read(length))
-            if urlsplit(self.path).path == "/api/v1/companion/goal-request":
+            request_path = urlsplit(self.path).path
+            if request_path == "/api/v1/companion/session":
+                companion_sessions.append(payload)
+                self._reply(
+                    {
+                        "contractVersion": "1.0.0",
+                        "leaseId": str(uuid.uuid4()),
+                        "negotiatedGuideProtocolVersion": "1.1.0",
+                        "catalogVersion": ACTION_CATALOG["catalogVersion"],
+                        "capabilities": payload["capabilities"],
+                        "heartbeatIntervalMs": 100,
+                        "leaseTtlMs": 1000,
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                    }
+                )
+                return
+            if request_path == "/api/v1/companion/heartbeat":
+                companion_heartbeats.append(payload)
+                self._reply(
+                    {
+                        "contractVersion": "1.0.0",
+                        "leaseId": payload["leaseId"],
+                        "sequence": payload["sequence"],
+                        "expiresAt": "2099-01-01T00:00:00Z",
+                    }
+                )
+                return
+            if request_path == "/api/v1/companion/state":
+                assert self.headers.get("x-operatingline-companion-lease") is not None
+            if request_path == "/api/v1/companion/goal-request":
                 goal_requests.append(payload)
                 self._reply(
                     {
@@ -2265,7 +2318,7 @@ def assert_companion_and_plan_semantics() -> None:
                     }
                 )
                 return
-            if urlsplit(self.path).path == "/api/v1/companion/revision-request":
+            if request_path == "/api/v1/companion/revision-request":
                 revision_requests.append(payload)
                 self._reply(
                     {
@@ -2274,7 +2327,7 @@ def assert_companion_and_plan_semantics() -> None:
                     }
                 )
                 return
-            if urlsplit(self.path).path == "/api/v1/companion/replan-run":
+            if request_path == "/api/v1/companion/replan-run":
                 replan_post_attempts.append(payload)
                 if reject_replan_runs[0]:
                     self._reply(
@@ -2319,7 +2372,7 @@ def assert_companion_and_plan_semantics() -> None:
                     }
                 )
                 return
-            if urlsplit(self.path).path == "/api/v1/companion/proposal-decision":
+            if request_path == "/api/v1/companion/proposal-decision":
                 proposal_decisions.append(payload)
                 self._reply({"result": "accepted"})
                 return
@@ -2367,8 +2420,8 @@ def assert_companion_and_plan_semantics() -> None:
             known_plan_content_sha256=session.plan_content_sha256,
         )
         companion._transport = transport
+        companion.status = "Connecting"
         transport.start()
-        companion.report("connected")
         deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
             companion.pump()
@@ -2398,6 +2451,41 @@ def assert_companion_and_plan_semantics() -> None:
         ]
         assert all(query["adapterId"] == ["blender"] for query in requests)
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
+        assert companion_sessions
+        assert companion_sessions[0] == {
+            "contractVersion": "1.0.0",
+            "adapterId": "blender",
+            "instanceId": companion.instance_id,
+            "companionVersion": "0.1.0",
+            "hostVersion": "unknown",
+            "supportedGuideProtocolVersions": sorted(SUPPORTED_PROTOCOL_VERSIONS),
+            "catalogVersion": ACTION_CATALOG["catalogVersion"],
+            "capabilities": {
+                "presentation": {
+                    "taskTree": "native",
+                    "viewportOverlay": "native",
+                    "interactiveAnchors": "emulated",
+                },
+                "execution": {
+                    "inspect": "native",
+                    "invokeActions": "native",
+                    "screenshot": "native",
+                    "rollbackModes": ["compensating_action", "native_undo"],
+                },
+                "runtime": {
+                    "dispatch": "main_thread_serial",
+                    "network": "native",
+                    "persistentProjectState": "native",
+                },
+            },
+        }
+        heartbeat_deadline = time.monotonic() + 1.0
+        while time.monotonic() < heartbeat_deadline and not companion_heartbeats:
+            time.sleep(0.01)
+        assert companion_heartbeats
+        assert companion_heartbeats[0]["adapterId"] == "blender"
+        assert companion_heartbeats[0]["instanceId"] == companion.instance_id
+        assert companion_heartbeats[0]["sequence"] == 1
         assert server_thread.ident != main_thread_id
 
         # Provider discovery never makes a default choice. Unavailable choices
@@ -3128,6 +3216,7 @@ def assert_companion_and_plan_semantics() -> None:
 
         class BoundedTransport:
             running = True
+            session_snapshot = FAKE_SESSION_VIEW
 
             def __init__(self, proposal):
                 self.incoming = Queue()
@@ -3276,6 +3365,7 @@ def assert_companion_and_plan_semantics() -> None:
 
         class DriftTransport:
             running = True
+            session_snapshot = FAKE_SESSION_VIEW
 
             def send_report(self, _report):
                 pass
@@ -3369,6 +3459,7 @@ def assert_companion_and_plan_semantics() -> None:
 
         class LegacyTransport:
             running = True
+            session_snapshot = FAKE_SESSION_VIEW
 
             def decide_proposal(self, proposal_id, decision):
                 legacy_decisions.append((proposal_id, decision))
@@ -3464,7 +3555,7 @@ def assert_companion_and_plan_semantics() -> None:
         transitions = [report["transition"] for report in reports]
         assert transitions[:2] == ["connected", "plan_loaded"]
         report = reports[-1]
-        assert set(report) == {
+        expected_report_fields = {
             "protocolVersion",
             "reportId",
             "sequence",
@@ -3481,11 +3572,14 @@ def assert_companion_and_plan_semantics() -> None:
             "transition",
             "stepId",
             "observations",
-            "observationGate",
-            "artifactAttestation",
             "error",
             "occurredAt",
         }
+        if report["protocolVersion"] in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
+            expected_report_fields.add("observationGate")
+        if report["protocolVersion"] == "1.5.0":
+            expected_report_fields.add("artifactAttestation")
+        assert set(report) == expected_report_fields
         uuid.UUID(report["reportId"])
         assert report["plan"] == {
             "id": "live-snowman",
@@ -3495,10 +3589,11 @@ def assert_companion_and_plan_semantics() -> None:
         assert len(report["planContentSha256"]) == 64
         assert report["executionId"] is None
         assert report["phase"] == "ready" and report["error"] is None
-        assert report["artifactAttestation"] is None
+        assert report.get("artifactAttestation") is None
 
         # A stale/unknown acknowledgement is an error and cannot advance the
-        # delivery watermark. Once accepted, the same pending report can flush.
+        # delivery watermark. Once accepted, the same pending report flushes
+        # after a fresh session is negotiated while the transport is running.
         post_result[0] = "stale"
         rejected_transport = CompanionTransport(
             runtime_url,
@@ -3523,9 +3618,15 @@ def assert_companion_and_plan_semantics() -> None:
             time.sleep(0.01)
         assert saw_rejection and rejected_transport.last_delivered_sequence == 0
         post_result[0] = "accepted"
+        recovery_deadline = time.monotonic() + 3.0
+        while (
+            time.monotonic() < recovery_deadline
+            and rejected_transport.last_delivered_sequence != 99
+        ):
+            time.sleep(0.01)
+        assert rejected_transport.last_delivered_sequence == 99
         rejected_transport.stop()
         assert rejected_transport.wait_stopped(2.0)
-        assert rejected_transport.last_delivered_sequence == 99
 
         # Reconnecting while a goal-linked proposal awaits the human must keep
         # the exact goal/proposal correlation and must not manufacture Reject.
@@ -3746,6 +3847,7 @@ def assert_companion_and_plan_semantics() -> None:
 
     class BranchTransport:
         running = True
+        session_snapshot = FAKE_SESSION_VIEW
 
         def __init__(self):
             self.incoming = Queue()
@@ -3968,10 +4070,38 @@ def assert_companion_and_plan_semantics() -> None:
     companion.install_plan(deepcopy(BUNDLED_PLAN))
     assert operating_line.get_session().plan_id == BUNDLED_PLAN["id"]
 
+    class AtomicSessionView:
+        negotiated_guide_protocol_version = "1.4.0"
+
+    class InterleavingTransport:
+        running = True
+
+        def __init__(self):
+            self.snapshot_reads = 0
+            self.reports = []
+
+        @property
+        def session_snapshot(self):
+            self.snapshot_reads += 1
+            if self.snapshot_reads > 1:
+                raise AssertionError("Controller reread a mutable session view")
+            return AtomicSessionView()
+
+        def send_report(self, report):
+            self.reports.append(report)
+
+    atomic_controller = CompanionController()
+    atomic_transport = InterleavingTransport()
+    atomic_controller._transport = atomic_transport
+    atomic_controller.report("connected")
+    assert atomic_transport.snapshot_reads == 1
+    assert atomic_transport.reports[-1]["protocolVersion"] == "1.4.0"
+
     class IdentityGuardTransport:
         def __init__(self):
             self.incoming = Queue()
             self.running = False
+            self.session_snapshot = None
             self.accepted_plans = []
             self.proposal_decisions = []
             self.reports = []
@@ -4654,6 +4784,7 @@ def assert_dialogue_proposal_round_trip() -> None:
 
     class DialogueTransport:
         running = True
+        session_snapshot = FAKE_SESSION_VIEW
 
         def __init__(self):
             self.incoming = Queue()
@@ -4806,6 +4937,7 @@ def assert_dialogue_proposal_first_failure_promotes_review() -> None:
 
     class DialogueRaceTransport:
         running = True
+        session_snapshot = FAKE_SESSION_VIEW
 
         def __init__(self):
             self.incoming = Queue()
@@ -5078,6 +5210,7 @@ def main() -> None:
     # the accepted session/scene untouched until the linked proposal is accepted.
     class GoalFakeTransport:
         running = True
+        session_snapshot = FAKE_SESSION_VIEW
 
         def __init__(self):
             self.incoming = Queue()

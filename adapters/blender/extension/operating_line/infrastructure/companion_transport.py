@@ -6,6 +6,7 @@ plain JSON-compatible messages with the main-thread companion controller.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import ipaddress
 import json
@@ -20,7 +21,11 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 import uuid
 
-from ..domain import PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS
+from ..domain import (
+    BLENDER_ACTION_CATALOG_VERSION,
+    PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+)
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 REPLAN_RUN_STATUSES = frozenset(
@@ -54,6 +59,37 @@ TERMINAL_DIALOGUE_RUN_STATUSES = DIALOGUE_RUN_STATUSES - {
     "replanning",
 }
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+COMPANION_SESSION_CONTRACT_VERSION = "1.0.0"
+BLENDER_ADAPTER_CAPABILITIES = {
+    "presentation": {
+        "taskTree": "native",
+        "viewportOverlay": "native",
+        "interactiveAnchors": "emulated",
+    },
+    "execution": {
+        "inspect": "native",
+        "invokeActions": "native",
+        "screenshot": "native",
+        "rollbackModes": ["compensating_action", "native_undo"],
+    },
+    "runtime": {
+        "dispatch": "main_thread_serial",
+        "network": "native",
+        "persistentProjectState": "native",
+    },
+}
+
+
+@dataclass(frozen=True)
+class CompanionSessionSnapshot:
+    """Immutable worker-owned view of one negotiated companion lease."""
+
+    lease_id: str
+    negotiated_guide_protocol_version: str
+    heartbeat_interval_seconds: float
+    expires_at: str
+    next_heartbeat_at: float
+    heartbeat_sequence: int
 
 
 def validate_companion_url(value: str) -> str:
@@ -103,6 +139,8 @@ class CompanionTransport:
         known_plan_content_sha256: str | None = None,
         known_proposal_id: str | None = None,
         known_revision_thread_id: str | None = None,
+        companion_version: str = "0.1.0",
+        host_version: str = "unknown",
         poll_interval: float = 1.0,
         timeout: float = 0.75,
     ) -> None:
@@ -111,6 +149,12 @@ class CompanionTransport:
             raise ValueError("Bearer token must contain at least 16 characters")
         self._token = token
         self._instance_id = instance_id
+        if not isinstance(companion_version, str) or not companion_version.strip():
+            raise ValueError("Companion version must be non-empty text")
+        if not isinstance(host_version, str) or not host_version.strip():
+            raise ValueError("Host version must be non-empty text")
+        self._companion_version = companion_version
+        self._host_version = host_version
         if (
             isinstance(poll_interval, bool)
             or not isinstance(poll_interval, (int, float))
@@ -134,6 +178,7 @@ class CompanionTransport:
         self._thread: threading.Thread | None = None
         self._flush_deadline = 0.0
         self._last_delivered_sequence = 0
+        self._session_snapshot: CompanionSessionSnapshot | None = None
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -178,6 +223,10 @@ class CompanionTransport:
     @property
     def last_delivered_sequence(self) -> int:
         return self._last_delivered_sequence
+
+    @property
+    def session_snapshot(self) -> CompanionSessionSnapshot | None:
+        return self._session_snapshot
 
     def start(self) -> None:
         if self.running:
@@ -352,6 +401,14 @@ class CompanionTransport:
             "Accept": "application/json",
             "Connection": "close",
         }
+        if (
+            path.startswith("/api/v1/companion/guide?")
+            or path == "/api/v1/companion/state"
+        ):
+            session = self._session_snapshot
+            if session is None:
+                raise ValueError("Companion session is not established")
+            headers["x-operatingline-companion-lease"] = session.lease_id
         if payload is not None:
             data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -408,6 +465,151 @@ class CompanionTransport:
             raise ValueError("Runtime response must be a JSON object")
         return decoded
 
+    @staticmethod
+    def _validate_exact_keys(
+        payload: dict[str, Any], expected: set[str], label: str
+    ) -> None:
+        actual = set(payload)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            unexpected = sorted(actual - expected)
+            details = []
+            if missing:
+                details.append(f"missing {', '.join(missing)}")
+            if unexpected:
+                details.append(f"unexpected {', '.join(unexpected)}")
+            raise ValueError(f"{label} has invalid fields: {'; '.join(details)}")
+
+    @staticmethod
+    def _validate_expiry(value: Any, label: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"{label} must be an ISO-8601 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError(f"{label} must be an ISO-8601 timestamp") from error
+        if parsed.tzinfo is None:
+            raise ValueError(f"{label} must include a timezone")
+        return value
+
+    def _establish_session(self) -> None:
+        response = self._request_json(
+            "POST",
+            "/api/v1/companion/session",
+            {
+                "contractVersion": COMPANION_SESSION_CONTRACT_VERSION,
+                "adapterId": "blender",
+                "instanceId": self._instance_id,
+                "companionVersion": self._companion_version,
+                "hostVersion": self._host_version,
+                "supportedGuideProtocolVersions": sorted(SUPPORTED_PROTOCOL_VERSIONS),
+                "catalogVersion": BLENDER_ACTION_CATALOG_VERSION,
+                "capabilities": BLENDER_ADAPTER_CAPABILITIES,
+            },
+        )
+        self._validate_exact_keys(
+            response,
+            {
+                "contractVersion",
+                "leaseId",
+                "negotiatedGuideProtocolVersion",
+                "catalogVersion",
+                "capabilities",
+                "heartbeatIntervalMs",
+                "leaseTtlMs",
+                "expiresAt",
+            },
+            "Companion session response",
+        )
+        if response["contractVersion"] != COMPANION_SESSION_CONTRACT_VERSION:
+            raise ValueError("Unsupported companion session contract version")
+        lease_id = self._validated_optional_uuid(
+            response["leaseId"], "Companion lease id"
+        )
+        if lease_id is None:
+            raise ValueError("Companion lease id must be a UUID")
+        negotiated_version = response["negotiatedGuideProtocolVersion"]
+        if negotiated_version not in SUPPORTED_PROTOCOL_VERSIONS:
+            raise ValueError("Runtime negotiated an unsupported guide protocol version")
+        if response["catalogVersion"] != BLENDER_ACTION_CATALOG_VERSION:
+            raise ValueError("Runtime negotiated the wrong Blender action catalog")
+        if response["capabilities"] != BLENDER_ADAPTER_CAPABILITIES:
+            raise ValueError("Runtime negotiated unexpected Blender capabilities")
+        heartbeat_interval_ms = response["heartbeatIntervalMs"]
+        lease_ttl_ms = response["leaseTtlMs"]
+        if (
+            isinstance(heartbeat_interval_ms, bool)
+            or not isinstance(heartbeat_interval_ms, int)
+            or heartbeat_interval_ms <= 0
+        ):
+            raise ValueError("Heartbeat interval must be a positive integer")
+        if (
+            isinstance(lease_ttl_ms, bool)
+            or not isinstance(lease_ttl_ms, int)
+            or lease_ttl_ms <= heartbeat_interval_ms
+        ):
+            raise ValueError("Lease TTL must be longer than the heartbeat interval")
+        expires_at = self._validate_expiry(response["expiresAt"], "Lease expiry")
+        heartbeat_interval_seconds = heartbeat_interval_ms / 1000.0
+        self._session_snapshot = CompanionSessionSnapshot(
+            lease_id=lease_id,
+            negotiated_guide_protocol_version=negotiated_version,
+            heartbeat_interval_seconds=heartbeat_interval_seconds,
+            expires_at=expires_at,
+            next_heartbeat_at=time.monotonic() + heartbeat_interval_seconds,
+            heartbeat_sequence=0,
+        )
+        self.incoming.put(
+            {
+                "kind": "session_established",
+                "leaseId": lease_id,
+                "negotiatedGuideProtocolVersion": negotiated_version,
+                "expiresAt": expires_at,
+            }
+        )
+
+    def _send_heartbeat(self) -> None:
+        session = self._session_snapshot
+        if session is None:
+            raise ValueError("Companion session is not established")
+        sequence = session.heartbeat_sequence + 1
+        response = self._request_json(
+            "POST",
+            "/api/v1/companion/heartbeat",
+            {
+                "contractVersion": COMPANION_SESSION_CONTRACT_VERSION,
+                "leaseId": session.lease_id,
+                "adapterId": "blender",
+                "instanceId": self._instance_id,
+                "sequence": sequence,
+            },
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(
+            response,
+            {"contractVersion", "leaseId", "sequence", "expiresAt"},
+            "Companion heartbeat response",
+        )
+        if response["contractVersion"] != COMPANION_SESSION_CONTRACT_VERSION:
+            raise ValueError("Unsupported companion heartbeat contract version")
+        if response["leaseId"] != session.lease_id:
+            raise ValueError("Runtime acknowledged the wrong companion lease")
+        if response["sequence"] != sequence:
+            raise ValueError("Runtime acknowledged the wrong heartbeat sequence")
+        expires_at = self._validate_expiry(response["expiresAt"], "Lease expiry")
+        if self._session_snapshot is session:
+            self._session_snapshot = replace(
+                session,
+                expires_at=expires_at,
+                next_heartbeat_at=(
+                    time.monotonic() + session.heartbeat_interval_seconds
+                ),
+                heartbeat_sequence=sequence,
+            )
+
+    def _clear_session(self) -> None:
+        self._session_snapshot = None
+
     def _read_response_body(
         self,
         response: HTTPResponse,
@@ -444,6 +646,9 @@ class CompanionTransport:
             sock.close()
 
     def _poll(self) -> None:
+        session = self._session_snapshot
+        if session is None:
+            raise ValueError("Companion session is not established")
         query: dict[str, str] = {
             "adapterId": "blender",
             "instanceId": self._instance_id,
@@ -461,7 +666,10 @@ class CompanionTransport:
             f"/api/v1/companion/guide?{urlencode(query)}",
             abort_on_stop=True,
         )
-        if response.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
+        if (
+            response.get("protocolVersion")
+            != session.negotiated_guide_protocol_version
+        ):
             raise ValueError("Unsupported companion protocol version")
         if "planContentSha256" not in response:
             raise ValueError("Runtime delivery must contain planContentSha256")
@@ -704,6 +912,8 @@ class CompanionTransport:
 
     def _run(self) -> None:
         next_poll = 0.0
+        next_session_attempt_at = 0.0
+        session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
         pending_report: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
@@ -742,6 +952,31 @@ class CompanionTransport:
                 break
             try:
                 request_succeeded = False
+                now = time.monotonic()
+                if (
+                    self._session_snapshot is None
+                    and not self._stop.is_set()
+                    and now >= next_session_attempt_at
+                ):
+                    self._establish_session()
+                    next_session_attempt_at = 0.0
+                    session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
+                    request_succeeded = True
+                now = time.monotonic()
+                session = self._session_snapshot
+                if session is None:
+                    if self._stop.is_set():
+                        time.sleep(0.01)
+                    else:
+                        retry_wait = max(0.0, next_session_attempt_at - now)
+                        self._stop.wait(min(0.05, retry_wait))
+                    continue
+                if (
+                    not self._stop.is_set()
+                    and now >= session.next_heartbeat_at
+                ):
+                    self._send_heartbeat()
+                    request_succeeded = True
                 while True:
                     try:
                         control = self.control.get_nowait()
@@ -1261,12 +1496,17 @@ class CompanionTransport:
                 ValueError,
                 json.JSONDecodeError,
             ) as error:
+                self._clear_session()
+                current_time = time.monotonic()
+                next_session_attempt_at = current_time + session_retry_delay
+                session_retry_delay = min(session_retry_delay * 2, 5.0)
                 message = str(error)
                 if message != last_error:
                     self.incoming.put({"kind": "error", "message": message})
                     last_error = message
-                next_poll = time.monotonic() + self._poll_interval
+                next_poll = current_time + self._poll_interval
             if self._stop.is_set():
                 time.sleep(0.01)
             else:
                 self._stop.wait(0.05)
+        self._clear_session()

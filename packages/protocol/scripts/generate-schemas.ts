@@ -17,6 +17,10 @@ import {
   companionReplanRunCreateRequestSchema,
   companionReplanRunSchema,
   companionReplanRunStatusRequestSchema,
+  companionHeartbeatRequestSchema,
+  companionHeartbeatResponseSchema,
+  companionSessionHelloRequestSchema,
+  companionSessionHelloResponseSchema,
   companionStateReportSchema,
   evalExportBundleSchema,
   evalExportRequestSchema,
@@ -67,6 +71,26 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'companion-session-hello-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-session-hello-request.json',
+    companionSessionHelloRequestSchema,
+  ],
+  [
+    'companion-session-hello-response.schema.json',
+    'https://operatingline.dev/schema/v1/companion-session-hello-response.json',
+    companionSessionHelloResponseSchema,
+  ],
+  [
+    'companion-session-heartbeat-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-session-heartbeat-request.json',
+    companionHeartbeatRequestSchema,
+  ],
+  [
+    'companion-session-heartbeat-response.schema.json',
+    'https://operatingline.dev/schema/v1/companion-session-heartbeat-response.json',
+    companionHeartbeatResponseSchema,
+  ],
   [
     'companion-dialogue-run-create-request.schema.json',
     'https://operatingline.dev/schema/v1/companion-dialogue-run-create-request.json',

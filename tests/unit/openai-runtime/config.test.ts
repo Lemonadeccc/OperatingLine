@@ -14,6 +14,7 @@ describe('opt-in OpenAI runtime configuration', () => {
   it('requires explicit credentials and model selection', () => {
     expect(loadOpenAIRuntimeConfig(requiredEnvironment)).toEqual({
       accessToken: 'local-access-token-value',
+      allowLegacyCompanions: true,
       apiKey: 'test-secret-key',
       databasePath: resolve('.data/operating-line-openai.db'),
       model: 'explicit-model-id',
@@ -36,10 +37,12 @@ describe('opt-in OpenAI runtime configuration', () => {
       loadOpenAIRuntimeConfig({
         ...requiredEnvironment,
         OPERATINGLINE_DATABASE_PATH: 'tmp/provider.db',
+        OPERATINGLINE_ALLOW_LEGACY_COMPANIONS: 'false',
         OPERATINGLINE_PORT: '9876',
       }),
     ).toMatchObject({
       databasePath: resolve('tmp/provider.db'),
+      allowLegacyCompanions: false,
       port: 9876,
     });
 
@@ -47,6 +50,15 @@ describe('opt-in OpenAI runtime configuration', () => {
       expect(() =>
         loadOpenAIRuntimeConfig({ ...requiredEnvironment, OPERATINGLINE_PORT: port }),
       ).toThrow('OPERATINGLINE_PORT');
+    }
+
+    for (const value of ['TRUE', 'False', ' false ', '0', '']) {
+      expect(() =>
+        loadOpenAIRuntimeConfig({
+          ...requiredEnvironment,
+          OPERATINGLINE_ALLOW_LEGACY_COMPANIONS: value,
+        }),
+      ).toThrow('OPERATINGLINE_ALLOW_LEGACY_COMPANIONS');
     }
   });
 });

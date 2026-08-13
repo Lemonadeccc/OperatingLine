@@ -97,7 +97,17 @@ class CompanionController:
 
     @property
     def connected(self) -> bool:
-        return self._transport is not None and self._transport.running
+        connected, _protocol_version = self._transport_connection_state()
+        return connected
+
+    def _transport_connection_state(self) -> tuple[bool, str]:
+        transport = self._transport
+        if transport is None or not transport.running:
+            return False, PROTOCOL_VERSION
+        snapshot = transport.session_snapshot
+        if snapshot is None:
+            return False, PROTOCOL_VERSION
+        return True, snapshot.negotiated_guide_protocol_version
 
     @property
     def timer_registered(self) -> bool:
@@ -170,6 +180,8 @@ class CompanionController:
                 if self._active_revision_lineage is not None
                 else None
             ),
+            companion_version=COMPANION_VERSION,
+            host_version=bpy.app.version_string,
         )
         self.disconnect(
             preserve_active_revision_draft=True,
@@ -192,8 +204,6 @@ class CompanionController:
             transport.start_initial_plan_run(self._initial_plan_run_request)
         if self.dialogue_handoff.active and self._dialogue_run_request is not None:
             transport.start_dialogue_run(self._dialogue_run_request)
-        self.status = "Connected"
-        self.report("connected")
 
     def disconnect(
         self,
@@ -2169,6 +2179,22 @@ class CompanionController:
                             "Runtime revision history is unavailable",
                         )
                     )
+                elif message.get("kind") == "session_established":
+                    self.error = ""
+                    session = get_session()
+                    if self.proposal_session is not None:
+                        self.status = (
+                            f"Plan proposal {self.proposal_session.plan_id} "
+                            f"r{self.proposal_session.revision} awaiting review"
+                        )
+                    else:
+                        self.status = (
+                            f"Plan {session.plan_id} r{session.revision}"
+                            if session.plan_id is not None
+                            and session.revision is not None
+                            else "Connected"
+                        )
+                    self.report("connected")
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"
@@ -2266,8 +2292,9 @@ class CompanionController:
         else:
             self._artifact_attestation_execution_id = None
             self._artifact_attestation = None
+        _connected, protocol_version = self._transport_connection_state()
         report = {
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": protocol_version,
             "reportId": report_id,
             "sequence": self._sequence,
             "adapterId": "blender",
@@ -2293,15 +2320,17 @@ class CompanionController:
                 else None
             ),
             "observations": observations,
-            "observationGate": gate.report_data() if gate is not None else None,
-            "artifactAttestation": (
-                deepcopy(self._artifact_attestation)
-                if phase == "completed"
-                else None
-            ),
             "error": error,
             "occurredAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
+        if report["protocolVersion"] in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
+            report["observationGate"] = gate.report_data() if gate is not None else None
+        if report["protocolVersion"] == "1.5.0":
+            report["artifactAttestation"] = (
+                deepcopy(self._artifact_attestation)
+                if phase == "completed"
+                else None
+            )
         if self._transport is not None:
             self._transport.send_report(report)
         self.last_report = report
