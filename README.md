@@ -894,6 +894,12 @@ token、OIDC、publish、tag、GitHub Release 或产物上传能力。实际
 npm 发布要等候选包提供可消费的 `dist`/声明/tarball、分支保护、registry ownership 与 Trusted
 Publisher 后再单独启用。详见 [ADR 0039](docs/adr/0039-changesets-release-preparation.md)。
 
+Dependabot 只把 minor/patch 依赖更新分组；major 升级保持为独立 PR 并验证兼容性。当前
+`typescript-eslint` 尚不支持 TypeScript 7，因此暂缓 TypeScript major 更新；其余 major 更新仍会
+单独提出。配置使用 GitHub 自动创建的默认标签，避免引用不存在的自定义标签。启用受保护 `main`
+之前，还需在 GitHub Actions 设置中允许工作流创建拉取请求，否则默认 `GITHUB_TOKEN` 无法创建草稿
+Changesets 版本 PR。Phase 0 不使用 PAT 或 registry credential。
+
 ## 路线图与当前边界
 
 已完成的是协议、Orchestrator 发布/投递/状态端、宿主发起 Goal-to-Guidance、持久化 Proposal/Decision、

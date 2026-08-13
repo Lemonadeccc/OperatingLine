@@ -34,7 +34,9 @@ Adopt Changesets 3 and a Phase 0 release workflow with these boundaries:
   root package-script aliases, and dependency installation disables lifecycle scripts.
 - The version pull request is created as a draft and returned to draft whenever new Changesets update
   it. A maintainer must explicitly mark it ready for review to trigger the normal CI workflow. Branch
-  protection is a separate future publication gate and is not claimed by this phase.
+  protection is a separate future publication gate and is not claimed by this phase. Before satisfying
+  that guard, the repository must also enable GitHub Actions to create pull requests; otherwise the default
+  `GITHUB_TOKEN` cannot open the draft. Phase 0 must not work around that setting with a personal access token.
 - All GitHub Actions are pinned to full commit SHAs. Checkout never persists credentials.
 - No npm token, OIDC permission, publish action or command, Git tag, GitHub Release, or artifact upload is
   permitted in Phase 0.

@@ -129,7 +129,13 @@ pnpm release:check
 预发布 Phase 0：只有受保护 `main` 上的非空 changeset 才会创建或更新草稿版本 PR；当前远端
 `main` 尚未保护，所以该 job 保持 skipped。所有包仍为 private，不会发布 npm、
 创建 tag/GitHub Release 或上传产品产物。不要在发布 workflow 中加入 registry token、OIDC 或 publish
-命令。完整边界见 [ADR 0039](docs/adr/0039-changesets-release-preparation.md)。
+命令。保护 `main` 前还必须在 GitHub Actions 设置中允许工作流创建拉取请求，使默认
+`GITHUB_TOKEN` 能创建草稿版本 PR；不要改用 PAT 绕过该设置。完整边界见
+[ADR 0039](docs/adr/0039-changesets-release-preparation.md)。
+
+Dependabot 仅将 minor/patch 更新按开发依赖和生产依赖分组，major 更新保持为独立 PR。当前
+`typescript-eslint` 尚不支持 TypeScript 7，因此暂缓 TypeScript major 更新；其余 major 更新仍会
+单独提出。不要覆盖 Dependabot 的默认标签，除非所有自定义标签已在仓库中创建。
 
 ## 提交拉取请求
 
