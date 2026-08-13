@@ -79,7 +79,7 @@
     "@operatingline/persistence": "workspace:*",
     "@operatingline/protocol": "workspace:*",
     "@operatingline/test-kit": "workspace:*",
-    "@types/node": "24.13.3",
+    "@types/node": "26.2.0",
     "commitizen": "4.3.2",
     "esbuild": "0.28.1",
     "eslint": "10.8.0",
