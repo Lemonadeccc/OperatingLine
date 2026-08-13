@@ -28,6 +28,8 @@ const schemaKeywords = new Set([
   'strictlyIncreasingFrames',
   'distinctPropertyValues',
   'atLeastOnePositiveProperty',
+  'vectorLengthMinimum',
+  'vectorLengthMaximum',
 ]);
 
 const supportedTypes = new Set([
@@ -50,6 +52,7 @@ const customArrayKeywords = [
   'strictlyIncreasingFrames',
 ] as const;
 const customObjectKeywords = ['distinctPropertyValues', 'atLeastOnePositiveProperty'] as const;
+const vectorLengthKeywords = ['vectorLengthMinimum', 'vectorLengthMaximum'] as const;
 
 type SchemaRecord = Record<string, unknown>;
 
@@ -230,6 +233,37 @@ function validateCustomArraySchema(schema: SchemaRecord, path: string): void {
   }
 }
 
+function validateVectorLengthSchema(schema: SchemaRecord, path: string): void {
+  if (!vectorLengthKeywords.some((keyword) => schema[keyword] !== undefined)) {
+    return;
+  }
+  const items = schema.items;
+  if (!isRecord(items) || (items.type !== 'number' && items.type !== 'integer')) {
+    schemaError(path, 'vector length keywords require numeric items');
+  }
+  if (
+    typeof schema.minItems !== 'number' ||
+    typeof schema.maxItems !== 'number' ||
+    schema.minItems <= 0 ||
+    schema.minItems !== schema.maxItems
+  ) {
+    schemaError(path, 'vector length keywords require one fixed positive array length');
+  }
+  for (const keyword of vectorLengthKeywords) {
+    requireFiniteNumber(schema, keyword, path);
+    if (typeof schema[keyword] === 'number' && schema[keyword] < 0) {
+      schemaError(path, `${keyword} must be nonnegative`);
+    }
+  }
+  if (
+    typeof schema.vectorLengthMinimum === 'number' &&
+    typeof schema.vectorLengthMaximum === 'number' &&
+    schema.vectorLengthMinimum > schema.vectorLengthMaximum
+  ) {
+    schemaError(path, 'vectorLengthMinimum cannot exceed vectorLengthMaximum');
+  }
+}
+
 function customRequiredPropertyNames(
   schema: SchemaRecord,
   keyword: (typeof customObjectKeywords)[number],
@@ -357,7 +391,8 @@ function validateSchemaNode(value: unknown, path: string): void {
     value.minItems !== undefined ||
     value.maxItems !== undefined ||
     value.uniqueItems !== undefined ||
-    customArrayKeywords.some((keyword) => value[keyword] !== undefined);
+    customArrayKeywords.some((keyword) => value[keyword] !== undefined) ||
+    vectorLengthKeywords.some((keyword) => value[keyword] !== undefined);
   if (usesArrayKeyword) {
     if (type !== 'array') {
       schemaError(path, 'array keywords require type array');
@@ -384,6 +419,7 @@ function validateSchemaNode(value: unknown, path: string): void {
       schemaError(path, 'minItems cannot exceed maxItems');
     }
     validateCustomArraySchema(value, path);
+    validateVectorLengthSchema(value, path);
   } else if (type === 'array') {
     schemaError(path, 'array schemas require items');
   }
@@ -509,6 +545,18 @@ function itemPath(path: string, index: number): string {
   return `${path}[${index}]`;
 }
 
+function normalizedSquaredVectorLength(value: number[], bound: number): number {
+  if (bound === 0) {
+    return value.some((component) => component !== 0) ? Number.POSITIVE_INFINITY : 0;
+  }
+  let squaredLength = 0;
+  for (const component of value) {
+    const normalizedComponent = component / bound;
+    squaredLength += normalizedComponent * normalizedComponent;
+  }
+  return squaredLength;
+}
+
 function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: string): string[] {
   const errors: string[] = [];
   const uniquenessFields = [
@@ -582,6 +630,31 @@ function validateCustomArrayRules(value: unknown[], schema: SchemaRecord, path: 
       if (errors.some((error) => error.endsWith('parents must be acyclic'))) {
         break;
       }
+    }
+  }
+  if (
+    vectorLengthKeywords.some((keyword) => schema[keyword] !== undefined) &&
+    typeof schema.minItems === 'number' &&
+    value.length === schema.minItems &&
+    value.every((item) => typeof item === 'number' && Number.isFinite(item))
+  ) {
+    const numericValue = value as number[];
+    if (
+      typeof schema.vectorLengthMinimum === 'number' &&
+      schema.vectorLengthMinimum > 0 &&
+      normalizedSquaredVectorLength(numericValue, schema.vectorLengthMinimum) < 1
+    ) {
+      errors.push(
+        `${path || 'arguments'} vector length must be at least ${schema.vectorLengthMinimum}`,
+      );
+    }
+    if (
+      typeof schema.vectorLengthMaximum === 'number' &&
+      normalizedSquaredVectorLength(numericValue, schema.vectorLengthMaximum) > 1
+    ) {
+      errors.push(
+        `${path || 'arguments'} vector length must be at most ${schema.vectorLengthMaximum}`,
+      );
     }
   }
   return errors;

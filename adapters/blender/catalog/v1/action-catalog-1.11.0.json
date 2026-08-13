@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.12.0",
+  "catalogVersion": "1.11.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide and Triangulate edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel and Solidify modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate and Extrude Region require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide and Triangulate edits; add owned Bevel and Solidify modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate requires Object Mode, no modifiers or shape keys, at least one non-triangle polygon, and source topology within 8192 vertices, 16384 edges, and 8192 polygons; quad_method=FIXED and ngon_method=EAR_CLIP are fixed implementation behavior. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Prefer one meaningful operation per leaf. Sculpting, arbitrary component selection, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -33,7 +33,6 @@
         "blender.mesh.create_primitive_batch",
         "blender.mesh.edit_subdivide",
         "blender.mesh.edit_triangulate",
-        "blender.mesh.edit_extrude_region",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.geometry_nodes.create_transform"
@@ -115,13 +114,6 @@
       "description": "Replace an owned object's mesh data with one deterministic whole-mesh triangulation result.",
       "selectionGuidance": "Select when the goal requires explicit triangle topology before later export, deformation, or rendering work.",
       "actionNames": ["blender.mesh.edit_triangulate"]
-    },
-    {
-      "id": "geometry.edit_extrude_region",
-      "title": "Bounded Edit Mode region extrusion",
-      "description": "Replace an owned object's mesh data with one deterministic extrusion of an explicit edge-connected face region.",
-      "selectionGuidance": "Select when the goal requires extending one known face region by an explicit local-space translation.",
-      "actionNames": ["blender.mesh.edit_extrude_region"]
     },
     {
       "id": "geometry.bevel_modifier",
@@ -920,77 +912,6 @@
       ],
       "supportedAnchorKinds": ["object", "operator", "unavailable"],
       "supportedObservationKinds": ["resource_exists", "mesh_triangulated"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.mesh.edit_extrude_region",
-      "title": "Extrude one owned mesh face region",
-      "description": "Creates a bounded face-region extrusion result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode with no modifiers or shape keys. polygonIndices must name one edge-connected region with a boundary edge; translation is a nonzero local-space vector. Source and result topology stay within 8192 vertices, 16384 edges, and 8192 polygons.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["targetId", "resultMeshId", "resultMeshName", "polygonIndices", "translation"],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "maxLength": 180,
-            "description": "Logical ID of an owned mesh object created by an earlier action."
-          },
-          "resultMeshId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-            "maxLength": 180,
-            "description": "Plan-unique logical ID for the replacement extruded mesh datablock."
-          },
-          "resultMeshName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "polygonIndices": {
-            "type": "array",
-            "items": { "type": "integer", "minimum": 0, "maximum": 8191 },
-            "minItems": 1,
-            "maxItems": 256,
-            "uniqueItems": true,
-            "description": "Unique source polygon indices forming one edge-connected region with at least one boundary edge."
-          },
-          "translation": {
-            "type": "array",
-            "items": { "type": "number", "minimum": -1000, "maximum": 1000 },
-            "minItems": 3,
-            "maxItems": 3,
-            "vectorLengthMinimum": 0.0001,
-            "vectorLengthMaximum": 1000,
-            "description": "Local-space translation vector whose Euclidean length must be between 0.0001 and 1000 at execution."
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Swaps the owned object's mesh link to the generated extrusion result."
-        },
-        {
-          "access": "create",
-          "resourceType": "MESH",
-          "argumentPath": "resultMeshId",
-          "derivedResourceTypes": [],
-          "description": "Creates the bounded extruded mesh while retaining the source for compensation."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists", "mesh_region_extruded"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",

@@ -42,6 +42,7 @@ from operating_line_deform_animation_extension.operating_line.infrastructure.sno
     OWNER_KEY,
     OWNER_VALUE,
     action_fcurves,
+    ensure_receipts_intact,
 )
 
 
@@ -389,6 +390,11 @@ def main() -> None:
     assert modifier.object is armature and modifier.use_vertex_groups
     assert not modifier.use_bone_envelopes and modifier.use_deform_preserve_volume
     assert all(armature.data.bones[name].use_deform for name in (ROOT_BONE, TIP_BONE))
+    skin_receipt = session.receipts["deform.skin"]
+    assert any(
+        mutation.attribute == "mesh_content" for mutation in skin_receipt.mutations
+    )
+    ensure_receipts_intact(session.receipts)
     skin_observation = evaluate_observations(
         (
             {

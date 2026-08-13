@@ -34,12 +34,12 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.8.0` 与 ActionCatalog `1.11.0` 一一绑定 21 个 action，并由活动叶节点的 `actionName` 选择配方。
+`1.9.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
-材质、骨骼、显式蒙皮权重、动画和渲染等十四条
+材质、骨骼、显式蒙皮权重、动画和渲染等十五条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
 菜单项。未来只有新的版本专用 recipe 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
@@ -87,7 +87,7 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异�
 与 Dialogue Run 状态，再把 JSON 放入队列。Provider 的对话 SSE 只在 Runtime 内消费；助手增量先写入
 durable append-only revision，Blender 始终只读取短 JSON 状态。
 网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
-ActionCatalog `1.11.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+ActionCatalog `1.12.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
 Connected。Guide 与状态请求绑定服务端签发的 lease，线程按协商周期发送严格递增心跳；失联、过期、
 Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界
 见 [ADR 0040](../adr/0040-companion-session-leases.md)。这里的 Connected/presence 只表示后台 transport
@@ -112,7 +112,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.11.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.12.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -223,8 +223,8 @@ Request-linked Proposal
 ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
 稳定资源名 `resources/snowman.plan.json`。
 
-当前动作目录 `1.11.0` 允许以下 21 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0`、`1.3.0`、`1.4.0`、`1.5.0`、`1.6.0`、`1.7.0`、`1.8.0`、`1.9.0`、`1.10.0` 供精确回放：
+当前动作目录 `1.12.0` 允许以下 22 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、`1.1.0`、`1.2.0`、`1.3.0`、`1.4.0`、`1.5.0`、`1.6.0`、`1.7.0`、`1.8.0`、`1.9.0`、`1.10.0`、`1.11.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_cube`
@@ -236,6 +236,7 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、
 - `blender.mesh.create_primitive_batch`
 - `blender.mesh.edit_subdivide`
 - `blender.mesh.edit_triangulate`
+- `blender.mesh.edit_extrude_region`
 - `blender.modifier.add_bevel`
 - `blender.modifier.add_solidify`
 - `blender.geometry_nodes.create_transform`
@@ -248,8 +249,8 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0`、
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.11.0` 提供十三项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
-subdivide、whole-mesh triangulate、Bevel Modifier、Solidify Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
+`1.12.0` 提供十四项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
+subdivide、whole-mesh triangulate、connected face-region extrusion、Bevel Modifier、Solidify Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
 explicit deform skin weights、pose transform keyframes、render scene setup 和 PNG preview output。
 Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
 再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
@@ -277,16 +278,22 @@ Blender datablock、mutation 和渲染产物；资源解析同时核对 `session
 不会从可复制 Scene 标签接管旧执行。Back 仍执行 compare-and-restore 补偿，只是该补偿操作本身也
 可以 Ctrl-Z/Redo。见 [ADR 0031](../adr/0031-blender-native-undo-history.md)。
 
-Edit/Modifier/Geometry Nodes 当前开放四个有界动作：Subdivide 复制源 Mesh、对整网格执行
-`1..8` cuts 后把对象换链到新 Mesh，源数据保留至回退；Bevel 创建一个不应用的 modifier；Solidify
+Edit/Modifier/Geometry Nodes 当前开放六个有界动作：Subdivide 复制源 Mesh、对整网格执行
+`1..8` cuts 后把对象换链到新 Mesh，源数据保留至回退；Triangulate 以固定 `FIXED` / `EAR_CLIP`
+方法把复制 Mesh 转换为三角面；Bevel 创建一个不应用的 modifier；Solidify
 只接受 `thickness` (`0.0001..100`) 与 `offset` (`-1..1`)，只允许 receipt-tracked 前置 Modifier，且源 Mesh 与
 前置 stack 的求值输入均不超过 8192 vertices、16384 edges、8192 polygons，固定 `solidify_mode=EXTRUDE`、`use_even_offset=true`、`use_rim=true` 和
-`use_rim_only=false`；Geometry
+`use_rim_only=false`；Extrude Region 解析 1–256 个唯一 polygon index，要求一个有边界的连通面区域，
+按长度在 `0.0001..1000` 的固定局部空间向量移动新顶点，并对源/结果实施相同拓扑上限；它在读取索引前验证
+源 Mesh 内容与 Object→Mesh receipt 链，再按来源顶点、无向边和面顶点集合规范化结果索引，允许后续
+Extrude 在 Blender 4.5/5.1 间稳定引用结果 polygon；Geometry
 Nodes 创建固定的 Group Input → Transform Geometry → Group Output 图并通过一个 NODES modifier
-挂载。Mesh 内容、modifier 精确属性和 node graph/interface 签名都参与 compare-and-restore，外部修改
-会保留 receipt 并阻止旧状态覆盖。任意选择集、任意 Edit Mode operator、其他 modifier 类型和任意
+挂载。动作创建的 Mesh 内容、初始 Object→Mesh link、蒙皮后的后继 Mesh 签名、modifier 精确属性和 node graph/interface 签名都参与 compare-and-restore，外部修改
+会保留 receipt 并阻止旧状态覆盖。任意 vertex/edge 选择、互不连通的 face region、任意 Edit Mode operator、其他 modifier 类型和任意
 node graph 仍不在允许列表。见 [ADR 0029](../adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
-[ADR 0037](../adr/0037-bounded-solidify-modifier.md)。
+[ADR 0037](../adr/0037-bounded-solidify-modifier.md)、
+[ADR 0038](../adr/0038-bounded-edit-triangulate.md) 与
+[ADR 0041](../adr/0041-bounded-edit-extrude-region.md)。
 
 回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera/Armature data 存在额外
 用户、Material 或 Action 被计划外对象使用、Object 被链接到计划外 Collection，或自有

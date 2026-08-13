@@ -1,5 +1,6 @@
 .codex/
 .omx/
+.omc/
 .git/
 node_modules/
 dist/

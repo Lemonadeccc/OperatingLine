@@ -25,6 +25,53 @@ const nestedSchema = {
 } as const;
 
 describe('action argument schemas', () => {
+  it('enforces fixed numeric vector length bounds', () => {
+    const schema = {
+      type: 'array',
+      items: { type: 'number' },
+      minItems: 3,
+      maxItems: 3,
+      vectorLengthMinimum: 0.5,
+      vectorLengthMaximum: 2,
+    };
+
+    validateActionArgumentsSchema(schema);
+    expect(validateActionArguments([0.3, 0.4, 0], schema)).toEqual([]);
+    expect(validateActionArguments([0, 0, 0], schema)).toEqual([
+      'arguments vector length must be at least 0.5',
+    ]);
+    expect(validateActionArguments([2, 2, 0], schema)).toEqual([
+      'arguments vector length must be at most 2',
+    ]);
+    expect(validateActionArguments(Array<number>(200_000).fill(0), schema)).toEqual([
+      'arguments must contain at most 3 items',
+    ]);
+
+    const hugeSchema = {
+      type: 'array',
+      items: { type: 'number' },
+      minItems: 2,
+      maxItems: 2,
+      vectorLengthMaximum: 1.1e308,
+    };
+    validateActionArgumentsSchema(hugeSchema);
+    expect(validateActionArguments([1e308, 1e308], hugeSchema)).toEqual([
+      'arguments vector length must be at most 1.1e+308',
+    ]);
+
+    const tinySchema = {
+      type: 'array',
+      items: { type: 'number' },
+      minItems: 2,
+      maxItems: 2,
+      vectorLengthMinimum: 1e-200,
+    };
+    validateActionArgumentsSchema(tinySchema);
+    expect(validateActionArguments([5e-201, 0], tinySchema)).toEqual([
+      'arguments vector length must be at least 1e-200',
+    ]);
+  });
+
   it('recursively validates nested objects, arrays, strings, numbers, and stable paths', () => {
     validateActionArgumentsSchema(nestedSchema);
     expect(
@@ -292,6 +339,43 @@ describe('action argument schemas', () => {
         additionalProperties: false,
       }),
     ).toThrow('atLeastOnePositiveProperty requires numeric property name');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        vectorLengthMinimum: 0.1,
+        items: { type: 'string' },
+      }),
+    ).toThrow('vector length keywords require numeric items');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        minItems: 2,
+        maxItems: 3,
+        vectorLengthMaximum: 1,
+        items: { type: 'number' },
+      }),
+    ).toThrow('vector length keywords require one fixed positive array length');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        vectorLengthMinimum: 2,
+        vectorLengthMaximum: 1,
+        items: { type: 'number' },
+      }),
+    ).toThrow('vectorLengthMinimum cannot exceed vectorLengthMaximum');
+    expect(() =>
+      validateActionArgumentsSchema({
+        type: 'array',
+        minItems: 3,
+        maxItems: 3,
+        vectorLengthMinimum: -1,
+        items: { type: 'number' },
+      }),
+    ).toThrow('vectorLengthMinimum must be nonnegative');
   });
 
   it.each(['constructor', 'toString', '__proto__'])(

@@ -261,7 +261,7 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `operatingline.plan_and_propose` MCP Prompt、调用 `operatingline.planning.prompt.get` Tool，或直接调用
 `operatingline.planning.context`，取得目标宿主的精确版本化目录、Companion 状态、revision 提示、
 计划约束和目录声明的有序阶段。客户端根据自然语言目标选择 `requiredPhaseIds` 并生成完整
-GuidePlan，再调用 `operatingline.planning.evaluate`。Blender `1.8.0` 目录提供十项适配器自有
+GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.12.0` 目录提供十四项适配器自有
 `semanticCapabilities`；capability-aware 规划必须在 `planning.capabilityCoverage` 中声明
 `requirement -> capability -> executable leaf` 链。quality baseline `1.1.0` 除既有阶段树、阶段顺序、
 资源创建与依赖、语义锚点和预期观察外，还确定性检查能力/步骤存在、步骤可执行且 action 属于相应能力。
@@ -287,7 +287,7 @@ Orchestrator 不内置模型，也不通过关键词假装理解目标；目标�
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。目录约束 coverage 决策见
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
-节点局部重规划对当前 Blender `1.8.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
+节点局部重规划对当前 Blender `1.12.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
 `1.0.0`。MCP
 `operatingline.replan.prompt.get` 与 HTTP `POST /api/v1/replan/prompt` 从一个仍 pending 的线性 thread
 head 构建相同 packet；其中绑定完整 immutable base Plan、引用节点、精确 ActionCatalog、发起实例最新

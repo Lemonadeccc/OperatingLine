@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.9.0",
+  "catalogVersion": "1.8.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.12.0",
+  "actionCatalogVersion": "1.11.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.12.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.11.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -656,56 +656,6 @@
         ],
         "reason": "The accepted action triangulates the complete bounded mesh into a new owned datablock with fixed FIXED/EAR_CLIP methods and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/triangulate_faces.html"
-      }
-    },
-    {
-      "id": "blender.mesh.edit_extrude_region.semantic",
-      "actionName": "blender.mesh.edit_extrude_region",
-      "title": "Extrude an explicit owned mesh face region through a bounded Edit Mode operation",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "semantic.select_owned_mesh",
-            "order": 2,
-            "label": "Owned Mesh",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
-          },
-          {
-            "id": "mode.edit_mesh",
-            "order": 3,
-            "label": "Edit Mode",
-            "intent": "navigate",
-            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
-          },
-          {
-            "id": "semantic.select_face_region",
-            "order": 4,
-            "label": "Face Region",
-            "intent": "configure",
-            "target": {
-              "kind": "semantic",
-              "hostId": "operatingline.blender.explicit_face_region"
-            }
-          },
-          {
-            "id": "operator.extrude_region_move",
-            "order": 5,
-            "label": "Extrude Region",
-            "intent": "execute",
-            "target": { "kind": "operator", "hostId": "mesh.extrude_region_move" }
-          }
-        ],
-        "reason": "The accepted action resolves stable source polygon indices, validates one connected bounded region, extrudes it by an exact local-space vector into a new owned mesh datablock, and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership, selection, observation, and rollback contract.",
-        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/tools/extrude_region.html"
       }
     },
     {

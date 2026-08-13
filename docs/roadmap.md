@@ -24,8 +24,8 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.8.0` 与 ActionCatalog `1.11.0` 一一覆盖 21 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
-      4.5/5.1 验证的 `native_path`，其他十四个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      `1.9.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
@@ -77,6 +77,15 @@
       `resource_exists + mesh_triangulated` 观察与补偿回退。InteractionCatalog `1.8.0` 提供独立
       `semantic_path`，历史 ActionCatalog `1.10.0` 与 InteractionCatalog `1.7.0` 保持可回放。见
       [ADR 0038](adr/0038-bounded-edit-triangulate.md)。
+- [x] Blender 有界连通面区域 Extrude：ActionCatalog `1.12.0` 新增
+      `blender.mesh.edit_extrude_region`，只接受 1–256 个唯一 polygon index 与固定局部空间 translation；
+      面必须构成一个有边界的 edge-connected region，目标必须处于 Object Mode、无 Modifier/Shape Key，
+      源和结果均限制在 8192 vertices、16384 edges、8192 polygons。动作复制源 Mesh 后换链，使用
+      来源 vertex provenance 规范化结果 vertex/edge/polygon 顺序，验证源内容与 Object→Mesh receipt 链，
+      并提供连续 Extrude 的跨 4.5/5.1 回归。它使用 `resource_exists + mesh_region_extruded` 观察门、补偿回退和 Blender 原生 Undo/Redo；
+      InteractionCatalog `1.9.0` 提供独立 `semantic_path`，历史 ActionCatalog `1.11.0` 与
+      InteractionCatalog `1.8.0` 保持逐字可回放。见
+      [ADR 0041](adr/0041-bounded-edit-extrude-region.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -94,7 +103,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.11.0` 提供十三项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.12.0` 提供十四项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；

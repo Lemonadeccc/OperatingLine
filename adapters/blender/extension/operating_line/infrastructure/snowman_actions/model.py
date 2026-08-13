@@ -22,6 +22,7 @@ from .common import (
     integer,
     logical_id,
     make_receipt,
+    mesh_content_signature,
     new_receipt_id,
     number,
     owned_resource,
@@ -541,6 +542,14 @@ def execute_geometry(
             )
             created.append(mesh_identity)
             _fill_mesh(mesh, primitive)
+            mutations.append(
+                MutationRecord(
+                    mesh_identity,
+                    "mesh_content",
+                    None,
+                    mesh_content_signature(mesh),
+                )
+            )
             obj = bpy.data.objects.new(primitive.object_name, mesh)
             object_identity = tag_resource(
                 obj,
@@ -550,6 +559,14 @@ def execute_geometry(
                 action.name,
             )
             created.append(object_identity)
+            mutations.append(
+                MutationRecord(
+                    object_identity,
+                    "data",
+                    None,
+                    mesh_identity,
+                )
+            )
             obj.location = primitive.location
             if primitive.kind in {"cone", "cylinder"}:
                 assert primitive.start is not None and primitive.end is not None

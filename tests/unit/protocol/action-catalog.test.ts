@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.11.0');
+    expect(catalog.catalogVersion).toBe('1.12.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -32,6 +32,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.create_primitive_batch',
       'blender.mesh.edit_subdivide',
       'blender.mesh.edit_triangulate',
+      'blender.mesh.edit_extrude_region',
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
       'blender.geometry_nodes.create_transform',
@@ -59,6 +60,7 @@ describe('action catalog protocol', () => {
       'geometry.primitive_assembly',
       'geometry.edit_subdivide',
       'geometry.edit_triangulate',
+      'geometry.edit_extrude_region',
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
       'geometry_nodes.transform',
@@ -84,6 +86,7 @@ describe('action catalog protocol', () => {
       '1.9.0',
       '1.10.0',
       '1.11.0',
+      '1.12.0',
     ]);
   });
 
@@ -387,6 +390,92 @@ describe('action catalog protocol', () => {
         triangulateSchema,
       ),
     ).toEqual(['resultMeshName must match pattern ^OperatingLine\\.', 'unknown unexpected']);
+    const extrudeSchema = schemaFor('blender.mesh.edit_extrude_region');
+    expect(extrudeSchema.additionalProperties).toBe(false);
+    expect(extrudeSchema.required).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+      'polygonIndices',
+      'translation',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.extruded_mesh',
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0, 5],
+          translation: [0, 0, 1],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.extruded_mesh',
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0, 0, 8192],
+          translation: [0, 0, 1001],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual([
+      'polygonIndices items must be unique',
+      'polygonIndices[2] must be at most 8191',
+      'translation[2] must be at most 1000',
+      'translation vector length must be at most 1000',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.extruded_mesh',
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0],
+          translation: [0, 0, 0],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual(['translation vector length must be at least 0.0001']);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'x'.repeat(181),
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0],
+          translation: [0, 0, 1],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual(['resultMeshId must have length at most 180']);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.extruded_mesh',
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0],
+          translation: [491.34180453259, 870.9668369798349, 0],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual(['translation vector length must be at most 1000']);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.extruded_mesh',
+          resultMeshName: 'OperatingLine.Body.ExtrudedMesh',
+          polygonIndices: [0],
+          translation: [999.999985743048, 0.1688606043279722, 0],
+        },
+        extrudeSchema,
+      ),
+    ).toEqual([]);
     expect(
       validateActionArguments(
         {

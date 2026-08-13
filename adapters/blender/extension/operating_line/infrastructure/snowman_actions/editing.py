@@ -40,6 +40,12 @@ MAX_SOLIDIFY_POLYGONS = 8192
 MAX_TRIANGULATE_VERTICES = 8192
 MAX_TRIANGULATE_EDGES = 16384
 MAX_TRIANGULATE_POLYGONS = 8192
+MAX_EXTRUDE_VERTICES = 8192
+MAX_EXTRUDE_EDGES = 16384
+MAX_EXTRUDE_POLYGONS = 8192
+MAX_EXTRUDE_SELECTED_POLYGONS = 256
+MIN_EXTRUDE_TRANSLATION = 0.0001
+MAX_EXTRUDE_TRANSLATION = 1000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +62,15 @@ class TriangulateDefinition:
     target_id: str
     result_mesh_id: str
     result_mesh_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtrudeRegionDefinition:
+    target_id: str
+    result_mesh_id: str
+    result_mesh_name: str
+    polygon_indices: tuple[int, ...]
+    translation: tuple[float, float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +102,18 @@ class GeometryNodesTransformDefinition:
     translation: tuple[float, float, float]
     rotation: tuple[float, float, float]
     scale: tuple[float, float, float]
+
+
+def _normalized_squared_vector_length(
+    value: tuple[float, ...], bound: float
+) -> float:
+    if bound == 0.0:
+        return float("inf") if any(component != 0.0 for component in value) else 0.0
+    squared_length = 0.0
+    for component in value:
+        normalized_component = component / bound
+        squared_length += normalized_component * normalized_component
+    return squared_length
 
 
 def validate_subdivide(arguments: Mapping[str, Any]) -> SubdivideDefinition:
@@ -125,6 +152,67 @@ def validate_triangulate(arguments: Mapping[str, Any]) -> TriangulateDefinition:
             "arguments.resultMeshName",
             prefix="OperatingLine.",
         ),
+    )
+
+
+def validate_extrude_region(arguments: Mapping[str, Any]) -> ExtrudeRegionDefinition:
+    fields = {
+        "targetId",
+        "resultMeshId",
+        "resultMeshName",
+        "polygonIndices",
+        "translation",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    raw_polygon_indices = arguments["polygonIndices"]
+    if (
+        not isinstance(raw_polygon_indices, list)
+        or not 1 <= len(raw_polygon_indices) <= MAX_EXTRUDE_SELECTED_POLYGONS
+    ):
+        raise ValueError(
+            "arguments.polygonIndices must contain between 1 and "
+            f"{MAX_EXTRUDE_SELECTED_POLYGONS} indices"
+        )
+    polygon_indices = tuple(
+        integer(
+            item,
+            f"arguments.polygonIndices[{index}]",
+            minimum=0,
+            maximum=MAX_EXTRUDE_POLYGONS - 1,
+        )
+        for index, item in enumerate(raw_polygon_indices)
+    )
+    if len(set(polygon_indices)) != len(polygon_indices):
+        raise ValueError("arguments.polygonIndices must not repeat indices")
+    translation = vector(
+        arguments["translation"],
+        "arguments.translation",
+        3,
+        minimum=-MAX_EXTRUDE_TRANSLATION,
+        maximum=MAX_EXTRUDE_TRANSLATION,
+    )
+    if not (
+        _normalized_squared_vector_length(translation, MIN_EXTRUDE_TRANSLATION)
+        >= 1.0
+        and _normalized_squared_vector_length(translation, MAX_EXTRUDE_TRANSLATION)
+        <= 1.0
+    ):
+        raise ValueError(
+            "arguments.translation length must be in "
+            f"[{MIN_EXTRUDE_TRANSLATION}, {MAX_EXTRUDE_TRANSLATION}]"
+        )
+    return ExtrudeRegionDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        result_mesh_id=logical_id(
+            arguments["resultMeshId"], "arguments.resultMeshId"
+        ),
+        result_mesh_name=text(
+            arguments["resultMeshName"],
+            "arguments.resultMeshName",
+            prefix="OperatingLine.",
+        ),
+        polygon_indices=tuple(sorted(polygon_indices)),
+        translation=translation,
     )
 
 
@@ -427,6 +515,276 @@ def _ensure_triangulate_topology_is_bounded(
             f"edges <= {MAX_TRIANGULATE_EDGES}, "
             f"polygons <= {MAX_TRIANGULATE_POLYGONS}"
         )
+
+
+def _ensure_extrude_topology_is_bounded(
+    topology: tuple[int, int, int], label: str
+) -> None:
+    limits = (
+        MAX_EXTRUDE_VERTICES,
+        MAX_EXTRUDE_EDGES,
+        MAX_EXTRUDE_POLYGONS,
+    )
+    if any(actual > limit for actual, limit in zip(topology, limits)):
+        raise ValueError(
+            f"Extrude Region {label} exceeds the supported topology limits: "
+            f"vertices <= {MAX_EXTRUDE_VERTICES}, "
+            f"edges <= {MAX_EXTRUDE_EDGES}, "
+            f"polygons <= {MAX_EXTRUDE_POLYGONS}"
+        )
+
+
+def _extrude_region_geometry(
+    bm: bmesh.types.BMesh,
+    polygon_indices: tuple[int, ...],
+) -> tuple[
+    tuple[bmesh.types.BMFace, ...],
+    tuple[bmesh.types.BMEdge, ...],
+    tuple[bmesh.types.BMVert, ...],
+]:
+    bm.verts.index_update()
+    bm.edges.index_update()
+    bm.faces.index_update()
+    bm.faces.ensure_lookup_table()
+    if polygon_indices[-1] >= len(bm.faces):
+        raise ValueError(
+            "Extrude Region polygon index is outside the target mesh: "
+            f"{polygon_indices[-1]} >= {len(bm.faces)}"
+        )
+    faces = tuple(bm.faces[index] for index in polygon_indices)
+    face_set = set(faces)
+    visited = {faces[0]}
+    frontier = [faces[0]]
+    while frontier:
+        current = frontier.pop()
+        for edge in current.edges:
+            for neighbor in edge.link_faces:
+                if neighbor in face_set and neighbor not in visited:
+                    visited.add(neighbor)
+                    frontier.append(neighbor)
+    if len(visited) != len(faces):
+        raise ValueError("Extrude Region polygons must form one edge-connected region")
+
+    edges = tuple(
+        sorted(
+            {edge for face in faces for edge in face.edges},
+            key=lambda edge: edge.index,
+        )
+    )
+    if any(len(edge.link_faces) > 2 for edge in edges):
+        raise ValueError("Extrude Region does not support non-manifold selected edges")
+    boundary_edges = tuple(
+        edge
+        for edge in edges
+        if sum(linked_face in face_set for linked_face in edge.link_faces) == 1
+    )
+    if not boundary_edges:
+        raise ValueError("Extrude Region polygons must have a boundary edge")
+    vertices = tuple(
+        sorted(
+            {vertex for face in faces for vertex in face.verts},
+            key=lambda vertex: vertex.index,
+        )
+    )
+    return faces, edges, vertices
+
+
+def _canonicalize_extrude_sequences(
+    bm: bmesh.types.BMesh,
+    extruded_vertices: tuple[bmesh.types.BMVert, ...],
+    source_index_layer: Any,
+) -> None:
+    new_vertices = set(extruded_vertices)
+    vertex_order = sorted(
+        tuple(bm.verts),
+        key=lambda vertex: (
+            1 if vertex in new_vertices else 0,
+            vertex[source_index_layer],
+        ),
+    )
+    vertex_keys = tuple(
+        (
+            1 if vertex in new_vertices else 0,
+            vertex[source_index_layer],
+        )
+        for vertex in vertex_order
+    )
+    if len(set(vertex_keys)) != len(vertex_keys):
+        raise RuntimeError("Extrude Region produced ambiguous vertex provenance")
+    vertex_rank = {vertex: rank for rank, vertex in enumerate(vertex_order)}
+    bm.verts.sort(key=lambda vertex: vertex_rank[vertex])
+    bm.verts.index_update()
+
+    edge_order = sorted(
+        tuple(bm.edges),
+        key=lambda edge: tuple(sorted(vertex.index for vertex in edge.verts)),
+    )
+    edge_keys = tuple(
+        tuple(sorted(vertex.index for vertex in edge.verts)) for edge in edge_order
+    )
+    if len(set(edge_keys)) != len(edge_keys):
+        raise RuntimeError("Extrude Region produced ambiguous edge connectivity")
+    edge_rank = {edge: rank for rank, edge in enumerate(edge_order)}
+    bm.edges.sort(key=lambda edge: edge_rank[edge])
+    bm.edges.index_update()
+
+    face_order = sorted(
+        tuple(bm.faces),
+        key=lambda face: tuple(sorted(vertex.index for vertex in face.verts)),
+    )
+    face_keys = tuple(
+        tuple(sorted(vertex.index for vertex in face.verts)) for face in face_order
+    )
+    if len(set(face_keys)) != len(face_keys):
+        raise RuntimeError("Extrude Region produced ambiguous face connectivity")
+    face_rank = {face: rank for rank, face in enumerate(face_order)}
+    bm.faces.sort(key=lambda face: face_rank[face])
+    bm.faces.index_update()
+
+
+def execute_extrude_region(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: ExtrudeRegionDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, source_mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    if target.mode != "OBJECT":
+        raise RuntimeError("Extrude Region target must be in Object Mode")
+    if target.modifiers:
+        raise RuntimeError("Extrude Region target must not have modifiers")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Extrude Region target must not have shape keys")
+    source_topology = (
+        len(target.data.vertices),
+        len(target.data.edges),
+        len(target.data.polygons),
+    )
+    _ensure_extrude_topology_is_bounded(source_topology, "source")
+    ensure_logical_ids_available(registry, (definition.result_mesh_id,))
+    ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    try:
+        result_mesh = target.data.copy()
+        result_mesh.name = definition.result_mesh_name
+        result_identity = tag_resource(
+            result_mesh,
+            definition.result_mesh_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        created.append(result_identity)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(result_mesh)
+            source_index_layer = bm.verts.layers.int.new(
+                "OperatingLine.source_vertex_index"
+            )
+            bm.verts.index_update()
+            for vertex in bm.verts:
+                vertex[source_index_layer] = vertex.index + 1
+            faces, edges, vertices = _extrude_region_geometry(
+                bm, definition.polygon_indices
+            )
+            selected_source_indices = tuple(
+                sorted(vertex[source_index_layer] for vertex in vertices)
+            )
+            extrusion = bmesh.ops.extrude_face_region(
+                bm,
+                geom=(*faces, *edges, *vertices),
+                use_keep_orig=False,
+                use_normal_flip=False,
+                use_normal_from_adjacent=False,
+            )
+            extruded_vertices = tuple(
+                item
+                for item in extrusion["geom"]
+                if isinstance(item, bmesh.types.BMVert)
+            )
+            if (
+                len(extruded_vertices) != len(vertices)
+                or len(set(extruded_vertices)) != len(extruded_vertices)
+                or tuple(
+                    sorted(
+                        vertex[source_index_layer]
+                        for vertex in extruded_vertices
+                    )
+                )
+                != selected_source_indices
+            ):
+                raise RuntimeError(
+                    "Extrude Region did not preserve the expected vertex provenance"
+                )
+            bmesh.ops.translate(
+                bm,
+                verts=extruded_vertices,
+                vec=definition.translation,
+            )
+            _canonicalize_extrude_sequences(
+                bm,
+                extruded_vertices,
+                source_index_layer,
+            )
+            bm.verts.layers.int.remove(source_index_layer)
+            bm.normal_update()
+            predicted_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+            _ensure_extrude_topology_is_bounded(predicted_topology, "result")
+            if not all(
+                result_count > source_count
+                for result_count, source_count in zip(
+                    predicted_topology, source_topology
+                )
+            ):
+                raise RuntimeError("Extrude Region did not grow the mesh topology")
+            bm.to_mesh(result_mesh)
+        finally:
+            bm.free()
+        result_mesh.update()
+        actual_topology = (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        _ensure_extrude_topology_is_bounded(actual_topology, "actual result")
+        if actual_topology != predicted_topology:
+            raise RuntimeError("Extrude Region topology changed during mesh conversion")
+        target.data = result_mesh
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                source_mesh_identity,
+                result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                result_identity,
+                "mesh_content",
+                None,
+                mesh_content_signature(result_mesh),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
 
 
 def execute_triangulate(

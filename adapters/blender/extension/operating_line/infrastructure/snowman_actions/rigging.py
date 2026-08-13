@@ -24,11 +24,13 @@ from .common import (
     integer,
     logical_id,
     make_receipt,
+    mesh_content_signature,
     new_receipt_id,
     number,
     owned_resource,
     require_keys,
     require_object,
+    resolve_resource,
     rollback_partial,
     snapshot_modifier,
     snapshot_skin_weights,
@@ -673,6 +675,18 @@ def execute_skin_weights(
         raise RuntimeError(
             f"Cannot replace existing modifier: {definition.modifier_name}"
         )
+    mesh_identity = next(
+        (
+            identity
+            for identity in registry.values()
+            if identity.resource_type == "MESH"
+            and resolve_resource(identity) is target.data
+        ),
+        None,
+    )
+    if mesh_identity is None:
+        raise RuntimeError(f"Owned skin mesh data is unavailable: {definition.target_id}")
+    before_mesh_content = mesh_content_signature(target.data)
 
     vertex_count = len(target.data.vertices)
     if vertex_count > MAX_WEIGHT_VERTICES:
@@ -772,6 +786,14 @@ def execute_skin_weights(
             )
         )
         modifier_recorded = True
+        mutations.append(
+            MutationRecord(
+                mesh_identity,
+                "mesh_content",
+                before_mesh_content,
+                mesh_content_signature(target.data),
+            )
+        )
         return make_receipt(
             receipt_id,
             step_id,

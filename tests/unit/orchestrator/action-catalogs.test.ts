@@ -7,7 +7,10 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.11.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.12.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.11.0' }).catalogVersion,
+    ).toBe('1.11.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.10.0' }).catalogVersion,
     ).toBe('1.10.0');

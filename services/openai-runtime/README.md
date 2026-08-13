@@ -35,7 +35,7 @@ pnpm dev:openai
 
 1. 调用 `operatingline.planner.providers.list`，检查远端传输、凭据管理、可用性和并发声明。
 2. 使用返回的 `providerId` 和一个新 UUID `requestId` 调用 `operatingline.planner.generate`。
-3. 检查 `status` 与 `planningQuality`。Blender `1.8.0` 使用 Planning Packet `1.1.0` 和 quality baseline
+3. 检查 `status` 与 `planningQuality`。当前 Blender `1.12.0` 使用 Planning Packet `1.1.0` 和 quality baseline
    `1.1.0`；草案必须把每条具体需求通过 `planning.capabilityCoverage` 映射到 catalog capability 和
    action 匹配的可执行叶子。历史目录继续使用 packet/baseline `1.0.0`。该结果固定
    `proposalCreated: false`。

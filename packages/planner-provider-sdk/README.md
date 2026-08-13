@@ -27,7 +27,7 @@ export interface PlannerProvider {
 
 `generate()` 返回 `unknown` 是有意的：provider 输出不被信任，Orchestrator 必须重新解析严格的
 `PlanningProposalDraft`，核对 packet identity、递归 ActionCatalog 参数、目录能力覆盖链和确定性规划质量。
-Blender catalog `1.8.0` 的 packet 格式为 `1.1.0`；provider 必须在 `planning.capabilityCoverage` 中把
+当前 Blender catalog `1.12.0` 的 packet 格式为 `1.1.0`；provider 必须在 `planning.capabilityCoverage` 中把
 每条具体需求映射到真实 catalog capability，再映射到 action 匹配的可执行叶子。历史无能力目录继续
 使用 packet `1.0.0`。插件不得把
 “生成完成”解释为 Proposal 已创建；公开结果的 `proposalCreated` 固定为 `false`。

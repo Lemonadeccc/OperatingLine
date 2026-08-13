@@ -43,7 +43,7 @@ await startRuntime({
   再经过核心的严格 Schema、identity、ActionCatalog、capability coverage 与规划质量验证；局部重规划还要通过
   `referenced_subtrees_v1` locality 门禁。
 - 初始 `generate()` 发送 `PlanningPromptPacket.renderedPrompt`；局部 `replan()` 发送独立的
-  `ReplanningPromptPacket.renderedPrompt`。Blender `1.8.0` 的 capability-aware packet 格式为 `1.1.0`，
+  `ReplanningPromptPacket.renderedPrompt`。当前 Blender `1.12.0` 的 capability-aware packet 格式为 `1.1.0`，
   并要求模型返回 `requirement -> catalog capability -> executable leaf` 映射；历史目录继续使用
   packet `1.0.0`。两者使用相同 Responses 请求、取消和错误清洗边界。
 - `dialogue()` 只转发经过类型检查的 `response.output_text.delta`，并把完整流与最终 assistant 文本精确

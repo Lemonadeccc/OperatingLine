@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 import uuid
 
+import bmesh
 import bpy
 
 sys.dont_write_bytecode = True
@@ -102,8 +103,12 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     ensure_receipts_intact,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
+    _ensure_extrude_topology_is_bounded,
     _ensure_triangulate_topology_is_bounded,
+    _extrude_region_geometry,
+    _normalized_squared_vector_length,
     validate_bevel,
+    validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
     validate_subdivide,
@@ -242,6 +247,7 @@ def assert_cube_action_round_trip() -> None:
         "cube.round_trip",
         "cube.round_trip.mesh",
     }
+    assert any(mutation.attribute == "mesh_content" for mutation in receipt.mutations)
 
     assert session.back() is not None
     assert bpy.data.objects.get(cube_name) is None
@@ -643,7 +649,7 @@ def assert_triangulate_round_trip_and_guards() -> None:
     try:
         modifier_session.next()
     except RuntimeError as error:
-        assert "Object Mode" in str(error)
+        assert "Completed resource was modified" in str(error)
     else:
         raise AssertionError("Triangulate must reject Edit Mode targets")
     assert modifier_cube.data is source_mesh
@@ -653,7 +659,7 @@ def assert_triangulate_round_trip_and_guards() -> None:
     try:
         modifier_session.next()
     except RuntimeError as error:
-        assert "receipt" in str(error).lower() or "shape" in str(error).lower()
+        assert "completed resource was modified" in str(error).lower()
     else:
         raise AssertionError("Triangulate must reject shape-key targets")
     assert modifier_cube.data is source_mesh
@@ -1113,13 +1119,22 @@ def assert_solidify_round_trip_and_conflicts() -> None:
     assert len(topology_cube.modifiers) == 0
     try:
         topology_session.next()
-    except ValueError as error:
-        assert "topology" in str(error).lower()
+    except RuntimeError as error:
+        assert "completed resource was modified" in str(error).lower()
     else:
         raise AssertionError("Solidify must reject source topology above its bound")
     assert topology_session.active_index == 0
     assert "solidify.modifier" not in topology_session.receipts
     assert len(topology_cube.modifiers) == 0
+    topology_cube.data.clear_geometry()
+    restored = bmesh.new()
+    try:
+        bmesh.ops.create_cube(restored, size=2.0)
+        restored.to_mesh(topology_cube.data)
+    finally:
+        restored.free()
+    topology_cube.data.update()
+    ensure_receipts_intact(topology_session.receipts)
     assert topology_session.back() is not None
     assert bpy.data.objects.get(object_name) is None
     assert bpy.data.meshes.get(f"{object_name}.Mesh") is None
@@ -1402,7 +1417,502 @@ def assert_solidify_observation_success_gate() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def extrude_region_steps(
+    *,
+    object_name: str = "OperatingLine.ExtrudeRegionCube",
+    result_mesh_id: str = "extrude.cube.result_mesh",
+    result_mesh_name: str = "OperatingLine.ExtrudeRegionCube.ResultMesh",
+    polygon_indices: list[int] | None = None,
+    translation: list[float] | None = None,
+) -> list[dict]:
+    return [
+        step("root", None, 0),
+        step(
+            "extrude.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "extrude.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "extrude.region",
+            "root",
+            2,
+            depends_on=["extrude.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_extrude_region",
+                "arguments": {
+                    "targetId": "extrude.cube",
+                    "resultMeshId": result_mesh_id,
+                    "resultMeshName": result_mesh_name,
+                    "polygonIndices": polygon_indices or [5],
+                    "translation": translation or [0.25, -0.5, 1.0],
+                },
+            },
+        ),
+    ]
+
+
+def assert_extrude_region_round_trip_and_guards() -> None:
+    object_name = "OperatingLine.ExtrudeRegionCube"
+    result_mesh_name = "OperatingLine.ExtrudeRegionCube.ResultMesh"
+    root = load_temporary_plan(extrude_region_steps())
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    cube = bpy.data.objects[object_name]
+    source_mesh = cube.data
+    source_coordinates = tuple(tuple(vertex.co) for vertex in source_mesh.vertices)
+
+    assert session.next() is not None
+    result_mesh = cube.data
+    assert result_mesh is not source_mesh
+    assert result_mesh.name == result_mesh_name
+    assert (
+        len(result_mesh.vertices),
+        len(result_mesh.edges),
+        len(result_mesh.polygons),
+    ) == (12, 20, 10)
+    assert tuple(
+        tuple(sorted(polygon.vertices)) for polygon in result_mesh.polygons
+    ) == (
+        (0, 1, 2, 3),
+        (0, 1, 4, 5),
+        (0, 2, 4, 6),
+        (1, 3, 8, 9),
+        (1, 5, 8, 10),
+        (2, 3, 6, 7),
+        (3, 7, 9, 11),
+        (4, 5, 6, 7),
+        (5, 7, 10, 11),
+        (8, 9, 10, 11),
+    )
+    assert result_mesh.attributes.get("OperatingLine.source_vertex_index") is None
+    assert tuple(tuple(vertex.co) for vertex in source_mesh.vertices) == source_coordinates
+    new_coordinates = tuple(tuple(vertex.co) for vertex in result_mesh.vertices[8:])
+    assert set(new_coordinates) == {
+        (-0.75, -1.5, 2.0),
+        (-0.75, 0.5, 2.0),
+        (1.25, -1.5, 2.0),
+        (1.25, 0.5, 2.0),
+    }
+    receipt = session.receipts["extrude.region"]
+    assert receipt.action_name == "blender.mesh.edit_extrude_region"
+    assert tuple(mutation.attribute for mutation in receipt.mutations) == (
+        "data",
+        "mesh_content",
+    )
+
+    parameters = {
+        "targetId": "extrude.cube",
+        "resultMeshId": "extrude.cube.result_mesh",
+    }
+    observations = observation_module.evaluate_observations(
+        (
+            {"kind": "mesh_region_extruded", "parameters": parameters},
+            {
+                "kind": "mesh_region_extruded",
+                "parameters": {**parameters, "unexpected": True},
+            },
+        ),
+        session.receipts,
+    )
+    assert tuple(item["satisfied"] for item in observations) == (True, False)
+
+    original_vertex = result_mesh.vertices[0].co.copy()
+    result_mesh.vertices[0].co.x += 0.25
+    assert (
+        observation_module.evaluate_observations(
+            ({"kind": "mesh_region_extruded", "parameters": parameters},),
+            session.receipts,
+        )[0]["satisfied"]
+        is False
+    )
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited extruded meshes must block rollback")
+    result_mesh.vertices[0].co = original_vertex
+
+    assert session.back() is not None
+    assert cube.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+    for label, mutate, message in (
+        (
+            "modifier",
+            lambda target: target.modifiers.new("External", "BEVEL"),
+            "must not have modifiers",
+        ),
+        (
+            "shape_key",
+            lambda target: target.shape_key_add(name="Basis"),
+            "Completed resource was modified",
+        ),
+    ):
+        guarded_name = f"OperatingLine.ExtrudeRegionGuard.{label}"
+        guarded_mesh_name = f"{guarded_name}.ResultMesh"
+        guarded_root = load_temporary_plan(
+            extrude_region_steps(
+                object_name=guarded_name,
+                result_mesh_name=guarded_mesh_name,
+            )
+        )
+        guarded_session = DemoSession(guarded_root, action_registry(guarded_root))
+        guarded_session.start()
+        assert guarded_session.next() is not None
+        guarded_target = bpy.data.objects[guarded_name]
+        guarded_source = guarded_target.data
+        mutate(guarded_target)
+        try:
+            guarded_session.next()
+        except RuntimeError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError(f"Extrude Region must reject a {label} target")
+        assert guarded_target.data is guarded_source
+        assert bpy.data.meshes.get(guarded_mesh_name) is None
+        if label == "modifier":
+            guarded_target.modifiers.clear()
+        else:
+            guarded_target.shape_key_clear()
+        assert guarded_session.back() is not None
+
+    mode_name = "OperatingLine.ExtrudeRegionGuard.EditMode"
+    mode_root = load_temporary_plan(
+        extrude_region_steps(
+            object_name=mode_name,
+            result_mesh_name=f"{mode_name}.ResultMesh",
+        )
+    )
+    mode_session = DemoSession(mode_root, action_registry(mode_root))
+    mode_session.start()
+    assert mode_session.next() is not None
+    mode_target = bpy.data.objects[mode_name]
+    bpy.context.view_layer.objects.active = mode_target
+    mode_target.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        mode_session.next()
+    except RuntimeError as error:
+        assert "Completed resource was modified" in str(error)
+    else:
+        raise AssertionError("Extrude Region must reject Edit Mode targets")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    assert mode_session.back() is not None
+
+    invalid_name = "OperatingLine.ExtrudeRegionGuard.Index"
+    invalid_mesh_name = f"{invalid_name}.ResultMesh"
+    invalid_index_root = load_temporary_plan(
+        extrude_region_steps(
+            object_name=invalid_name,
+            result_mesh_name=invalid_mesh_name,
+            polygon_indices=[6],
+        )
+    )
+    invalid_index_session = DemoSession(
+        invalid_index_root, action_registry(invalid_index_root)
+    )
+    invalid_index_session.start()
+    assert invalid_index_session.next() is not None
+    invalid_target = bpy.data.objects[invalid_name]
+    invalid_source = invalid_target.data
+    try:
+        invalid_index_session.next()
+    except ValueError as error:
+        assert "outside the target mesh" in str(error)
+    else:
+        raise AssertionError("Extrude Region must reject out-of-range polygon indices")
+    assert invalid_target.data is invalid_source
+    assert bpy.data.meshes.get(invalid_mesh_name) is None
+    assert invalid_index_session.back() is not None
+
+    _ensure_extrude_topology_is_bounded((8192, 16384, 8192), "boundary")
+    for topology in ((8193, 0, 0), (0, 16385, 0), (0, 0, 8193)):
+        try:
+            _ensure_extrude_topology_is_bounded(topology, "boundary")
+        except ValueError as error:
+            assert "topology limits" in str(error)
+        else:
+            raise AssertionError(f"Extrude Region must reject topology {topology}")
+
+
+def _bmesh_for_faces(
+    coordinates: tuple[tuple[float, float, float], ...],
+    face_indices: tuple[tuple[int, ...], ...],
+) -> bmesh.types.BMesh:
+    bm = bmesh.new()
+    vertices = tuple(bm.verts.new(coordinate) for coordinate in coordinates)
+    for indices in face_indices:
+        bm.faces.new(tuple(vertices[index] for index in indices))
+    bm.verts.index_update()
+    bm.edges.index_update()
+    bm.faces.index_update()
+    bm.faces.ensure_lookup_table()
+    return bm
+
+
+def assert_extrude_region_connectivity_guards() -> None:
+    connected_name = "OperatingLine.ExtrudeRegionConnected"
+    connected_mesh_name = f"{connected_name}.ResultMesh"
+    connected_root = load_temporary_plan(
+        extrude_region_steps(
+            object_name=connected_name,
+            result_mesh_name=connected_mesh_name,
+            polygon_indices=[0, 1],
+        )
+    )
+    connected_session = DemoSession(
+        connected_root, action_registry(connected_root)
+    )
+    connected_session.start()
+    assert connected_session.next() is not None
+    connected_target = bpy.data.objects[connected_name]
+    connected_source = connected_target.data
+    assert connected_session.next() is not None
+    assert (
+        len(connected_target.data.vertices),
+        len(connected_target.data.edges),
+        len(connected_target.data.polygons),
+    ) == (14, 24, 12)
+    assert tuple(
+        tuple(sorted(polygon.vertices))
+        for polygon in connected_target.data.polygons
+    ) == (
+        (0, 1, 4, 5),
+        (0, 1, 8, 9),
+        (0, 2, 4, 6),
+        (0, 2, 8, 10),
+        (1, 3, 5, 7),
+        (1, 3, 9, 11),
+        (2, 6, 10, 12),
+        (3, 7, 11, 13),
+        (4, 5, 6, 7),
+        (6, 7, 12, 13),
+        (8, 9, 10, 11),
+        (10, 11, 12, 13),
+    )
+    assert connected_session.back() is not None
+    assert connected_target.data is connected_source
+    assert bpy.data.meshes.get(connected_mesh_name) is None
+    assert connected_session.back() is not None
+
+    for label, polygon_indices, message in (
+        ("Disconnected", [0, 2], "edge-connected"),
+        ("Closed", [0, 1, 2, 3, 4, 5], "boundary edge"),
+    ):
+        object_name = f"OperatingLine.ExtrudeRegion{label}"
+        result_mesh_name = f"{object_name}.ResultMesh"
+        root = load_temporary_plan(
+            extrude_region_steps(
+                object_name=object_name,
+                result_mesh_name=result_mesh_name,
+                polygon_indices=polygon_indices,
+            )
+        )
+        session = DemoSession(root, action_registry(root))
+        session.start()
+        assert session.next() is not None
+        target = bpy.data.objects[object_name]
+        source = target.data
+        try:
+            session.next()
+        except ValueError as error:
+            assert message in str(error)
+        else:
+            raise AssertionError(f"Extrude Region must reject {label.lower()} faces")
+        assert target.data is source
+        assert bpy.data.meshes.get(result_mesh_name) is None
+        assert session.back() is not None
+
+    non_manifold = _bmesh_for_faces(
+        (
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (0.5, 1.0, 0.0),
+            (0.5, -1.0, 0.0),
+            (0.5, 0.0, 1.0),
+        ),
+        ((0, 1, 2), (1, 0, 3), (0, 1, 4)),
+    )
+    try:
+        try:
+            _extrude_region_geometry(non_manifold, (0, 1))
+        except ValueError as error:
+            assert "non-manifold" in str(error)
+        else:
+            raise AssertionError("Extrude Region must reject non-manifold edges")
+    finally:
+        non_manifold.free()
+
+
+def assert_extrude_region_rejects_modified_source() -> None:
+    object_name = "OperatingLine.ExtrudeRegionModifiedSource"
+    result_mesh_name = f"{object_name}.ResultMesh"
+    root = load_temporary_plan(
+        extrude_region_steps(
+            object_name=object_name,
+            result_mesh_name=result_mesh_name,
+        )
+    )
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    target = bpy.data.objects[object_name]
+    source_mesh = target.data
+    original_coordinate = source_mesh.vertices[0].co.copy()
+    source_mesh.vertices[0].co.x += 0.125
+    try:
+        session.next()
+    except RuntimeError as error:
+        assert "Completed resource was modified" in str(error)
+        assert "extrude.cube.mesh.mesh_content" in str(error)
+    else:
+        raise AssertionError("Extrude Region must reject a modified source mesh")
+    assert target.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    source_mesh.vertices[0].co = original_coordinate
+    assert session.back() is not None
+
+
+def assert_extrude_region_chained_indices() -> None:
+    object_name = "OperatingLine.ExtrudeRegionChained"
+    first_mesh_name = f"{object_name}.FirstMesh"
+    second_mesh_name = f"{object_name}.SecondMesh"
+    steps = extrude_region_steps(
+        object_name=object_name,
+        result_mesh_id="extrude.cube.first_mesh",
+        result_mesh_name=first_mesh_name,
+    )
+    steps.append(
+        step(
+            "extrude.region.second",
+            "root",
+            3,
+            depends_on=["extrude.region"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_extrude_region",
+                "arguments": {
+                    "targetId": "extrude.cube",
+                    "resultMeshId": "extrude.cube.second_mesh",
+                    "resultMeshName": second_mesh_name,
+                    "polygonIndices": [9],
+                    "translation": [0.0, 0.0, 0.5],
+                },
+            },
+        )
+    )
+    root = load_temporary_plan(steps)
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    target = bpy.data.objects[object_name]
+    source_mesh = target.data
+    assert session.next() is not None
+    first_mesh = target.data
+    assert tuple(sorted(first_mesh.polygons[9].vertices)) == (8, 9, 10, 11)
+    assert session.next() is not None
+    assert (
+        len(target.data.vertices),
+        len(target.data.edges),
+        len(target.data.polygons),
+    ) == (16, 28, 14)
+    assert session.back() is not None
+    assert target.data is first_mesh
+    assert bpy.data.meshes.get(second_mesh_name) is None
+    assert session.back() is not None
+    assert target.data is source_mesh
+    assert bpy.data.meshes.get(first_mesh_name) is None
+    assert session.back() is not None
+
+
+def assert_extrude_region_observation_success_gate() -> None:
+    object_name = "OperatingLine.ExtrudeRegionGateCube"
+
+    def gated_steps(*, result_mesh_id: str) -> list[dict]:
+        result = extrude_region_steps(
+            object_name=object_name,
+            result_mesh_name="OperatingLine.ExtrudeRegionGateCube.ResultMesh",
+        )
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "mesh_region_extruded",
+                "parameters": {
+                    "targetId": "extrude.cube",
+                    "resultMeshId": result_mesh_id,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    passing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(result_mesh_id="extrude.cube.result_mesh"),
+        }
+    )
+    passing_session = DemoSession(
+        passing_root,
+        action_registry(passing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    passing_session.start()
+    assert passing_session.next() is not None
+    assert passing_session.next() is not None
+    assert passing_session.back() is not None
+    assert passing_session.back() is not None
+
+    failing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps(result_mesh_id="extrude.cube.wrong_mesh"),
+        }
+    )
+    failing_session = DemoSession(
+        failing_root,
+        action_registry(failing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    failing_session.start()
+    assert failing_session.next() is not None
+    source_mesh = bpy.data.objects[object_name].data
+    try:
+        failing_session.next()
+    except RuntimeError as error:
+        assert "Observation gate failed" in str(error)
+    else:
+        raise AssertionError("A wrong extruded mesh ID must fail the success gate")
+    assert failing_session.active_index == 0
+    assert "extrude.region" not in failing_session.receipts
+    assert bpy.data.objects[object_name].data is source_mesh
+    assert bpy.data.meshes.get("OperatingLine.ExtrudeRegionGateCube.ResultMesh") is None
+    assert failing_session.back() is not None
+
+
 def assert_editing_argument_boundaries() -> None:
+    assert _normalized_squared_vector_length((1e308, 1e308), 1.1e308) > 1.0
+    assert _normalized_squared_vector_length((5e-201, 0.0), 1e-200) < 1.0
     triangulate = validate_triangulate(
         {
             "targetId": "edit.target",
@@ -1411,6 +1921,45 @@ def assert_editing_argument_boundaries() -> None:
         }
     )
     assert triangulate.result_mesh_id == "edit.triangulated.mesh"
+    extrude = validate_extrude_region(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.extruded.mesh",
+            "resultMeshName": "OperatingLine.ExtrudedMesh",
+            "polygonIndices": [5, 0],
+            "translation": [0.0, 0.0, 0.0001],
+        }
+    )
+    assert extrude.polygon_indices == (0, 5)
+    assert extrude.translation == (0.0, 0.0, 0.0001)
+    rejected_boundary_translation = [491.34180453259, 870.9668369798349, 0.0]
+    try:
+        validate_extrude_region(
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.extruded.mesh",
+                "resultMeshName": "OperatingLine.ExtrudedMesh",
+                "polygonIndices": [0],
+                "translation": rejected_boundary_translation,
+            }
+        )
+    except ValueError as error:
+        assert (
+            "arguments.translation length must be in [0.0001, 1000.0]"
+            in str(error)
+        )
+    else:
+        raise AssertionError("Extrude Region must reject a rounded-up squared length")
+    accepted_boundary_translation = [999.999985743048, 0.1688606043279722, 0.0]
+    assert validate_extrude_region(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.extruded.mesh",
+            "resultMeshName": "OperatingLine.ExtrudedMesh",
+            "polygonIndices": [0],
+            "translation": accepted_boundary_translation,
+        }
+    ).translation == tuple(accepted_boundary_translation)
     assert validate_subdivide(
         {
             "targetId": "edit.target",
@@ -1465,6 +2014,28 @@ def assert_editing_argument_boundaries() -> None:
     assert geometry_nodes.scale == (0.0001, 1000.0, 1.0)
 
     invalid_cases = (
+        (
+            validate_extrude_region,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.extruded.mesh",
+                "resultMeshName": "OperatingLine.ExtrudedMesh",
+                "polygonIndices": [0, 0],
+                "translation": [0.0, 0.0, 1.0],
+            },
+            "must not repeat",
+        ),
+        (
+            validate_extrude_region,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.extruded.mesh",
+                "resultMeshName": "OperatingLine.ExtrudedMesh",
+                "polygonIndices": [0],
+                "translation": [0.0, 0.0, 0.0],
+            },
+            "translation length",
+        ),
         (
             validate_triangulate,
             {
@@ -5162,6 +5733,11 @@ def main() -> None:
     assert_cube_action_round_trip()
     assert_editing_argument_boundaries()
     assert_edit_modifier_geometry_nodes_round_trip()
+    assert_extrude_region_round_trip_and_guards()
+    assert_extrude_region_connectivity_guards()
+    assert_extrude_region_rejects_modified_source()
+    assert_extrude_region_chained_indices()
+    assert_extrude_region_observation_success_gate()
     assert_triangulate_round_trip_and_guards()
     assert_triangulate_ngon_conflicts_and_boundaries()
     assert_triangulate_observation_success_gate()
