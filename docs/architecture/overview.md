@@ -133,6 +133,12 @@ Headless Eval review service
   ├─ no provider profile, aliases, sidecar, or real run id in browser DTOs
   └─ independent preparer, two reviewers, and disagreement adjudicator
 
+Headless Eval collection status service
+  ├─ separate loopback-only operator session, read-only routes
+  ├─ aggregate treatment/sign-off/review/adjudication counts only
+  ├─ no case/run/provider/reviewer identifiers or review artifacts
+  └─ collection minimums only, release readiness always not assessed
+
 HumanEvalAnnotation / HumanEvalAdjudication
   ├─ exact run + rubric content hashes
   ├─ provider-blind per-criterion human judgments + evidence

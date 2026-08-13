@@ -24,6 +24,7 @@
     "eval:capture": "tsx tools/eval/capture.ts",
     "eval:blind": "tsx tools/eval/blind.ts",
     "eval:review": "tsx services/eval-review/src/cli.ts",
+    "eval:status": "tsx services/eval-review/src/status-cli.ts",
     "eval:recover-lock": "tsx tools/eval/recover-lock.ts",
     "eval:check": "tsx tools/eval/check.ts",
     "eval:report": "tsx tools/eval/report.ts",

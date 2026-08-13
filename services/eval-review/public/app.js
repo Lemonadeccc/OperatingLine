@@ -4,6 +4,7 @@ const state = {
   items: [],
   selectedId: null,
   selectionGeneration: 0,
+  collectionGeneration: 0,
   objectUrls: [],
 };
 
@@ -99,6 +100,95 @@ function renderQueue() {
         ],
       ),
     );
+  }
+}
+
+function remainingCount(value) {
+  if (!Number.isInteger(value) || value < 0) throw new Error('Invalid collection count');
+  return value;
+}
+
+function renderWorklist(worklist) {
+  const container = document.querySelector('#collection-status');
+  const expectedKeys = [
+    'pendingAdjudications',
+    'pendingSignoffs',
+    'releaseReadiness',
+    'remainingDistinctTreatments',
+    'remainingIndependentReviews',
+  ];
+  if (
+    !worklist ||
+    typeof worklist !== 'object' ||
+    Array.isArray(worklist) ||
+    JSON.stringify(Object.keys(worklist).sort()) !== JSON.stringify(expectedKeys) ||
+    worklist.releaseReadiness !== 'not_assessed'
+  ) {
+    throw new Error('Invalid collection status');
+  }
+  const captureRemaining = remainingCount(worklist.remainingDistinctTreatments);
+  const signoffRemaining = remainingCount(worklist.pendingSignoffs);
+  const reviewRemaining = remainingCount(worklist.remainingIndependentReviews);
+  const adjudicationRemaining = remainingCount(worklist.pendingAdjudications);
+  const metrics = [
+    ['待采集处理', captureRemaining],
+    ['待签署', signoffRemaining],
+    ['待独立审核', reviewRemaining],
+    ['待裁决', adjudicationRemaining],
+  ];
+
+  container.setAttribute('aria-busy', 'false');
+  container.replaceChildren(
+    element(
+      'dl',
+      { className: 'collection-metrics' },
+      metrics.flatMap(([label, count]) => [
+        element('div', { className: 'collection-metric' }, [
+          element('dt', { textContent: label }),
+          element('dd', { textContent: String(count) }),
+        ]),
+      ]),
+    ),
+    element('p', {
+      className: 'release-note',
+      textContent:
+        signoffRemaining > 0
+          ? '完成全局盲签后才会开放审核/裁决队列；发布就绪状态未评估。'
+          : '发布就绪状态未评估；此处仅显示采集最低要求。',
+    }),
+  );
+}
+
+function renderWorklistError() {
+  const container = document.querySelector('#collection-status');
+  container.setAttribute('aria-busy', 'false');
+  container.replaceChildren(
+    element('p', {
+      className: 'collection-error',
+      textContent: '无法载入采集状态，请稍后刷新。',
+    }),
+    element('p', {
+      className: 'release-note',
+      textContent: '发布就绪状态未评估。',
+    }),
+  );
+}
+
+async function loadWorklist() {
+  const generation = state.collectionGeneration + 1;
+  state.collectionGeneration = generation;
+  const container = document.querySelector('#collection-status');
+  container.setAttribute('aria-busy', 'true');
+  container.replaceChildren(element('p', { className: 'muted', textContent: '正在载入采集状态…' }));
+  try {
+    const response = await api('/api/v1/worklist');
+    const worklist = await response.json();
+    if (generation !== state.collectionGeneration) return;
+    renderWorklist(worklist);
+  } catch {
+    if (generation !== state.collectionGeneration) return;
+    renderWorklistError();
+    notice('无法载入采集状态。', true);
   }
 }
 
@@ -351,8 +441,23 @@ async function start() {
   state.token = readToken();
   const sessionResponse = await api('/api/v1/session');
   state.session = await sessionResponse.json();
-  document.querySelector('#session').textContent =
-    `${state.session.role === 'reviewer' ? 'Reviewer' : 'Adjudicator'} · Provider identity hidden`;
+  if (state.session.role === 'operator') {
+    document.querySelector('h1').textContent = '采集状态';
+    document.querySelector('#session').textContent = 'Operator · Aggregate status only';
+    document.querySelector('#operator-workspace').hidden = false;
+    document.querySelector('#collection-refresh').addEventListener('click', () => {
+      void loadWorklist();
+    });
+    await loadWorklist();
+    return;
+  }
+  if (state.session.role !== 'reviewer' && state.session.role !== 'adjudicator') {
+    throw new Error('不支持的本地会话角色。');
+  }
+  document.querySelector('#review-workspace').hidden = false;
+  document.querySelector('#session').textContent = `${
+    state.session.role === 'reviewer' ? 'Reviewer' : 'Adjudicator'
+  } · Provider identity hidden`;
   document.querySelector('#refresh').addEventListener('click', () => {
     void loadItems().catch((error) => notice(error.message, true));
   });

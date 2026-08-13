@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  HumanEvalCollectionStatusWorkspace,
   HumanEvalReviewWorkspace,
   type ReviewerCaseDto,
   type ReviewerSubmission,
@@ -14,6 +15,7 @@ import {
   createHumanEvalIntegrity,
   createProviderEvalRun,
   loadHumanEvalDatasetDirectory,
+  withHumanEvalDatasetWriteLock,
 } from '@operatingline/eval-kit';
 import {
   humanEvalSuiteSchema,
@@ -183,6 +185,119 @@ function withRunIdentity(run: ReturnType<typeof buildProviderEvalRunFixture>, ne
 }
 
 describe('HumanEvalReviewWorkspace', () => {
+  it('reports only aggregate operator status and refreshes across unsigned captures', async () => {
+    const { directory } = await createWorkspace();
+    const workspace = await HumanEvalCollectionStatusWorkspace.open({
+      datasetDirectory: directory,
+    });
+
+    expect(await workspace.getCollectionStatus()).toEqual({
+      remainingDistinctTreatments: 2,
+      pendingSignoffs: 0,
+      remainingIndependentReviews: 0,
+      pendingAdjudications: 0,
+      releaseReadiness: 'not_assessed',
+    });
+    await expect(
+      Promise.all(Array.from({ length: 8 }, () => workspace.getCollectionStatus())),
+    ).resolves.toHaveLength(8);
+
+    const suite = buildHumanEvalSuiteFixture();
+    const unsignedRun = withRunIdentity(
+      buildProviderEvalRunFixture(suite),
+      '10000000-0000-4000-8000-000000000099',
+    );
+    await writeFile(
+      join(directory, 'runs', `${unsignedRun.runId}.run.json`),
+      JSON.stringify(unsignedRun),
+    );
+
+    const refreshedStatus = await workspace.getCollectionStatus();
+    expect(refreshedStatus).toEqual({
+      remainingDistinctTreatments: 2,
+      pendingSignoffs: 1,
+      remainingIndependentReviews: 0,
+      pendingAdjudications: 0,
+      releaseReadiness: 'not_assessed',
+    });
+    expect(Object.keys(refreshedStatus).sort()).toEqual(
+      [
+        'remainingDistinctTreatments',
+        'pendingSignoffs',
+        'remainingIndependentReviews',
+        'pendingAdjudications',
+        'releaseReadiness',
+      ].sort(),
+    );
+    const publicJson = JSON.stringify(refreshedStatus);
+    for (const forbidden of [
+      'canvas.launch_diagram',
+      '10000000-0000-4000-8000-000000000003',
+      '10000000-0000-4000-8000-000000000099',
+      'fixture.canvas_planner',
+      'Fixture Canvas Planner',
+      'blind.preparer',
+      'provider-blind',
+      'signoff',
+    ]) {
+      expect(publicJson).not.toContain(forbidden);
+    }
+  });
+
+  it('does not expose tentative records while a dataset writer holds the transaction lock', async () => {
+    const { directory } = await createWorkspace();
+    const workspace = await HumanEvalCollectionStatusWorkspace.open({
+      datasetDirectory: directory,
+    });
+    const suite = buildHumanEvalSuiteFixture();
+    const tentativeRun = withRunIdentity(
+      buildProviderEvalRunFixture(suite),
+      '10000000-0000-4000-8000-000000000099',
+    );
+    let releaseWriter!: () => void;
+    let writerEntered!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseWriter = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      writerEntered = resolve;
+    });
+    const writer = withHumanEvalDatasetWriteLock(directory, async () => {
+      await writeFile(
+        join(directory, 'runs', `${tentativeRun.runId}.run.json`),
+        JSON.stringify(tentativeRun),
+      );
+      writerEntered();
+      await release;
+      await rm(join(directory, 'runs', `${tentativeRun.runId}.run.json`));
+    });
+    await entered;
+
+    try {
+      await expect(workspace.getCollectionStatus()).rejects.toThrow(/temporarily unavailable/);
+    } finally {
+      releaseWriter();
+      await writer;
+    }
+    await expect(workspace.getCollectionStatus()).resolves.toMatchObject({ pendingSignoffs: 0 });
+  });
+
+  it('rejects retired suites instead of presenting them as actionable status', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'operatingline-status-retired-'));
+    temporaryDirectories.push(directory);
+    const fixtureSuite = buildHumanEvalSuiteFixture();
+    const content = { ...withoutKey(fixtureSuite, 'integrity'), status: 'retired' as const };
+    const retiredSuite = humanEvalSuiteSchema.parse({
+      ...content,
+      integrity: createHumanEvalIntegrity(content),
+    });
+    await writeFile(join(directory, 'suite.json'), JSON.stringify(retiredSuite));
+
+    await expect(
+      HumanEvalCollectionStatusWorkspace.open({ datasetDirectory: directory }),
+    ).rejects.toThrow(/retired suite/);
+  });
+
   it('projects a blind reviewer DTO and isolates two independent reviewer sessions', async () => {
     const { workspace } = await createWorkspace();
     const reviewerA = reviewer(workspace, 'reviewer.alpha');

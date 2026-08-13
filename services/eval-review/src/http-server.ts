@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -12,6 +12,10 @@ import {
   type ReviewerCorrection,
   type ReviewerSubmission,
 } from './review-workspace.js';
+import {
+  HumanEvalCollectionStatusBusyError,
+  type HumanEvalCollectionStatusWorkspace,
+} from './collection-status-workspace.js';
 
 const maximumRequestBodyBytes = 512 * 1024;
 const publicDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../public');
@@ -38,6 +42,30 @@ export interface RunningEvalReviewServer {
   readonly role: ReviewSessionConfiguration['role'];
   stop(): Promise<void>;
 }
+
+export interface EvalCollectionStatusServerOptions {
+  readonly workspace: HumanEvalCollectionStatusWorkspace;
+  readonly port?: number;
+}
+
+export interface RunningEvalCollectionStatusServer {
+  readonly baseUrl: string;
+  readonly statusUrl: string;
+  readonly role: 'operator';
+  stop(): Promise<void>;
+}
+
+interface InternalReviewServerOptions extends EvalReviewServerOptions {
+  readonly mode: 'review';
+  readonly sessionToken: string;
+}
+
+interface InternalStatusServerOptions extends EvalCollectionStatusServerOptions {
+  readonly mode: 'status';
+  readonly sessionToken: string;
+}
+
+type InternalServerOptions = InternalReviewServerOptions | InternalStatusServerOptions;
 
 class HttpInputError extends Error {
   constructor(
@@ -78,7 +106,7 @@ function bearerToken(request: IncomingMessage, expected: string): string {
   const authorization = request.headers.authorization;
   const supplied = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
   if (supplied === '' || !sameSecret(supplied, expected)) {
-    throw new HttpInputError(401, 'A valid review session bearer token is required');
+    throw new HttpInputError(401, 'A valid local Eval session bearer token is required');
   }
   return supplied;
 }
@@ -319,11 +347,29 @@ function statusForWorkspaceError(error: ReviewWorkspaceError): number {
 export async function startEvalReviewServer(
   options: EvalReviewServerOptions,
 ): Promise<RunningEvalReviewServer> {
+  const session = options.workspace.createSession(options.session);
+  return startEvalHttpServer({ ...options, mode: 'review', sessionToken: session.sessionToken });
+}
+
+export async function startEvalCollectionStatusServer(
+  options: EvalCollectionStatusServerOptions,
+): Promise<RunningEvalCollectionStatusServer> {
+  return startEvalHttpServer({ ...options, mode: 'status', sessionToken: randomUUID() });
+}
+
+function startEvalHttpServer(
+  options: InternalReviewServerOptions,
+): Promise<RunningEvalReviewServer>;
+function startEvalHttpServer(
+  options: InternalStatusServerOptions,
+): Promise<RunningEvalCollectionStatusServer>;
+async function startEvalHttpServer(
+  options: InternalServerOptions,
+): Promise<RunningEvalReviewServer | RunningEvalCollectionStatusServer> {
   const port = options.port ?? 0;
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new Error('Eval review port must be an integer between 0 and 65535');
+    throw new Error('Local Eval port must be an integer between 0 and 65535');
   }
-  const session = options.workspace.createSession(options.session);
   let expectedHost = '';
   const server = createServer(async (request, response) => {
     try {
@@ -335,17 +381,33 @@ export async function startEvalReviewServer(
         return;
       }
 
-      const token = bearerToken(request, session.sessionToken);
+      const token = bearerToken(request, options.sessionToken);
       if (method === 'GET' && url.pathname === '/api/v1/session') {
-        sendJson(response, 200, {
-          role: options.session.role,
-          providerIdentityVisible: false,
-          numericScoring: false,
-          providerRanking: false,
-        });
+        sendJson(
+          response,
+          200,
+          options.mode === 'status'
+            ? { role: 'operator' }
+            : {
+                role: options.session.role,
+                providerIdentityVisible: false,
+                numericScoring: false,
+                providerRanking: false,
+              },
+        );
+        return;
+      }
+      if (method === 'GET' && url.pathname === '/api/v1/worklist') {
+        if (options.mode !== 'status') {
+          throw new HttpInputError(403, 'Collection status requires an operator session');
+        }
+        sendJson(response, 200, await options.workspace.getCollectionStatus());
         return;
       }
       if (method === 'GET' && url.pathname === '/api/v1/items') {
+        if (options.mode !== 'review') {
+          throw new HttpInputError(403, 'Operator sessions cannot access review items');
+        }
         await options.workspace.refresh();
         const items =
           options.session.role === 'reviewer'
@@ -356,6 +418,9 @@ export async function startEvalReviewServer(
       }
       const selectedItemId = itemId(url.pathname);
       if (method === 'GET' && selectedItemId !== null) {
+        if (options.mode !== 'review') {
+          throw new HttpInputError(403, 'Operator sessions cannot access review items');
+        }
         await options.workspace.refresh();
         const item =
           options.session.role === 'reviewer'
@@ -366,6 +431,9 @@ export async function startEvalReviewServer(
       }
       const selectedArtifactToken = artifactToken(url.pathname);
       if (method === 'GET' && selectedArtifactToken !== null) {
+        if (options.mode !== 'review') {
+          throw new HttpInputError(403, 'Operator sessions cannot access review artifacts');
+        }
         const artifact = await options.workspace.resolveRenderedArtifact(
           token,
           selectedArtifactToken,
@@ -375,6 +443,9 @@ export async function startEvalReviewServer(
       }
       const annotationRunId = itemAction(url.pathname, 'annotation');
       if (method === 'POST' && annotationRunId !== null) {
+        if (options.mode !== 'review') {
+          throw new HttpInputError(403, 'Operator sessions cannot submit annotations');
+        }
         if (options.session.role !== 'reviewer') {
           throw new HttpInputError(403, 'This session cannot submit annotations');
         }
@@ -389,6 +460,9 @@ export async function startEvalReviewServer(
       }
       const adjudicationRunId = itemAction(url.pathname, 'adjudication');
       if (method === 'POST' && adjudicationRunId !== null) {
+        if (options.mode !== 'review') {
+          throw new HttpInputError(403, 'Operator sessions cannot submit adjudications');
+        }
         if (options.session.role !== 'adjudicator') {
           throw new HttpInputError(403, 'This session cannot submit adjudications');
         }
@@ -413,6 +487,11 @@ export async function startEvalReviewServer(
           error: error.code,
           message: error.message,
         });
+      } else if (error instanceof HumanEvalCollectionStatusBusyError) {
+        sendJson(response, 503, {
+          error: 'collection_status_busy',
+          message: error.message,
+        });
       } else {
         sendJson(response, 500, {
           error: 'internal_error',
@@ -432,17 +511,25 @@ export async function startEvalReviewServer(
   const address = server.address();
   if (address === null || typeof address === 'string') {
     await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
-    throw new Error('Eval review server did not bind a TCP address');
+    throw new Error('Local Eval server did not bind a TCP address');
   }
   expectedHost = `127.0.0.1:${address.port}`;
   const baseUrl = `http://${expectedHost}`;
-  return {
-    baseUrl,
-    reviewUrl: `${baseUrl}/#token=${encodeURIComponent(session.sessionToken)}`,
-    role: options.session.role,
-    stop: () =>
-      new Promise<void>((resolvePromise, reject) => {
-        server.close((error) => (error === undefined ? resolvePromise() : reject(error)));
-      }),
-  };
+  const stop = () =>
+    new Promise<void>((resolvePromise, reject) => {
+      server.close((error) => (error === undefined ? resolvePromise() : reject(error)));
+    });
+  return options.mode === 'review'
+    ? {
+        baseUrl,
+        reviewUrl: `${baseUrl}/#token=${encodeURIComponent(options.sessionToken)}`,
+        role: options.session.role,
+        stop,
+      }
+    : {
+        baseUrl,
+        statusUrl: `${baseUrl}/#token=${encodeURIComponent(options.sessionToken)}`,
+        role: 'operator',
+        stop,
+      };
 }

@@ -343,6 +343,24 @@ content hash、盲审 projection hash、每个已人工检查像素的 rendered 
 
 对数据集中的每个 Run 重复此步骤。只要有一个 Run 缺少有效 sidecar，review workspace 就拒绝启动。
 
+在采集、sign-off 和评审过程中，可单独启动只读的运营进度页：
+
+```bash
+pnpm eval:status \
+  --dataset "$EVAL_DATASET" \
+  --port 0 \
+  --repo-root "$EVAL_REPO_ROOT"
+```
+
+该模式不创建 reviewer/adjudicator 会话，也不开放审核任务、artifact 或写入路由。
+它只显示待采集 treatment、待 sign-off、剩余独立审核和待裁决的聚合数量，
+不返回 case/Run ID、Provider 标识、sign-off 内容或审核者身份。
+当仍有未签署 Run 时，全局 review gate 未开放，因此审核和裁决计数表示当前可执行队列，
+不是绕过 sign-off 预测后续工作。`retired` suite 不能启动该运营页。
+“只读”表示不写入 Eval 业务记录；为避免读到尚未提交或随后回滚的文件，每次刷新会短暂
+参与数据集事务锁。如果其他采集/评审进程正在写入，页面会显示暂时不可用，HTTP 返回
+`503 collection_status_busy`，重新刷新即可。
+
 ## 5. 两名独立 reviewer
 
 为第一名 reviewer 启动一个本地 session：
@@ -419,6 +437,8 @@ Run ID，并且不输出暂时不可执行的 review/adjudication 队列。先�
 下一阶段队列。`collectionPolicyMinimumsMet` 只表示采集政策最小值；
 `releaseReadiness: "not_assessed"` 明示它不代表发布就绪。`retired` suite 固定为不可操作。
 它不会发起 Provider 调用，不会生成未来 Run ID/Provider 分配，也不会把 `collecting` suite 误报为已发布数据集。
+只读运营进度页使用同一 worklist 派生的聚合值，并始终把发布就绪标记为未评估。
+Reviewer/adjudicator 会话不接收这些全局计数，以避免暴露同伴参与或分歧状态。
 
 `eval:check` 必须成功后才能使用 report 作为审计产物。`eval:report` 生成 published-audience、内容寻址、
 无分数 comparison；它会保留 failed、`needs_revision`、`unable_to_judge`、缺失 annotation 和未裁决分歧，

@@ -14,7 +14,7 @@
 > Orchestrator 现在可以查询 Blender `1.11.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
-> `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:review` →
+> `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:status`/`eval:review` →
 > `eval:check`/`eval:report` 采集与盲审工具链；当前尚无真实 Provider Run、blind sign-off 或人工
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
@@ -799,6 +799,9 @@ published-audience comparison：
 pnpm eval:check
 pnpm eval:report
 ```
+
+采集期间可用 `pnpm eval:status --dataset <directory>` 启动独立的回环只读进度页；
+它只显示脱敏聚合计数，不开放盲审任务或 artifact。
 
 两个命令都可把同布局的数据集目录作为第一个参数。默认
 `protocol/fixtures/v1/eval/blender-core` 当前验证为 7 个案例、0 个 Run、0 个 blind sign-off、0 个

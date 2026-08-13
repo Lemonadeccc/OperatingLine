@@ -14,7 +14,27 @@
       </div>
       <div id="session" class="session-badge">正在验证本地会话…</div>
     </header>
-    <main class="workspace">
+    <main id="operator-workspace" class="operator-workspace" hidden>
+      <section class="collection-status" aria-labelledby="collection-status-title">
+        <div class="collection-status-heading">
+          <div>
+            <p class="eyebrow">COLLECTION STATUS</p>
+            <h2 id="collection-status-title">采集进度</h2>
+          </div>
+          <button id="collection-refresh" type="button">刷新</button>
+        </div>
+        <div
+          id="collection-status"
+          class="collection-status-content"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <p class="muted">正在载入采集状态…</p>
+        </div>
+      </section>
+    </main>
+    <main id="review-workspace" class="workspace" hidden>
       <aside class="queue" aria-label="审核队列">
         <div class="queue-heading">
           <h2>任务</h2>
