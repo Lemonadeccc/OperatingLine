@@ -67,7 +67,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             snapshot.recipe_id,
             "blender.mesh.create_uv_sphere.native",
         )
-        self.assertEqual(snapshot.catalog_version, "1.13.0")
+        self.assertEqual(snapshot.catalog_version, "1.14.0")
         self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
         self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")

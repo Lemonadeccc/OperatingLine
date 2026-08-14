@@ -156,6 +156,59 @@ function icosphereAuthoringCandidateFixture(
   return tree;
 }
 
+function cubeAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Cube authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cube',
+    arguments: {
+      resourceId: 'tutorial.cube.body',
+      objectName: 'OperatingLine.CubeBody',
+      size: 2.5,
+      location: [-1, 2, 0.5],
+    },
+  };
+  leaf['title'] = 'Create and configure one Cube body';
+  leaf['intent'] = 'Create a named Cube with exact size and location.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_cube',
+    description: 'Create one Cube body.',
+    parameters: { size: 2.5 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place the Cube at its exact world location.',
+    parameters: { location: [-1, 2, 0.5] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Cube object.',
+    parameters: { name: 'OperatingLine.CubeBody' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [-1, 2, 0.5] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cube_add',
+      menuPath: ['Add', 'Mesh', 'Cube'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.cube.body' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -170,6 +223,9 @@ describe('procedure compilation runtime', () => {
     const shortcutInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.12.0',
     );
+    const icosphereInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.13.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -182,6 +238,9 @@ describe('procedure compilation runtime', () => {
     if (shortcutInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.12.0 snapshot');
     }
+    if (icosphereInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.13.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -191,6 +250,7 @@ describe('procedure compilation runtime', () => {
         legacyMaterializingInteractionCatalog,
         orderedMenuInteractionCatalog,
         shortcutInteractionCatalog,
+        icosphereInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -520,6 +580,125 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereHttpMaterialization.status).toBe(200);
       await expect(icosphereHttpMaterialization.json()).resolves.toEqual(icosphereMaterialization);
+
+      const cubeMcp = await callMcpTool(
+        runtime,
+        14,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: cubeAuthoringCandidateFixture(packet) },
+      );
+      expect(cubeMcp.result?.isError).not.toBe(true);
+      const cubeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        cubeMcp.result?.structuredContent,
+      );
+      expect(cubeMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.14.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cube.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const cubeLeaf = cubeMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (cubeLeaf?.kind !== 'leaf' || cubeLeaf.action === null) {
+        throw new Error('Expected one materialized Cube leaf');
+      }
+      const cubeMenu = cubeLeaf.menuTracks[0];
+      if (cubeMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Cube menu track');
+      }
+      expect(cubeMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { size: 2.5 },
+        { value: [-1, 2, 0.5] },
+        { value: 'OperatingLine.CubeBody' },
+      ]);
+      expect(
+        cubeMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(cubeLeaf.action.arguments).toEqual({
+        resourceId: 'tutorial.cube.body',
+        objectName: 'OperatingLine.CubeBody',
+        size: 2.5,
+        location: [-1, 2, 0.5],
+      });
+      expect(cubeLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'shortcut',
+          reason: 'No verified shortcut procedure is available.',
+        }),
+      ]);
+      expect(cubeLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(cubeMcp.result?.content?.[0]?.text).toBe(JSON.stringify(cubeMaterialization));
+      const cubeHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: cubeAuthoringCandidateFixture(packet) }),
+      });
+      expect(cubeHttp.status).toBe(200);
+      await expect(cubeHttp.json()).resolves.toEqual(cubeMaterialization);
+
+      const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: icosphereInteractionCatalog.catalogVersion,
+      });
+      const icospherePacket = procedureAuthoringPromptPacketSchema.parse(
+        icospherePrompt.result?.structuredContent,
+      );
+      const historicalIcosphere = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 16, 'operatingline.procedure.authoring.materialize', {
+            packet: icospherePacket,
+            tree: icosphereAuthoringCandidateFixture(icospherePacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalIcosphere.coverage).toEqual([
+        {
+          leafId: 'snowman.head.eyes.left',
+          recipeId: 'blender.mesh.create_icosphere.native',
+          menu: 'materialized',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        },
+      ]);
+      const historicalCube = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 17, 'operatingline.procedure.authoring.materialize', {
+            packet: icospherePacket,
+            tree: cubeAuthoringCandidateFixture(icospherePacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalCube).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: { interactionCatalogVersion: '1.13.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cube.native',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
 
       const rebuiltPacket = buildProcedureAuthoringPromptPacket(
         request,

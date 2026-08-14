@@ -90,8 +90,27 @@ describe('interaction catalog registry', () => {
       parameterBinding: 'ordered_parameter_operations',
     });
     expect(frozenShortcut.recipes[1]!.procedureMaterialization).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.13.0');
-    const latestShortcut = blenderInteractionCatalog.recipes[0]!.procedureMaterialization?.shortcut;
+    const frozenIcosphere = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.13.0',
+    });
+    expect(
+      frozenIcosphere.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
+      )?.procedureMaterialization?.menu,
+    ).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(
+      frozenIcosphere.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cube')
+        ?.procedureMaterialization,
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.14.0');
+    const latestShortcut = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    )?.procedureMaterialization?.shortcut;
     expect(latestShortcut).toMatchObject({
       availability: 'available',
       source: 'catalog.ordered_shortcut_operations',
@@ -113,7 +132,11 @@ describe('interaction catalog registry', () => {
     expect(latestShortcut.omittedActionArguments).toEqual([
       expect.objectContaining({ argumentName: 'resourceId' }),
     ]);
-    expect(blenderInteractionCatalog.recipes[1]!.procedureMaterialization).toMatchObject({
+    expect(
+      blenderInteractionCatalog.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
+      )?.procedureMaterialization,
+    ).toMatchObject({
       menu: {
         availability: 'available',
         parameterBinding: 'ordered_parameter_operations',
@@ -132,6 +155,42 @@ describe('interaction catalog registry', () => {
       },
       shortcut: { availability: 'unavailable' },
       mcp: { availability: 'unavailable' },
+    });
+    expect(
+      blenderInteractionCatalog.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_cube',
+      )?.procedureMaterialization,
+    ).toMatchObject({
+      menu: {
+        availability: 'available',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          {
+            name: 'size',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'size',
+              transform: 'identity',
+            },
+          },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.cube',
+          operations: [
+            expect.objectContaining({ id: 'control.location' }),
+            expect.objectContaining({ id: 'control.object_name' }),
+          ],
+        },
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
     });
   });
 
@@ -162,6 +221,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '1e02e7295d1e305887ddf79409e7113e4267ea89a5fd18e44caac5b254731375',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.13.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.13.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '1c97dfa118715546eafe3709624469de97edbc22a20102a80c8710f0b46b10dc',
     );
   });
 

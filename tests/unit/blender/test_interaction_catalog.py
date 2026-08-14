@@ -1,6 +1,7 @@
 """Pure Python contract tests for the bundled Blender InteractionCatalog."""
 
 from copy import deepcopy
+import hashlib
 from importlib import import_module
 import json
 from pathlib import Path
@@ -107,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.13.0")
+        self.assertEqual(catalog.catalog_version, "1.14.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -145,7 +146,11 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             15,
         )
-        sphere = catalog.recipes[0]
+        sphere = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_uv_sphere"
+        )
         self.assertIsNotNone(sphere.procedure_materialization)
         assert sphere.procedure_materialization is not None
         self.assertEqual(
@@ -220,7 +225,11 @@ class InteractionCatalogTests(unittest.TestCase):
             sphere.procedure_materialization.mcp.availability,
             "unavailable",
         )
-        icosphere = catalog.recipes[1]
+        icosphere = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_icosphere"
+        )
         self.assertIsNotNone(icosphere.procedure_materialization)
         assert icosphere.procedure_materialization is not None
         icosphere_menu = icosphere.procedure_materialization.menu
@@ -286,10 +295,96 @@ class InteractionCatalogTests(unittest.TestCase):
             icosphere.procedure_materialization.mcp.availability,
             "unavailable",
         )
+        cube = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_cube"
+        )
+        self.assertIsNotNone(cube.procedure_materialization)
+        assert cube.procedure_materialization is not None
+        cube_menu = cube.procedure_materialization.menu
+        self.assertEqual(cube_menu.availability, "available")
+        self.assertEqual(cube_menu.source, "guidance.native_path")
+        self.assertEqual(cube_menu.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            cube_menu.parameter_binding, "ordered_parameter_operations"
+        )
+        assert cube_menu.operator_parameters is not None
+        self.assertEqual(len(cube_menu.operator_parameters), 1)
+        cube_size = cube_menu.operator_parameters[0]
+        self.assertEqual(
+            (cube_size.name, cube_size.source.argument_name, cube_size.source.transform),
+            ("size", "size", "identity"),
+        )
+        assert cube_menu.control_operations is not None
+        self.assertEqual(
+            cube_menu.control_operations.insert_after_step_id, "operator.cube"
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.id,
+                    operation.path,
+                    operation.parameters[0].name,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.transform,
+                )
+                for operation in cube_menu.control_operations.operations
+            ),
+            (
+                (
+                    "control.location",
+                    ("Sidebar", "Item", "Transform", "Location"),
+                    "value",
+                    "location",
+                    "identity",
+                ),
+                (
+                    "control.object_name",
+                    ("Outliner", "Object Name"),
+                    "value",
+                    "objectName",
+                    "identity",
+                ),
+            ),
+        )
+        assert cube_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in cube_menu.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender control.",
+                ),
+            ),
+        )
+        self.assertEqual(
+            (
+                cube.procedure_materialization.shortcut.availability,
+                cube.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertEqual(
+            (
+                cube.procedure_materialization.mcp.availability,
+                cube.procedure_materialization.mcp.reason,
+            ),
+            ("unavailable", "No approved action-level MCP tool is available."),
+        )
         self.assertTrue(
             all(
                 recipe.procedure_materialization is None
-                for recipe in catalog.recipes[2:]
+                for recipe in catalog.recipes
+                if recipe.action_name
+                not in {
+                    "blender.mesh.create_uv_sphere",
+                    "blender.mesh.create_icosphere",
+                    "blender.mesh.create_cube",
+                }
             )
         )
 
@@ -366,6 +461,38 @@ class InteractionCatalogTests(unittest.TestCase):
         assert sphere_materialization is not None
         self.assertEqual(sphere_materialization.shortcut.availability, "available")
         self.assertIsNone(frozen.recipes[1].procedure_materialization)
+
+    def test_loads_byte_frozen_icosphere_catalog_without_cube_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.13.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "1c97dfa118715546eafe3709624469de97edbc22a20102a80c8710f0b46b10dc",
+        )
+        self.assertEqual(frozen.catalog_version, "1.13.0")
+        icosphere = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_icosphere"
+        )
+        cube = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cube"
+        )
+        self.assertIsNotNone(icosphere.procedure_materialization)
+        self.assertIsNone(cube.procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

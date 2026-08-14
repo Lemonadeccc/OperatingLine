@@ -111,6 +111,55 @@ function icosphereCandidate(
   return tree;
 }
 
+function cubeCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Cube candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cube',
+    arguments: {
+      resourceId: 'tutorial.cube.body',
+      objectName: 'OperatingLine.CubeBody',
+      size: 2.5,
+      location: [-1, 2, 0.5],
+    },
+  };
+  leaf.title = 'Create and configure one Cube body';
+  leaf.intent = 'Create a named Cube with exact size and location.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_cube',
+    description: 'Create one Cube body.',
+    parameters: { size: 2.5 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place the Cube at its exact world location.',
+    parameters: { location: [-1, 2, 0.5] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Cube object.',
+    parameters: { name: 'OperatingLine.CubeBody' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [-1, 2, 0.5] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cube_add',
+      menuPath: ['Add', 'Mesh', 'Cube'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.cube.body' },
+  };
+  return tree;
+}
+
 function orderedMenu(catalog: InteractionCatalog) {
   const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
   if (
@@ -366,6 +415,95 @@ describe('procedure authoring materialization', () => {
       subdivisions: 3,
       radius: 1.75,
       location: [-1.25, 2.5, 0.75],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Cube ordered menu without inventing shortcut or MCP support', () => {
+    const input = cubeCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Cube leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_cube.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Cube menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_cube.native',
+      title: 'Add one cube from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.cube',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Cube'],
+        parameters: { size: 2.5 },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [-1, 2, 0.5] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.CubeBody' },
+      },
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.cube.body',
+      objectName: 'OperatingLine.CubeBody',
+      size: 2.5,
+      location: [-1, 2, 0.5],
     });
     expect(leaf.shortcutTracks).toEqual([
       expect.objectContaining({

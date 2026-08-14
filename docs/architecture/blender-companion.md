@@ -34,12 +34,16 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.13.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0`/`1.10.0`/`1.11.0`/`1.12.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.14.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
-新增四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
-与 `objectName`，省略内部 `resourceId`。它没有已声明 shortcut；MCP 也仍因没有真实 action-level tool
-而 unavailable。所有这些轨迹仍只是 candidate 教学投影。
+保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
+与 `objectName`。Cube 新增四步 guidance 加 Location、Object Name 的六步 menu；最终 operator 以 identity
+投影绑定 accepted action 的 `size`。该值表示完整边长而非 transform scale。Icosphere 和 Cube 都省略内部
+`resourceId`，没有已声明 shortcut；MCP 也仍因没有真实 action-level tool 而 unavailable。所有这些轨迹
+仍是 `candidate`/`structural_only` 教学投影；Cube 轨迹没有经过真实 Blender replay，原生菜单/operator
+也不能复现 managed collection 归属、resource tag、receipt、幂等或补偿语义。见
+[ADR 0050](../adr/0050-cube-ordered-menu-materialization.md)。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
