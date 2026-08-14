@@ -27,6 +27,9 @@ Immutable Procedure Library
   ├─ tree id + monotonic immutable revision
   ├─ canonical SHA-256 integrity and atomic audit event
   ├─ exact/latest reads + stable summary pagination
+  ├─ normalized exact operation index; unavailable tracks excluded
+  ├─ provenance-rich MCP/HTTP search; no embedding, score, or host execution
+  ├─ storage cursor is distinct from node/operation order
   └─ validated knowledge only; no proposal or host execution
 
 GuidePlan

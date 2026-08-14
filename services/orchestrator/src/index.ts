@@ -8,6 +8,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
 import {
   openOperatingLineDatabase,
+  type StoredProcedureOperationIndex as DatabaseStoredProcedureOperationIndex,
   type StoredProcedureTreeRecord as DatabaseStoredProcedureTreeRecord,
   type StoredProcedureTreeSummary as DatabaseStoredProcedureTreeSummary,
 } from '@operatingline/persistence';
@@ -53,6 +54,9 @@ import {
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
   canonicalizeProtocolJsonValue,
+  procedureOperationSearchHitSchema,
+  procedureOperationSearchRequestSchema,
+  procedureOperationSearchResultSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
   procedureTreeGetRequestSchema,
@@ -610,6 +614,253 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    const sameStringArray = (
+      left: readonly string[] | null,
+      right: readonly string[] | null,
+    ): boolean =>
+      left === null || right === null
+        ? left === right
+        : left.length === right.length && left.every((value, index) => value === right[index]);
+
+    type CachedProcedureSearchTree = {
+      stored: DatabaseStoredProcedureTreeRecord;
+      record: ReturnType<typeof publicProcedureTreeRecord>;
+    };
+
+    const materializeProcedureOperationSearchHit = (
+      indexed: DatabaseStoredProcedureOperationIndex,
+      treeCache: Map<string, CachedProcedureSearchTree>,
+    ) => {
+      const treeKey = `${indexed.treeId}@${indexed.treeRevision}`;
+      let cached = treeCache.get(treeKey);
+      if (cached === undefined) {
+        const stored = database.getProcedureTree(indexed.treeId, indexed.treeRevision);
+        if (stored === null) {
+          throw new Error(
+            `Indexed procedure tree is missing: ${indexed.treeId}@${indexed.treeRevision}`,
+          );
+        }
+        cached = { stored, record: publicProcedureTreeRecord(stored) };
+        treeCache.set(treeKey, cached);
+      }
+      const { stored, record } = cached;
+      const tree = record.tree;
+      if (stored.sequence !== indexed.treeSequence || tree.adapterId !== indexed.adapterId) {
+        throw new Error(
+          `Indexed procedure tree identity is inconsistent: ${indexed.treeId}@${indexed.treeRevision}`,
+        );
+      }
+      const nodeById = new Map(tree.nodes.map((node) => [node.id, node]));
+      const leaf = nodeById.get(indexed.leafId);
+      if (leaf?.kind !== 'leaf') {
+        throw new Error(`Indexed procedure leaf is missing: ${indexed.leafId}`);
+      }
+      if (
+        leaf.validation.status !== indexed.validationStatus ||
+        (leaf.action?.name ?? null) !== indexed.actionName
+      ) {
+        throw new Error(`Indexed procedure leaf metadata is inconsistent: ${indexed.leafId}`);
+      }
+      const semanticById = new Map(
+        leaf.semanticOperations.map((operation) => [operation.id, operation]),
+      );
+      let operation: unknown;
+      let track: { id: string; title: string; preconditions: unknown[] } | null = null;
+      let semanticActions: string[];
+      let evidenceRefs: string[];
+      switch (indexed.modality) {
+        case 'semantic': {
+          const found = leaf.semanticOperations.find(
+            (candidate) => candidate.id === indexed.operationId,
+          );
+          if (found === undefined || indexed.trackId !== null) {
+            throw new Error(`Indexed semantic operation is missing: ${indexed.operationId}`);
+          }
+          operation = found;
+          semanticActions = [found.semanticAction];
+          evidenceRefs = found.evidenceRefs;
+          break;
+        }
+        case 'menu': {
+          const foundTrack = leaf.menuTracks.find((candidate) => candidate.id === indexed.trackId);
+          if (foundTrack?.availability !== 'available') {
+            throw new Error(`Indexed menu track is unavailable: ${indexed.trackId ?? ''}`);
+          }
+          const found = foundTrack.operations.find(
+            (candidate) => candidate.id === indexed.operationId,
+          );
+          if (
+            found === undefined ||
+            found.target.hostId !== indexed.menuTargetHostId ||
+            !sameStringArray(found.path, indexed.menuPath)
+          ) {
+            throw new Error(`Indexed menu operation is inconsistent: ${indexed.operationId}`);
+          }
+          operation = found;
+          track = {
+            id: foundTrack.id,
+            title: foundTrack.title,
+            preconditions: foundTrack.preconditions,
+          };
+          semanticActions = found.semanticRefs.map((reference) => {
+            const semantic = semanticById.get(reference);
+            if (semantic === undefined) {
+              throw new Error(`Indexed menu operation has an unknown semantic ref: ${reference}`);
+            }
+            return semantic.semanticAction;
+          });
+          evidenceRefs = found.evidenceRefs;
+          break;
+        }
+        case 'shortcut': {
+          const foundTrack = leaf.shortcutTracks.find(
+            (candidate) => candidate.id === indexed.trackId,
+          );
+          if (foundTrack?.availability !== 'available') {
+            throw new Error(`Indexed shortcut track is unavailable: ${indexed.trackId ?? ''}`);
+          }
+          const found = foundTrack.operations.find(
+            (candidate) => candidate.id === indexed.operationId,
+          );
+          if (found === undefined || !sameStringArray(found.keys, indexed.shortcutKeys)) {
+            throw new Error(`Indexed shortcut operation is inconsistent: ${indexed.operationId}`);
+          }
+          operation = found;
+          track = {
+            id: foundTrack.id,
+            title: foundTrack.title,
+            preconditions: foundTrack.preconditions,
+          };
+          semanticActions = found.semanticRefs.map((reference) => {
+            const semantic = semanticById.get(reference);
+            if (semantic === undefined) {
+              throw new Error(
+                `Indexed shortcut operation has an unknown semantic ref: ${reference}`,
+              );
+            }
+            return semantic.semanticAction;
+          });
+          evidenceRefs = found.evidenceRefs;
+          break;
+        }
+        case 'mcp': {
+          const foundTrack = leaf.mcpTracks.find((candidate) => candidate.id === indexed.trackId);
+          if (foundTrack?.availability !== 'available') {
+            throw new Error(`Indexed MCP track is unavailable: ${indexed.trackId ?? ''}`);
+          }
+          const found = foundTrack.operations.find(
+            (candidate) => candidate.id === indexed.operationId,
+          );
+          if (
+            found === undefined ||
+            found.serverName !== indexed.mcpServerName ||
+            found.toolName !== indexed.mcpToolName
+          ) {
+            throw new Error(`Indexed MCP operation is inconsistent: ${indexed.operationId}`);
+          }
+          operation = found;
+          track = {
+            id: foundTrack.id,
+            title: foundTrack.title,
+            preconditions: foundTrack.preconditions,
+          };
+          semanticActions = found.semanticRefs.map((reference) => {
+            const semantic = semanticById.get(reference);
+            if (semantic === undefined) {
+              throw new Error(`Indexed MCP operation has an unknown semantic ref: ${reference}`);
+            }
+            return semantic.semanticAction;
+          });
+          evidenceRefs = found.evidenceRefs;
+          break;
+        }
+      }
+      if (!sameStringArray(semanticActions, indexed.semanticActions)) {
+        throw new Error(`Indexed semantic alignment is inconsistent: ${indexed.operationId}`);
+      }
+      const evidenceIds = new Set(evidenceRefs);
+      const evidence = tree.evidence.filter((item) => evidenceIds.has(item.id));
+      if (evidence.length !== evidenceIds.size) {
+        throw new Error(`Indexed operation evidence is incomplete: ${indexed.operationId}`);
+      }
+      const sourceIds = new Set(evidence.map((item) => item.sourceId));
+      const sources = tree.sources.filter((source) => sourceIds.has(source.id));
+      if (sources.length !== sourceIds.size) {
+        throw new Error(`Indexed operation sources are incomplete: ${indexed.operationId}`);
+      }
+      const nodePath: Array<{
+        id: string;
+        kind: 'group' | 'leaf';
+        order: number;
+        title: string;
+      }> = [];
+      let currentId: string | null = leaf.id;
+      while (currentId !== null) {
+        const node = nodeById.get(currentId);
+        if (node === undefined) {
+          throw new Error(`Indexed operation path is incomplete: ${indexed.operationId}`);
+        }
+        nodePath.unshift({ id: node.id, kind: node.kind, order: node.order, title: node.title });
+        currentId = node.parentId;
+      }
+      return procedureOperationSearchHitSchema.parse({
+        indexSequence: indexed.sequence,
+        tree: publicProcedureTreeSummary(stored),
+        nodePath,
+        leafId: leaf.id,
+        leafTitle: leaf.title,
+        leafIntent: leaf.intent,
+        leafAction: leaf.action,
+        leafValidation: leaf.validation,
+        semanticActions,
+        sources,
+        evidence,
+        modality: indexed.modality,
+        track,
+        operation,
+      });
+    };
+
+    const searchProcedureOperations = (
+      request: ReturnType<typeof procedureOperationSearchRequestSchema.parse>,
+    ) => {
+      const limit = request.limit ?? 50;
+      const indexed = database.searchProcedureOperations({
+        afterSequence: request.afterSequence ?? 0,
+        limit: limit + 1,
+        ...(request.treeId === undefined ? {} : { treeId: request.treeId }),
+        ...(request.revision === undefined ? {} : { treeRevision: request.revision }),
+        ...(request.adapterId === undefined ? {} : { adapterId: request.adapterId }),
+        ...(request.leafId === undefined ? {} : { leafId: request.leafId }),
+        ...(request.operationId === undefined ? {} : { operationId: request.operationId }),
+        ...(request.modality === undefined ? {} : { modality: request.modality }),
+        ...(request.validationStatus === undefined
+          ? {}
+          : { validationStatus: request.validationStatus }),
+        ...(request.actionName === undefined ? {} : { actionName: request.actionName }),
+        ...(request.semanticAction === undefined ? {} : { semanticAction: request.semanticAction }),
+        ...(request.menuTargetHostId === undefined
+          ? {}
+          : { menuTargetHostId: request.menuTargetHostId }),
+        ...(request.menuPath === undefined ? {} : { menuPath: request.menuPath }),
+        ...(request.shortcutKeys === undefined ? {} : { shortcutKeys: request.shortcutKeys }),
+        ...(request.mcpServerName === undefined ? {} : { mcpServerName: request.mcpServerName }),
+        ...(request.mcpToolName === undefined ? {} : { mcpToolName: request.mcpToolName }),
+      });
+      const hasMore = indexed.length > limit;
+      const visible = indexed.slice(0, limit);
+      const treeCache = new Map<string, CachedProcedureSearchTree>();
+      return procedureOperationSearchResultSchema.parse({
+        operations: visible.map((operation) =>
+          materializeProcedureOperationSearchHit(operation, treeCache),
+        ),
+        nextAfterSequence: hasMore ? (visible.at(-1)?.sequence ?? null) : null,
+        matching: 'exact_structured_filters',
+        similarityScoreProduced: false,
+        hostExecutionStarted: false,
+      });
+    };
+
     const getPlanningQuality = (
       request: ReturnType<typeof planningQualityEvaluationRequestSchema.parse>,
       selectedCatalog?: ActionCatalog,
@@ -1153,6 +1404,55 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                   text: JSON.stringify({
                     error: 'procedure_tree_list_failed',
                     message: 'Procedure tree list failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.search',
+        {
+          description:
+            'Search immutable ProcedureTree operations using exact structured selectors for semantic actions, ActionCatalog actions, menu targets and paths, shortcut keys, MCP tools, validation state, and revision provenance. Returns no similarity score and never executes host work.',
+          inputSchema: deferMcpInputValidation(procedureOperationSearchRequestSchema),
+          outputSchema: procedureOperationSearchResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureOperationSearchRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_operation_search_request',
+                    message:
+                      'Procedure operation search request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = searchProcedureOperations(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            app?.log.error(error, 'Procedure operation search failed');
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_operation_search_failed',
+                    message: 'Procedure operation search failed',
                   }),
                 },
               ],
@@ -1839,6 +2139,24 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(500).send({
           error: 'procedure_tree_list_failed',
           message: 'Procedure tree list failed',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/search', async (request, reply) => {
+      const parsedRequest = procedureOperationSearchRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_operation_search_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return searchProcedureOperations(parsedRequest.data);
+      } catch (error) {
+        request.log.error(error, 'Procedure operation search failed');
+        return reply.code(500).send({
+          error: 'procedure_operation_search_failed',
+          message: 'Procedure operation search failed',
         });
       }
     });

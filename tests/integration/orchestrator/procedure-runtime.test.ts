@@ -218,6 +218,135 @@ describe('procedure compilation runtime', () => {
         nextAfterSequence: null,
       });
 
+      const semanticSearch = await callMcpTool(runtime, 5, 'operatingline.procedure.search', {
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+        semanticAction: 'create_uv_sphere',
+      });
+      expect(semanticSearch.result?.isError).not.toBe(true);
+      const semanticHits = JSON.parse(semanticSearch.result?.content?.[0]?.text ?? '{}') as {
+        operations?: Array<{
+          modality?: string;
+          semanticActions?: string[];
+          tree?: { treeId?: string; revision?: number; integrity?: unknown };
+          nodePath?: Array<{ id?: string }>;
+          operation?: { id?: string; parameters?: unknown };
+          sources?: unknown[];
+          evidence?: unknown[];
+        }>;
+        matching?: string;
+        similarityScoreProduced?: boolean;
+        hostExecutionStarted?: boolean;
+      };
+      expect(semanticHits.operations).toHaveLength(6);
+      expect(semanticHits.operations?.map((hit) => hit.modality)).toEqual([
+        'semantic',
+        'menu',
+        'menu',
+        'menu',
+        'menu',
+        'shortcut',
+      ]);
+      expect(semanticHits.operations?.[0]).toMatchObject({
+        semanticActions: ['create_uv_sphere'],
+        tree: {
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          integrity: { algorithm: 'sha256' },
+        },
+        nodePath: [
+          { id: 'snowman' },
+          { id: 'snowman.head' },
+          { id: 'snowman.head.eyes' },
+          { id: 'snowman.head.eyes.left' },
+        ],
+        sources: [{ id: 'source.prompt' }],
+        evidence: [{ id: 'evidence.prompt' }],
+      });
+      expect(semanticHits).toMatchObject({
+        matching: 'exact_structured_filters',
+        similarityScoreProduced: false,
+        hostExecutionStarted: false,
+      });
+
+      const firstSearchPage = await callMcpTool(runtime, 6, 'operatingline.procedure.search', {
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+        semanticAction: 'create_uv_sphere',
+        limit: 2,
+      });
+      const firstSearchPageResult = JSON.parse(
+        firstSearchPage.result?.content?.[0]?.text ?? '{}',
+      ) as {
+        operations?: Array<{ indexSequence?: number }>;
+        nextAfterSequence?: number | null;
+      };
+      expect(firstSearchPageResult.operations).toHaveLength(2);
+      expect(firstSearchPageResult.nextAfterSequence).toBe(
+        firstSearchPageResult.operations?.[1]?.indexSequence,
+      );
+      const secondSearchPage = await fetch(`${runtime.baseUrl}/api/v1/procedure/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          semanticAction: 'create_uv_sphere',
+          afterSequence: firstSearchPageResult.nextAfterSequence,
+          limit: 4,
+        }),
+      });
+      expect(secondSearchPage.status).toBe(200);
+      await expect(secondSearchPage.json()).resolves.toMatchObject({
+        operations: [{}, {}, {}, {}],
+        nextAfterSequence: null,
+      });
+
+      const menuSearch = await fetch(`${runtime.baseUrl}/api/v1/procedure/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          modality: 'menu',
+          menuTargetHostId: 'mesh.primitive_uv_sphere_add',
+          menuPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+        }),
+      });
+      expect(menuSearch.status).toBe(200);
+      await expect(menuSearch.json()).resolves.toMatchObject({
+        operations: [
+          {
+            modality: 'menu',
+            operation: {
+              id: 'menu.uv_sphere',
+              parameters: { radius: 1, location: [0, 0, 0] },
+            },
+          },
+          {
+            modality: 'menu',
+            operation: {
+              id: 'menu.uv_sphere',
+              parameters: { radius: 1, location: [0, 0, 0] },
+            },
+          },
+        ],
+      });
+
+      const unavailableMcpSearch = await callMcpTool(runtime, 6, 'operatingline.procedure.search', {
+        modality: 'mcp',
+        mcpToolName: 'create_uv_sphere',
+      });
+      expect(JSON.parse(unavailableMcpSearch.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        operations: [],
+        nextAfterSequence: null,
+      });
+
+      const invalidSearch = await fetch(`${runtime.baseUrl}/api/v1/procedure/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ limit: 10 }),
+      });
+      expect(invalidSearch.status).toBe(400);
+
       const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
       await expect(guide.json()).resolves.toEqual({ plan: null });
       await runtime.stop();
@@ -234,6 +363,19 @@ describe('procedure compilation runtime', () => {
       );
       expect(restarted.status).toBe(200);
       await expect(restarted.json()).resolves.toMatchObject({ tree: { revision: 3 } });
+      const restartedSearch = await fetch(`${runtime.baseUrl}/api/v1/procedure/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          treeId: 'snowman.eye.left.procedure',
+          operationId: 'menu.uv_sphere',
+          modality: 'menu',
+        }),
+      });
+      expect(restartedSearch.status).toBe(200);
+      await expect(restartedSearch.json()).resolves.toMatchObject({
+        operations: [{ tree: { revision: 1 } }, { tree: { revision: 3 } }],
+      });
     } finally {
       await runtime?.stop();
       rmSync(directory, { recursive: true, force: true });

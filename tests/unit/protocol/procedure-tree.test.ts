@@ -7,6 +7,7 @@ import {
   compileProcedureTreeToGuidePlan,
   materializeProcedureOperations,
   parseProcedureTree,
+  procedureOperationSearchRequestSchema,
   procedureTreeGetRequestSchema,
   procedureTreeListRequestSchema,
   procedureTreeSchema,
@@ -252,5 +253,49 @@ describe('procedure tree protocol', () => {
         storedAt: '2026-08-14T00:00:00.000Z',
       }),
     ).toMatchObject({ tree: { id: tree.id, revision: 1 } });
+  });
+
+  it('rejects an operation search without an exact selector', () => {
+    expect(procedureOperationSearchRequestSchema.safeParse({ limit: 10 }).success).toBe(false);
+  });
+
+  it('rejects an operation revision selector without a tree id', () => {
+    expect(
+      procedureOperationSearchRequestSchema.safeParse({ revision: 1, modality: 'semantic' })
+        .success,
+    ).toBe(false);
+  });
+
+  it('rejects string and boolean operation search numerics', () => {
+    expect(
+      procedureOperationSearchRequestSchema.safeParse({
+        treeId: 'snowman.eye.left.procedure',
+        revision: '1',
+        afterSequence: '0',
+        limit: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts an exact compound operation selector', () => {
+    expect(
+      procedureOperationSearchRequestSchema.parse({
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+        modality: 'menu',
+        menuTargetHostId: 'mesh.primitive_uv_sphere_add',
+        menuPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+        afterSequence: 0,
+        limit: 10,
+      }),
+    ).toEqual({
+      treeId: 'snowman.eye.left.procedure',
+      revision: 1,
+      modality: 'menu',
+      menuTargetHostId: 'mesh.primitive_uv_sphere_add',
+      menuPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+      afterSequence: 0,
+      limit: 10,
+    });
   });
 });

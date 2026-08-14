@@ -161,6 +161,47 @@ export type RecordProcedureTreeResult =
       latestRevision: number;
     };
 
+export type ProcedureOperationIndexModality = 'semantic' | 'menu' | 'shortcut' | 'mcp';
+
+export interface ProcedureOperationSearchInput {
+  afterSequence: number;
+  limit: number;
+  treeId?: string;
+  treeRevision?: number;
+  adapterId?: string;
+  leafId?: string;
+  operationId?: string;
+  modality?: ProcedureOperationIndexModality;
+  validationStatus?: 'candidate' | 'verified' | 'rejected';
+  actionName?: string;
+  semanticAction?: string;
+  menuTargetHostId?: string;
+  menuPath?: readonly string[];
+  shortcutKeys?: readonly string[];
+  mcpServerName?: string;
+  mcpToolName?: string;
+}
+
+export interface StoredProcedureOperationIndex {
+  sequence: number;
+  treeSequence: number;
+  treeId: string;
+  treeRevision: number;
+  adapterId: string;
+  leafId: string;
+  validationStatus: 'candidate' | 'verified' | 'rejected';
+  actionName: string | null;
+  modality: ProcedureOperationIndexModality;
+  trackId: string | null;
+  operationId: string;
+  semanticActions: string[];
+  menuTargetHostId: string | null;
+  menuPath: string[] | null;
+  shortcutKeys: string[] | null;
+  mcpServerName: string | null;
+  mcpToolName: string | null;
+}
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -293,6 +334,7 @@ export interface OperatingLineDatabase {
     limit: number,
     adapterId?: string,
   ): StoredProcedureTreeSummary[];
+  searchProcedureOperations(input: ProcedureOperationSearchInput): StoredProcedureOperationIndex[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -613,6 +655,57 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (12, datetime('now'));
   `);
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_operations (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      tree_sequence INTEGER NOT NULL,
+      tree_id TEXT NOT NULL,
+      tree_revision INTEGER NOT NULL CHECK (tree_revision > 0),
+      adapter_id TEXT NOT NULL,
+      leaf_id TEXT NOT NULL,
+      leaf_validation_status TEXT NOT NULL CHECK (
+        leaf_validation_status IN ('candidate', 'verified', 'rejected')
+      ),
+      leaf_action_name TEXT,
+      modality TEXT NOT NULL CHECK (modality IN ('semantic', 'menu', 'shortcut', 'mcp')),
+      track_id TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      semantic_actions TEXT NOT NULL CHECK (json_valid(semantic_actions)),
+      menu_target_host_id TEXT,
+      menu_path TEXT CHECK (menu_path IS NULL OR json_valid(menu_path)),
+      shortcut_keys TEXT CHECK (shortcut_keys IS NULL OR json_valid(shortcut_keys)),
+      mcp_server_name TEXT,
+      mcp_tool_name TEXT,
+      UNIQUE (tree_id, tree_revision, leaf_id, modality, track_id, operation_id),
+      FOREIGN KEY (tree_sequence) REFERENCES procedure_trees(sequence),
+      FOREIGN KEY (tree_id, tree_revision) REFERENCES procedure_trees(tree_id, revision)
+    );
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_tree_sequence
+    ON procedure_operations (tree_id, tree_revision, sequence);
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_adapter_modality
+    ON procedure_operations (adapter_id, modality, sequence);
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_action
+    ON procedure_operations (leaf_action_name, sequence)
+    WHERE leaf_action_name IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_menu
+    ON procedure_operations (menu_target_host_id, menu_path, sequence)
+    WHERE modality = 'menu';
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_shortcut
+    ON procedure_operations (shortcut_keys, sequence)
+    WHERE modality = 'shortcut';
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_mcp
+    ON procedure_operations (mcp_server_name, mcp_tool_name, sequence)
+    WHERE modality = 'mcp';
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (13, datetime('now'));
+  `);
 
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
@@ -713,6 +806,292 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     ORDER BY sequence
     LIMIT ?
   `);
+  const indexSemanticProcedureOperations = sqlite.prepare(`
+    INSERT INTO procedure_operations (
+      tree_sequence,
+      tree_id,
+      tree_revision,
+      adapter_id,
+      leaf_id,
+      leaf_validation_status,
+      leaf_action_name,
+      modality,
+      track_id,
+      operation_id,
+      semantic_actions,
+      menu_target_host_id,
+      menu_path,
+      shortcut_keys,
+      mcp_server_name,
+      mcp_tool_name
+    )
+    SELECT
+      tree.sequence,
+      tree.tree_id,
+      tree.revision,
+      tree.adapter_id,
+      json_extract(node.value, '$.id'),
+      json_extract(node.value, '$.validation.status'),
+      json_extract(node.value, '$.action.name'),
+      'semantic',
+      '',
+      json_extract(operation.value, '$.id'),
+      json_array(json_extract(operation.value, '$.semanticAction')),
+      NULL,
+      NULL,
+      NULL,
+      NULL,
+      NULL
+    FROM procedure_trees AS tree,
+      json_each(tree.payload, '$.nodes') AS node,
+      json_each(node.value, '$.semanticOperations') AS operation
+    WHERE json_extract(node.value, '$.kind') = 'leaf'
+      AND (? IS NULL OR (tree.tree_id = ? AND tree.revision = ?))
+    ORDER BY tree.sequence, CAST(node.key AS INTEGER), CAST(operation.key AS INTEGER)
+    ON CONFLICT (tree_id, tree_revision, leaf_id, modality, track_id, operation_id)
+    DO NOTHING
+  `);
+  const indexMenuProcedureOperations = sqlite.prepare(`
+    INSERT INTO procedure_operations (
+      tree_sequence,
+      tree_id,
+      tree_revision,
+      adapter_id,
+      leaf_id,
+      leaf_validation_status,
+      leaf_action_name,
+      modality,
+      track_id,
+      operation_id,
+      semantic_actions,
+      menu_target_host_id,
+      menu_path,
+      shortcut_keys,
+      mcp_server_name,
+      mcp_tool_name
+    )
+    SELECT
+      tree.sequence,
+      tree.tree_id,
+      tree.revision,
+      tree.adapter_id,
+      json_extract(node.value, '$.id'),
+      json_extract(node.value, '$.validation.status'),
+      json_extract(node.value, '$.action.name'),
+      'menu',
+      json_extract(track.value, '$.id'),
+      json_extract(operation.value, '$.id'),
+      (
+        SELECT json_group_array(aligned.semantic_action)
+        FROM (
+          SELECT json_extract(semantic.value, '$.semanticAction') AS semantic_action
+          FROM json_each(operation.value, '$.semanticRefs') AS reference
+          JOIN json_each(node.value, '$.semanticOperations') AS semantic
+            ON json_extract(semantic.value, '$.id') = reference.value
+          ORDER BY CAST(reference.key AS INTEGER)
+        ) AS aligned
+      ),
+      json_extract(operation.value, '$.target.hostId'),
+      json_extract(operation.value, '$.path'),
+      NULL,
+      NULL,
+      NULL
+    FROM procedure_trees AS tree,
+      json_each(tree.payload, '$.nodes') AS node,
+      json_each(node.value, '$.menuTracks') AS track,
+      json_each(track.value, '$.operations') AS operation
+    WHERE json_extract(node.value, '$.kind') = 'leaf'
+      AND json_extract(track.value, '$.availability') = 'available'
+      AND (? IS NULL OR (tree.tree_id = ? AND tree.revision = ?))
+    ORDER BY
+      tree.sequence,
+      CAST(node.key AS INTEGER),
+      CAST(track.key AS INTEGER),
+      CAST(operation.key AS INTEGER)
+    ON CONFLICT (tree_id, tree_revision, leaf_id, modality, track_id, operation_id)
+    DO NOTHING
+  `);
+  const indexShortcutProcedureOperations = sqlite.prepare(`
+    INSERT INTO procedure_operations (
+      tree_sequence,
+      tree_id,
+      tree_revision,
+      adapter_id,
+      leaf_id,
+      leaf_validation_status,
+      leaf_action_name,
+      modality,
+      track_id,
+      operation_id,
+      semantic_actions,
+      menu_target_host_id,
+      menu_path,
+      shortcut_keys,
+      mcp_server_name,
+      mcp_tool_name
+    )
+    SELECT
+      tree.sequence,
+      tree.tree_id,
+      tree.revision,
+      tree.adapter_id,
+      json_extract(node.value, '$.id'),
+      json_extract(node.value, '$.validation.status'),
+      json_extract(node.value, '$.action.name'),
+      'shortcut',
+      json_extract(track.value, '$.id'),
+      json_extract(operation.value, '$.id'),
+      (
+        SELECT json_group_array(aligned.semantic_action)
+        FROM (
+          SELECT json_extract(semantic.value, '$.semanticAction') AS semantic_action
+          FROM json_each(operation.value, '$.semanticRefs') AS reference
+          JOIN json_each(node.value, '$.semanticOperations') AS semantic
+            ON json_extract(semantic.value, '$.id') = reference.value
+          ORDER BY CAST(reference.key AS INTEGER)
+        ) AS aligned
+      ),
+      NULL,
+      NULL,
+      json_extract(operation.value, '$.keys'),
+      NULL,
+      NULL
+    FROM procedure_trees AS tree,
+      json_each(tree.payload, '$.nodes') AS node,
+      json_each(node.value, '$.shortcutTracks') AS track,
+      json_each(track.value, '$.operations') AS operation
+    WHERE json_extract(node.value, '$.kind') = 'leaf'
+      AND json_extract(track.value, '$.availability') = 'available'
+      AND (? IS NULL OR (tree.tree_id = ? AND tree.revision = ?))
+    ORDER BY
+      tree.sequence,
+      CAST(node.key AS INTEGER),
+      CAST(track.key AS INTEGER),
+      CAST(operation.key AS INTEGER)
+    ON CONFLICT (tree_id, tree_revision, leaf_id, modality, track_id, operation_id)
+    DO NOTHING
+  `);
+  const indexMcpProcedureOperations = sqlite.prepare(`
+    INSERT INTO procedure_operations (
+      tree_sequence,
+      tree_id,
+      tree_revision,
+      adapter_id,
+      leaf_id,
+      leaf_validation_status,
+      leaf_action_name,
+      modality,
+      track_id,
+      operation_id,
+      semantic_actions,
+      menu_target_host_id,
+      menu_path,
+      shortcut_keys,
+      mcp_server_name,
+      mcp_tool_name
+    )
+    SELECT
+      tree.sequence,
+      tree.tree_id,
+      tree.revision,
+      tree.adapter_id,
+      json_extract(node.value, '$.id'),
+      json_extract(node.value, '$.validation.status'),
+      json_extract(node.value, '$.action.name'),
+      'mcp',
+      json_extract(track.value, '$.id'),
+      json_extract(operation.value, '$.id'),
+      (
+        SELECT json_group_array(aligned.semantic_action)
+        FROM (
+          SELECT json_extract(semantic.value, '$.semanticAction') AS semantic_action
+          FROM json_each(operation.value, '$.semanticRefs') AS reference
+          JOIN json_each(node.value, '$.semanticOperations') AS semantic
+            ON json_extract(semantic.value, '$.id') = reference.value
+          ORDER BY CAST(reference.key AS INTEGER)
+        ) AS aligned
+      ),
+      NULL,
+      NULL,
+      NULL,
+      json_extract(operation.value, '$.serverName'),
+      json_extract(operation.value, '$.toolName')
+    FROM procedure_trees AS tree,
+      json_each(tree.payload, '$.nodes') AS node,
+      json_each(node.value, '$.mcpTracks') AS track,
+      json_each(track.value, '$.operations') AS operation
+    WHERE json_extract(node.value, '$.kind') = 'leaf'
+      AND json_extract(track.value, '$.availability') = 'available'
+      AND (? IS NULL OR (tree.tree_id = ? AND tree.revision = ?))
+    ORDER BY
+      tree.sequence,
+      CAST(node.key AS INTEGER),
+      CAST(track.key AS INTEGER),
+      CAST(operation.key AS INTEGER)
+    ON CONFLICT (tree_id, tree_revision, leaf_id, modality, track_id, operation_id)
+    DO NOTHING
+  `);
+  const indexProcedureOperations = (treeId: string | null, revision: number | null): void => {
+    const parameters =
+      treeId === null ? ([null, null, null] as const) : ([treeId, treeId, revision] as const);
+    indexSemanticProcedureOperations.run(...parameters);
+    indexMenuProcedureOperations.run(...parameters);
+    indexShortcutProcedureOperations.run(...parameters);
+    indexMcpProcedureOperations.run(...parameters);
+  };
+  const searchProcedureOperationRows = sqlite.prepare(`
+    SELECT
+      sequence,
+      tree_sequence,
+      tree_id,
+      tree_revision,
+      adapter_id,
+      leaf_id,
+      leaf_validation_status,
+      leaf_action_name,
+      modality,
+      track_id,
+      operation_id,
+      semantic_actions,
+      menu_target_host_id,
+      menu_path,
+      shortcut_keys,
+      mcp_server_name,
+      mcp_tool_name
+    FROM procedure_operations AS indexed
+    WHERE indexed.sequence > ?
+      AND (? IS NULL OR indexed.tree_id = ?)
+      AND (? IS NULL OR indexed.tree_revision = ?)
+      AND (? IS NULL OR indexed.adapter_id = ?)
+      AND (? IS NULL OR indexed.leaf_id = ?)
+      AND (? IS NULL OR indexed.operation_id = ?)
+      AND (? IS NULL OR indexed.modality = ?)
+      AND (? IS NULL OR indexed.leaf_validation_status = ?)
+      AND (? IS NULL OR indexed.leaf_action_name = ?)
+      AND (
+        ? IS NULL OR EXISTS (
+          SELECT 1
+          FROM json_each(indexed.semantic_actions) AS semantic
+          WHERE semantic.value = ?
+        )
+      )
+      AND (? IS NULL OR indexed.menu_target_host_id = ?)
+      AND (? IS NULL OR indexed.menu_path = ?)
+      AND (? IS NULL OR indexed.shortcut_keys = ?)
+      AND (? IS NULL OR indexed.mcp_server_name = ?)
+      AND (? IS NULL OR indexed.mcp_tool_name = ?)
+    ORDER BY indexed.sequence
+    LIMIT ?
+  `);
+
+  sqlite.exec('BEGIN IMMEDIATE;');
+  try {
+    indexProcedureOperations(null, null);
+    sqlite.exec('COMMIT;');
+  } catch (error) {
+    sqlite.exec('ROLLBACK;');
+    throw error;
+  }
   const insertGuideProposal = sqlite.prepare(`
     INSERT INTO guide_proposals (
       proposal_id,
@@ -1167,6 +1546,124 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     return { ...summary, tree: JSON.parse(payload) as unknown };
   };
 
+  const parseIndexedStringArray = (payload: unknown, field: string): string[] => {
+    if (typeof payload !== 'string') {
+      throw new Error(`SQLite returned an invalid procedure operation ${field}`);
+    }
+    const parsed = JSON.parse(payload) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string')) {
+      throw new Error(`SQLite returned an invalid procedure operation ${field}`);
+    }
+    return parsed;
+  };
+
+  const parseNullableIndexedStringArray = (payload: unknown, field: string): string[] | null =>
+    payload === null ? null : parseIndexedStringArray(payload, field);
+
+  const parseProcedureOperationIndexRow = (row: unknown): StoredProcedureOperationIndex => {
+    const candidate = row as {
+      sequence?: unknown;
+      tree_sequence?: unknown;
+      tree_id?: unknown;
+      tree_revision?: unknown;
+      adapter_id?: unknown;
+      leaf_id?: unknown;
+      leaf_validation_status?: unknown;
+      leaf_action_name?: unknown;
+      modality?: unknown;
+      track_id?: unknown;
+      operation_id?: unknown;
+      semantic_actions?: unknown;
+      menu_target_host_id?: unknown;
+      menu_path?: unknown;
+      shortcut_keys?: unknown;
+      mcp_server_name?: unknown;
+      mcp_tool_name?: unknown;
+    };
+    if (
+      typeof candidate.sequence !== 'number' ||
+      !Number.isSafeInteger(candidate.sequence) ||
+      candidate.sequence < 1 ||
+      typeof candidate.tree_sequence !== 'number' ||
+      !Number.isSafeInteger(candidate.tree_sequence) ||
+      candidate.tree_sequence < 1 ||
+      typeof candidate.tree_id !== 'string' ||
+      typeof candidate.tree_revision !== 'number' ||
+      !Number.isSafeInteger(candidate.tree_revision) ||
+      candidate.tree_revision < 1 ||
+      typeof candidate.adapter_id !== 'string' ||
+      typeof candidate.leaf_id !== 'string' ||
+      !['candidate', 'verified', 'rejected'].includes(String(candidate.leaf_validation_status)) ||
+      (candidate.leaf_action_name !== null && typeof candidate.leaf_action_name !== 'string') ||
+      !['semantic', 'menu', 'shortcut', 'mcp'].includes(String(candidate.modality)) ||
+      typeof candidate.track_id !== 'string' ||
+      typeof candidate.operation_id !== 'string' ||
+      (candidate.menu_target_host_id !== null &&
+        typeof candidate.menu_target_host_id !== 'string') ||
+      (candidate.mcp_server_name !== null && typeof candidate.mcp_server_name !== 'string') ||
+      (candidate.mcp_tool_name !== null && typeof candidate.mcp_tool_name !== 'string')
+    ) {
+      throw new Error('SQLite returned an invalid procedure operation index row');
+    }
+    const modality = candidate.modality as ProcedureOperationIndexModality;
+    const semanticActions = parseIndexedStringArray(candidate.semantic_actions, 'semantic actions');
+    const menuPath = parseNullableIndexedStringArray(candidate.menu_path, 'menu path');
+    const shortcutKeys = parseNullableIndexedStringArray(candidate.shortcut_keys, 'shortcut keys');
+    const trackId = candidate.track_id.length === 0 ? null : candidate.track_id;
+    const contextIsValid =
+      semanticActions.length > 0 &&
+      ((modality === 'semantic' &&
+        trackId === null &&
+        candidate.menu_target_host_id === null &&
+        menuPath === null &&
+        shortcutKeys === null &&
+        candidate.mcp_server_name === null &&
+        candidate.mcp_tool_name === null) ||
+        (modality === 'menu' &&
+          trackId !== null &&
+          candidate.menu_target_host_id !== null &&
+          menuPath !== null &&
+          shortcutKeys === null &&
+          candidate.mcp_server_name === null &&
+          candidate.mcp_tool_name === null) ||
+        (modality === 'shortcut' &&
+          trackId !== null &&
+          candidate.menu_target_host_id === null &&
+          menuPath === null &&
+          shortcutKeys !== null &&
+          candidate.mcp_server_name === null &&
+          candidate.mcp_tool_name === null) ||
+        (modality === 'mcp' &&
+          trackId !== null &&
+          candidate.menu_target_host_id === null &&
+          menuPath === null &&
+          shortcutKeys === null &&
+          candidate.mcp_server_name !== null &&
+          candidate.mcp_tool_name !== null));
+    if (!contextIsValid) {
+      throw new Error('SQLite returned a context-inconsistent procedure operation index row');
+    }
+    return {
+      sequence: candidate.sequence,
+      treeSequence: candidate.tree_sequence,
+      treeId: candidate.tree_id,
+      treeRevision: candidate.tree_revision,
+      adapterId: candidate.adapter_id,
+      leafId: candidate.leaf_id,
+      validationStatus: candidate.leaf_validation_status as 'candidate' | 'verified' | 'rejected',
+      actionName: candidate.leaf_action_name,
+      modality,
+      trackId,
+      operationId: candidate.operation_id,
+      semanticActions,
+      menuTargetHostId: candidate.menu_target_host_id,
+      menuPath,
+      shortcutKeys,
+      mcpServerName: candidate.mcp_server_name,
+      mcpToolName: candidate.mcp_tool_name,
+    };
+  };
+
   return {
     appendEvent(event) {
       insertEvent.run(
@@ -1280,6 +1777,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           storedAt,
           payload,
         );
+        indexProcedureOperations(input.treeId, input.revision);
         insertEvent.run(
           `procedure-tree:${input.treeId}:${input.revision}`,
           'procedure.tree.stored',
@@ -1336,6 +1834,81 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           ? listProcedureTreeRows.all(afterSequence, limit)
           : listProcedureTreeRowsByAdapter.all(afterSequence, adapterId, limit);
       return rows.map(parseProcedureTreeSummaryRow);
+    },
+    searchProcedureOperations(input) {
+      if (!Number.isSafeInteger(input.afterSequence) || input.afterSequence < 0) {
+        throw new Error('Procedure operation cursor must be a non-negative safe integer');
+      }
+      if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 10_000) {
+        throw new Error('Procedure operation limit must be an integer between 1 and 10000');
+      }
+      if (
+        input.treeRevision !== undefined &&
+        (!Number.isSafeInteger(input.treeRevision) || input.treeRevision < 1)
+      ) {
+        throw new Error('Procedure operation tree revision must be a positive safe integer');
+      }
+      if (input.treeRevision !== undefined && input.treeId === undefined) {
+        throw new Error('Procedure operation revision filtering requires a tree id');
+      }
+      const stringFilters = [
+        input.treeId,
+        input.adapterId,
+        input.leafId,
+        input.operationId,
+        input.actionName,
+        input.semanticAction,
+        input.menuTargetHostId,
+        input.mcpServerName,
+        input.mcpToolName,
+      ];
+      if (stringFilters.some((value) => value !== undefined && value.trim().length === 0)) {
+        throw new Error('Procedure operation search strings must be nonempty');
+      }
+      const menuPath = input.menuPath === undefined ? null : canonicalJson(input.menuPath);
+      const shortcutKeys =
+        input.shortcutKeys === undefined ? null : canonicalJson(input.shortcutKeys);
+      if (input.menuPath !== undefined && input.menuPath.length === 0) {
+        throw new Error('Procedure operation menu path must be nonempty');
+      }
+      if (input.shortcutKeys !== undefined && input.shortcutKeys.length === 0) {
+        throw new Error('Procedure operation shortcut keys must be nonempty');
+      }
+      const nullable = <T>(value: T | undefined): T | null => value ?? null;
+      return searchProcedureOperationRows
+        .all(
+          input.afterSequence,
+          nullable(input.treeId),
+          nullable(input.treeId),
+          nullable(input.treeRevision),
+          nullable(input.treeRevision),
+          nullable(input.adapterId),
+          nullable(input.adapterId),
+          nullable(input.leafId),
+          nullable(input.leafId),
+          nullable(input.operationId),
+          nullable(input.operationId),
+          nullable(input.modality),
+          nullable(input.modality),
+          nullable(input.validationStatus),
+          nullable(input.validationStatus),
+          nullable(input.actionName),
+          nullable(input.actionName),
+          nullable(input.semanticAction),
+          nullable(input.semanticAction),
+          nullable(input.menuTargetHostId),
+          nullable(input.menuTargetHostId),
+          menuPath,
+          menuPath,
+          shortcutKeys,
+          shortcutKeys,
+          nullable(input.mcpServerName),
+          nullable(input.mcpServerName),
+          nullable(input.mcpToolName),
+          nullable(input.mcpToolName),
+          input.limit,
+        )
+        .map(parseProcedureOperationIndexRow);
     },
     recordGuideProposal(proposal) {
       const payload = canonicalJson(proposal);

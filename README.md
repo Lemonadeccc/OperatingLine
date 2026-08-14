@@ -73,6 +73,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   外部证书/私钥生成并验证生产签名包；仓库不包含生产私钥，自签名也不代表公开可信。
 - **版本化协议**：定义 GuidePlan、GuideProposal/Decision、树/DAG、语义锚点、动作绑定和能力画像，并生成
   JSON Schema 与跨语言 fixture。
+- **不可变 ProcedureTree 操作检索**：Runtime 把已保存树中的 semantic operation 和 available 的菜单、
+  快捷键、MCP operation 规范化索引，并通过 `operatingline.procedure.search` 与
+  `POST /api/v1/procedure/search` 提供 AND 组合的精确结构筛选。命中项保留 tree revision/完整性、节点
+  路径、leaf 验证状态、轨迹、来源和证据；unavailable 轨迹不返回。分页使用独立的存储
+  `indexSequence`，不把它当作 operation 顺序；接口不做向量/相似度检索，也不执行宿主动作。见
+  [ADR 0044](docs/adr/0044-exact-procedure-operation-index.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、

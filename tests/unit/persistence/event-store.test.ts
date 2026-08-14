@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 
@@ -280,6 +280,21 @@ function procedureTreeRecord(revision = 1, overrides: Record<string, unknown> = 
   };
 }
 
+function indexedProcedureTreeRecord() {
+  const tree = JSON.parse(
+    readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  return procedureTreeRecord(1, {
+    treeId: tree['id'],
+    title: tree['title'],
+    adapterId: tree['adapterId'],
+    actionCatalogVersion: tree['actionCatalogVersion'],
+    interactionCatalogVersion: tree['interactionCatalogVersion'],
+    hostVersionRange: tree['hostVersionRange'],
+    tree,
+  });
+}
+
 describe('OperatingLine persistence', () => {
   it('stores immutable procedure revisions with stable reads, pagination, and audit events', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-tree-test-'));
@@ -370,6 +385,178 @@ describe('OperatingLine persistence', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('searches indexed operations with exact compound filters', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    expect(database.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+      result: 'accepted',
+    });
+
+    const exact = database.searchProcedureOperations({
+      afterSequence: 0,
+      limit: 10,
+      treeId: 'snowman.eye.left.procedure',
+      treeRevision: 1,
+      modality: 'menu',
+      semanticAction: 'create_uv_sphere',
+      menuTargetHostId: 'mesh.primitive_uv_sphere_add',
+      menuPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+    });
+    expect(exact).toMatchObject([
+      {
+        treeId: 'snowman.eye.left.procedure',
+        treeRevision: 1,
+        modality: 'menu',
+        operationId: 'menu.uv_sphere',
+        semanticActions: ['create_uv_sphere'],
+      },
+    ]);
+
+    database.close();
+  });
+
+  it('continues indexed operation search after an exact cursor', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    expect(database.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+      result: 'accepted',
+    });
+
+    const firstPage = database.searchProcedureOperations({
+      afterSequence: 0,
+      limit: 1,
+      treeId: 'snowman.eye.left.procedure',
+      modality: 'semantic',
+    });
+    expect(firstPage).toHaveLength(1);
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: firstPage[0]!.sequence,
+        limit: 10,
+        treeId: 'snowman.eye.left.procedure',
+        modality: 'semantic',
+      }),
+    ).toMatchObject([{ operationId: 'semantic.transform' }, { operationId: 'semantic.rename' }]);
+    database.close();
+  });
+
+  it('does not index unavailable MCP tracks', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    expect(database.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+      result: 'accepted',
+    });
+
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: 0,
+        limit: 10,
+        treeId: 'snowman.eye.left.procedure',
+        modality: 'mcp',
+      }),
+    ).toEqual([]);
+    database.close();
+  });
+
+  it('preserves semantic reference order in the operation index', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const record = indexedProcedureTreeRecord();
+    const tree = record.tree as {
+      nodes: Array<{
+        kind: string;
+        menuTracks?: Array<{
+          availability: string;
+          operations?: Array<{ id: string; semanticRefs: string[] }>;
+        }>;
+      }>;
+    };
+    const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+    const operation = leaf?.menuTracks
+      ?.find((track) => track.availability === 'available')
+      ?.operations?.find((candidate) => candidate.id === 'menu.uv_sphere');
+    if (operation === undefined) throw new Error('Expected indexed menu operation fixture');
+    operation.semanticRefs = ['semantic.rename', 'semantic.create'];
+
+    expect(database.recordProcedureTree(record)).toMatchObject({ result: 'accepted' });
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: 0,
+        limit: 10,
+        treeId: 'snowman.eye.left.procedure',
+        operationId: 'menu.uv_sphere',
+      }),
+    ).toMatchObject([
+      {
+        semanticActions: ['rename_object', 'create_uv_sphere'],
+      },
+    ]);
+    database.close();
+  });
+
+  it('backfills indexed operations for procedure trees stored before schema 13', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-index-backfill-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const initial = openOperatingLineDatabase(databasePath);
+      expect(initial.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+        result: 'accepted',
+      });
+      initial.close();
+
+      const schemaTwelve = new DatabaseSync(databasePath);
+      schemaTwelve.exec(`
+        DROP TABLE procedure_operations;
+        DELETE FROM schema_migrations WHERE version = 13;
+      `);
+      schemaTwelve.close();
+
+      const migrated = openOperatingLineDatabase(databasePath);
+      expect(
+        migrated.searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          treeId: 'snowman.eye.left.procedure',
+          operationId: 'menu.uv_sphere',
+        }),
+      ).toMatchObject([
+        {
+          modality: 'menu',
+          semanticActions: ['create_uv_sphere'],
+        },
+      ]);
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rolls back a procedure revision when derived index data violates a constraint', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const base = procedureTreeRecord(1);
+    const malformed = {
+      ...base,
+      tree: {
+        ...(base.tree as Record<string, unknown>),
+        nodes: [
+          {
+            id: 'leaf.invalid',
+            kind: 'leaf',
+            action: null,
+            validation: { status: 'invalid' },
+            semanticOperations: [
+              {
+                id: 'semantic.invalid',
+                semanticAction: 'invalid_action',
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(() => database.recordProcedureTree(malformed)).toThrow();
+    expect(database.listProcedureTrees(0, 10)).toEqual([]);
+    expect(database.countEvents()).toBe(0);
+    database.close();
   });
 
   it('atomically records a semantic revision request with its dialogue transition', () => {
@@ -1333,7 +1520,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 12,
+        count: 13,
       });
       expect(
         inspected
@@ -1422,6 +1609,13 @@ describe('OperatingLine persistence', () => {
         'injected procedure event failure',
       );
       expect(database.listProcedureTrees(0, 10)).toEqual([]);
+      expect(
+        database.searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          treeId: 'snowman.eye.procedure',
+        }),
+      ).toEqual([]);
       expect(database.countEvents()).toBe(0);
       database.close();
     } finally {

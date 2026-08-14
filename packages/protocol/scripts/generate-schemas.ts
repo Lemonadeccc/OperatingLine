@@ -58,6 +58,8 @@ import {
   procedureTreeGetRequestSchema,
   procedureTreeListRequestSchema,
   procedureTreeListResultSchema,
+  procedureOperationSearchRequestSchema,
+  procedureOperationSearchResultSchema,
   procedureTreeStoreRequestSchema,
   procedureTreeStoreResultSchema,
   storedProcedureTreeSchema,
@@ -369,6 +371,16 @@ const schemas = [
     'procedure-tree-list-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tree-list-result.json',
     procedureTreeListResultSchema,
+  ],
+  [
+    'procedure-operation-search-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-operation-search-request.json',
+    procedureOperationSearchRequestSchema,
+  ],
+  [
+    'procedure-operation-search-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-operation-search-result.json',
+    procedureOperationSearchResultSchema,
   ],
   [
     'planning-context.schema.json',

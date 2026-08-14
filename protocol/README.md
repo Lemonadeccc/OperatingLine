@@ -31,6 +31,14 @@ ActionCatalog 及 host version range，返回 `interactionTracks: structural_onl
 相同内容幂等，冲突或旧 revision 拒绝。完整读取会重算规范内容哈希，列表用稳定 sequence 游标只返回摘要；
 存取都不会发布 GuidePlan、创建 Proposal 或执行宿主。见
 `docs/adr/0043-immutable-procedure-tree-library.md`。
+`procedure-operation-search-request.schema.json` 与 `procedure-operation-search-result.schema.json` 定义
+MCP `operatingline.procedure.search` 和 HTTP `POST /api/v1/procedure/search` 的精确操作检索。所有
+selector 以 AND 组合；字符串和 `semanticAction` 使用完整值匹配，菜单路径与快捷键使用顺序敏感的完整
+数组匹配。结果带树完整性、节点路径、leaf 验证状态、轨迹、operation 及其来源证据；unavailable 轨迹
+不进入索引。`indexSequence` 只是稳定的存储分页游标，不是节点或 operation 顺序。响应固定声明
+`matching: exact_structured_filters`、`similarityScoreProduced: false` 和
+`hostExecutionStarted: false`；该接口没有 semantic embedding，也不执行宿主动作。见
+`docs/adr/0044-exact-procedure-operation-index.md`。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或

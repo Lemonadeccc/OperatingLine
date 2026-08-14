@@ -228,6 +228,10 @@
         事件及游标分页，持久保存经过完整编译门禁的树；MCP/HTTP 支持 store、精确/最新 get 和摘要 list，
         重启后仍可读取，但不会发布 GuidePlan、创建 Proposal 或执行宿主。见
         [ADR 0043](adr/0043-immutable-procedure-tree-library.md)。
+  - [x] 不可变 ProcedureTree 精确操作索引：规范化索引 semantic 及 available 菜单、快捷键和 MCP
+        operation；MCP/HTTP 以 AND 组合的精确结构 selector 返回 revision、节点、验证状态、来源和证据。
+        `indexSequence` 只用于存储分页，不表示操作顺序；结果没有相似度分数或 semantic embedding，也不
+        启动宿主执行。见 [ADR 0044](adr/0044-exact-procedure-operation-index.md)。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的 Provider/RAG 路径，使不会 Blender 的用户能先审阅结构和参数，

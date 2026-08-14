@@ -328,6 +328,136 @@ export const procedureTreeListResultSchema = z.strictObject({
 });
 export type ProcedureTreeListResult = z.infer<typeof procedureTreeListResultSchema>;
 
+export const procedureOperationSearchModalitySchema = z.enum([
+  'semantic',
+  'menu',
+  'shortcut',
+  'mcp',
+]);
+export type ProcedureOperationSearchModality = z.infer<
+  typeof procedureOperationSearchModalitySchema
+>;
+
+const procedureOperationSearchSelectorFields = [
+  'treeId',
+  'adapterId',
+  'leafId',
+  'operationId',
+  'modality',
+  'validationStatus',
+  'actionName',
+  'semanticAction',
+  'menuTargetHostId',
+  'menuPath',
+  'shortcutKeys',
+  'mcpServerName',
+  'mcpToolName',
+] as const;
+
+export const procedureOperationSearchRequestSchema = z
+  .strictObject({
+    treeId: guideStepIdSchema.optional(),
+    revision: z.number().int().positive().optional(),
+    adapterId: z.string().min(1).optional(),
+    leafId: guideStepIdSchema.optional(),
+    operationId: guideStepIdSchema.optional(),
+    modality: procedureOperationSearchModalitySchema.optional(),
+    validationStatus: procedureValidationSchema.shape.status.optional(),
+    actionName: z.string().min(1).optional(),
+    semanticAction: guideStepIdSchema.optional(),
+    menuTargetHostId: z.string().min(1).optional(),
+    menuPath: z.array(z.string().min(1)).min(1).optional(),
+    shortcutKeys: z.array(z.string().min(1)).min(1).optional(),
+    mcpServerName: z.string().min(1).optional(),
+    mcpToolName: z.string().min(1).optional(),
+    afterSequence: z.number().int().nonnegative().optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  })
+  .superRefine((request, context) => {
+    if (request.revision !== undefined && request.treeId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['revision'],
+        message: 'Procedure operation revision filtering requires treeId',
+      });
+    }
+    if (procedureOperationSearchSelectorFields.every((field) => request[field] === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Procedure operation search requires at least one exact selector',
+      });
+    }
+  })
+  .meta({
+    anyOf: procedureOperationSearchSelectorFields.map((field) => ({ required: [field] })),
+    allOf: [{ if: { required: ['revision'] }, then: { required: ['treeId'] } }],
+  });
+export type ProcedureOperationSearchRequest = z.infer<typeof procedureOperationSearchRequestSchema>;
+
+const procedureOperationSearchNodePathItemSchema = z.strictObject({
+  id: guideStepIdSchema,
+  kind: z.enum(['group', 'leaf']),
+  order: z.number().int().positive(),
+  title: z.string().min(1),
+});
+
+const procedureOperationSearchTrackSchema = z.strictObject({
+  id: guideStepIdSchema,
+  title: z.string().min(1),
+  preconditions: z.array(procedurePreconditionSchema),
+});
+
+const procedureOperationSearchHitBaseShape = {
+  indexSequence: z.number().int().positive(),
+  tree: procedureTreeSummarySchema,
+  nodePath: z.array(procedureOperationSearchNodePathItemSchema).min(1),
+  leafId: guideStepIdSchema,
+  leafTitle: z.string().min(1),
+  leafIntent: z.string().min(1),
+  leafAction: procedureLeafNodeSchema.shape.action,
+  leafValidation: procedureValidationSchema,
+  semanticActions: z.array(guideStepIdSchema).min(1),
+  sources: z.array(procedureSourceSchema),
+  evidence: z.array(procedureEvidenceSchema),
+} as const;
+
+export const procedureOperationSearchHitSchema = z.discriminatedUnion('modality', [
+  z.strictObject({
+    ...procedureOperationSearchHitBaseShape,
+    modality: z.literal('semantic'),
+    track: z.null(),
+    operation: semanticProcedureOperationSchema,
+  }),
+  z.strictObject({
+    ...procedureOperationSearchHitBaseShape,
+    modality: z.literal('menu'),
+    track: procedureOperationSearchTrackSchema,
+    operation: menuProcedureOperationSchema,
+  }),
+  z.strictObject({
+    ...procedureOperationSearchHitBaseShape,
+    modality: z.literal('shortcut'),
+    track: procedureOperationSearchTrackSchema,
+    operation: shortcutProcedureOperationSchema,
+  }),
+  z.strictObject({
+    ...procedureOperationSearchHitBaseShape,
+    modality: z.literal('mcp'),
+    track: procedureOperationSearchTrackSchema,
+    operation: mcpProcedureCallSchema,
+  }),
+]);
+export type ProcedureOperationSearchHit = z.infer<typeof procedureOperationSearchHitSchema>;
+
+export const procedureOperationSearchResultSchema = z.strictObject({
+  operations: z.array(procedureOperationSearchHitSchema),
+  nextAfterSequence: z.number().int().positive().nullable(),
+  matching: z.literal('exact_structured_filters'),
+  similarityScoreProduced: z.literal(false),
+  hostExecutionStarted: z.literal(false),
+});
+export type ProcedureOperationSearchResult = z.infer<typeof procedureOperationSearchResultSchema>;
+
 export const procedureTrackModalities = ['menu', 'shortcut', 'mcp'] as const;
 export type ProcedureTrackModality = (typeof procedureTrackModalities)[number];
 export type ProcedureTrackOperation =
