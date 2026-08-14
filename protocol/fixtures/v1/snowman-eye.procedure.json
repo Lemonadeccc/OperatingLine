@@ -274,12 +274,31 @@
           "modality": "mcp"
         }
       ],
+      "anchors": [
+        {
+          "kind": "world_position",
+          "position": [0.32, -0.86, 2.14]
+        },
+        {
+          "kind": "operator",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "menuPath": ["Add", "Mesh", "UV Sphere"]
+        }
+      ],
       "expectedObservations": [
         {
           "kind": "resource_exists",
           "parameters": { "resourceId": "snowman.eye.left" }
         }
       ],
+      "observationPolicy": {
+        "mode": "success_gate",
+        "failureStrategy": "rollback_step"
+      },
+      "rollback": {
+        "mode": "compensating_action",
+        "checkpointRequired": false
+      },
       "validation": {
         "status": "candidate",
         "validatedHostVersions": [],

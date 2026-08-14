@@ -18,6 +18,9 @@ suite 留在 `fixtures/v1/eval/`，由 `@operatingline/eval-kit` 直接验证，
 显式声明 available/unavailable，来源证据、置信度、视频权利状态和宿主验证状态必须与操作一起保存；
 不得把不存在的 MCP 函数或未验证的视频猜测伪装成可执行数据。示例位于
 `fixtures/v1/snowman-eye.procedure.json`。
+`materializeProcedureOperations` 只负责按依赖安全的叶子顺序选择并串联轨迹，遇到多别名必须显式指定
+track ID；`compileProcedureTreeToGuidePlan` 把层级、Action、Anchor、Observation 和回退确定性编译到
+现有人工审批 GuidePlan。两者都不提交 Proposal、接受计划或执行宿主动作。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或

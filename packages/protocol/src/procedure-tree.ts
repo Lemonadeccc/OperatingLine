@@ -1,6 +1,15 @@
 import { z } from 'zod';
 
-import { guideStepIdSchema, observationExpectationSchema } from './guide.js';
+import { rollbackModeSchema } from './adapter.js';
+import {
+  guidePlanSchema,
+  guideProtocolVersion,
+  guideStepIdSchema,
+  observationExpectationSchema,
+  observationPolicySchema,
+  semanticAnchorSchema,
+  type GuidePlan,
+} from './guide.js';
 import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const procedureTreeFormatVersion = '1.0.0' as const;
@@ -196,7 +205,13 @@ export const procedureLeafNodeSchema = z.strictObject({
   menuTracks: z.array(menuProcedureTrackSchema).min(1),
   shortcutTracks: z.array(shortcutProcedureTrackSchema).min(1),
   mcpTracks: z.array(mcpProcedureTrackSchema).min(1),
+  anchors: z.array(semanticAnchorSchema),
   expectedObservations: z.array(observationExpectationSchema),
+  observationPolicy: observationPolicySchema.optional(),
+  rollback: z.strictObject({
+    mode: rollbackModeSchema,
+    checkpointRequired: z.boolean(),
+  }),
   validation: procedureValidationSchema,
 });
 export type ProcedureLeafNode = z.infer<typeof procedureLeafNodeSchema>;
@@ -222,6 +237,18 @@ export const procedureTreeSchema = z.strictObject({
   nodes: z.array(procedureNodeSchema).min(1),
 });
 export type ProcedureTree = z.infer<typeof procedureTreeSchema>;
+
+export const procedureTrackModalities = ['menu', 'shortcut', 'mcp'] as const;
+export type ProcedureTrackModality = (typeof procedureTrackModalities)[number];
+export type ProcedureTrackOperation =
+  MenuProcedureOperation | ShortcutProcedureOperation | McpProcedureCall;
+export interface MaterializedProcedureOperation {
+  readonly globalOrder: number;
+  readonly leafId: string;
+  readonly trackId: string;
+  readonly modality: ProcedureTrackModality;
+  readonly operation: ProcedureTrackOperation;
+}
 
 type OrderedItem = Readonly<{ id: string; order: number }>;
 
@@ -297,6 +324,12 @@ function validateAvailableTrack(
 }
 
 function validateLeaf(leaf: ProcedureLeafNode, evidenceIds: ReadonlySet<string>): void {
+  if (leaf.action === null && leaf.observationPolicy !== undefined) {
+    throw new Error(`Actionless procedure leaf ${leaf.id} cannot declare an observation policy`);
+  }
+  if (leaf.observationPolicy?.mode === 'success_gate' && leaf.expectedObservations.length === 0) {
+    throw new Error(`Success-gated procedure leaf ${leaf.id} requires an expected observation`);
+  }
   validateOrderedItems(`Procedure leaf ${leaf.id} semantic operations`, leaf.semanticOperations);
   const semanticIds = new Set(leaf.semanticOperations.map((operation) => operation.id));
   for (const operation of leaf.semanticOperations) {
@@ -497,6 +530,50 @@ export function parseProcedureTree(input: unknown): ProcedureTree {
   return tree;
 }
 
+/** Compile the editable intermediate tree into the existing human-approved GuidePlan boundary. */
+export function compileProcedureTreeToGuidePlan(tree: ProcedureTree): GuidePlan {
+  validateProcedureTree(tree);
+  return guidePlanSchema.parse({
+    protocolVersion: guideProtocolVersion,
+    id: tree.id,
+    revision: tree.revision,
+    title: tree.title,
+    rootStepId: tree.rootNodeId,
+    steps: tree.nodes.map((node) => {
+      const common = {
+        id: node.id,
+        parentId: node.parentId,
+        order: node.order,
+        dependsOn: node.dependsOn,
+        title: node.title,
+        intent: node.intent,
+        state: 'draft' as const,
+      };
+      if (node.kind === 'group') {
+        return {
+          ...common,
+          explanation: node.intent,
+          action: null,
+          anchors: [],
+          expectedObservations: [],
+          rollback: { mode: 'checkpoint_restore' as const, checkpointRequired: true },
+        };
+      }
+      return {
+        ...common,
+        explanation: node.semanticOperations.map((operation) => operation.description).join(' '),
+        action: node.action,
+        anchors: node.anchors,
+        expectedObservations: node.expectedObservations,
+        ...(node.observationPolicy === undefined
+          ? {}
+          : { observationPolicy: node.observationPolicy }),
+        rollback: node.rollback,
+      };
+    }),
+  });
+}
+
 /** Return executable leaves in dependency-safe, presentation-stable order. */
 export function stableProcedureLeafOrder(tree: ProcedureTree): ProcedureLeafNode[] {
   validateProcedureTree(tree);
@@ -542,4 +619,60 @@ export function stableProcedureLeafOrder(tree: ProcedureTree): ProcedureLeafNode
     remaining.delete(next.id);
   }
   return ordered;
+}
+
+function tracksForModality(leaf: ProcedureLeafNode, modality: ProcedureTrackModality) {
+  switch (modality) {
+    case 'menu':
+      return leaf.menuTracks;
+    case 'shortcut':
+      return leaf.shortcutTracks;
+    case 'mcp':
+      return leaf.mcpTracks;
+  }
+}
+
+/** Select and concatenate one available execution track per leaf without executing host actions. */
+export function materializeProcedureOperations(
+  tree: ProcedureTree,
+  modality: ProcedureTrackModality,
+  selectedTrackIds: Readonly<Record<string, string>> = {},
+): MaterializedProcedureOperation[] {
+  const materialized: MaterializedProcedureOperation[] = [];
+  for (const leaf of stableProcedureLeafOrder(tree)) {
+    const tracks = tracksForModality(leaf, modality);
+    const selectedTrackId = selectedTrackIds[leaf.id];
+    const candidates =
+      selectedTrackId === undefined
+        ? tracks.filter((track) => track.availability === 'available')
+        : tracks.filter(
+            (track) => track.id === selectedTrackId && track.availability === 'available',
+          );
+    if (candidates.length === 0) {
+      const selection = selectedTrackId === undefined ? '' : ` selected as ${selectedTrackId}`;
+      throw new Error(`Procedure leaf ${leaf.id} has no available ${modality} track${selection}`);
+    }
+    if (candidates.length > 1) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} has ambiguous ${modality} tracks: ${candidates
+          .map((track) => track.id)
+          .sort()
+          .join(', ')}`,
+      );
+    }
+    const track = candidates[0]!;
+    if (track.availability !== 'available') {
+      throw new Error(`Procedure leaf ${leaf.id} selected an unavailable ${modality} track`);
+    }
+    for (const operation of [...track.operations].sort((left, right) => left.order - right.order)) {
+      materialized.push({
+        globalOrder: materialized.length + 1,
+        leafId: leaf.id,
+        trackId: track.id,
+        modality,
+        operation,
+      });
+    }
+  }
+  return materialized;
 }

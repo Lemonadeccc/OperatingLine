@@ -1886,6 +1886,10 @@ export {
 } from './eval-export.js';
 export { computeGuidePlanDiff } from './guide-plan-diff.js';
 export {
+  validateGuidePlanAgainstActionCatalog,
+  validateGuidePlanStructure,
+} from './guide-validation.js';
+export {
   computeGuidePlanThreeWayMerge,
   createGuideRevisionBranchList,
   resolveGuideRevisionMergeContext,

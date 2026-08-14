@@ -28,6 +28,10 @@ leaf 保存标准化 `semanticOperations[]`，以及一个或多个版本/上下
 协议运行时校验以下不变量：单根、无断连或层级/依赖环、group 不可执行、同级及轨迹顺序从 1 连续、
 证据来源有效、每条可用执行轨迹完整覆盖该 leaf 的语义操作、`verified` 数据必须声明验证过的宿主版本。
 公开 JSON Schema 校验结构；`parseProcedureTree` 继续执行图和跨数组引用校验。
+`compileProcedureTreeToGuidePlan` 确定性保留层级、依赖、Action、Anchor、Observation、成功门和回退，
+把中间表示编译为当前 Guide protocol；它不提交 Proposal、不接受计划，也不执行宿主动作。
+`materializeProcedureOperations` 按依赖安全的叶子顺序连接所选执行轨迹；一个 leaf 有多个可用别名时
+调用方必须显式指定 track ID，没有可用轨迹或选择 unavailable 轨迹时失败。
 
 ## 兼容性与后果
 
@@ -37,5 +41,5 @@ Companion、Proposal 签名与执行审批语义保持不变。首个 fixture �
 计划级、需人工审批的 MCP 工具而标记为 unavailable。
 
 后续需要独立实现：教学视频分段与证据提取、ProcedureTree 可视化编辑器、Action/InteractionCatalog
-检索与轨迹物化器、ProcedureTree → GuidePlan 编译器、真实 Blender 逐轨迹验证，以及经授权和双人盲审
-的数据集导出。任何未来动作级 MCP 工具仍须保留宿主审批、安全目录、Observation 和 Undo 边界。
+检索与轨迹物化器、真实 Blender 逐轨迹验证，以及经授权和双人盲审的数据集导出。任何未来动作级 MCP
+工具仍须保留宿主审批、安全目录、Observation 和 Undo 边界。

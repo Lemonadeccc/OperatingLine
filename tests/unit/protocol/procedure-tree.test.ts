@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  compileProcedureTreeToGuidePlan,
+  materializeProcedureOperations,
   parseProcedureTree,
   procedureTreeSchema,
   stableProcedureLeafOrder,
@@ -100,6 +102,63 @@ describe('procedure tree protocol', () => {
       'snowman.head.eyes.left',
       'snowman.head.eyes.right',
     ]);
+  });
+
+  it('compiles to the existing human-approved GuidePlan boundary', () => {
+    const plan = compileProcedureTreeToGuidePlan(readFixture());
+    const leaf = plan.steps.find((step) => step.id === 'snowman.head.eyes.left');
+
+    expect(plan).toMatchObject({
+      protocolVersion: '1.5.0',
+      id: 'snowman.eye.left.procedure',
+      rootStepId: 'snowman',
+    });
+    expect(leaf).toMatchObject({
+      action: {
+        adapterId: 'blender',
+        name: 'blender.mesh.create_uv_sphere',
+        arguments: {
+          objectName: 'OperatingLine.EyeLeft',
+          radius: 0.12,
+          location: [0.32, -0.86, 2.14],
+        },
+      },
+      observationPolicy: { mode: 'success_gate', failureStrategy: 'rollback_step' },
+      rollback: { mode: 'compensating_action', checkpointRequired: false },
+    });
+  });
+
+  it('materializes one explicit track per leaf with stable global operation order', () => {
+    const tree = readFixture();
+    const menu = materializeProcedureOperations(tree, 'menu');
+
+    expect(menu).toHaveLength(7);
+    expect(menu.map((item) => item.globalOrder)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(menu[4]).toMatchObject({
+      leafId: 'snowman.head.eyes.left',
+      trackId: 'menu.layout.default',
+      modality: 'menu',
+      operation: {
+        id: 'menu.location',
+        parameters: { value: [0.32, -0.86, 2.14] },
+      },
+    });
+    expect(() => materializeProcedureOperations(tree, 'mcp')).toThrow('has no available mcp track');
+
+    const ambiguous = structuredClone(tree);
+    const leaf = ambiguous.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    const alternative = structuredClone(leaf.menuTracks[0]!);
+    alternative.id = 'menu.layout.alternative';
+    leaf.menuTracks.push(alternative);
+    expect(() => materializeProcedureOperations(ambiguous, 'menu')).toThrow(
+      'ambiguous menu tracks',
+    );
+    expect(
+      materializeProcedureOperations(ambiguous, 'menu', {
+        [leaf.id]: 'menu.layout.alternative',
+      })[0]?.trackId,
+    ).toBe('menu.layout.alternative');
   });
 
   it('rejects broken semantic alignment, ordering, hierarchy, and evidence provenance', () => {

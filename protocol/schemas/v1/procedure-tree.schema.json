@@ -993,6 +993,119 @@
                   ]
                 }
               },
+              "anchors": {
+                "type": "array",
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "object"
+                        },
+                        "objectName": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "objectName"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "world_position"
+                        },
+                        "position": {
+                          "minItems": 3,
+                          "maxItems": 3,
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "position"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "operator"
+                        },
+                        "operatorId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "menuPath": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "operatorId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "owned_control"
+                        },
+                        "surfaceId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "controlId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "surfaceId",
+                        "controlId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "unavailable"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
               "expectedObservations": {
                 "type": "array",
                 "items": {
@@ -1016,6 +1129,66 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "observationPolicy": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "telemetry"
+                      }
+                    },
+                    "required": [
+                      "mode"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "const": "success_gate"
+                      },
+                      "failureStrategy": {
+                        "type": "string",
+                        "enum": [
+                          "rollback_step",
+                          "retain_for_repair"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "failureStrategy"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "rollback": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "native_undo",
+                      "checkpoint_restore",
+                      "compensating_action",
+                      "unsupported"
+                    ]
+                  },
+                  "checkpointRequired": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "checkpointRequired"
+                ],
+                "additionalProperties": false
               },
               "validation": {
                 "type": "object",
@@ -1064,7 +1237,9 @@
               "menuTracks",
               "shortcutTracks",
               "mcpTracks",
+              "anchors",
               "expectedObservations",
+              "rollback",
               "validation"
             ],
             "additionalProperties": false
