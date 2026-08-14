@@ -3,7 +3,10 @@ import { dirname } from 'node:path';
 
 import pino from 'pino';
 
-import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
+import {
+  blenderActionCatalogs,
+  blenderInteractionCatalogs,
+} from '@operatingline/blender-action-catalog';
 import {
   createClaudeCodeCliPlannerProvider,
   createCodexCliPlannerProvider,
@@ -25,6 +28,7 @@ const runtime = await startRuntime({
   accessToken: config.accessToken,
   adapters: [],
   actionCatalogs: blenderActionCatalogs,
+  interactionCatalogs: blenderInteractionCatalogs,
   plannerProviders,
   plannerProviderTimeoutMs: config.plannerProviderTimeoutMs,
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },

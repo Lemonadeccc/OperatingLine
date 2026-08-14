@@ -32,6 +32,14 @@ Immutable Procedure Library
   ├─ storage cursor is distinct from node/operation order
   └─ validated knowledge only; no proposal or host execution
 
+ProcedureAuthoringPromptPacket
+  ├─ natural-language goal + namespaced source/evidence
+  ├─ normalized exact ActionCatalog + InteractionCatalog binding
+  ├─ candidate-only response; all interaction tracks unavailable
+  ├─ SHA-256 packet binding → authoring validate → structural compile
+  ├─ no duplicated rendered prompt; 256 KiB canonical size budget
+  └─ MCP host model handoff; no model call, store, proposal, or execution
+
 GuidePlan
   ├─ presentation tree: parentId + order
   ├─ execution graph: dependsOn
@@ -292,6 +300,20 @@ JSON Schema、coverage 要求和相同工作流规则作为确定性协议对象
 客户端选择模型和发送授权。这三条 provider-neutral packet 入口和默认 standalone 不调用模型、不读取
 供应商密钥，也不依赖从 2026-07-28 起已弃用的 MCP Sampling；只有独立 opt-in composition root 会把
 显式配置的 provider 注入同一核心 runtime。
+
+自然语言 Procedure 编写使用独立的 `ProcedureAuthoringPromptPacket 1.0.0`。MCP
+`operatingline.procedure.prompt.get` 与 HTTP `POST /api/v1/procedure/prompt` 把 goal、固定来源证据、
+tree identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema
+放进同一 packet。当前 MCP 客户端的宿主模型消费该 packet，可用 `operatingline.procedure.search` 获取精确
+grounding 候选，再生成层级、语义 operation 和 Action 参数。
+所有生成 leaf 仍为 candidate，菜单、快捷键和 MCP 轨迹必须为 unavailable；把目录配方或已验证检索结果
+物化为 available 轨迹需要后续确定性 grounding validator。实际 authoring 候选必须连同原 packet 提交给
+`operatingline.procedure.authoring.validate`；服务端重算 canonical SHA-256、按精确版本从 registry 重建 packet、
+检查固定 identity/provenance 与 candidate-only 契约，再调用通用 compile。通用 compile 单独调用不构成
+authoring 验证。Packet 不再复制 rendered prompt，并以 256 KiB canonical 大小 fail closed。packet 构建和
+验证都不会调用 Provider、自动保存树、创建 Proposal 或执行宿主。当前没有向量/语义 RAG、完整 Procedure
+Provider coordinator、可视化编辑器或训练导出。完整边界见
+[ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

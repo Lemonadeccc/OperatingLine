@@ -3,7 +3,10 @@ import { dirname } from 'node:path';
 
 import pino from 'pino';
 
-import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
+import {
+  blenderActionCatalogs,
+  blenderInteractionCatalogs,
+} from '@operatingline/blender-action-catalog';
 import { createOpenAIResponsesPlannerProvider } from '@operatingline/openai-planner-provider';
 import { startRuntime } from '@operatingline/orchestrator';
 
@@ -22,6 +25,7 @@ const runtime = await startRuntime({
   accessToken: config.accessToken,
   adapters: [],
   actionCatalogs: blenderActionCatalogs,
+  interactionCatalogs: blenderInteractionCatalogs,
   plannerProviders: [plannerProvider],
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,

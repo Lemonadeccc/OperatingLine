@@ -232,10 +232,22 @@
         operation；MCP/HTTP 以 AND 组合的精确结构 selector 返回 revision、节点、验证状态、来源和证据。
         `indexSequence` 只用于存储分页，不表示操作顺序；结果没有相似度分数或 semantic embedding，也不
         启动宿主执行。见 [ADR 0044](adr/0044-exact-procedure-operation-index.md)。
+  - [x] 供应商无关的自然语言 Procedure 编写 packet：MCP/HTTP 将目标、固定来源证据、tree identity、
+        精确 ActionCatalog/InteractionCatalog 与 candidate-only 响应 Schema 交给当前 MCP 宿主模型；
+        当前只生成层级、语义 operation 和 Action 参数，菜单、快捷键与 MCP 轨迹强制 unavailable；目录和
+        精确检索结果仅作为后续 grounding 候选。候选与原 packet 通过服务端 authoring validate 核对 canonical
+        SHA-256、已安装目录、固定 identity/provenance 和 candidate-only 契约，再走既有 compile；packet 去掉
+        重复 rendered prompt，并有 256 KiB canonical 上限。该流程不调用模型、不自动保存、创建 Proposal 或
+        执行宿主，也不声称已经实现语义 RAG。见
+        [ADR 0045](adr/0045-provider-neutral-procedure-authoring.md)。
+  - [ ] 确定性交互 grounding/materialization：给 operation 增加可验证的 InteractionCatalog recipe/step
+        或 verified Procedure operation provenance，将候选物化成包含精确菜单、快捷键、MCP 参数的 available
+        轨迹；通用 compile 在此之前继续明确标记 interaction tracks 为 structural-only。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
-  - [ ] 句子到完整 ProcedureTree 的 Provider/RAG 路径，使不会 Blender 的用户能先审阅结构和参数，
-        再对局部效果评论与精修；输入不依赖教学视频。
+  - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，
+        增加显式 Provider coordinator、经验证的语义召回与结果治理，使不会 Blender 的用户能先审阅结构
+        和参数，再对局部效果评论与精修；输入不依赖教学视频。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

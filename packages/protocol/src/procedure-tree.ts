@@ -29,8 +29,8 @@ export const procedureSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     id: guideStepIdSchema,
     kind: z.literal('natural_language'),
-    text: z.string().trim().min(1).max(10_000),
-    locale: z.string().min(1).optional(),
+    text: z.string().min(1).max(10_000).regex(/\S/),
+    locale: z.string().min(1).max(64).regex(/^\S+$/).optional(),
   }),
   z.strictObject({
     id: guideStepIdSchema,

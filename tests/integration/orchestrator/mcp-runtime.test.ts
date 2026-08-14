@@ -280,6 +280,8 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.procedure.prompt.get' },
+            { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.compile' },
             { name: 'operatingline.procedure.store' },
             { name: 'operatingline.procedure.get' },
@@ -304,6 +306,15 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.guide.propose' },
           ],
         },
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.authoring.validate',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['packet', 'tree'],
+        additionalProperties: false,
       });
       expect(
         toolsPayload.result?.tools?.find((tool) => tool.name === 'operatingline.replan.propose')

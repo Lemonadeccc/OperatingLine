@@ -123,11 +123,14 @@
                       "text": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "pattern": "\\S"
                       },
                       "locale": {
                         "type": "string",
-                        "minLength": 1
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^\\S+$"
                       }
                     },
                     "required": [

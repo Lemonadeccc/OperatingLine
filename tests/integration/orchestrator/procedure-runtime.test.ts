@@ -5,8 +5,23 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
-import { startRuntime, type RunningRuntime } from '@operatingline/orchestrator';
+import {
+  blenderActionCatalog,
+  blenderInteractionCatalog,
+} from '@operatingline/blender-action-catalog';
+import {
+  buildProcedureAuthoringPromptPacket,
+  computeProcedureAuthoringPromptPacketContentSha256,
+  procedureAuthoringPromptPacketContent,
+  startRuntime,
+  type RunningRuntime,
+} from '@operatingline/orchestrator';
+import {
+  canonicalizeProtocolJsonValue,
+  procedureAuthoringPromptPacketMaxCanonicalBytes,
+  procedureAuthoringPromptPacketSchema,
+  type ProcedureAuthoringPromptPacket,
+} from '@operatingline/protocol';
 
 const accessToken = 'procedure-runtime-test-token';
 const headers = {
@@ -54,7 +69,304 @@ function procedureFixture(): Record<string, unknown> {
   ) as Record<string, unknown>;
 }
 
+function authoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = procedureFixture();
+  for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
+    if (node['kind'] !== 'leaf') continue;
+    const leafId = String(node['id']);
+    for (const modality of ['menu', 'shortcut', 'mcp'] as const) {
+      node[`${modality}Tracks`] = [
+        {
+          id: `${leafId}.${modality}.unavailable`,
+          availability: 'unavailable',
+          title: `${modality} grounding pending`,
+          reason: 'A deterministic grounding stage has not materialized this track.',
+          modality,
+        },
+      ];
+    }
+  }
+  const source = packet.context.goalProvenance.source;
+  const evidence = { ...packet.context.goalProvenance.evidence, sourceId: source.id };
+  (tree['sources'] as Array<Record<string, unknown>>).push(source);
+  (tree['evidence'] as Array<Record<string, unknown>>).push(evidence);
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
+  it('builds one provider-neutral candidate authoring packet without side effects', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const request = {
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal: '制作雪人的头部，并创建、定位、缩放和命名左眼球体。',
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+        locale: 'zh-CN',
+      };
+      const mcp = await callMcpTool(runtime, 1, 'operatingline.procedure.prompt.get', request);
+      expect(mcp.result?.isError).not.toBe(true);
+      const packet = procedureAuthoringPromptPacketSchema.parse(mcp.result?.structuredContent);
+      expect(packet).toMatchObject({
+        context: {
+          requestedTreeId: request.treeId,
+          recommendedRevision: 1,
+          goalProvenance: {
+            source: {
+              id: 'source.snowman.eye.left.procedure.revision.1.goal',
+              text: request.goal,
+            },
+            evidence: {
+              id: 'evidence.snowman.eye.left.procedure.revision.1.goal',
+            },
+          },
+          catalogBinding: {
+            adapterId: 'blender',
+            actionCatalog: { catalogVersion: blenderActionCatalog.catalogVersion },
+            interactionCatalog: { catalogVersion: blenderInteractionCatalog.catalogVersion },
+          },
+          constraints: { allInteractionTracksUnavailable: true },
+        },
+        retrieval: {
+          toolName: 'operatingline.procedure.search',
+          matching: 'exact_structured_filters',
+          similarityScoreProduced: false,
+        },
+        workflow: {
+          validationToolName: 'operatingline.procedure.authoring.validate',
+          compileToolName: 'operatingline.procedure.compile',
+        },
+        sideEffects: {
+          modelCalled: false,
+          procedureStored: false,
+          proposalCreated: false,
+          hostExecutionStarted: false,
+        },
+      });
+      expect(packet).not.toHaveProperty('renderedPrompt');
+      expect(JSON.parse(mcp.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        packetContentSha256: packet.integrity.contentSha256,
+      });
+      expect(packet.integrity.contentSha256).toBe(
+        computeProcedureAuthoringPromptPacketContentSha256(
+          procedureAuthoringPromptPacketContent(packet),
+        ),
+      );
+      expect(canonicalizeProtocolJsonValue(packet).byteLength).toBeLessThanOrEqual(
+        procedureAuthoringPromptPacketMaxCanonicalBytes,
+      );
+
+      const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+      });
+      expect(http.status).toBe(200);
+      await expect(http.json()).resolves.toEqual(packet);
+
+      const candidate = authoringCandidateFixture(packet);
+      const validated = await callMcpTool(
+        runtime,
+        2,
+        'operatingline.procedure.authoring.validate',
+        { packet, tree: candidate },
+      );
+      expect(validated.result?.isError).not.toBe(true);
+      const validationResult = JSON.parse(validated.result?.content?.[0]?.text ?? '{}') as Record<
+        string,
+        unknown
+      >;
+      expect(validationResult).toMatchObject({
+        packetContentSha256: packet.integrity.contentSha256,
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+        },
+        compilation: {
+          procedureTreeId: request.treeId,
+          procedureTreeRevision: 1,
+          proposalCreated: false,
+          hostExecutionStarted: false,
+        },
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+      expect(validated.result?.structuredContent).toEqual(validationResult);
+
+      const httpValidation = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/validate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: candidate }),
+      });
+      expect(httpValidation.status).toBe(200);
+      await expect(httpValidation.json()).resolves.toEqual(validationResult);
+
+      const rebuiltPacket = buildProcedureAuthoringPromptPacket(
+        request,
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      expect(rebuiltPacket).toEqual(packet);
+
+      const procedures = await fetch(`${runtime.baseUrl}/api/v1/procedures`, { headers });
+      await expect(procedures.json()).resolves.toEqual({
+        procedures: [],
+        nextAfterSequence: null,
+      });
+      const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
+      await expect(guide.json()).resolves.toEqual({ plan: null });
+
+      const unavailable = await callMcpTool(runtime, 3, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: '9.9.9',
+      });
+      expect(unavailable.result).toMatchObject({ isError: true });
+      expect(unavailable.result?.content?.[0]?.text).toContain(
+        'procedure_authoring_prompt_unavailable',
+      );
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('rejects tampered, resealed, identity-drifted, and non-candidate authoring input', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const promptRequest = {
+        targetAdapterId: 'blender',
+        goal: 'Create the left eye sphere.',
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+      };
+      const packet = buildProcedureAuthoringPromptPacket(
+        promptRequest,
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const candidate = authoringCandidateFixture(packet);
+
+      const badIntegrity = structuredClone(packet);
+      badIntegrity.integrity.contentSha256 = '0'.repeat(64);
+      const badIntegrityMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.validate',
+        { packet: badIntegrity, tree: candidate },
+      );
+      expect(badIntegrityMcp.result).toMatchObject({ isError: true });
+      expect(badIntegrityMcp.result?.content?.[0]?.text).toContain(
+        'procedure_authoring_validation_failed',
+      );
+
+      const resealed = structuredClone(packet);
+      resealed.workflow.instructions = [
+        ...resealed.workflow.instructions,
+        'A client-added instruction must not become part of the installed packet.',
+      ];
+      resealed.integrity.contentSha256 = computeProcedureAuthoringPromptPacketContentSha256(
+        procedureAuthoringPromptPacketContent(resealed),
+      );
+      const resealedHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/validate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet: resealed, tree: candidate }),
+      });
+      expect(resealedHttp.status).toBe(422);
+      await expect(resealedHttp.json()).resolves.toMatchObject({
+        error: 'procedure_authoring_validation_failed',
+        message: 'Procedure authoring packet does not match the installed catalog snapshots',
+      });
+
+      const changedIdentity = structuredClone(candidate);
+      changedIdentity['id'] = 'different.procedure';
+      const changedIdentityHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/validate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: changedIdentity }),
+        },
+      );
+      expect(changedIdentityHttp.status).toBe(422);
+      await expect(changedIdentityHttp.json()).resolves.toMatchObject({
+        error: 'procedure_authoring_validation_failed',
+      });
+
+      const changedSource = structuredClone(candidate);
+      const goalSource = (changedSource['sources'] as Array<Record<string, unknown>>).find(
+        (source) => source['id'] === packet.context.goalProvenance.source.id,
+      );
+      if (goalSource === undefined) throw new Error('Expected packet-bound goal source');
+      goalSource['text'] = 'Changed after the packet was built.';
+      const changedSourceHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/validate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: changedSource }),
+        },
+      );
+      expect(changedSourceHttp.status).toBe(422);
+
+      const compileInvalid = structuredClone(candidate);
+      const actionLeaf = (compileInvalid['nodes'] as Array<Record<string, unknown>>).find(
+        (node) => node['kind'] === 'leaf',
+      );
+      if (actionLeaf === undefined) throw new Error('Expected action leaf');
+      const action = actionLeaf['action'] as Record<string, unknown>;
+      action['name'] = 'blender.unknown_action';
+      const compileInvalidHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/validate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: compileInvalid }),
+        },
+      );
+      expect(compileInvalidHttp.status).toBe(422);
+      await expect(compileInvalidHttp.json()).resolves.toMatchObject({
+        error: 'procedure_authoring_validation_failed',
+      });
+
+      const availableTracks = procedureFixture();
+      availableTracks['sources'] = candidate['sources'];
+      availableTracks['evidence'] = candidate['evidence'];
+      const availableHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/validate`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: availableTracks }),
+      });
+      expect(availableHttp.status).toBe(400);
+      await expect(availableHttp.json()).resolves.toMatchObject({
+        error: 'invalid_procedure_authoring_validation_request',
+      });
+
+      const procedures = await fetch(`${runtime.baseUrl}/api/v1/procedures`, { headers });
+      await expect(procedures.json()).resolves.toMatchObject({ procedures: [] });
+      const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
+      await expect(guide.json()).resolves.toEqual({ plan: null });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it('classifies persistence failures as internal without exposing SQLite details', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-failure-'));
     const databasePath = join(directory, 'state.db');

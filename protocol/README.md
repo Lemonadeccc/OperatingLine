@@ -39,6 +39,19 @@ selector 以 AND 组合；字符串和 `semanticAction` 使用完整值匹配，
 `matching: exact_structured_filters`、`similarityScoreProduced: false` 和
 `hostExecutionStarted: false`；该接口没有 semantic embedding，也不执行宿主动作。见
 `docs/adr/0044-exact-procedure-operation-index.md`。
+`procedure-authoring-prompt-request.schema.json`、`procedure-authoring-prompt-context.schema.json`、
+`procedure-authoring-prompt-packet.schema.json`、`procedure-authoring-candidate-tree.schema.json`、
+`procedure-authoring-validation-request.schema.json` 和 `procedure-authoring-validation-result.schema.json` 定义
+自然语言目标到候选 ProcedureTree 的供应商无关交接契约。MCP `operatingline.procedure.prompt.get` 与 HTTP
+`POST /api/v1/procedure/prompt` 返回同一 `1.0.0` packet：它精确绑定 ActionCatalog/InteractionCatalog、
+按 tree/revision 命名空间化的 goal provenance 和 tree identity，并要求每个生成 leaf 保持 `candidate`、
+`validatedHostVersions` 为空，三类交互轨迹也必须为 `unavailable`。当前 MCP 宿主模型可按 packet 生成层级、
+语义 operation 和 Action 参数；InteractionCatalog 与精确检索结果只作为后续确定性 grounding 的候选，
+不能在当前响应中自行变成 available 轨迹。候选必须连同原 packet 交给
+`operatingline.procedure.authoring.validate`：服务端验证 packet canonical SHA-256、已安装目录快照、固定 identity/
+provenance 和 candidate-only 契约，再复用既有 compile。Packet 不含重复 rendered prompt，并以 256 KiB
+canonical 大小为上限。该入口不调用模型、保存树、创建 Proposal 或执行宿主，也没有向量或语义 RAG。见
+`docs/adr/0045-provider-neutral-procedure-authoring.md`。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或

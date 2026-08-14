@@ -79,6 +79,16 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   路径、leaf 验证状态、轨迹、来源和证据；unavailable 轨迹不返回。分页使用独立的存储
   `indexSequence`，不把它当作 operation 顺序；接口不做向量/相似度检索，也不执行宿主动作。见
   [ADR 0044](docs/adr/0044-exact-procedure-operation-index.md)。
+- **自然语言 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
+  `POST /api/v1/procedure/prompt` 返回供应商无关的 `1.0.0` packet，精确绑定 ActionCatalog、
+  InteractionCatalog、tree identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
+  宿主模型按 packet 生成层级、语义 operation 和 Action 参数；菜单、快捷键与 MCP 轨迹在本阶段必须保持
+  unavailable，直到后续确定性 grounding/materialization 校验。精确检索目前只提供 grounding 候选，随后
+  把原 packet 与候选提交给 `operatingline.procedure.authoring.validate`；服务端核对 canonical SHA-256、
+  已安装目录快照、candidate-only 契约和固定 provenance，并复用既有 compile。Packet 不再重复内嵌 rendered
+  prompt，且以 256 KiB canonical 大小 fail closed。该入口不调用模型、不自动保存树、创建 Proposal 或执行
+  宿主；当前也没有向量/语义 RAG、完整 Procedure Provider coordinator、可视化编辑器或训练导出。见
+  [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、

@@ -54,6 +54,10 @@ import {
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
   canonicalizeProtocolJsonValue,
+  procedureAuthoringPromptPacketSchema,
+  procedureAuthoringPromptRequestSchema,
+  procedureAuthoringValidationRequestSchema,
+  procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
   procedureOperationSearchRequestSchema,
   procedureOperationSearchResultSchema,
@@ -76,6 +80,7 @@ import {
   type GuidePlan,
   type GuideGoalRequest,
   type GuideProposal,
+  type InteractionCatalog,
   type PlanningIntent,
   type PlanningQualityReport,
   type RuntimeStatus,
@@ -115,7 +120,13 @@ import { localReplanCoverageStepIds } from './local-replan-scope.js';
 import { createGuideRevisionThreadHistory } from './guide-revision-history.js';
 import { createGuideRevisionBranchList } from './guide-revision-branches.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
+import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
+import {
+  buildProcedureAuthoringPromptPacket,
+  validateProcedureAuthoringCandidate,
+  validateProcedureAuthoringPromptPacketIntegrity,
+} from './procedure-authoring-prompt.js';
 import {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
@@ -148,6 +159,7 @@ export interface StartRuntimeOptions {
   accessToken: string;
   adapters?: readonly AppAdapter[];
   actionCatalogs?: readonly ActionCatalog[];
+  interactionCatalogs?: readonly InteractionCatalog[];
   plannerProviders?: readonly PlannerProvider[];
   plannerProviderTimeoutMs?: number;
   companionLeases?: CompanionLeaseManagerOptions;
@@ -241,6 +253,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ...(options.actionCatalogs ?? []),
     ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
   ]);
+  const interactionCatalogRegistry = createInteractionCatalogRegistry(
+    options.interactionCatalogs ?? [],
+    actionCatalogRegistry,
+  );
   const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
   const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
   const database = openOperatingLineDatabase(options.databasePath);
@@ -428,6 +444,25 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       return packet;
     };
 
+    const getProcedureAuthoringPrompt = (
+      request: ReturnType<typeof procedureAuthoringPromptRequestSchema.parse>,
+    ) => {
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: request.targetAdapterId,
+        ...(request.actionCatalogVersion === undefined
+          ? {}
+          : { catalogVersion: request.actionCatalogVersion }),
+      });
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: request.targetAdapterId,
+        actionCatalogVersion: actionCatalog.catalogVersion,
+        ...(request.interactionCatalogVersion === undefined
+          ? {}
+          : { interactionCatalogVersion: request.interactionCatalogVersion }),
+      });
+      return buildProcedureAuthoringPromptPacket(request, actionCatalog, interactionCatalog);
+    };
+
     const getGuideGoalRequest = (requestId: string): GuideGoalRequest => {
       const stored = database.getGuideGoalRequest(requestId);
       if (stored === null) {
@@ -495,6 +530,44 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         interactionCatalogVersion: tree.interactionCatalogVersion,
         validation: procedureRuntimeValidation,
         plan,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    };
+
+    const validateProcedureAuthoring = (
+      request: ReturnType<typeof procedureAuthoringValidationRequestSchema.parse>,
+    ) => {
+      const packet = validateProcedureAuthoringPromptPacketIntegrity(request.packet);
+      const expectedPacket = getProcedureAuthoringPrompt({
+        targetAdapterId: packet.context.catalogBinding.adapterId,
+        actionCatalogVersion: packet.context.catalogBinding.actionCatalog.catalogVersion,
+        interactionCatalogVersion: packet.context.catalogBinding.interactionCatalog.catalogVersion,
+        goal: packet.context.goalProvenance.source.text,
+        treeId: packet.context.requestedTreeId,
+        revision: packet.context.recommendedRevision,
+        ...(packet.context.goalProvenance.source.locale === undefined
+          ? {}
+          : { locale: packet.context.goalProvenance.source.locale }),
+      });
+      if (packet.integrity.contentSha256 !== expectedPacket.integrity.contentSha256) {
+        throw new Error(
+          'Procedure authoring packet does not match the installed catalog snapshots',
+        );
+      }
+      const tree = validateProcedureAuthoringCandidate(packet, request.tree);
+      const compilation = compileProcedure({ tree });
+      return procedureAuthoringValidationResultSchema.parse({
+        formatVersion: packet.formatVersion,
+        packetContentSha256: packet.integrity.contentSha256,
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+        },
+        compilation,
+        procedureStored: false,
         proposalCreated: false,
         hostExecutionStarted: false,
       });
@@ -1187,6 +1260,117 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
           };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.prompt.get',
+        {
+          description:
+            'Build a deterministic, provider-neutral authoring packet for one natural-language goal. It pins exact normalized ActionCatalog and InteractionCatalog snapshots, requires a candidate-only ProcedureTree with unavailable interaction tracks, and does not call a model, store a tree, create a Proposal, or execute host work.',
+          inputSchema: deferMcpInputValidation(procedureAuthoringPromptRequestSchema),
+          outputSchema: procedureAuthoringPromptPacketSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureAuthoringPromptRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_authoring_prompt_request',
+                    message:
+                      'Procedure authoring prompt request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const packet = getProcedureAuthoringPrompt(parsedRequest.data);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: packet.formatVersion,
+                    packetContentSha256: packet.integrity.contentSha256,
+                    message: 'The complete authoring packet is in structuredContent.',
+                  }),
+                },
+              ],
+              structuredContent: packet,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_authoring_prompt_unavailable',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Procedure authoring prompt is unavailable',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.validate',
+        {
+          description:
+            'Validate a ProcedureTree candidate against the exact authoring packet, installed catalog snapshots, candidate-only trust boundary, and existing compilation rules. This does not store, propose, accept, or execute anything.',
+          inputSchema: deferMcpInputValidation(procedureAuthoringValidationRequestSchema),
+          outputSchema: procedureAuthoringValidationResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureAuthoringValidationRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_authoring_validation_request',
+                    message:
+                      'Procedure authoring validation request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = validateProcedureAuthoring(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_authoring_validation_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Procedure authoring validation failed',
+                  }),
+                },
+              ],
+            };
+          }
         },
       );
 
@@ -2047,6 +2231,41 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/prompt', async (request, reply) => {
+      const parsedRequest = procedureAuthoringPromptRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_authoring_prompt_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return getProcedureAuthoringPrompt(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'procedure_authoring_prompt_unavailable',
+          message:
+            error instanceof Error ? error.message : 'Procedure authoring prompt is unavailable',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/authoring/validate', async (request, reply) => {
+      const parsedRequest = procedureAuthoringValidationRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_authoring_validation_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return validateProcedureAuthoring(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'procedure_authoring_validation_failed',
+          message: error instanceof Error ? error.message : 'Procedure authoring validation failed',
+        });
+      }
+    });
     runtimeApp.post('/api/v1/procedure/compile', async (request, reply) => {
       const parsedRequest = procedureCompilationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -2719,6 +2938,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 }
 
 export { createActionCatalogRegistry };
+export { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 export {
   CompanionLeaseError,
   companionHeartbeatIntervalMs,
@@ -2754,6 +2974,13 @@ export {
   normalizeLocalReplanRoots,
 } from './local-replan-scope.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';
+export {
+  buildProcedureAuthoringPromptPacket,
+  computeProcedureAuthoringPromptPacketContentSha256,
+  procedureAuthoringPromptPacketContent,
+  validateProcedureAuthoringCandidate,
+  validateProcedureAuthoringPromptPacketIntegrity,
+} from './procedure-authoring-prompt.js';
 export {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,

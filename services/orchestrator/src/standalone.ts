@@ -3,7 +3,10 @@ import { dirname, resolve } from 'node:path';
 
 import pino from 'pino';
 
-import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
+import {
+  blenderActionCatalogs,
+  blenderInteractionCatalogs,
+} from '@operatingline/blender-action-catalog';
 
 import { startRuntime } from './index.js';
 
@@ -25,6 +28,7 @@ const runtime = await startRuntime({
   accessToken,
   adapters: [],
   actionCatalogs: blenderActionCatalogs,
+  interactionCatalogs: blenderInteractionCatalogs,
   companionLeases: { allowLegacyCompanions },
   port: Number(process.env.OPERATINGLINE_PORT ?? 0),
 });
