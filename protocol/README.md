@@ -53,6 +53,23 @@ provenance 和 candidate-only 契约，再复用既有 compile。Packet 不含�
 canonical 大小为上限。该入口不调用模型、保存树、创建 Proposal 或执行宿主，也没有向量或语义 RAG。见
 `docs/adr/0045-provider-neutral-procedure-authoring.md`。
 
+`procedure-authoring-materialization-request.schema.json` 与
+`procedure-authoring-materialization-result.schema.json` 定义后续第一个目录绑定菜单 grounding 切片。MCP
+`operatingline.procedure.authoring.materialize` 与 HTTP
+`POST /api/v1/procedure/authoring/materialize` 复用完全相同的原 packet + candidate，并重新执行 packet
+integrity、已安装目录、candidate-only 契约和 compile 校验。只有 InteractionCatalog recipe 的封闭
+`procedureMaterialization` 声明可以把轨迹变为 available；当前菜单声明固定为
+`guidance.native_path + all_leaf_operations + accepted_action_arguments`，shortcut/MCP 仍只能明确
+unavailable。输出按 catalog step 的精确顺序生成累计 label path；每步携带 leaf 的全部 semantic/evidence
+refs，只有最后的 accepted-action execution step 携带原样 Action arguments。Track ID 等于 recipe ID，
+operation ID 等于 recipe step ID，再结合树顶层 `interactionCatalogVersion` 可重建 recipe/step provenance。
+结果返回已安装 InteractionCatalog digest、输入/输出 tree hash 和逐 leaf coverage，但 leaf 仍为 candidate，
+`validatedHostVersions` 仍为空。通用 compile 继续是 `structural_only`。该入口不调用模型/Provider、不保存
+树、不创建 Proposal、也不执行 Blender。完整 result 信封才是目录 grounding 证明；单独抽出或经通用 store
+保存的 tree 会丢失 digest/coverage attestation，只能按 `structural_only` 使用。Blender InteractionCatalog
+`1.10.0` 只为 UV Sphere opt in；历史 `1.9.0` 保持可回放。见
+`docs/adr/0046-catalog-bound-procedure-materialization.md`。
+
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或
 `retain_for_repair`。`1.0.0`/`1.1.0` 不得携带该字段。Companion report `1.2.0` 必须显式携带

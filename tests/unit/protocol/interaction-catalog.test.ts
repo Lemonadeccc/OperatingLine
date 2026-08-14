@@ -14,7 +14,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.9.0');
+    expect(catalog.catalogVersion).toBe('1.10.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -49,6 +49,7 @@ describe('interaction catalog protocol', () => {
       '1.7.0',
       '1.8.0',
       '1.9.0',
+      '1.10.0',
     ]);
 
     const sphere = catalog.recipes[0]!;
@@ -66,6 +67,25 @@ describe('interaction catalog protocol', () => {
         binding: 'accepted_plan_action',
       },
     });
+    expect(sphere.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'available',
+        source: 'guidance.native_path',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'accepted_action_arguments',
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No versioned shortcut recipe is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
+    expect(catalog.recipes.slice(1)).toSatisfy((recipes) =>
+      recipes.every((recipe) => recipe.procedureMaterialization === undefined),
+    );
   });
 
   it('rejects ambiguous recipes, broken execution bindings, and action coverage drift', () => {
@@ -83,6 +103,24 @@ describe('interaction catalog protocol', () => {
     native.execution.operatorId = 'mesh.primitive_ico_sphere_add';
     expect(() => validateInteractionCatalog(brokenExecution, blenderActionCatalog)).toThrow(
       'bind its operator target exactly',
+    );
+
+    const semanticMaterialization = structuredClone(blenderInteractionCatalog);
+    semanticMaterialization.recipes[0]!.guidance = structuredClone(
+      semanticMaterialization.recipes.find((recipe) => recipe.guidance.kind === 'semantic_path')!
+        .guidance,
+    );
+    expect(() => validateInteractionCatalog(semanticMaterialization, blenderActionCatalog)).toThrow(
+      'available menu materialization requires native_path guidance',
+    );
+
+    const unsupportedMenuTarget = structuredClone(blenderInteractionCatalog);
+    unsupportedMenuTarget.recipes[0]!.guidance.steps[0]!.target = {
+      kind: 'panel',
+      hostId: 'VIEW3D_PT_example',
+    };
+    expect(() => validateInteractionCatalog(unsupportedMenuTarget, blenderActionCatalog)).toThrow(
+      'available menu materialization cannot represent panel targets',
     );
 
     const missing = structuredClone(blenderInteractionCatalog);

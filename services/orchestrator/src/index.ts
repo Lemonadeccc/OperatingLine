@@ -54,6 +54,9 @@ import {
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
   canonicalizeProtocolJsonValue,
+  procedureAuthoringMaterializationFormatVersion,
+  procedureAuthoringMaterializationRequestSchema,
+  procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
   procedureAuthoringValidationRequestSchema,
@@ -122,6 +125,7 @@ import { createGuideRevisionBranchList } from './guide-revision-branches.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
+import { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
 import {
   buildProcedureAuthoringPromptPacket,
   validateProcedureAuthoringCandidate,
@@ -535,7 +539,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
-    const validateProcedureAuthoring = (
+    const validateProcedureAuthoringInput = (
       request: ReturnType<typeof procedureAuthoringValidationRequestSchema.parse>,
     ) => {
       const packet = validateProcedureAuthoringPromptPacketIntegrity(request.packet);
@@ -557,6 +561,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
       const tree = validateProcedureAuthoringCandidate(packet, request.tree);
       const compilation = compileProcedure({ tree });
+      return { packet, tree, compilation };
+    };
+
+    const validateProcedureAuthoring = (
+      request: ReturnType<typeof procedureAuthoringValidationRequestSchema.parse>,
+    ) => {
+      const { packet, compilation } = validateProcedureAuthoringInput(request);
       return procedureAuthoringValidationResultSchema.parse({
         formatVersion: packet.formatVersion,
         packetContentSha256: packet.integrity.contentSha256,
@@ -566,6 +577,52 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           authoringCandidateContract: 'validated',
           procedureCompilation: 'validated',
         },
+        compilation,
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    };
+
+    const materializeProcedureAuthoring = (
+      request: ReturnType<typeof procedureAuthoringMaterializationRequestSchema.parse>,
+    ) => {
+      const { packet, tree } = validateProcedureAuthoringInput(request);
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: tree.adapterId,
+        catalogVersion: tree.actionCatalogVersion,
+      });
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: tree.adapterId,
+        actionCatalogVersion: tree.actionCatalogVersion,
+        interactionCatalogVersion: tree.interactionCatalogVersion,
+      });
+      const materialized = materializeProcedureAuthoringCandidate(
+        tree,
+        actionCatalog,
+        interactionCatalog,
+      );
+      const compilation = compileProcedure({ tree: materialized.tree });
+      return procedureAuthoringMaterializationResultSchema.parse({
+        formatVersion: procedureAuthoringMaterializationFormatVersion,
+        packetContentSha256: packet.integrity.contentSha256,
+        inputTreeContentSha256: materialized.inputTreeContentSha256,
+        outputTreeContentSha256: materialized.outputTreeContentSha256,
+        catalogBinding: {
+          adapterId: interactionCatalog.adapterId,
+          actionCatalogVersion: interactionCatalog.actionCatalogVersion,
+          interactionCatalogVersion: interactionCatalog.catalogVersion,
+          interactionCatalogContentSha256: materialized.interactionCatalogContentSha256,
+        },
+        coverage: materialized.coverage,
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+          interactionGrounding: 'validated_against_installed_interaction_catalog',
+        },
+        tree: materialized.tree,
         compilation,
         procedureStored: false,
         proposalCreated: false,
@@ -1375,6 +1432,58 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.authoring.materialize',
+        {
+          description:
+            'Revalidate a candidate against its exact authoring packet, then deterministically materialize only InteractionCatalog-declared tracks. Catalog-grounded menu paths may become available; unverified shortcut and MCP tracks remain unavailable. This does not store, propose, accept, or execute anything.',
+          inputSchema: deferMcpInputValidation(procedureAuthoringMaterializationRequestSchema),
+          outputSchema: procedureAuthoringMaterializationResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureAuthoringMaterializationRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_authoring_materialization_request',
+                    message:
+                      'Procedure authoring materialization request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = materializeProcedureAuthoring(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_authoring_materialization_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Procedure authoring materialization failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.compile',
         {
           description:
@@ -1425,7 +1534,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.store',
         {
           description:
-            'Validate and immutably store one ProcedureTree revision as a knowledge artifact. Duplicate identical revisions are idempotent; stale or conflicting revisions are rejected. This never proposes or executes Blender work.',
+            'Validate and immutably store one ProcedureTree revision as a structural knowledge artifact. Duplicate identical revisions are idempotent; stale or conflicting revisions are rejected. Generic store does not retain MaterializationResult attestation, so a standalone stored tree cannot prove catalog grounding. This never proposes or executes Blender work.',
           inputSchema: deferMcpInputValidation(procedureTreeStoreRequestSchema),
           outputSchema: procedureTreeStoreResultSchema,
         },
@@ -2266,6 +2375,24 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/authoring/materialize', async (request, reply) => {
+      const parsedRequest = procedureAuthoringMaterializationRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_authoring_materialization_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return materializeProcedureAuthoring(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'procedure_authoring_materialization_failed',
+          message:
+            error instanceof Error ? error.message : 'Procedure authoring materialization failed',
+        });
+      }
+    });
     runtimeApp.post('/api/v1/procedure/compile', async (request, reply) => {
       const parsedRequest = procedureCompilationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -2974,6 +3101,7 @@ export {
   normalizeLocalReplanRoots,
 } from './local-replan-scope.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';
+export { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
 export {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,

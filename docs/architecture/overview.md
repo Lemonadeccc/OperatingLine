@@ -40,6 +40,14 @@ ProcedureAuthoringPromptPacket
   ├─ no duplicated rendered prompt; 256 KiB canonical size budget
   └─ MCP host model handoff; no model call, store, proposal, or execution
 
+ProcedureAuthoringMaterialization
+  ├─ exact packet + candidate → repeat packet-bound validation
+  ├─ closed InteractionCatalog declaration; undeclared tracks unavailable
+  ├─ recipe ID → track ID; recipe step ID → operation ID
+  ├─ ordered cumulative menu path + all semantic/evidence references
+  ├─ accepted Action arguments only on the final execution step
+  └─ catalog/tree digests + leaf coverage; candidate state remains unchanged
+
 GuidePlan
   ├─ presentation tree: parentId + order
   ├─ execution graph: dependsOn
@@ -306,14 +314,30 @@ JSON Schema、coverage 要求和相同工作流规则作为确定性协议对象
 tree identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema
 放进同一 packet。当前 MCP 客户端的宿主模型消费该 packet，可用 `operatingline.procedure.search` 获取精确
 grounding 候选，再生成层级、语义 operation 和 Action 参数。
-所有生成 leaf 仍为 candidate，菜单、快捷键和 MCP 轨迹必须为 unavailable；把目录配方或已验证检索结果
-物化为 available 轨迹需要后续确定性 grounding validator。实际 authoring 候选必须连同原 packet 提交给
+所有生成 leaf 仍为 candidate，菜单、快捷键和 MCP 轨迹必须为 unavailable；模型不能自行把目录配方或
+检索结果物化为 available。实际 authoring 候选必须连同原 packet 提交给
 `operatingline.procedure.authoring.validate`；服务端重算 canonical SHA-256、按精确版本从 registry 重建 packet、
 检查固定 identity/provenance 与 candidate-only 契约，再调用通用 compile。通用 compile 单独调用不构成
 authoring 验证。Packet 不再复制 rendered prompt，并以 256 KiB canonical 大小 fail closed。packet 构建和
 验证都不会调用 Provider、自动保存树、创建 Proposal 或执行宿主。当前没有向量/语义 RAG、完整 Procedure
 Provider coordinator、可视化编辑器或训练导出。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)。
+
+后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
+`POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
+validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
+`1.10.0` 只为 UV Sphere menu 声明
+`guidance.native_path + all_leaf_operations + accepted_action_arguments`：输出严格沿 catalog step order，
+每步 path 累积精确 label 并引用 leaf 的全部 semantic/evidence；只有最后的 accepted-action execution step
+携带原样 Action arguments。Track/operation ID 分别复用 recipe/step ID，结合树顶层 catalog version 可重建
+provenance。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。shortcut/MCP 仍因没有已验证
+recipe/获批 action-level tool 而确定性 unavailable；leaf 仍为 candidate 且
+`validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。历史 `1.9.0` 继续精确回放。该入口
+不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。目录证明只存在于完整 result 信封；
+单独抽出或交给通用 store 的 tree 只保留可重建引用，仍须视为 `structural_only`，不得作为训练、检索或执行
+grounding attestation。完整决策见
+[ADR 0046](../adr/0046-catalog-bound-procedure-materialization.md)。有序逐控件参数 DSL、verified
+shortcut/MCP recipe、真实 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

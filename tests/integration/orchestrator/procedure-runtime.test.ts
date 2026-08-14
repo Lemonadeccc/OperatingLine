@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blenderActionCatalog,
   blenderInteractionCatalog,
+  blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
   buildProcedureAuthoringPromptPacket,
@@ -18,6 +19,7 @@ import {
 } from '@operatingline/orchestrator';
 import {
   canonicalizeProtocolJsonValue,
+  procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
   type ProcedureAuthoringPromptPacket,
@@ -73,6 +75,11 @@ function authoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
   const tree = procedureFixture();
+  tree['adapterId'] = packet.context.catalogBinding.adapterId;
+  tree['actionCatalogVersion'] = packet.context.catalogBinding.actionCatalog.catalogVersion;
+  tree['interactionCatalogVersion'] =
+    packet.context.catalogBinding.interactionCatalog.catalogVersion;
+  tree['hostVersionRange'] = packet.context.catalogBinding.interactionCatalog.hostVersionRange;
   for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
     if (node['kind'] !== 'leaf') continue;
     const leafId = String(node['id']);
@@ -97,11 +104,17 @@ function authoringCandidateFixture(
 
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
+    const legacyInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.9.0',
+    );
+    if (legacyInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
       actionCatalogs: [blenderActionCatalog],
-      interactionCatalogs: [blenderInteractionCatalog],
+      interactionCatalogs: [legacyInteractionCatalog, blenderInteractionCatalog],
     });
     try {
       const request = {
@@ -213,6 +226,85 @@ describe('procedure compilation runtime', () => {
       expect(httpValidation.status).toBe(200);
       await expect(httpValidation.json()).resolves.toEqual(validationResult);
 
+      const materializedMcp = await callMcpTool(
+        runtime,
+        3,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: candidate },
+      );
+      expect(materializedMcp.result?.isError).not.toBe(true);
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      expect(materialization).toMatchObject({
+        packetContentSha256: packet.integrity.contentSha256,
+        catalogBinding: {
+          adapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_uv_sphere.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+          interactionGrounding: 'validated_against_installed_interaction_catalog',
+        },
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+      expect(materializedMcp.result?.content?.[0]?.text).toBe(JSON.stringify(materialization));
+      const materializedLeaf = materialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      expect(materializedLeaf?.kind).toBe('leaf');
+      if (materializedLeaf?.kind !== 'leaf' || materializedLeaf.action === null) {
+        throw new Error('Expected one materialized executable leaf');
+      }
+      const menuTrack = materializedLeaf.menuTracks[0]!;
+      expect(menuTrack.availability).toBe('available');
+      if (menuTrack.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded menu track');
+      }
+      expect(menuTrack.operations.map((operation) => operation.path)).toEqual([
+        ['Layout'],
+        ['Layout', 'Add'],
+        ['Layout', 'Add', 'Mesh'],
+        ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+      ]);
+      expect(menuTrack.operations.at(-1)?.parameters).toEqual(materializedLeaf.action.arguments);
+      expect(materializedLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({ availability: 'unavailable', modality: 'shortcut' }),
+      ]);
+      expect(materializedLeaf.mcpTracks).toEqual([
+        expect.objectContaining({ availability: 'unavailable', modality: 'mcp' }),
+      ]);
+      expect(materializedLeaf.validation).toMatchObject({
+        status: 'candidate',
+        validatedHostVersions: [],
+      });
+
+      const httpMaterialization = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: candidate }),
+        },
+      );
+      expect(httpMaterialization.status).toBe(200);
+      await expect(httpMaterialization.json()).resolves.toEqual(materialization);
+
       const rebuiltPacket = buildProcedureAuthoringPromptPacket(
         request,
         blenderActionCatalog,
@@ -228,7 +320,33 @@ describe('procedure compilation runtime', () => {
       const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
       await expect(guide.json()).resolves.toEqual({ plan: null });
 
-      const unavailable = await callMcpTool(runtime, 3, 'operatingline.procedure.prompt.get', {
+      const legacyPrompt = await callMcpTool(runtime, 4, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: legacyInteractionCatalog.catalogVersion,
+      });
+      const legacyPacket = procedureAuthoringPromptPacketSchema.parse(
+        legacyPrompt.result?.structuredContent,
+      );
+      const legacyCandidate = authoringCandidateFixture(legacyPacket);
+      const legacyMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 5, 'operatingline.procedure.authoring.materialize', {
+            packet: legacyPacket,
+            tree: legacyCandidate,
+          })
+        ).result?.structuredContent,
+      );
+      expect(legacyMaterialization.coverage).toEqual([
+        {
+          leafId: 'snowman.head.eyes.left',
+          recipeId: 'blender.mesh.create_uv_sphere.native',
+          menu: 'unavailable',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        },
+      ]);
+
+      const unavailable = await callMcpTool(runtime, 6, 'operatingline.procedure.prompt.get', {
         ...request,
         interactionCatalogVersion: '9.9.9',
       });
@@ -291,6 +409,19 @@ describe('procedure compilation runtime', () => {
       expect(resealedHttp.status).toBe(422);
       await expect(resealedHttp.json()).resolves.toMatchObject({
         error: 'procedure_authoring_validation_failed',
+        message: 'Procedure authoring packet does not match the installed catalog snapshots',
+      });
+      const resealedMaterializationHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet: resealed, tree: candidate }),
+        },
+      );
+      expect(resealedMaterializationHttp.status).toBe(422);
+      await expect(resealedMaterializationHttp.json()).resolves.toMatchObject({
+        error: 'procedure_authoring_materialization_failed',
         message: 'Procedure authoring packet does not match the installed catalog snapshots',
       });
 
@@ -356,6 +487,18 @@ describe('procedure compilation runtime', () => {
       expect(availableHttp.status).toBe(400);
       await expect(availableHttp.json()).resolves.toMatchObject({
         error: 'invalid_procedure_authoring_validation_request',
+      });
+      const availableMaterializationHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: availableTracks }),
+        },
+      );
+      expect(availableMaterializationHttp.status).toBe(400);
+      await expect(availableMaterializationHttp.json()).resolves.toMatchObject({
+        error: 'invalid_procedure_authoring_materialization_request',
       });
 
       const procedures = await fetch(`${runtime.baseUrl}/api/v1/procedures`, { headers });

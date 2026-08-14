@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.9.0",
+  "catalogVersion": "1.10.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.12.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -80,6 +80,22 @@
           "binding": "accepted_plan_action"
         },
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments"
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No versioned shortcut recipe is available."
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
       }
     },
     {

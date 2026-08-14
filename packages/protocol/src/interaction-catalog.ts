@@ -73,11 +73,38 @@ export const interactionPathSchema = z.discriminatedUnion('kind', [
 ]);
 export type InteractionPath = z.infer<typeof interactionPathSchema>;
 
+export const unavailableProcedureMaterializationSchema = z.strictObject({
+  availability: z.literal('unavailable'),
+  reason: z.string().min(1),
+});
+export type UnavailableProcedureMaterialization = z.infer<
+  typeof unavailableProcedureMaterializationSchema
+>;
+
+export const menuProcedureMaterializationSchema = z.discriminatedUnion('availability', [
+  unavailableProcedureMaterializationSchema,
+  z.strictObject({
+    availability: z.literal('available'),
+    source: z.literal('guidance.native_path'),
+    semanticBinding: z.literal('all_leaf_operations'),
+    parameterBinding: z.literal('accepted_action_arguments'),
+  }),
+]);
+export type MenuProcedureMaterialization = z.infer<typeof menuProcedureMaterializationSchema>;
+
+export const procedureMaterializationSchema = z.strictObject({
+  menu: menuProcedureMaterializationSchema,
+  shortcut: unavailableProcedureMaterializationSchema,
+  mcp: unavailableProcedureMaterializationSchema,
+});
+export type ProcedureMaterialization = z.infer<typeof procedureMaterializationSchema>;
+
 export const interactionRecipeSchema = z.strictObject({
   id: guideStepIdSchema,
   actionName: z.string().min(1),
   title: z.string().min(1),
   guidance: interactionPathSchema,
+  procedureMaterialization: procedureMaterializationSchema.optional(),
 });
 export type InteractionRecipe = z.infer<typeof interactionRecipeSchema>;
 
@@ -94,7 +121,36 @@ export const interactionCatalogSchema = z.strictObject({
 });
 export type InteractionCatalog = z.infer<typeof interactionCatalogSchema>;
 
+const menuProcedureTargetKinds = new Set<InteractionTargetKind>([
+  'workspace',
+  'editor',
+  'mode',
+  'menu',
+  'menu_item',
+  'operator',
+  'control',
+]);
+
 function validateRecipe(recipe: InteractionRecipe): void {
+  if (recipe.procedureMaterialization?.menu.availability === 'available') {
+    if (
+      recipe.guidance.kind !== 'native_path' ||
+      recipe.guidance.execution.binding !== 'accepted_plan_action'
+    ) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} available menu materialization requires native_path guidance with accepted_plan_action execution`,
+      );
+    }
+    const unsupportedStep = recipe.guidance.steps.find(
+      (step) => !menuProcedureTargetKinds.has(step.target.kind),
+    );
+    if (unsupportedStep !== undefined) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} available menu materialization cannot represent ${unsupportedStep.target.kind} targets`,
+      );
+    }
+  }
+
   const stepIds = new Set<string>();
   const stepOrders = new Set<number>();
   const stepLabels = new Set<string>();

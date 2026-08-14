@@ -58,6 +58,8 @@ import {
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
+  procedureAuthoringMaterializationRequestSchema,
+  procedureAuthoringMaterializationResultSchema,
   procedureTreeSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
@@ -367,6 +369,16 @@ const schemas = [
     'procedure-authoring-validation-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-authoring-validation-result.json',
     procedureAuthoringValidationResultSchema,
+  ],
+  [
+    'procedure-authoring-materialization-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-authoring-materialization-request.json',
+    procedureAuthoringMaterializationRequestSchema,
+  ],
+  [
+    'procedure-authoring-materialization-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-authoring-materialization-result.json',
+    procedureAuthoringMaterializationResultSchema,
   ],
   [
     'procedure-compilation-request.schema.json',

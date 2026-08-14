@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.9.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.10.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -243,6 +243,18 @@
   - [ ] 确定性交互 grounding/materialization：给 operation 增加可验证的 InteractionCatalog recipe/step
         或 verified Procedure operation provenance，将候选物化成包含精确菜单、快捷键、MCP 参数的 available
         轨迹；通用 compile 在此之前继续明确标记 interaction tracks 为 structural-only。
+    - [x] 首个目录绑定菜单 grounding 切片：新增供应商无关的 MCP
+          `operatingline.procedure.authoring.materialize` 与 HTTP
+          `/api/v1/procedure/authoring/materialize`，复用原 packet + candidate 并重新执行 packet-bound
+          validation。Blender InteractionCatalog `1.10.0` 仅为 UV Sphere 通过封闭声明启用按 catalog step
+          顺序、累计 label、完整 semantic/evidence refs 和最终 accepted-action 参数生成的菜单轨迹；track/
+          operation ID 与 catalog version 保留可重建的 recipe/step provenance。shortcut/MCP 确定性 unavailable，
+          leaf 仍为 candidate，历史 `1.9.0` 可回放；结果带已安装目录 digest、输入/输出 tree hash 和逐 leaf
+          coverage。完整 result 信封才构成该证明；单独抽取或经通用 store 保存的 tree 仍是
+          `structural_only`。该切片不调用模型、保存、创建 Proposal 或执行 Blender。见
+          [ADR 0046](adr/0046-catalog-bound-procedure-materialization.md)。
+    - [ ] 增加有序的逐控件参数 DSL、经真实版本验证的 shortcut/MCP recipe，并将更多 action 的封闭声明
+          接入同一确定性物化边界。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，

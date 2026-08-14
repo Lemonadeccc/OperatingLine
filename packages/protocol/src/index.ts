@@ -25,6 +25,7 @@ export * from './replanning-provider.js';
 export * from './proposal.js';
 export * from './procedure-tree.js';
 export * from './procedure-authoring.js';
+export * from './procedure-materialization.js';
 export * from './revision.js';
 export * from './runtime.js';
 export * from './version.js';

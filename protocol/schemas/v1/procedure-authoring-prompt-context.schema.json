@@ -749,6 +749,103 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "procedureMaterialization": {
+                    "type": "object",
+                    "properties": {
+                      "menu": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "availability": {
+                                "type": "string",
+                                "const": "unavailable"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "availability",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "availability": {
+                                "type": "string",
+                                "const": "available"
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "guidance.native_path"
+                              },
+                              "semanticBinding": {
+                                "type": "string",
+                                "const": "all_leaf_operations"
+                              },
+                              "parameterBinding": {
+                                "type": "string",
+                                "const": "accepted_action_arguments"
+                              }
+                            },
+                            "required": [
+                              "availability",
+                              "source",
+                              "semanticBinding",
+                              "parameterBinding"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "shortcut": {
+                        "type": "object",
+                        "properties": {
+                          "availability": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "availability",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "mcp": {
+                        "type": "object",
+                        "properties": {
+                          "availability": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "availability",
+                          "reason"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "menu",
+                      "shortcut",
+                      "mcp"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [

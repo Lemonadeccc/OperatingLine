@@ -48,6 +48,15 @@ describe('interaction catalog registry', () => {
         actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
       }).catalogVersion,
     ).toBe(blenderInteractionCatalog.catalogVersion);
+    const historical = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.9.0',
+    });
+    expect(historical.catalogVersion).toBe('1.9.0');
+    expect(
+      historical.recipes.every((recipe) => recipe.procedureMaterialization === undefined),
+    ).toBe(true);
   });
 
   it('rejects duplicate catalogs and missing action catalog bindings', () => {

@@ -143,6 +143,11 @@ describe('procedure authoring prompt', () => {
     );
 
     const valid = fixture();
+    valid['adapterId'] = packet.context.catalogBinding.adapterId;
+    valid['actionCatalogVersion'] = packet.context.catalogBinding.actionCatalog.catalogVersion;
+    valid['interactionCatalogVersion'] =
+      packet.context.catalogBinding.interactionCatalog.catalogVersion;
+    valid['hostVersionRange'] = packet.context.catalogBinding.interactionCatalog.hostVersionRange;
     forceInteractionTracksUnavailable(valid);
     const goalSource = packet.context.goalProvenance.source;
     const goalEvidence = {
@@ -167,6 +172,13 @@ describe('procedure authoring prompt', () => {
       (source) => source['id'] === goalSource.id,
     )!['text'] = 'different goal';
     const availableTrack = fixture();
+    availableTrack['adapterId'] = packet.context.catalogBinding.adapterId;
+    availableTrack['actionCatalogVersion'] =
+      packet.context.catalogBinding.actionCatalog.catalogVersion;
+    availableTrack['interactionCatalogVersion'] =
+      packet.context.catalogBinding.interactionCatalog.catalogVersion;
+    availableTrack['hostVersionRange'] =
+      packet.context.catalogBinding.interactionCatalog.hostVersionRange;
     availableTrack['sources'] = valid['sources'];
     availableTrack['evidence'] = valid['evidence'];
     const blankAdditionalSource = structuredClone(valid);

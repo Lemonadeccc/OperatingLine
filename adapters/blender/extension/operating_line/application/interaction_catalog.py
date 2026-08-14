@@ -31,6 +31,17 @@ TARGET_KINDS = frozenset(
         "semantic",
     }
 )
+MENU_PROCEDURE_TARGET_KINDS = frozenset(
+    {
+        "workspace",
+        "editor",
+        "mode",
+        "menu",
+        "menu_item",
+        "operator",
+        "control",
+    }
+)
 STEP_INTENTS = frozenset({"navigate", "configure", "execute", "verify"})
 PRECONDITION_KINDS = frozenset({"workspace", "editor", "mode", "selection"})
 
@@ -67,6 +78,26 @@ class InteractionPathDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcedureMaterializationChannel:
+    """One declared procedure materialization channel."""
+
+    availability: str
+    reason: str | None = None
+    source: str | None = None
+    semantic_binding: str | None = None
+    parameter_binding: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProcedureMaterializationDefinition:
+    """Declared menu, shortcut, and MCP procedure materialization support."""
+
+    menu: ProcedureMaterializationChannel
+    shortcut: ProcedureMaterializationChannel
+    mcp: ProcedureMaterializationChannel
+
+
+@dataclass(frozen=True, slots=True)
 class InteractionRecipe:
     """Host interaction guidance bound to exactly one catalog action."""
 
@@ -74,6 +105,7 @@ class InteractionRecipe:
     action_name: str
     title: str
     guidance: InteractionPathDefinition
+    procedure_materialization: ProcedureMaterializationDefinition | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,6 +343,95 @@ def _parse_guidance(
     )
 
 
+def _parse_unavailable_materialization(
+    value: Any,
+    label: str,
+) -> ProcedureMaterializationChannel:
+    raw = _expect_object(value, label)
+    _expect_exact_keys(
+        raw,
+        required={"availability", "reason"},
+        label=label,
+    )
+    if raw["availability"] != "unavailable":
+        raise ValueError(f"{label} availability must be unavailable")
+    return ProcedureMaterializationChannel(
+        availability="unavailable",
+        reason=_expect_string(raw["reason"], f"{label} reason"),
+    )
+
+
+def _parse_procedure_materialization(
+    value: Any,
+    recipe_id: str,
+    guidance: InteractionPathDefinition,
+) -> ProcedureMaterializationDefinition:
+    label = f"Interaction recipe {recipe_id} procedureMaterialization"
+    raw = _expect_object(value, label)
+    _expect_exact_keys(
+        raw,
+        required={"menu", "shortcut", "mcp"},
+        label=label,
+    )
+    raw_menu = _expect_object(raw["menu"], f"{label} menu")
+    menu_availability = _expect_string(
+        raw_menu.get("availability"), f"{label} menu availability"
+    )
+    if menu_availability == "unavailable":
+        menu = _parse_unavailable_materialization(raw_menu, f"{label} menu")
+    elif menu_availability == "available":
+        _expect_exact_keys(
+            raw_menu,
+            required={
+                "availability",
+                "source",
+                "semanticBinding",
+                "parameterBinding",
+            },
+            label=f"{label} menu",
+        )
+        if raw_menu["source"] != "guidance.native_path":
+            raise ValueError(f"{label} menu has unsupported source")
+        if raw_menu["semanticBinding"] != "all_leaf_operations":
+            raise ValueError(f"{label} menu has unsupported semanticBinding")
+        if raw_menu["parameterBinding"] != "accepted_action_arguments":
+            raise ValueError(f"{label} menu has unsupported parameterBinding")
+        if guidance.kind is not InteractionPathKind.NATIVE:
+            raise ValueError(
+                f"Interaction recipe {recipe_id} available menu materialization "
+                "requires native_path guidance with accepted_plan_action execution"
+            )
+        unsupported_step = next(
+            (
+                step
+                for step in guidance.steps
+                if step.target_kind not in MENU_PROCEDURE_TARGET_KINDS
+            ),
+            None,
+        )
+        if unsupported_step is not None:
+            raise ValueError(
+                f"Interaction recipe {recipe_id} available menu materialization "
+                f"cannot represent {unsupported_step.target_kind} targets"
+            )
+        menu = ProcedureMaterializationChannel(
+            availability="available",
+            source="guidance.native_path",
+            semantic_binding="all_leaf_operations",
+            parameter_binding="accepted_action_arguments",
+        )
+    else:
+        raise ValueError(f"{label} menu has unknown availability")
+
+    return ProcedureMaterializationDefinition(
+        menu=menu,
+        shortcut=_parse_unavailable_materialization(
+            raw["shortcut"], f"{label} shortcut"
+        ),
+        mcp=_parse_unavailable_materialization(raw["mcp"], f"{label} mcp"),
+    )
+
+
 def load_interaction_catalog(
     path: Path = RESOURCE_PATH,
     action_catalog_path: Path = ACTION_CATALOG_PATH,
@@ -345,6 +466,7 @@ def load_interaction_catalog(
         _expect_exact_keys(
             raw_recipe,
             required={"id", "actionName", "title", "guidance"},
+            optional={"procedureMaterialization"},
             label="Interaction recipe",
         )
         recipe_id = _expect_string(raw_recipe["id"], "Interaction recipe id")
@@ -359,12 +481,20 @@ def load_interaction_catalog(
             raise ValueError(f"Duplicate interaction recipe action: {action_name}")
         recipe_ids.add(recipe_id)
         action_names.add(action_name)
+        guidance = _parse_guidance(raw_recipe["guidance"], recipe_id)
         recipes.append(
             InteractionRecipe(
                 id=recipe_id,
                 action_name=action_name,
                 title=_expect_string(raw_recipe["title"], "Interaction recipe title"),
-                guidance=_parse_guidance(raw_recipe["guidance"], recipe_id),
+                guidance=guidance,
+                procedure_materialization=(
+                    _parse_procedure_materialization(
+                        raw_recipe["procedureMaterialization"], recipe_id, guidance
+                    )
+                    if "procedureMaterialization" in raw_recipe
+                    else None
+                ),
             )
         )
 
@@ -438,6 +568,8 @@ __all__ = (
     "InteractionPathKind",
     "InteractionRecipe",
     "InteractionStepDefinition",
+    "ProcedureMaterializationChannel",
+    "ProcedureMaterializationDefinition",
     "RESOURCE_PATH",
     "load_interaction_catalog",
 )

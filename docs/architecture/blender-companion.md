@@ -34,7 +34,9 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.9.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方。
+`1.10.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 保持精确回放。`1.10.0` 还只为 UV Sphere 声明目录绑定的 Procedure menu 物化，shortcut/MCP
+仍明确 unavailable。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
