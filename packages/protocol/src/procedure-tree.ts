@@ -238,6 +238,30 @@ export const procedureTreeSchema = z.strictObject({
 });
 export type ProcedureTree = z.infer<typeof procedureTreeSchema>;
 
+export const procedureCompilationRequestSchema = z.strictObject({
+  tree: procedureTreeSchema,
+});
+export type ProcedureCompilationRequest = z.infer<typeof procedureCompilationRequestSchema>;
+
+export const procedureCompilationResultSchema = z.strictObject({
+  formatVersion: procedureTreeFormatVersionSchema,
+  procedureTreeId: guideStepIdSchema,
+  procedureTreeRevision: z.number().int().positive(),
+  adapterId: z.string().min(1),
+  actionCatalogVersion: catalogVersionSchema,
+  interactionCatalogVersion: catalogVersionSchema,
+  validation: z.strictObject({
+    procedureStructure: z.literal('validated'),
+    actionCatalogBinding: z.literal('validated'),
+    hostVersionRange: z.literal('validated_against_action_catalog'),
+    interactionTracks: z.literal('structural_only'),
+  }),
+  plan: guidePlanSchema,
+  proposalCreated: z.literal(false),
+  hostExecutionStarted: z.literal(false),
+});
+export type ProcedureCompilationResult = z.infer<typeof procedureCompilationResultSchema>;
+
 export const procedureTrackModalities = ['menu', 'shortcut', 'mcp'] as const;
 export type ProcedureTrackModality = (typeof procedureTrackModalities)[number];
 export type ProcedureTrackOperation =

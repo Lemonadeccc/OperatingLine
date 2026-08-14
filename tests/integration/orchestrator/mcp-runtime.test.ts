@@ -280,6 +280,7 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.procedure.compile' },
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.planning.evaluate' },
             { name: 'operatingline.planning.prompt.get' },

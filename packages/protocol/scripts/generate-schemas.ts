@@ -53,6 +53,8 @@ import {
   planningQualityEvaluationRequestSchema,
   planningQualityReportSchema,
   procedureTreeSchema,
+  procedureCompilationRequestSchema,
+  procedureCompilationResultSchema,
   plannerGenerateRequestSchema,
   plannerGenerationErrorSchema,
   plannerGenerationResultSchema,
@@ -321,6 +323,16 @@ const schemas = [
     'procedure-tree.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tree.json',
     procedureTreeSchema,
+  ],
+  [
+    'procedure-compilation-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-compilation-request.json',
+    procedureCompilationRequestSchema,
+  ],
+  [
+    'procedure-compilation-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-compilation-result.json',
+    procedureCompilationResultSchema,
   ],
   [
     'planning-context.schema.json',

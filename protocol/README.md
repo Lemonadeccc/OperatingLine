@@ -21,6 +21,11 @@ suite 留在 `fixtures/v1/eval/`，由 `@operatingline/eval-kit` 直接验证，
 `materializeProcedureOperations` 只负责按依赖安全的叶子顺序选择并串联轨迹，遇到多别名必须显式指定
 track ID；`compileProcedureTreeToGuidePlan` 把层级、Action、Anchor、Observation 和回退确定性编译到
 现有人工审批 GuidePlan。两者都不提交 Proposal、接受计划或执行宿主动作。
+`procedure-compilation-request.schema.json` 与 `procedure-compilation-result.schema.json` 定义
+`operatingline.procedure.compile` 和 `/api/v1/procedure/compile` 的只读边界：Runtime 核对已安装的精确
+ActionCatalog 及 host version range，返回 `interactionTracks: structural_only`、
+`proposalCreated: false` 和 `hostExecutionStarted: false`；宿主 InteractionCatalog 与真实 UI 回放验证
+仍是独立的后续门禁。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或

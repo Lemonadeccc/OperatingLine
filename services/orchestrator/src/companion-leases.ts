@@ -14,6 +14,8 @@ import {
   type CompanionSessionHelloResponse,
 } from '@operatingline/protocol';
 
+import { satisfiesStableVersionRange } from './stable-version-ranges.js';
+
 export const companionHeartbeatIntervalMs = 5_000;
 export const companionLeaseTtlMs = 15_000;
 
@@ -84,59 +86,6 @@ function positiveInteger(value: number, label: string): number {
     throw new Error(`${label} must be a positive safe integer`);
   }
   return value;
-}
-
-type StableVersion = readonly [major: number, minor: number, patch: number];
-
-function parseStableVersion(value: string, label: string): StableVersion {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:\s|$)/.exec(value.trim());
-  if (match === null) {
-    throw new Error(`${label} must begin with a stable semantic version`);
-  }
-  const version = match.slice(1).map(Number) as unknown as StableVersion;
-  if (version.some((part) => !Number.isSafeInteger(part))) {
-    throw new Error(`${label} contains an unsafe semantic version component`);
-  }
-  return version;
-}
-
-function compareVersions(left: StableVersion, right: StableVersion): number {
-  for (let index = 0; index < left.length; index += 1) {
-    const difference = left[index]! - right[index]!;
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-  return 0;
-}
-
-function satisfiesVersionRange(value: string, range: string, label: string): boolean {
-  const version = parseStableVersion(value, label);
-  return range.split('||').some((alternative) => {
-    const comparators = alternative.trim().split(/\s+/).filter(Boolean);
-    if (comparators.length === 0) {
-      throw new Error(`${label} range must contain at least one comparator`);
-    }
-    return comparators.every((comparator) => {
-      const match = /^(>=|<=|>|<|=)?(\d+\.\d+\.\d+)$/.exec(comparator);
-      if (match === null) {
-        throw new Error(`${label} range contains an unsupported comparator: ${comparator}`);
-      }
-      const comparison = compareVersions(version, parseStableVersion(match[2]!, `${label} range`));
-      switch (match[1] ?? '=') {
-        case '>=':
-          return comparison >= 0;
-        case '<=':
-          return comparison <= 0;
-        case '>':
-          return comparison > 0;
-        case '<':
-          return comparison < 0;
-        default:
-          return comparison === 0;
-      }
-    });
-  });
 }
 
 function validateCapabilitiesAgainstCatalog(
@@ -275,7 +224,7 @@ export function createCompanionLeaseManager(
         );
       }
       if (
-        !satisfiesVersionRange(
+        !satisfiesStableVersionRange(
           request.companionVersion,
           catalog.adapterVersionRange,
           'Companion version',
@@ -287,7 +236,9 @@ export function createCompanionLeaseManager(
           422,
         );
       }
-      if (!satisfiesVersionRange(request.hostVersion, catalog.hostVersionRange, 'Host version')) {
+      if (
+        !satisfiesStableVersionRange(request.hostVersion, catalog.hostVersionRange, 'Host version')
+      ) {
         throw new CompanionLeaseError(
           'host_version_incompatible',
           'Host version is outside the installed action catalog host range',

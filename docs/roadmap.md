@@ -221,6 +221,9 @@
         和回退，并通过当前 Blender ActionCatalog 校验；编译本身不提交、接受或执行计划。
   - [x] 执行轨迹确定性物化：按依赖安全的叶子顺序串联一个可用菜单/快捷键/MCP 轨迹；多别名必须
         显式选择 track ID，缺失、歧义或 unavailable 轨迹 fail closed。
+  - [x] 只读 Runtime 编译入口：MCP `operatingline.procedure.compile` 与 HTTP
+        `/api/v1/procedure/compile` 验证树、已安装精确 ActionCatalog 和 host version range，返回编译后的
+        GuidePlan，但明确标记 interaction track 仅完成结构验证且不会创建 Proposal 或启动宿主执行。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的 Provider/RAG 路径，使不会 Blender 的用户能先审阅结构和参数，

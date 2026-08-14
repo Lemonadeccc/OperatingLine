@@ -48,6 +48,10 @@ import {
   planningQualityBaselineVersion,
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
+  procedureCompilationRequestSchema,
+  procedureCompilationResultSchema,
+  compileProcedureTreeToGuidePlan,
+  parseProcedureTree,
   replanningPromptPacketSchema,
   replanningPromptRequestSchema,
   type ActionCatalog,
@@ -120,6 +124,7 @@ import {
   validateProposalTarget,
 } from './guide-validation.js';
 import { closeAll, throwAfterCleanup, type CleanupStep } from './lifecycle.js';
+import { isStableVersionRangeSubset } from './stable-version-ranges.js';
 
 export interface StartRuntimeOptions {
   databasePath: string;
@@ -394,6 +399,41 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         exportId: randomUUID(),
         exportedAt: new Date().toISOString(),
       });
+
+    const compileProcedure = (
+      request: ReturnType<typeof procedureCompilationRequestSchema.parse>,
+    ) => {
+      const tree = parseProcedureTree(request.tree);
+      const catalog = actionCatalogRegistry.get({
+        targetAdapterId: tree.adapterId,
+        catalogVersion: tree.actionCatalogVersion,
+      });
+      if (!isStableVersionRangeSubset(tree.hostVersionRange, catalog.hostVersionRange)) {
+        throw new Error(
+          `Procedure tree host range ${tree.hostVersionRange} is not contained by ${catalog.adapterId}@${catalog.catalogVersion} range ${catalog.hostVersionRange}`,
+        );
+      }
+      const plan = compileProcedureTreeToGuidePlan(tree);
+      validateGuidePlanStructure(plan);
+      validateGuidePlanAgainstActionCatalog(plan, catalog);
+      return procedureCompilationResultSchema.parse({
+        formatVersion: tree.formatVersion,
+        procedureTreeId: tree.id,
+        procedureTreeRevision: tree.revision,
+        adapterId: tree.adapterId,
+        actionCatalogVersion: tree.actionCatalogVersion,
+        interactionCatalogVersion: tree.interactionCatalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        plan,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    };
 
     const getPlanningQuality = (
       request: ReturnType<typeof planningQualityEvaluationRequestSchema.parse>,
@@ -721,6 +761,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
           };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.compile',
+        {
+          description:
+            'Validate a source-grounded ProcedureTree, bind its exact installed ActionCatalog, and compile it into a GuidePlan without persisting, proposing, accepting, or executing anything. Interaction tracks receive structural validation only until a host-specific catalog verifier is registered.',
+          inputSchema: deferMcpInputValidation(procedureCompilationRequestSchema),
+          outputSchema: procedureCompilationResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureCompilationRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_compilation_request',
+                    message: 'Procedure compilation request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = compileProcedure(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_compilation_failed',
+                    message: error instanceof Error ? error.message : 'Unknown compilation error',
+                  }),
+                },
+              ],
+            };
+          }
         },
       );
 
@@ -1307,6 +1394,23 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(404).send({
           error: 'catalog_not_found',
           message: error instanceof Error ? error.message : 'Unknown action catalog error',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/compile', async (request, reply) => {
+      const parsedRequest = procedureCompilationRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_compilation_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return compileProcedure(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'procedure_compilation_failed',
+          message: error instanceof Error ? error.message : 'Unknown compilation error',
         });
       }
     });
@@ -1920,3 +2024,7 @@ export {
   restoreReplanPlannerProviderInvocations,
 } from './planner-replan-generation.js';
 export { buildReplanningPromptPacket } from './replanning-prompt.js';
+export {
+  isStableVersionRangeSubset,
+  satisfiesStableVersionRange,
+} from './stable-version-ranges.js';
