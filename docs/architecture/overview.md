@@ -326,18 +326,21 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.10.0` 只为 UV Sphere menu 声明
-`guidance.native_path + all_leaf_operations + accepted_action_arguments`：输出严格沿 catalog step order，
-每步 path 累积精确 label 并引用 leaf 的全部 semantic/evidence；只有最后的 accepted-action execution step
-携带原样 Action arguments。Track/operation ID 分别复用 recipe/step ID，结合树顶层 catalog version 可重建
+`1.11.0` 只为 UV Sphere menu 声明 `ordered_parameter_operations`：输出先沿 catalog step order 生成四步
+菜单，再按声明数组生成 Location、Scale、Object Name 三个带精确值的 control operation；目录安装期要求
+所有顶层 Action 参数恰好映射或带理由省略，且只允许 literal、identity 与 uniform-vector 转换。
+Track/operation ID 分别复用 recipe/step/control ID，结合树顶层 catalog version 可重建
 provenance。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。shortcut/MCP 仍因没有已验证
 recipe/获批 action-level tool 而确定性 unavailable；leaf 仍为 candidate 且
-`validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。历史 `1.9.0` 继续精确回放。该入口
+`validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 是教学投影，不是
+宿主状态等价证明。历史 `1.9.0`/`1.10.0` 继续精确回放；旧算法返回结果格式 `1.0.0`，ordered 算法返回
+`1.1.0`。该入口
 不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。目录证明只存在于完整 result 信封；
 单独抽出或交给通用 store 的 tree 只保留可重建引用，仍须视为 `structural_only`，不得作为训练、检索或执行
 grounding attestation。完整决策见
-[ADR 0046](../adr/0046-catalog-bound-procedure-materialization.md)。有序逐控件参数 DSL、verified
-shortcut/MCP recipe、真实 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
+[ADR 0046](../adr/0046-catalog-bound-procedure-materialization.md) 与
+[ADR 0047](../adr/0047-ordered-procedure-parameter-operations.md)。verified shortcut/MCP recipe、真实 Blender
+回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

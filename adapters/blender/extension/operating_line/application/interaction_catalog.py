@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from enum import Enum
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any
@@ -44,6 +45,8 @@ MENU_PROCEDURE_TARGET_KINDS = frozenset(
 )
 STEP_INTENTS = frozenset({"navigate", "configure", "execute", "verify"})
 PRECONDITION_KINDS = frozenset({"workspace", "editor", "mode", "selection"})
+RESERVED_PARAMETER_NAMES = frozenset({"__proto__", "prototype", "constructor"})
+PARAMETER_ASSIGNMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 
 
 class InteractionPathKind(str, Enum):
@@ -86,6 +89,56 @@ class ProcedureMaterializationChannel:
     source: str | None = None
     semantic_binding: str | None = None
     parameter_binding: str | None = None
+    operator_parameters: tuple["ParameterAssignmentDefinition", ...] | None = None
+    control_operations: "PostExecutionControlOperationsDefinition | None" = None
+    omitted_action_arguments: (
+        tuple["OmittedActionArgumentDefinition", ...] | None
+    ) = None
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterAssignmentSourceDefinition:
+    """One closed source for a materialized host-operation parameter."""
+
+    kind: str
+    value: Any = None
+    argument_name: str | None = None
+    transform: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ParameterAssignmentDefinition:
+    """One named parameter supplied to an ordered host operation."""
+
+    name: str
+    source: ParameterAssignmentSourceDefinition
+
+
+@dataclass(frozen=True, slots=True)
+class PostExecutionControlOperationDefinition:
+    """One ordered post-execution host control declared by the catalog."""
+
+    id: str
+    label: str
+    target_id: str
+    path: tuple[str, ...]
+    parameters: tuple[ParameterAssignmentDefinition, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PostExecutionControlOperationsDefinition:
+    """Ordered host controls inserted after one native execution step."""
+
+    insert_after_step_id: str
+    operations: tuple[PostExecutionControlOperationDefinition, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OmittedActionArgumentDefinition:
+    """One action argument deliberately absent from materialized operations."""
+
+    argument_name: str
+    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +208,27 @@ def _expect_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a non-empty string")
     return value
+
+
+def _reject_non_finite_json_constant(value: str) -> Any:
+    raise ValueError(f"JSON document contains non-finite number {value}")
+
+
+def _validate_finite_json_numbers(value: Any) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON document contains a non-finite number")
+    if isinstance(value, list):
+        for item in value:
+            _validate_finite_json_numbers(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _validate_finite_json_numbers(item)
+
+
+def _load_json_object(resource: Any, label: str) -> dict[str, Any]:
+    value = json.load(resource, parse_constant=_reject_non_finite_json_constant)
+    _validate_finite_json_numbers(value)
+    return _expect_object(value, label)
 
 
 def _expect_version(value: Any, label: str) -> str:
@@ -361,6 +435,168 @@ def _parse_unavailable_materialization(
     )
 
 
+def _parse_parameter_source(
+    value: Any,
+    label: str,
+) -> ParameterAssignmentSourceDefinition:
+    raw = _expect_object(value, label)
+    kind = _expect_string(raw.get("kind"), f"{label} kind")
+    if kind == "literal":
+        _expect_exact_keys(raw, required={"kind", "value"}, label=label)
+        return ParameterAssignmentSourceDefinition(kind=kind, value=raw["value"])
+    if kind == "action_argument":
+        _expect_exact_keys(
+            raw,
+            required={"kind", "argumentName", "transform"},
+            label=label,
+        )
+        transform = _expect_string(raw["transform"], f"{label} transform")
+        if transform not in {"identity", "uniform_vector3"}:
+            raise ValueError(f"{label} has unsupported transform")
+        return ParameterAssignmentSourceDefinition(
+            kind=kind,
+            argument_name=_expect_string(
+                raw["argumentName"], f"{label} argumentName"
+            ),
+            transform=transform,
+        )
+    raise ValueError(f"{label} has unknown kind")
+
+
+def _parse_parameters(
+    value: Any,
+    label: str,
+    *,
+    require_nonempty: bool = False,
+) -> tuple[ParameterAssignmentDefinition, ...]:
+    if not isinstance(value, list) or (require_nonempty and not value):
+        if require_nonempty:
+            raise ValueError(f"{label} must be a non-empty array")
+        raise ValueError(f"{label} must be an array")
+    parameters: list[ParameterAssignmentDefinition] = []
+    names: set[str] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} parameter")
+        _expect_exact_keys(
+            raw,
+            required={"name", "source"},
+            label=f"{label} parameter",
+        )
+        name = _expect_string(raw["name"], f"{label} parameter name")
+        if name in RESERVED_PARAMETER_NAMES:
+            raise ValueError(f"{label} contains reserved parameter name {name}")
+        if PARAMETER_ASSIGNMENT_NAME_PATTERN.fullmatch(name) is None:
+            raise ValueError(f"{label} contains non-portable parameter name {name}")
+        if name in names:
+            raise ValueError(f"{label} contains duplicate parameter name {name}")
+        names.add(name)
+        parameters.append(
+            ParameterAssignmentDefinition(
+                name=name,
+                source=_parse_parameter_source(
+                    raw["source"], f"{label} parameter {name} source"
+                ),
+            )
+        )
+    return tuple(parameters)
+
+
+def _parse_control_operations(
+    value: Any,
+    recipe_id: str,
+    guidance: InteractionPathDefinition,
+) -> tuple[PostExecutionControlOperationDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} controlOperations"
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    step_ids = {step.id for step in guidance.steps}
+    step_labels = {step.label for step in guidance.steps}
+    operation_ids: set[str] = set()
+    operation_labels: set[str] = set()
+    operations: list[PostExecutionControlOperationDefinition] = []
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} operation")
+        _expect_exact_keys(
+            raw,
+            required={"id", "label", "target", "path", "parameters"},
+            label=f"{label} operation",
+        )
+        operation_id = _expect_string(raw["id"], f"{label} operation id")
+        if STEP_ID_PATTERN.fullmatch(operation_id) is None:
+            raise ValueError(f"{label} has invalid operation id")
+        operation_label = _expect_string(raw["label"], f"{label} operation label")
+        if operation_id in operation_ids or operation_id in step_ids:
+            raise ValueError(f"{label} contains duplicate operation id {operation_id}")
+        if operation_label in operation_labels or operation_label in step_labels:
+            raise ValueError(
+                f"{label} contains duplicate operation label {operation_label}"
+            )
+        target = _expect_object(raw["target"], f"{label} operation target")
+        _expect_exact_keys(
+            target,
+            required={"kind", "hostId"},
+            label=f"{label} operation target",
+        )
+        if target["kind"] != "control":
+            raise ValueError(f"{label} operation target kind must be control")
+        raw_path = raw["path"]
+        if not isinstance(raw_path, list) or not raw_path:
+            raise ValueError(f"{label} operation path must be a non-empty array")
+        path = tuple(
+            _expect_string(item, f"{label} operation path item")
+            for item in raw_path
+        )
+        operation_ids.add(operation_id)
+        operation_labels.add(operation_label)
+        operations.append(
+            PostExecutionControlOperationDefinition(
+                id=operation_id,
+                label=operation_label,
+                target_id=_expect_string(
+                    target["hostId"], f"{label} operation target hostId"
+                ),
+                path=path,
+                parameters=_parse_parameters(
+                    raw["parameters"],
+                    f"{label} operation {operation_id}",
+                    require_nonempty=True,
+                ),
+            )
+        )
+    return tuple(operations)
+
+
+def _parse_omitted_action_arguments(
+    value: Any,
+    recipe_id: str,
+) -> tuple[OmittedActionArgumentDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} omittedActionArguments"
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be an array")
+    omitted: list[OmittedActionArgumentDefinition] = []
+    names: set[str] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} entry")
+        _expect_exact_keys(
+            raw,
+            required={"argumentName", "reason"},
+            label=f"{label} entry",
+        )
+        argument_name = _expect_string(
+            raw["argumentName"], f"{label} argumentName"
+        )
+        if argument_name in names:
+            raise ValueError(f"{label} contains duplicate argument {argument_name}")
+        names.add(argument_name)
+        omitted.append(
+            OmittedActionArgumentDefinition(
+                argument_name=argument_name,
+                reason=_expect_string(raw["reason"], f"{label} reason"),
+            )
+        )
+    return tuple(omitted)
+
+
 def _parse_procedure_materialization(
     value: Any,
     recipe_id: str,
@@ -380,22 +616,34 @@ def _parse_procedure_materialization(
     if menu_availability == "unavailable":
         menu = _parse_unavailable_materialization(raw_menu, f"{label} menu")
     elif menu_availability == "available":
-        _expect_exact_keys(
-            raw_menu,
-            required={
-                "availability",
-                "source",
-                "semanticBinding",
-                "parameterBinding",
-            },
-            label=f"{label} menu",
+        parameter_binding = _expect_string(
+            raw_menu.get("parameterBinding"), f"{label} menu parameterBinding"
         )
+        base_keys = {
+            "availability",
+            "source",
+            "semanticBinding",
+            "parameterBinding",
+        }
+        if parameter_binding == "accepted_action_arguments":
+            _expect_exact_keys(raw_menu, required=base_keys, label=f"{label} menu")
+        elif parameter_binding == "ordered_parameter_operations":
+            _expect_exact_keys(
+                raw_menu,
+                required=base_keys
+                | {
+                    "operatorParameters",
+                    "controlOperations",
+                    "omittedActionArguments",
+                },
+                label=f"{label} menu",
+            )
+        else:
+            raise ValueError(f"{label} menu has unsupported parameterBinding")
         if raw_menu["source"] != "guidance.native_path":
             raise ValueError(f"{label} menu has unsupported source")
         if raw_menu["semanticBinding"] != "all_leaf_operations":
             raise ValueError(f"{label} menu has unsupported semanticBinding")
-        if raw_menu["parameterBinding"] != "accepted_action_arguments":
-            raise ValueError(f"{label} menu has unsupported parameterBinding")
         if guidance.kind is not InteractionPathKind.NATIVE:
             raise ValueError(
                 f"Interaction recipe {recipe_id} available menu materialization "
@@ -414,11 +662,49 @@ def _parse_procedure_materialization(
                 f"Interaction recipe {recipe_id} available menu materialization "
                 f"cannot represent {unsupported_step.target_kind} targets"
             )
+        operator_parameters = None
+        control_operations = None
+        omitted_action_arguments = None
+        if parameter_binding == "ordered_parameter_operations":
+            raw_control_operations = _expect_object(
+                raw_menu["controlOperations"],
+                f"Interaction recipe {recipe_id} controlOperations",
+            )
+            _expect_exact_keys(
+                raw_control_operations,
+                required={"insertAfterStepId", "operations"},
+                label=f"Interaction recipe {recipe_id} controlOperations",
+            )
+            insert_after_step_id = _expect_string(
+                raw_control_operations["insertAfterStepId"],
+                f"{label} menu controlOperations insertAfterStepId",
+            )
+            if insert_after_step_id != guidance.steps[-1].id:
+                raise ValueError(
+                    f"Interaction recipe {recipe_id} insertAfterStepId must equal "
+                    "the execution step"
+                )
+            operator_parameters = _parse_parameters(
+                raw_menu["operatorParameters"],
+                f"Interaction recipe {recipe_id} operatorParameters",
+            )
+            control_operations = PostExecutionControlOperationsDefinition(
+                insert_after_step_id=insert_after_step_id,
+                operations=_parse_control_operations(
+                    raw_control_operations["operations"], recipe_id, guidance
+                ),
+            )
+            omitted_action_arguments = _parse_omitted_action_arguments(
+                raw_menu["omittedActionArguments"], recipe_id
+            )
         menu = ProcedureMaterializationChannel(
             availability="available",
             source="guidance.native_path",
             semantic_binding="all_leaf_operations",
-            parameter_binding="accepted_action_arguments",
+            parameter_binding=parameter_binding,
+            operator_parameters=operator_parameters,
+            control_operations=control_operations,
+            omitted_action_arguments=omitted_action_arguments,
         )
     else:
         raise ValueError(f"{label} menu has unknown availability")
@@ -432,6 +718,78 @@ def _parse_procedure_materialization(
     )
 
 
+def _validate_ordered_parameter_operations(
+    recipe: InteractionRecipe,
+    action: dict[str, Any],
+) -> None:
+    materialization = recipe.procedure_materialization
+    if (
+        materialization is None
+        or materialization.menu.parameter_binding
+        != "ordered_parameter_operations"
+    ):
+        return
+    menu = materialization.menu
+    assert menu.operator_parameters is not None
+    assert menu.control_operations is not None
+    assert menu.omitted_action_arguments is not None
+
+    argument_schema = _expect_object(
+        action.get("argumentsSchema"),
+        f"Action {recipe.action_name} argumentsSchema",
+    )
+    properties = _expect_object(
+        argument_schema.get("properties"),
+        f"Action {recipe.action_name} argument properties",
+    )
+    property_names = set(properties)
+    mapped_sources: dict[str, ParameterAssignmentSourceDefinition] = {}
+    parameters = list(menu.operator_parameters)
+    for operation in menu.control_operations.operations:
+        parameters.extend(operation.parameters)
+    for parameter in parameters:
+        source = parameter.source
+        if source.kind != "action_argument":
+            continue
+        assert source.argument_name is not None
+        if source.argument_name in mapped_sources:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} maps action argument "
+                f"{source.argument_name} more than once"
+            )
+        mapped_sources[source.argument_name] = source
+
+    omitted_names = {
+        omitted.argument_name for omitted in menu.omitted_action_arguments
+    }
+    overlap = set(mapped_sources) & omitted_names
+    if overlap:
+        raise ValueError(
+            f"Interaction recipe {recipe.id} both maps and omits action argument "
+            f"{min(overlap)}"
+        )
+    unknown = (set(mapped_sources) | omitted_names) - property_names
+    missing = property_names - set(mapped_sources) - omitted_names
+    if unknown or missing:
+        raise ValueError(
+            f"Interaction recipe {recipe.id} ordered parameter action coverage mismatch; "
+            f"missing: {', '.join(sorted(missing)) or 'none'}; "
+            f"unknown: {', '.join(sorted(unknown)) or 'none'}"
+        )
+    for argument_name, source in mapped_sources.items():
+        if source.transform != "uniform_vector3":
+            continue
+        property_schema = _expect_object(
+            properties[argument_name],
+            f"Action {recipe.action_name} argument {argument_name} schema",
+        )
+        if property_schema.get("type") not in {"number", "integer"}:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} uniform_vector3 source "
+                f"{argument_name} must have a numeric action schema"
+            )
+
+
 def load_interaction_catalog(
     path: Path = RESOURCE_PATH,
     action_catalog_path: Path = ACTION_CATALOG_PATH,
@@ -439,7 +797,7 @@ def load_interaction_catalog(
     """Load, strictly validate, and cross-check one adapter interaction catalog."""
 
     with path.open(encoding="utf-8") as resource:
-        raw = _expect_object(json.load(resource), "Interaction catalog")
+        raw = _load_json_object(resource, "Interaction catalog")
     _expect_exact_keys(
         raw,
         required={
@@ -499,7 +857,7 @@ def load_interaction_catalog(
         )
 
     with action_catalog_path.open(encoding="utf-8") as resource:
-        action_catalog = _expect_object(json.load(resource), "Action catalog")
+        action_catalog = _load_json_object(resource, "Action catalog")
     action_catalog_adapter = _expect_string(
         action_catalog.get("adapterId"), "Action catalog adapterId"
     )
@@ -518,13 +876,14 @@ def load_interaction_catalog(
     raw_actions = action_catalog.get("actions")
     if not isinstance(raw_actions, list):
         raise ValueError("Action catalog actions must be an array")
-    catalog_actions = {
-        _expect_string(
-            _expect_object(action, "Action catalog action").get("name"),
-            "Action catalog action name",
+    catalog_action_definitions: dict[str, dict[str, Any]] = {}
+    for raw_action_value in raw_actions:
+        raw_action = _expect_object(raw_action_value, "Action catalog action")
+        raw_action_name = _expect_string(
+            raw_action.get("name"), "Action catalog action name"
         )
-        for action in raw_actions
-    }
+        catalog_action_definitions[raw_action_name] = raw_action
+    catalog_actions = set(catalog_action_definitions)
     missing = catalog_actions - action_names
     unknown = action_names - catalog_actions
     if missing or unknown:
@@ -532,6 +891,10 @@ def load_interaction_catalog(
             "Interaction catalog action coverage mismatch; "
             f"missing: {', '.join(sorted(missing)) or 'none'}; "
             f"unknown: {', '.join(sorted(unknown)) or 'none'}"
+        )
+    for recipe in recipes:
+        _validate_ordered_parameter_operations(
+            recipe, catalog_action_definitions[recipe.action_name]
         )
 
     return InteractionCatalog(
@@ -568,6 +931,11 @@ __all__ = (
     "InteractionPathKind",
     "InteractionRecipe",
     "InteractionStepDefinition",
+    "OmittedActionArgumentDefinition",
+    "ParameterAssignmentDefinition",
+    "ParameterAssignmentSourceDefinition",
+    "PostExecutionControlOperationDefinition",
+    "PostExecutionControlOperationsDefinition",
     "ProcedureMaterializationChannel",
     "ProcedureMaterializationDefinition",
     "RESOURCE_PATH",

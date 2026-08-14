@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -57,6 +61,27 @@ describe('interaction catalog registry', () => {
     expect(
       historical.recipes.every((recipe) => recipe.procedureMaterialization === undefined),
     ).toBe(true);
+
+    const frozenLegacy = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.10.0',
+    });
+    expect(frozenLegacy.recipes[0]!.procedureMaterialization?.menu).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'accepted_action_arguments',
+    });
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.11.0');
+  });
+
+  it('keeps the InteractionCatalog 1.10.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.10.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '7341b663fe5b6a6ce096a0aa370fb35b2345f3021a46e515d3e9476a5b630bf4',
+    );
   });
 
   it('rejects duplicate catalogs and missing action catalog bindings', () => {

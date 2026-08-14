@@ -14,10 +14,12 @@ import {
 } from './procedure-tree.js';
 import { catalogVersionSchema } from './version.js';
 
-export const procedureAuthoringMaterializationFormatVersion = '1.0.0' as const;
-export const procedureAuthoringMaterializationFormatVersionSchema = z.literal(
+export const procedureAuthoringMaterializationLegacyFormatVersion = '1.0.0' as const;
+export const procedureAuthoringMaterializationFormatVersion = '1.1.0' as const;
+export const procedureAuthoringMaterializationFormatVersionSchema = z.enum([
+  procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationFormatVersion,
-);
+]);
 
 const procedureAuthoringMaterializationContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -86,8 +88,7 @@ export type ProcedureAuthoringMaterializationRequest = z.infer<
   typeof procedureAuthoringMaterializationRequestSchema
 >;
 
-export const procedureAuthoringMaterializationResultSchema = z.strictObject({
-  formatVersion: procedureAuthoringMaterializationFormatVersionSchema,
+const procedureAuthoringMaterializationResultShape = {
   packetContentSha256: procedureAuthoringMaterializationContentSha256Schema,
   inputTreeContentSha256: procedureAuthoringMaterializationContentSha256Schema,
   outputTreeContentSha256: procedureAuthoringMaterializationContentSha256Schema,
@@ -110,7 +111,18 @@ export const procedureAuthoringMaterializationResultSchema = z.strictObject({
   procedureStored: z.literal(false),
   proposalCreated: z.literal(false),
   hostExecutionStarted: z.literal(false),
-});
+} as const;
+
+export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnion('formatVersion', [
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationLegacyFormatVersion),
+    ...procedureAuthoringMaterializationResultShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationFormatVersion),
+    ...procedureAuthoringMaterializationResultShape,
+  }),
+]);
 export type ProcedureAuthoringMaterializationResult = z.infer<
   typeof procedureAuthoringMaterializationResultSchema
 >;

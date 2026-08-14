@@ -30,6 +30,7 @@ import interactionCatalog160Json from '../v1/interaction-catalog-1.6.0.json' wit
 import interactionCatalog170Json from '../v1/interaction-catalog-1.7.0.json' with { type: 'json' };
 import interactionCatalog180Json from '../v1/interaction-catalog-1.8.0.json' with { type: 'json' };
 import interactionCatalog190Json from '../v1/interaction-catalog-1.9.0.json' with { type: 'json' };
+import interactionCatalog1100Json from '../v1/interaction-catalog-1.10.0.json' with { type: 'json' };
 import interactionCatalogJson from '../v1/interaction-catalog.json' with { type: 'json' };
 
 export const blenderActionCatalog: ActionCatalog = actionCatalogSchema.parse(catalogJson);
@@ -73,6 +74,9 @@ const blenderInteractionCatalog180: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalog180Json);
 const blenderInteractionCatalog190: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalog190Json);
+const blenderInteractionCatalog1100: InteractionCatalog = interactionCatalogSchema.parse(
+  interactionCatalog1100Json,
+);
 export const blenderInteractionCatalog: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalogJson);
 export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.freeze([
@@ -86,6 +90,7 @@ export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.
   blenderInteractionCatalog170,
   blenderInteractionCatalog180,
   blenderInteractionCatalog190,
+  blenderInteractionCatalog1100,
   blenderInteractionCatalog,
 ]);
 
@@ -99,4 +104,5 @@ validateInteractionCatalog(blenderInteractionCatalog160, blenderActionCatalogs[9
 validateInteractionCatalog(blenderInteractionCatalog170, blenderActionCatalogs[10]!);
 validateInteractionCatalog(blenderInteractionCatalog180, blenderActionCatalogs[11]!);
 validateInteractionCatalog(blenderInteractionCatalog190, blenderActionCatalog);
+validateInteractionCatalog(blenderInteractionCatalog1100, blenderActionCatalog);
 validateInteractionCatalog(blenderInteractionCatalog, blenderActionCatalog);

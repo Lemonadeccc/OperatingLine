@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blenderActionCatalog,
   blenderInteractionCatalog,
+  blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
   canonicalizeProtocolJsonValue,
@@ -17,13 +18,15 @@ import {
 
 import { materializeProcedureAuthoringCandidate } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
 
-function candidate(): ProcedureAuthoringCandidateTree {
+function candidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
   const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
   ) as Record<string, unknown>;
   tree['actionCatalogVersion'] = blenderActionCatalog.catalogVersion;
-  tree['interactionCatalogVersion'] = blenderInteractionCatalog.catalogVersion;
-  tree['hostVersionRange'] = blenderInteractionCatalog.hostVersionRange;
+  tree['interactionCatalogVersion'] = interactionCatalog.catalogVersion;
+  tree['hostVersionRange'] = interactionCatalog.hostVersionRange;
   for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
     if (node['kind'] !== 'leaf') continue;
     const leafId = String(node['id']);
@@ -58,6 +61,17 @@ function candidate(): ProcedureAuthoringCandidateTree {
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
+function orderedMenu(catalog: InteractionCatalog) {
+  const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
+  if (
+    menu?.availability !== 'available' ||
+    menu.parameterBinding !== 'ordered_parameter_operations'
+  ) {
+    throw new Error('Expected ordered parameter operations fixture');
+  }
+  return menu;
+}
+
 function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
@@ -70,6 +84,7 @@ describe('procedure authoring materialization', () => {
       blenderActionCatalog,
       blenderInteractionCatalog,
     );
+    expect(result.formatVersion).toBe('1.1.0');
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     expect(leaf?.kind).toBe('leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected leaf');
@@ -108,9 +123,31 @@ describe('procedure authoring materialization', () => {
         id: 'operator.uv_sphere',
         order: 4,
         path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
-        parameters: leaf.action?.arguments,
+        parameters: { radius: 1 },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [0.32, -0.86, 2.14] },
+      },
+      {
+        id: 'control.scale',
+        order: 6,
+        path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+        parameters: { value: [0.12, 0.12, 0.12] },
+      },
+      {
+        id: 'control.object_name',
+        order: 7,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.EyeLeft' },
       },
     ]);
+    expect(
+      track.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action?.arguments['resourceId']).toBe('snowman.eye.left');
     expect(result.coverage).toEqual([
       {
         leafId: 'snowman.head.eyes.left',
@@ -135,6 +172,84 @@ describe('procedure authoring materialization', () => {
       reason: 'No approved action-level MCP tool is available.',
       modality: 'mcp',
     });
+  });
+
+  it('preserves the exact 1.10 legacy materialization algorithm and result version', () => {
+    const legacyCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.10.0',
+    );
+    if (legacyCatalog === undefined) throw new Error('expected InteractionCatalog 1.10.0');
+
+    const result = materializeProcedureAuthoringCandidate(
+      candidate(legacyCatalog),
+      blenderActionCatalog,
+      legacyCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) throw new Error('expected legacy leaf');
+    const track = leaf.menuTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected legacy menu track');
+
+    expect(result.formatVersion).toBe('1.0.0');
+    expect(track.operations).toHaveLength(4);
+    expect(track.operations.at(-1)?.parameters).toEqual(leaf.action.arguments);
+  });
+
+  it('uses result format 1.0.0 when a latest-catalog tree has only actionless leaves', () => {
+    const input = candidate();
+    const leaf = input.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected leaf');
+    leaf.action = null;
+    delete leaf.observationPolicy;
+
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+
+    expect(result.formatVersion).toBe('1.0.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: null,
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+  });
+
+  it('uses result format 1.1.0 when an ordered leaf is mixed with an actionless leaf', () => {
+    const input = candidate();
+    const orderedLeaf = input.nodes.find((node) => node.kind === 'leaf');
+    if (orderedLeaf?.kind !== 'leaf') throw new Error('expected leaf');
+    const actionlessLeaf = structuredClone(orderedLeaf);
+    actionlessLeaf.id = 'snowman.head.eyes.annotation';
+    actionlessLeaf.order = 2;
+    actionlessLeaf.title = 'Describe eye placement';
+    actionlessLeaf.intent = 'Keep a non-executable teaching note beside the ordered action.';
+    actionlessLeaf.action = null;
+    delete actionlessLeaf.observationPolicy;
+    input.nodes.push(actionlessLeaf);
+
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(
+      result.coverage.map(({ leafId, recipeId, menu }) => ({ leafId, recipeId, menu })),
+    ).toEqual([
+      {
+        leafId: orderedLeaf.id,
+        recipeId: 'blender.mesh.create_uv_sphere.native',
+        menu: 'materialized',
+      },
+      { leafId: actionlessLeaf.id, recipeId: null, menu: 'unavailable' },
+    ]);
   });
 
   it('aligns every native operation to semantic and stable de-duplicated evidence order', () => {
@@ -168,6 +283,52 @@ describe('procedure authoring materialization', () => {
       ]);
       expect(operation.evidenceRefs).toEqual(['evidence.prompt', 'evidence.extra']);
     }
+  });
+
+  it('derives ordered control values only from validated action arguments', () => {
+    const input = candidate();
+    const leaf = input.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected leaf');
+    leaf.semanticOperations[1]!.parameters = {
+      location: [999, 999, 999],
+      scale: [999, 999, 999],
+    };
+    leaf.semanticOperations[2]!.parameters = { name: 'Forged.Name' };
+
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const outputLeaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (outputLeaf?.kind !== 'leaf') throw new Error('expected output leaf');
+    const track = outputLeaf.menuTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected available menu track');
+
+    expect(track.operations.slice(4).map((operation) => operation.parameters)).toEqual([
+      { value: [0.32, -0.86, 2.14] },
+      { value: [0.12, 0.12, 0.12] },
+      { value: 'OperatingLine.EyeLeft' },
+    ]);
+  });
+
+  it('materializes portable names as own parameters without inherited-object collisions', () => {
+    const interactionCatalog = structuredClone(blenderInteractionCatalog);
+    orderedMenu(interactionCatalog).operatorParameters[0]!.name = 'toString';
+
+    const result = materializeProcedureAuthoringCandidate(
+      candidate(interactionCatalog),
+      blenderActionCatalog,
+      interactionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected output leaf');
+    const track = leaf.menuTracks[0];
+    if (track?.availability !== 'available') throw new Error('expected available menu track');
+    const parameters = track.operations[3]!.parameters;
+
+    expect(Object.hasOwn(parameters, 'toString')).toBe(true);
+    expect(parameters['toString']).toBe(1);
   });
 
   it('is deterministic, hashes canonical snapshots, and never mutates inputs', () => {

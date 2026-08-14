@@ -56,6 +56,7 @@ unavailable，而不是推断路径。通用 `operatingline.procedure.compile` �
 `interactionTracks: structural_only`。
 
 该入口不调用模型或 Provider，不保存 ProcedureTree，不创建、发布或接受 Proposal，也不执行 Blender
-或把 candidate 晋升为 verified。每个控件的有序参数 DSL、经过真实版本验证的 shortcut/MCP recipe、真实
-Blender 逐叶回放与验证状态写回仍待实现。完整的 Procedure Provider coordinator、向量/语义 RAG、教学
+或把 candidate 晋升为 verified。后续 ADR 0047 已在 InteractionCatalog `1.11.0` 增加有序控件参数 DSL，
+并把本 ADR 的 `1.10.0` 行为逐字冻结；经过真实版本验证的 shortcut/MCP recipe、真实 Blender 逐叶回放与
+验证状态写回仍待实现。完整的 Procedure Provider coordinator、向量/语义 RAG、教学
 视频采集、可视化编辑器、训练数据治理与导出也不属于本切片。

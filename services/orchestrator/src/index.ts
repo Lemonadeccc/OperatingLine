@@ -54,7 +54,6 @@ import {
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
   canonicalizeProtocolJsonValue,
-  procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketSchema,
@@ -604,7 +603,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
       const compilation = compileProcedure({ tree: materialized.tree });
       return procedureAuthoringMaterializationResultSchema.parse({
-        formatVersion: procedureAuthoringMaterializationFormatVersion,
+        formatVersion: materialized.formatVersion,
         packetContentSha256: packet.integrity.contentSha256,
         inputTreeContentSha256: materialized.inputTreeContentSha256,
         outputTreeContentSha256: materialized.outputTreeContentSha256,
@@ -1435,7 +1434,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.authoring.materialize',
         {
           description:
-            'Revalidate a candidate against its exact authoring packet, then deterministically materialize only InteractionCatalog-declared tracks. Catalog-grounded menu paths may become available; unverified shortcut and MCP tracks remain unavailable. This does not store, propose, accept, or execute anything.',
+            'Revalidate a candidate against its exact authoring packet, then deterministically materialize only InteractionCatalog-declared tracks. Catalog-grounded menu paths and ordered candidate teaching controls may become available; they do not prove host-state equivalence, and unverified shortcut/MCP tracks remain unavailable. This does not store, propose, accept, or execute anything.',
           inputSchema: deferMcpInputValidation(procedureAuthoringMaterializationRequestSchema),
           outputSchema: procedureAuthoringMaterializationResultSchema,
         },

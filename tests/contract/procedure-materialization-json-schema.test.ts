@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compileProcedureTreeToGuidePlan,
   procedureAuthoringMaterializationFormatVersion,
+  procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
@@ -270,6 +271,14 @@ describe('public procedure authoring materialization JSON Schemas', () => {
 
     const cases = [
       { value: result, accepted: true },
+      {
+        value: {
+          ...result,
+          formatVersion: procedureAuthoringMaterializationLegacyFormatVersion,
+        },
+        accepted: true,
+      },
+      { value: { ...result, formatVersion: '1.2.0' }, accepted: false },
       { value: { ...result, procedureStored: true }, accepted: false },
       { value: { ...result, outputTreeContentSha256: 'C'.repeat(64) }, accepted: false },
       { value: { ...result, provider: 'example' }, accepted: false },

@@ -761,7 +761,7 @@
                         "type": "object",
                         "properties": {
                           "menu": {
-                            "oneOf": [
+                            "anyOf": [
                               {
                                 "type": "object",
                                 "properties": {
@@ -781,32 +781,282 @@
                                 "additionalProperties": false
                               },
                               {
-                                "type": "object",
-                                "properties": {
-                                  "availability": {
-                                    "type": "string",
-                                    "const": "available"
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "availability": {
+                                        "type": "string",
+                                        "const": "available"
+                                      },
+                                      "source": {
+                                        "type": "string",
+                                        "const": "guidance.native_path"
+                                      },
+                                      "semanticBinding": {
+                                        "type": "string",
+                                        "const": "all_leaf_operations"
+                                      },
+                                      "parameterBinding": {
+                                        "type": "string",
+                                        "const": "accepted_action_arguments"
+                                      }
+                                    },
+                                    "required": [
+                                      "availability",
+                                      "source",
+                                      "semanticBinding",
+                                      "parameterBinding"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "source": {
-                                    "type": "string",
-                                    "const": "guidance.native_path"
-                                  },
-                                  "semanticBinding": {
-                                    "type": "string",
-                                    "const": "all_leaf_operations"
-                                  },
-                                  "parameterBinding": {
-                                    "type": "string",
-                                    "const": "accepted_action_arguments"
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "availability": {
+                                        "type": "string",
+                                        "const": "available"
+                                      },
+                                      "source": {
+                                        "type": "string",
+                                        "const": "guidance.native_path"
+                                      },
+                                      "semanticBinding": {
+                                        "type": "string",
+                                        "const": "all_leaf_operations"
+                                      },
+                                      "parameterBinding": {
+                                        "type": "string",
+                                        "const": "ordered_parameter_operations"
+                                      },
+                                      "operatorParameters": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string",
+                                              "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                                            },
+                                            "source": {
+                                              "oneOf": [
+                                                {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "kind": {
+                                                      "type": "string",
+                                                      "const": "literal"
+                                                    },
+                                                    "value": {
+                                                      "$ref": "#/$defs/__schema0"
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "kind",
+                                                    "value"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "kind": {
+                                                      "type": "string",
+                                                      "const": "action_argument"
+                                                    },
+                                                    "argumentName": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "transform": {
+                                                      "type": "string",
+                                                      "enum": [
+                                                        "identity",
+                                                        "uniform_vector3"
+                                                      ]
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "kind",
+                                                    "argumentName",
+                                                    "transform"
+                                                  ],
+                                                  "additionalProperties": false
+                                                }
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "name",
+                                            "source"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "controlOperations": {
+                                        "type": "object",
+                                        "properties": {
+                                          "insertAfterStepId": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                          },
+                                          "operations": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string",
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                                },
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "target": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "kind": {
+                                                      "type": "string",
+                                                      "const": "control"
+                                                    },
+                                                    "hostId": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "kind",
+                                                    "hostId"
+                                                  ],
+                                                  "additionalProperties": false
+                                                },
+                                                "path": {
+                                                  "minItems": 1,
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  }
+                                                },
+                                                "parameters": {
+                                                  "minItems": 1,
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "name": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                                                      },
+                                                      "source": {
+                                                        "oneOf": [
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "kind": {
+                                                                "type": "string",
+                                                                "const": "literal"
+                                                              },
+                                                              "value": {
+                                                                "$ref": "#/$defs/__schema0"
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "kind",
+                                                              "value"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          },
+                                                          {
+                                                            "type": "object",
+                                                            "properties": {
+                                                              "kind": {
+                                                                "type": "string",
+                                                                "const": "action_argument"
+                                                              },
+                                                              "argumentName": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                              },
+                                                              "transform": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                  "identity",
+                                                                  "uniform_vector3"
+                                                                ]
+                                                              }
+                                                            },
+                                                            "required": [
+                                                              "kind",
+                                                              "argumentName",
+                                                              "transform"
+                                                            ],
+                                                            "additionalProperties": false
+                                                          }
+                                                        ]
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "name",
+                                                      "source"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "label",
+                                                "target",
+                                                "path",
+                                                "parameters"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": [
+                                          "insertAfterStepId",
+                                          "operations"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "omittedActionArguments": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "argumentName": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "reason": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "argumentName",
+                                            "reason"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "availability",
+                                      "source",
+                                      "semanticBinding",
+                                      "parameterBinding",
+                                      "operatorParameters",
+                                      "controlOperations",
+                                      "omittedActionArguments"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "availability",
-                                  "source",
-                                  "semanticBinding",
-                                  "parameterBinding"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             ]
                           },
@@ -963,7 +1213,7 @@
             "type": "string"
           },
           "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/__schema1"
           }
         }
       },
@@ -1104,6 +1354,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    },
+    "__schema1": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema1"
           }
         }
       ]

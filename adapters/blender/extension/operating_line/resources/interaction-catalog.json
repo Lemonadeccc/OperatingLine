@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.10.0",
+  "catalogVersion": "1.11.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.12.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -86,7 +86,84 @@
           "availability": "available",
           "source": "guidance.native_path",
           "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments"
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "radius",
+              "source": {
+                "kind": "literal",
+                "value": 1
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.uv_sphere",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.scale",
+                "label": "Scale",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.scale"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Scale"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "radius",
+                      "transform": "uniform_vector3"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
         },
         "shortcut": {
           "availability": "unavailable",

@@ -6,6 +6,8 @@ import {
   interactionCatalogSchema,
   parseProcedureTree,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringMaterializationFormatVersion,
+  procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
   stableProcedureLeafOrder,
   validateActionArguments,
@@ -26,11 +28,28 @@ import { isStableVersionRangeSubset } from './stable-version-ranges.js';
 type MaterializationCoverage = ProcedureAuthoringMaterializationResult['coverage'];
 
 export interface ProcedureAuthoringMaterialization {
+  readonly formatVersion:
+    | typeof procedureAuthoringMaterializationLegacyFormatVersion
+    | typeof procedureAuthoringMaterializationFormatVersion;
   readonly tree: ProcedureAuthoringMaterializedTree;
   readonly coverage: MaterializationCoverage;
   readonly inputTreeContentSha256: string;
   readonly outputTreeContentSha256: string;
   readonly interactionCatalogContentSha256: string;
+}
+
+interface MaterializationParameterAssignment {
+  readonly name: string;
+  readonly source:
+    | {
+        readonly kind: 'literal';
+        readonly value: MenuProcedureOperation['parameters'][string];
+      }
+    | {
+        readonly kind: 'action_argument';
+        readonly argumentName: string;
+        readonly transform: 'identity' | 'uniform_vector3';
+      };
 }
 
 function sha256(value: unknown): string {
@@ -108,6 +127,48 @@ function menuTarget(
   }
 }
 
+function materializeParameters(
+  assignments: readonly MaterializationParameterAssignment[],
+  actionArguments: Readonly<Record<string, MenuProcedureOperation['parameters'][string]>>,
+): MenuProcedureOperation['parameters'] {
+  const parameters = Object.create(null) as MenuProcedureOperation['parameters'];
+  const defineParameter = (
+    name: string,
+    value: MenuProcedureOperation['parameters'][string],
+  ): void => {
+    Object.defineProperty(parameters, name, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  };
+  for (const assignment of assignments) {
+    const source = assignment.source;
+    if (source.kind === 'literal') {
+      defineParameter(assignment.name, structuredClone(source.value));
+      continue;
+    }
+    const argument = actionArguments[source.argumentName];
+    if (argument === undefined) {
+      throw new Error(
+        `Ordered menu parameter ${assignment.name} references missing action argument ${source.argumentName}`,
+      );
+    }
+    if (source.transform === 'identity') {
+      defineParameter(assignment.name, structuredClone(argument));
+      continue;
+    }
+    if (typeof argument !== 'number' || !Number.isFinite(argument)) {
+      throw new Error(
+        `Ordered menu parameter ${assignment.name} requires a finite numeric action argument`,
+      );
+    }
+    defineParameter(assignment.name, [argument, argument, argument]);
+  }
+  return parameters;
+}
+
 function materializeLeaf(
   leaf: ProcedureLeafNode,
   recipe: InteractionCatalog['recipes'][number] | undefined,
@@ -122,6 +183,11 @@ function materializeLeaf(
       : undefined;
   const menuAvailable =
     declaration?.menu.availability === 'available' && nativeRecipe !== undefined;
+  const orderedMenuDeclaration =
+    declaration?.menu.availability === 'available' &&
+    declaration.menu.parameterBinding === 'ordered_parameter_operations'
+      ? declaration.menu
+      : undefined;
   const semanticOperations = [...leaf.semanticOperations].sort(
     (left, right) => left.order - right.order,
   );
@@ -131,31 +197,50 @@ function materializeLeaf(
   ];
 
   const menuTracks = menuAvailable
-    ? [
-        {
-          id: nativeRecipe!.recipe.id,
-          availability: 'available' as const,
-          title: nativeRecipe!.recipe.title,
-          preconditions: structuredClone(nativeRecipe!.guidance.preconditions),
-          modality: 'menu' as const,
-          operations: [...nativeRecipe!.guidance.steps]
-            .sort((left, right) => left.order - right.order)
-            .map((step, index, orderedSteps) => ({
-              id: step.id,
-              order: step.order,
-              semanticRefs: [...semanticRefs],
-              description: step.label,
-              evidenceRefs: [...evidenceRefs],
-              intent: step.intent,
-              target: menuTarget(step.target),
-              path: orderedSteps.slice(0, index + 1).map((pathStep) => pathStep.label),
-              parameters:
-                step.id === nativeRecipe!.guidance.execution.stepId && leaf.action !== null
-                  ? structuredClone(leaf.action.arguments)
-                  : {},
-            })),
-        },
-      ]
+    ? (() => {
+        const orderedGuidanceSteps = [...nativeRecipe!.guidance.steps].sort(
+          (left, right) => left.order - right.order,
+        );
+        const actionArguments = leaf.action?.arguments ?? {};
+        const guidanceOperations = orderedGuidanceSteps.map((step, index) => ({
+          id: step.id,
+          order: step.order,
+          semanticRefs: [...semanticRefs],
+          description: step.label,
+          evidenceRefs: [...evidenceRefs],
+          intent: step.intent,
+          target: menuTarget(step.target),
+          path: orderedGuidanceSteps.slice(0, index + 1).map((pathStep) => pathStep.label),
+          parameters:
+            step.id === nativeRecipe!.guidance.execution.stepId && leaf.action !== null
+              ? orderedMenuDeclaration === undefined
+                ? structuredClone(leaf.action.arguments)
+                : materializeParameters(orderedMenuDeclaration.operatorParameters, actionArguments)
+              : {},
+        }));
+        const controlOperations =
+          orderedMenuDeclaration?.controlOperations.operations.map((operation, index) => ({
+            id: operation.id,
+            order: orderedGuidanceSteps.length + index + 1,
+            semanticRefs: [...semanticRefs],
+            description: operation.label,
+            evidenceRefs: [...evidenceRefs],
+            intent: 'configure' as const,
+            target: structuredClone(operation.target),
+            path: [...operation.path],
+            parameters: materializeParameters(operation.parameters, actionArguments),
+          })) ?? [];
+        return [
+          {
+            id: nativeRecipe!.recipe.id,
+            availability: 'available' as const,
+            title: nativeRecipe!.recipe.title,
+            preconditions: structuredClone(nativeRecipe!.guidance.preconditions),
+            modality: 'menu' as const,
+            operations: [...guidanceOperations, ...controlOperations],
+          },
+        ];
+      })()
     : [
         unavailableTrack(
           leaf,
@@ -269,6 +354,13 @@ export function materializeProcedureAuthoringCandidate(
     interactionCatalog.recipes.map((recipe) => [recipe.actionName, recipe]),
   );
   const orderedCandidateLeaves = stableProcedureLeafOrder(validatedCandidate);
+  const usesOrderedParameterOperations = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return (
+      recipe?.procedureMaterialization?.menu.availability === 'available' &&
+      recipe.procedureMaterialization.menu.parameterBinding === 'ordered_parameter_operations'
+    );
+  });
   for (const leaf of orderedCandidateLeaves) {
     if (leaf.action === null) continue;
     const action = actionsByName.get(leaf.action.name);
@@ -306,6 +398,9 @@ export function materializeProcedureAuthoringCandidate(
   );
 
   return {
+    formatVersion: usesOrderedParameterOperations
+      ? procedureAuthoringMaterializationFormatVersion
+      : procedureAuthoringMaterializationLegacyFormatVersion,
     tree,
     coverage,
     inputTreeContentSha256: sha256(candidate),
