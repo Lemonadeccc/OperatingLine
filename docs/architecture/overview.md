@@ -16,6 +16,13 @@ Claude Desktop 的本地 MCPB 只提供 stdio→HTTP 薄连接器并继承 Runti
 Schema、保存 Token 或取得宿主执行权。
 
 ```text
+ProcedureTree
+  ├─ source-grounded group/leaf hierarchy
+  ├─ semanticOperations[] with concrete parameters
+  ├─ menuTracks[] / shortcutTracks[] / mcpTracks[]
+  ├─ semanticRefs align unequal execution sequences
+  └─ candidate/verified/rejected provenance before GuidePlan compilation
+
 GuidePlan
   ├─ presentation tree: parentId + order
   ├─ execution graph: dependsOn

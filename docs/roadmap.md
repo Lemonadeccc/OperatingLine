@@ -201,8 +201,28 @@
       既有类型化 local replan。所有成功路径最多创建只读 Proposal，仍需 Accept/Reject，场景固定不变。
       默认不选择 Provider、不保存长期授权、不自动重试、接受或执行。见
       [ADR 0035](adr/0035-streamed-dialogue-and-semantic-replanning.md)。
+- [x] 参数化多轨迹 ProcedureTree 基础：新增独立 `1.0.0` 中间表示，把视频、自然语言或人工来源组织为
+      group/leaf 树；每个 leaf 用 `semanticRefs` 对齐具体、有序且可不等长的菜单、快捷键和 MCP 轨迹，
+      位置、缩放、名称及函数 arguments 保存在真正输入它们的数组元素。来源证据、置信度、视频权利状态、
+      ActionCatalog 绑定、Observation 与候选/验证状态一同保留；不存在的动作级 MCP 函数必须显式标记
+      unavailable。Guide protocol `1.5.0` 与既有执行审批边界不变。见
+      [ADR 0042](adr/0042-aligned-procedure-tree-tracks.md)。
 
 ## 后续里程碑
+
+- [ ] 教学来源到可编辑执行树的完整闭环：把 ProcedureTree 基础推进为真实的知识采集、检索、可视化
+      调整与 Blender 回放系统，而不是把 YouTube 下载或模型猜测直接当成训练真值。
+  - [ ] 教学视频导入、字幕/画面/按键分段、大步骤与小步骤抽取，以及时间区间、证据帧和置信度绑定。
+  - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
+        菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
+  - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision
+        分支、合并和来源差异。
+  - [ ] ProcedureTree → GuidePlan 编译器：选择一个可用轨迹，保持 ActionCatalog、安全审批、Observation、
+        恢复策略和 Blender 原生 Undo，再由真实 Blender 逐叶回放验证。
+  - [ ] 句子到完整 ProcedureTree 的 Provider/RAG 路径，使不会 Blender 的用户能先审阅结构和参数，
+        再对局部效果评论与精修；输入不依赖教学视频。
+  - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
+        不明确的视频数据不得进入 released 训练集。
 
 - [ ] 更大的人工 Eval：把已完成的版本化采集基础设施推进为经过真实采集、独立盲审和数据审核的
       released 数据集。Capability trace 只证明 provider 声明可追溯到目录 action；确定性 packet、JSON

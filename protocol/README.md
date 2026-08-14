@@ -12,6 +12,13 @@ suite 留在 `fixtures/v1/eval/`，由 `@operatingline/eval-kit` 直接验证，
 `guide-proposal-*` 定义 AI 提案、服务端信封和宿主决策。它们与 GuidePlan Schema 一样由
 `packages/protocol` 生成；任何宿主不得自行增加未版本化字段。
 
+`procedure-tree.schema.json` 定义 GuidePlan 之前的可编辑知识与规划中间表示。它可以来自教学视频、
+自然语言或人工资料；group/leaf 树负责大步骤与小步骤，leaf 的 `semanticOperations[]` 通过
+`semanticRefs` 对齐带具体参数和顺序的 `menuTracks[]`、`shortcutTracks[]`、`mcpTracks[]`。轨迹必须
+显式声明 available/unavailable，来源证据、置信度、视频权利状态和宿主验证状态必须与操作一起保存；
+不得把不存在的 MCP 函数或未验证的视频猜测伪装成可执行数据。示例位于
+`fixtures/v1/snowman-eye.procedure.json`。
+
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或
 `retain_for_repair`。`1.0.0`/`1.1.0` 不得携带该字段。Companion report `1.2.0` 必须显式携带

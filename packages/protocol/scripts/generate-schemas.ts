@@ -52,6 +52,7 @@ import {
   planningProposalDraftSchema,
   planningQualityEvaluationRequestSchema,
   planningQualityReportSchema,
+  procedureTreeSchema,
   plannerGenerateRequestSchema,
   plannerGenerationErrorSchema,
   plannerGenerationResultSchema,
@@ -315,6 +316,11 @@ const schemas = [
     'interaction-catalog.schema.json',
     'https://operatingline.dev/schema/v1/interaction-catalog.json',
     interactionCatalogSchema,
+  ],
+  [
+    'procedure-tree.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree.json',
+    procedureTreeSchema,
   ],
   [
     'planning-context.schema.json',

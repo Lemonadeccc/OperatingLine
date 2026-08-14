@@ -1,0 +1,290 @@
+{
+  "formatVersion": "1.0.0",
+  "id": "snowman.eye.left.procedure",
+  "revision": 1,
+  "title": "创建并调整雪人的左眼",
+  "adapterId": "blender",
+  "actionCatalogVersion": "1.12.0",
+  "interactionCatalogVersion": "1.9.0",
+  "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
+  "rootNodeId": "snowman",
+  "sources": [
+    {
+      "id": "source.prompt",
+      "kind": "natural_language",
+      "text": "制作雪人的头部，并创建、定位、缩放和命名左眼球体。",
+      "locale": "zh-CN"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence.prompt",
+      "sourceId": "source.prompt",
+      "locator": { "kind": "whole_source" },
+      "description": "用户对左眼球体的自然语言要求。",
+      "confidence": 1
+    }
+  ],
+  "nodes": [
+    {
+      "id": "snowman",
+      "parentId": null,
+      "order": 1,
+      "dependsOn": [],
+      "title": "制作雪人",
+      "intent": "完成雪人资产",
+      "kind": "group"
+    },
+    {
+      "id": "snowman.head",
+      "parentId": "snowman",
+      "order": 1,
+      "dependsOn": [],
+      "title": "制作头部",
+      "intent": "完成雪人的头部和五官",
+      "kind": "group"
+    },
+    {
+      "id": "snowman.head.eyes",
+      "parentId": "snowman.head",
+      "order": 1,
+      "dependsOn": [],
+      "title": "创建眼睛",
+      "intent": "创建并放置眼睛对象",
+      "kind": "group"
+    },
+    {
+      "id": "snowman.head.eyes.left",
+      "parentId": "snowman.head.eyes",
+      "order": 1,
+      "dependsOn": [],
+      "title": "创建并调整左眼球体",
+      "intent": "以确定的位置、缩放和名称创建左眼",
+      "kind": "leaf",
+      "action": {
+        "adapterId": "blender",
+        "name": "blender.mesh.create_uv_sphere",
+        "arguments": {
+          "resourceId": "snowman.eye.left",
+          "objectName": "OperatingLine.EyeLeft",
+          "radius": 0.12,
+          "location": [0.32, -0.86, 2.14]
+        }
+      },
+      "semanticOperations": [
+        {
+          "id": "semantic.create",
+          "order": 1,
+          "semanticAction": "create_uv_sphere",
+          "description": "创建一个 UV 球体作为左眼。",
+          "parameters": { "radius": 1 },
+          "evidenceRefs": ["evidence.prompt"]
+        },
+        {
+          "id": "semantic.transform",
+          "order": 2,
+          "semanticAction": "set_object_transform",
+          "description": "设置左眼球体的位置和缩放。",
+          "parameters": {
+            "location": [0.32, -0.86, 2.14],
+            "scale": [0.12, 0.12, 0.12]
+          },
+          "evidenceRefs": ["evidence.prompt"]
+        },
+        {
+          "id": "semantic.rename",
+          "order": 3,
+          "semanticAction": "rename_object",
+          "description": "将左眼对象命名为 OperatingLine.EyeLeft。",
+          "parameters": { "name": "OperatingLine.EyeLeft" },
+          "evidenceRefs": ["evidence.prompt"]
+        }
+      ],
+      "menuTracks": [
+        {
+          "id": "menu.layout.default",
+          "availability": "available",
+          "title": "Layout 菜单与属性控件轨迹",
+          "modality": "menu",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            { "kind": "scene_state", "label": "3D Cursor", "value": "[0,0,0]" }
+          ],
+          "operations": [
+            {
+              "id": "menu.layout",
+              "order": 1,
+              "semanticRefs": ["semantic.create"],
+              "description": "切换到 Layout 工作区。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "navigate",
+              "target": { "kind": "workspace", "hostId": "Layout" },
+              "path": ["Layout"],
+              "parameters": {}
+            },
+            {
+              "id": "menu.add",
+              "order": 2,
+              "semanticRefs": ["semantic.create"],
+              "description": "打开 Add 菜单。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "navigate",
+              "target": { "kind": "menu", "hostId": "VIEW3D_MT_add" },
+              "path": ["Layout", "Add"],
+              "parameters": {}
+            },
+            {
+              "id": "menu.mesh",
+              "order": 3,
+              "semanticRefs": ["semantic.create"],
+              "description": "打开 Mesh 子菜单。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "navigate",
+              "target": { "kind": "menu", "hostId": "VIEW3D_MT_mesh_add" },
+              "path": ["Layout", "Add", "Mesh"],
+              "parameters": {}
+            },
+            {
+              "id": "menu.uv_sphere",
+              "order": 4,
+              "semanticRefs": ["semantic.create"],
+              "description": "执行 UV Sphere 创建操作。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "execute",
+              "target": { "kind": "operator", "hostId": "mesh.primitive_uv_sphere_add" },
+              "path": ["Layout", "Add", "Mesh", "UV Sphere"],
+              "parameters": { "radius": 1, "location": [0, 0, 0] }
+            },
+            {
+              "id": "menu.location",
+              "order": 5,
+              "semanticRefs": ["semantic.transform"],
+              "description": "在 Item/Transform 中设置绝对位置。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "configure",
+              "target": { "kind": "control", "hostId": "VIEW3D_PT_item.transform.location" },
+              "path": ["Sidebar", "Item", "Transform", "Location"],
+              "parameters": { "value": [0.32, -0.86, 2.14] }
+            },
+            {
+              "id": "menu.scale",
+              "order": 6,
+              "semanticRefs": ["semantic.transform"],
+              "description": "在 Item/Transform 中设置绝对缩放。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "configure",
+              "target": { "kind": "control", "hostId": "VIEW3D_PT_item.transform.scale" },
+              "path": ["Sidebar", "Item", "Transform", "Scale"],
+              "parameters": { "value": [0.12, 0.12, 0.12] }
+            },
+            {
+              "id": "menu.rename",
+              "order": 7,
+              "semanticRefs": ["semantic.rename"],
+              "description": "在 Outliner 中设置对象名称。",
+              "evidenceRefs": ["evidence.prompt"],
+              "intent": "configure",
+              "target": { "kind": "control", "hostId": "OUTLINER.object.name" },
+              "path": ["Outliner", "Object Name"],
+              "parameters": { "value": "OperatingLine.EyeLeft" }
+            }
+          ]
+        }
+      ],
+      "shortcutTracks": [
+        {
+          "id": "shortcut.blender.default",
+          "availability": "available",
+          "title": "Blender 默认快捷键轨迹",
+          "modality": "shortcut",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
+            { "kind": "scene_state", "label": "3D Cursor", "value": "[0,0,0]" }
+          ],
+          "operations": [
+            {
+              "id": "shortcut.add_sphere",
+              "order": 1,
+              "semanticRefs": ["semantic.create"],
+              "description": "使用 Add 快捷键并选择 UV Sphere。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["SHIFT", "A"],
+              "selectionPath": ["Mesh", "UV Sphere"],
+              "parameters": { "radius": 1, "location": [0, 0, 0] }
+            },
+            {
+              "id": "shortcut.move_x",
+              "order": 2,
+              "semanticRefs": ["semantic.transform"],
+              "description": "沿 X 轴移动到目标坐标。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["G", "X"],
+              "parameters": { "value": 0.32, "confirm": "ENTER" }
+            },
+            {
+              "id": "shortcut.move_y",
+              "order": 3,
+              "semanticRefs": ["semantic.transform"],
+              "description": "沿 Y 轴移动到目标坐标。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["G", "Y"],
+              "parameters": { "value": -0.86, "confirm": "ENTER" }
+            },
+            {
+              "id": "shortcut.move_z",
+              "order": 4,
+              "semanticRefs": ["semantic.transform"],
+              "description": "沿 Z 轴移动到目标坐标。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["G", "Z"],
+              "parameters": { "value": 2.14, "confirm": "ENTER" }
+            },
+            {
+              "id": "shortcut.scale",
+              "order": 5,
+              "semanticRefs": ["semantic.transform"],
+              "description": "统一缩放眼睛球体。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["S"],
+              "parameters": { "value": 0.12, "confirm": "ENTER" }
+            },
+            {
+              "id": "shortcut.rename",
+              "order": 6,
+              "semanticRefs": ["semantic.rename"],
+              "description": "重命名当前对象。",
+              "evidenceRefs": ["evidence.prompt"],
+              "keys": ["F2"],
+              "parameters": { "text": "OperatingLine.EyeLeft", "confirm": "ENTER" }
+            }
+          ]
+        }
+      ],
+      "mcpTracks": [
+        {
+          "id": "mcp.operatingline.action_execution",
+          "availability": "unavailable",
+          "title": "OperatingLine 动作级 MCP 调用",
+          "reason": "当前 MCP 只提交和审批完整 GuidePlan，尚未公开绕过宿主审批的动作级执行工具；不得伪造不存在的函数。",
+          "modality": "mcp"
+        }
+      ],
+      "expectedObservations": [
+        {
+          "kind": "resource_exists",
+          "parameters": { "resourceId": "snowman.eye.left" }
+        }
+      ],
+      "validation": {
+        "status": "candidate",
+        "validatedHostVersions": [],
+        "notes": ["菜单和快捷键轨迹仍需在受支持的 Blender 版本中逐步回放验证。"]
+      }
+    }
+  ]
+}

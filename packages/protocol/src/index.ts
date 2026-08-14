@@ -23,6 +23,7 @@ export * from './prompt.js';
 export * from './provider.js';
 export * from './replanning-provider.js';
 export * from './proposal.js';
+export * from './procedure-tree.js';
 export * from './revision.js';
 export * from './runtime.js';
 export * from './version.js';
