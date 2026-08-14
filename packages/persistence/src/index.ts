@@ -122,6 +122,45 @@ export interface CompanionDialogueRunInput {
 
 export type RecordCompanionDialogueRunResult = 'accepted' | 'duplicate' | 'conflict';
 
+export interface ProcedureTreeRecordInput {
+  treeId: string;
+  revision: number;
+  title: string;
+  adapterId: string;
+  actionCatalogVersion: string;
+  interactionCatalogVersion: string;
+  hostVersionRange: string;
+  contentSha256: string;
+  tree: unknown;
+}
+
+export interface StoredProcedureTreeSummary {
+  sequence: number;
+  treeId: string;
+  revision: number;
+  title: string;
+  adapterId: string;
+  actionCatalogVersion: string;
+  interactionCatalogVersion: string;
+  hostVersionRange: string;
+  contentSha256: string;
+  storedAt: string;
+}
+
+export interface StoredProcedureTreeRecord extends StoredProcedureTreeSummary {
+  tree: unknown;
+}
+
+export type RecordProcedureTreeResult =
+  | {
+      result: 'accepted' | 'duplicate';
+      record: StoredProcedureTreeRecord;
+    }
+  | {
+      result: 'stale' | 'conflict';
+      latestRevision: number;
+    };
+
 function canonicalJson(value: unknown): string {
   const normalize = (candidate: unknown): unknown => {
     if (Array.isArray(candidate)) {
@@ -247,6 +286,13 @@ export interface OperatingLineDatabase {
     expectedStatuses: readonly string[],
   ): boolean;
   listNonterminalCompanionDialogueRuns(): unknown[];
+  recordProcedureTree(input: ProcedureTreeRecordInput): RecordProcedureTreeResult;
+  getProcedureTree(treeId: string, revision?: number): StoredProcedureTreeRecord | null;
+  listProcedureTrees(
+    afterSequence: number,
+    limit: number,
+    adapterId?: string,
+  ): StoredProcedureTreeSummary[];
   recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
   listLatestCompanionStates(): unknown[];
   close(): void;
@@ -540,6 +586,33 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (11, datetime('now'));
   `);
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_trees (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      tree_id TEXT NOT NULL,
+      revision INTEGER NOT NULL CHECK (revision > 0),
+      title TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      action_catalog_version TEXT NOT NULL,
+      interaction_catalog_version TEXT NOT NULL,
+      host_version_range TEXT NOT NULL,
+      content_sha256 TEXT NOT NULL CHECK (
+        length(content_sha256) = 64 AND content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      stored_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      UNIQUE (tree_id, revision)
+    );
+
+    CREATE INDEX IF NOT EXISTS procedure_trees_adapter_sequence
+    ON procedure_trees (adapter_id, sequence);
+
+    CREATE INDEX IF NOT EXISTS procedure_trees_latest_revision
+    ON procedure_trees (tree_id, revision DESC);
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (12, datetime('now'));
+  `);
 
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
@@ -557,6 +630,88 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT sequence, id, event_type, payload, created_at
     FROM execution_events
     WHERE id = ?
+  `);
+  const insertProcedureTree = sqlite.prepare(`
+    INSERT INTO procedure_trees (
+      tree_id,
+      revision,
+      title,
+      adapter_id,
+      action_catalog_version,
+      interaction_catalog_version,
+      host_version_range,
+      content_sha256,
+      stored_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const findProcedureTree = sqlite.prepare(`
+    SELECT
+      sequence,
+      tree_id,
+      revision,
+      title,
+      adapter_id,
+      action_catalog_version,
+      interaction_catalog_version,
+      host_version_range,
+      content_sha256,
+      stored_at,
+      payload
+    FROM procedure_trees
+    WHERE tree_id = ? AND revision = ?
+  `);
+  const findLatestProcedureTree = sqlite.prepare(`
+    SELECT
+      sequence,
+      tree_id,
+      revision,
+      title,
+      adapter_id,
+      action_catalog_version,
+      interaction_catalog_version,
+      host_version_range,
+      content_sha256,
+      stored_at,
+      payload
+    FROM procedure_trees
+    WHERE tree_id = ?
+    ORDER BY revision DESC
+    LIMIT 1
+  `);
+  const listProcedureTreeRows = sqlite.prepare(`
+    SELECT
+      sequence,
+      tree_id,
+      revision,
+      title,
+      adapter_id,
+      action_catalog_version,
+      interaction_catalog_version,
+      host_version_range,
+      content_sha256,
+      stored_at
+    FROM procedure_trees
+    WHERE sequence > ?
+    ORDER BY sequence
+    LIMIT ?
+  `);
+  const listProcedureTreeRowsByAdapter = sqlite.prepare(`
+    SELECT
+      sequence,
+      tree_id,
+      revision,
+      title,
+      adapter_id,
+      action_catalog_version,
+      interaction_catalog_version,
+      host_version_range,
+      content_sha256,
+      stored_at
+    FROM procedure_trees
+    WHERE sequence > ? AND adapter_id = ?
+    ORDER BY sequence
+    LIMIT ?
   `);
   const insertGuideProposal = sqlite.prepare(`
     INSERT INTO guide_proposals (
@@ -962,6 +1117,56 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     };
   };
 
+  const parseProcedureTreeSummaryRow = (row: unknown): StoredProcedureTreeSummary => {
+    const candidate = row as {
+      sequence?: unknown;
+      tree_id?: unknown;
+      revision?: unknown;
+      title?: unknown;
+      adapter_id?: unknown;
+      action_catalog_version?: unknown;
+      interaction_catalog_version?: unknown;
+      host_version_range?: unknown;
+      content_sha256?: unknown;
+      stored_at?: unknown;
+    };
+    if (
+      typeof candidate.sequence !== 'number' ||
+      typeof candidate.tree_id !== 'string' ||
+      typeof candidate.revision !== 'number' ||
+      typeof candidate.title !== 'string' ||
+      typeof candidate.adapter_id !== 'string' ||
+      typeof candidate.action_catalog_version !== 'string' ||
+      typeof candidate.interaction_catalog_version !== 'string' ||
+      typeof candidate.host_version_range !== 'string' ||
+      typeof candidate.content_sha256 !== 'string' ||
+      typeof candidate.stored_at !== 'string'
+    ) {
+      throw new Error('SQLite returned an invalid procedure tree summary');
+    }
+    return {
+      sequence: candidate.sequence,
+      treeId: candidate.tree_id,
+      revision: candidate.revision,
+      title: candidate.title,
+      adapterId: candidate.adapter_id,
+      actionCatalogVersion: candidate.action_catalog_version,
+      interactionCatalogVersion: candidate.interaction_catalog_version,
+      hostVersionRange: candidate.host_version_range,
+      contentSha256: candidate.content_sha256,
+      storedAt: candidate.stored_at,
+    };
+  };
+
+  const parseProcedureTreeRow = (row: unknown): StoredProcedureTreeRecord => {
+    const summary = parseProcedureTreeSummaryRow(row);
+    const payload = (row as { payload?: unknown }).payload;
+    if (typeof payload !== 'string') {
+      throw new Error('SQLite returned an invalid procedure tree payload');
+    }
+    return { ...summary, tree: JSON.parse(payload) as unknown };
+  };
+
   return {
     appendEvent(event) {
       insertEvent.run(
@@ -1014,6 +1219,123 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       }
       const row = findEvent.get(id);
       return row === undefined ? null : parseExecutionEventRow(row);
+    },
+    recordProcedureTree(input) {
+      if (
+        input.treeId.trim().length === 0 ||
+        input.title.trim().length === 0 ||
+        input.adapterId.trim().length === 0 ||
+        input.actionCatalogVersion.trim().length === 0 ||
+        input.interactionCatalogVersion.trim().length === 0 ||
+        input.hostVersionRange.trim().length === 0
+      ) {
+        throw new Error('Procedure tree identity fields must be nonempty');
+      }
+      if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
+        throw new Error('Procedure tree revision must be a positive safe integer');
+      }
+      if (!/^[a-f0-9]{64}$/.test(input.contentSha256)) {
+        throw new Error('Procedure tree content SHA-256 must be lowercase hexadecimal');
+      }
+      const payload = canonicalJson(input.tree);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const latestRow = findLatestProcedureTree.get(input.treeId);
+        const latest = latestRow === undefined ? null : parseProcedureTreeRow(latestRow);
+        const existingRow = findProcedureTree.get(input.treeId, input.revision);
+        if (existingRow !== undefined) {
+          const existing = parseProcedureTreeRow(existingRow);
+          const duplicate =
+            existing.title === input.title &&
+            existing.adapterId === input.adapterId &&
+            existing.actionCatalogVersion === input.actionCatalogVersion &&
+            existing.interactionCatalogVersion === input.interactionCatalogVersion &&
+            existing.hostVersionRange === input.hostVersionRange &&
+            existing.contentSha256 === input.contentSha256 &&
+            canonicalJson(existing.tree) === payload;
+          sqlite.exec('COMMIT;');
+          return duplicate
+            ? { result: 'duplicate', record: existing }
+            : { result: 'conflict', latestRevision: latest?.revision ?? existing.revision };
+        }
+        if (latest !== null && latest.adapterId !== input.adapterId) {
+          sqlite.exec('COMMIT;');
+          return { result: 'conflict', latestRevision: latest.revision };
+        }
+        if (latest !== null && input.revision <= latest.revision) {
+          sqlite.exec('COMMIT;');
+          return { result: 'stale', latestRevision: latest.revision };
+        }
+
+        const storedAt = new Date().toISOString();
+        insertProcedureTree.run(
+          input.treeId,
+          input.revision,
+          input.title,
+          input.adapterId,
+          input.actionCatalogVersion,
+          input.interactionCatalogVersion,
+          input.hostVersionRange,
+          input.contentSha256,
+          storedAt,
+          payload,
+        );
+        insertEvent.run(
+          `procedure-tree:${input.treeId}:${input.revision}`,
+          'procedure.tree.stored',
+          canonicalJson({
+            treeId: input.treeId,
+            revision: input.revision,
+            title: input.title,
+            adapterId: input.adapterId,
+            actionCatalogVersion: input.actionCatalogVersion,
+            interactionCatalogVersion: input.interactionCatalogVersion,
+            hostVersionRange: input.hostVersionRange,
+            contentSha256: input.contentSha256,
+            storedAt,
+          }),
+          storedAt,
+        );
+        const storedRow = findProcedureTree.get(input.treeId, input.revision);
+        if (storedRow === undefined) {
+          throw new Error('Procedure tree insertion could not be read back');
+        }
+        const record = parseProcedureTreeRow(storedRow);
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', record };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getProcedureTree(treeId, revision) {
+      if (treeId.trim().length === 0) {
+        throw new Error('Procedure tree id must be nonempty');
+      }
+      if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1)) {
+        throw new Error('Procedure tree revision must be a positive safe integer');
+      }
+      const row =
+        revision === undefined
+          ? findLatestProcedureTree.get(treeId)
+          : findProcedureTree.get(treeId, revision);
+      return row === undefined ? null : parseProcedureTreeRow(row);
+    },
+    listProcedureTrees(afterSequence, limit, adapterId) {
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+        throw new Error('Procedure tree cursor must be a non-negative safe integer');
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
+        throw new Error('Procedure tree limit must be an integer between 1 and 10000');
+      }
+      if (adapterId !== undefined && adapterId.trim().length === 0) {
+        throw new Error('Procedure tree adapter id must be nonempty');
+      }
+      const rows =
+        adapterId === undefined
+          ? listProcedureTreeRows.all(afterSequence, limit)
+          : listProcedureTreeRowsByAdapter.all(afterSequence, adapterId, limit);
+      return rows.map(parseProcedureTreeSummaryRow);
     },
     recordGuideProposal(proposal) {
       const payload = canonicalJson(proposal);

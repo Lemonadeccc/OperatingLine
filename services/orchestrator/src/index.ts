@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 
 import { createMcpFastifyApp } from '@modelcontextprotocol/fastify';
@@ -6,7 +6,11 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import type { NodeIncomingMessageLike } from '@modelcontextprotocol/node';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
-import { openOperatingLineDatabase } from '@operatingline/persistence';
+import {
+  openOperatingLineDatabase,
+  type StoredProcedureTreeRecord as DatabaseStoredProcedureTreeRecord,
+  type StoredProcedureTreeSummary as DatabaseStoredProcedureTreeSummary,
+} from '@operatingline/persistence';
 import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
   actionCatalogRequestSchema,
@@ -48,8 +52,17 @@ import {
   planningQualityBaselineVersion,
   planningQualityEvaluationRequestSchema,
   planningPromptRequestSchema,
+  canonicalizeProtocolJsonValue,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
+  procedureTreeGetRequestSchema,
+  procedureTreeListRequestSchema,
+  procedureTreeListResultSchema,
+  procedureTreeStoreRequestSchema,
+  procedureTreeStoreResultSchema,
+  procedureTreeSummarySchema,
+  protocolJsonValueCanonicalization,
+  storedProcedureTreeSchema,
   compileProcedureTreeToGuidePlan,
   parseProcedureTree,
   replanningPromptPacketSchema,
@@ -145,6 +158,54 @@ export interface RunningRuntime {
 }
 
 export const runtimeVersion = '0.1.0';
+
+const procedureRuntimeValidation = {
+  procedureStructure: 'validated',
+  actionCatalogBinding: 'validated',
+  hostVersionRange: 'validated_against_action_catalog',
+  interactionTracks: 'structural_only',
+} as const;
+
+const positiveIntegerQuerySchema = z
+  .string()
+  .regex(/^[1-9]\d*$/)
+  .transform(Number)
+  .pipe(z.number().int().positive());
+const nonnegativeIntegerQuerySchema = z
+  .string()
+  .regex(/^(0|[1-9]\d*)$/)
+  .transform(Number)
+  .pipe(z.number().int().nonnegative());
+const procedureTreeGetHttpQuerySchema = z.strictObject({
+  treeId: procedureTreeGetRequestSchema.shape.treeId,
+  revision: positiveIntegerQuerySchema.optional(),
+});
+const procedureTreeListHttpQuerySchema = z.strictObject({
+  adapterId: procedureTreeListRequestSchema.shape.adapterId,
+  afterSequence: nonnegativeIntegerQuerySchema.optional(),
+  limit: positiveIntegerQuerySchema.pipe(z.number().max(100)).optional(),
+});
+
+class ProcedureTreeRevisionError extends Error {
+  constructor(
+    readonly result: 'stale' | 'conflict',
+    readonly treeId: string,
+    readonly revision: number,
+    readonly latestRevision: number,
+  ) {
+    super(
+      `Procedure tree ${treeId} revision ${revision} is ${result}; latest stored revision is ${latestRevision}`,
+    );
+    this.name = 'ProcedureTreeRevisionError';
+  }
+}
+
+class ProcedureTreeValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProcedureTreeValidationError';
+  }
+}
 
 export async function startRuntime(options: StartRuntimeOptions): Promise<RunningRuntime> {
   if (options.accessToken.length < 16) {
@@ -400,10 +461,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         exportedAt: new Date().toISOString(),
       });
 
-    const compileProcedure = (
-      request: ReturnType<typeof procedureCompilationRequestSchema.parse>,
-    ) => {
-      const tree = parseProcedureTree(request.tree);
+    const validateAndCompileProcedureTree = (treeInput: unknown) => {
+      const tree = parseProcedureTree(treeInput);
       const catalog = actionCatalogRegistry.get({
         targetAdapterId: tree.adapterId,
         catalogVersion: tree.actionCatalogVersion,
@@ -416,6 +475,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const plan = compileProcedureTreeToGuidePlan(tree);
       validateGuidePlanStructure(plan);
       validateGuidePlanAgainstActionCatalog(plan, catalog);
+      return { tree, plan };
+    };
+
+    const compileProcedure = (
+      request: ReturnType<typeof procedureCompilationRequestSchema.parse>,
+    ) => {
+      const { tree, plan } = validateAndCompileProcedureTree(request.tree);
       return procedureCompilationResultSchema.parse({
         formatVersion: tree.formatVersion,
         procedureTreeId: tree.id,
@@ -423,15 +489,124 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         adapterId: tree.adapterId,
         actionCatalogVersion: tree.actionCatalogVersion,
         interactionCatalogVersion: tree.interactionCatalogVersion,
-        validation: {
-          procedureStructure: 'validated',
-          actionCatalogBinding: 'validated',
-          hostVersionRange: 'validated_against_action_catalog',
-          interactionTracks: 'structural_only',
-        },
+        validation: procedureRuntimeValidation,
         plan,
         proposalCreated: false,
         hostExecutionStarted: false,
+      });
+    };
+
+    const computeProcedureTreeContentSha256 = (tree: unknown): string =>
+      createHash('sha256').update(canonicalizeProtocolJsonValue(tree)).digest('hex');
+
+    const publicProcedureTreeRecord = (record: DatabaseStoredProcedureTreeRecord) => {
+      const tree = parseProcedureTree(record.tree);
+      if (
+        tree.id !== record.treeId ||
+        tree.revision !== record.revision ||
+        tree.title !== record.title ||
+        tree.adapterId !== record.adapterId ||
+        tree.actionCatalogVersion !== record.actionCatalogVersion ||
+        tree.interactionCatalogVersion !== record.interactionCatalogVersion ||
+        tree.hostVersionRange !== record.hostVersionRange
+      ) {
+        throw new Error(
+          `Stored procedure tree metadata does not match payload: ${record.treeId}@${record.revision}`,
+        );
+      }
+      const contentSha256 = computeProcedureTreeContentSha256(tree);
+      if (contentSha256 !== record.contentSha256) {
+        throw new Error(
+          `Stored procedure tree integrity check failed: ${record.treeId}@${record.revision}`,
+        );
+      }
+      return storedProcedureTreeSchema.parse({
+        sequence: record.sequence,
+        tree,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: protocolJsonValueCanonicalization,
+          contentSha256,
+        },
+        storedAt: record.storedAt,
+      });
+    };
+
+    const publicProcedureTreeSummary = (record: DatabaseStoredProcedureTreeSummary) =>
+      procedureTreeSummarySchema.parse({
+        sequence: record.sequence,
+        treeId: record.treeId,
+        revision: record.revision,
+        title: record.title,
+        adapterId: record.adapterId,
+        actionCatalogVersion: record.actionCatalogVersion,
+        interactionCatalogVersion: record.interactionCatalogVersion,
+        hostVersionRange: record.hostVersionRange,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: protocolJsonValueCanonicalization,
+          contentSha256: record.contentSha256,
+        },
+        storedAt: record.storedAt,
+      });
+
+    const storeProcedureTree = (
+      request: ReturnType<typeof procedureTreeStoreRequestSchema.parse>,
+    ) => {
+      const tree = (() => {
+        try {
+          return validateAndCompileProcedureTree(request.tree).tree;
+        } catch (error) {
+          throw new ProcedureTreeValidationError(
+            error instanceof Error ? error.message : 'Unknown procedure validation error',
+          );
+        }
+      })();
+      const contentSha256 = computeProcedureTreeContentSha256(tree);
+      const stored = database.recordProcedureTree({
+        treeId: tree.id,
+        revision: tree.revision,
+        title: tree.title,
+        adapterId: tree.adapterId,
+        actionCatalogVersion: tree.actionCatalogVersion,
+        interactionCatalogVersion: tree.interactionCatalogVersion,
+        hostVersionRange: tree.hostVersionRange,
+        contentSha256,
+        tree,
+      });
+      if (!('record' in stored)) {
+        throw new ProcedureTreeRevisionError(
+          stored.result,
+          tree.id,
+          tree.revision,
+          stored.latestRevision,
+        );
+      }
+      return procedureTreeStoreResultSchema.parse({
+        result: stored.result,
+        record: publicProcedureTreeRecord(stored.record),
+        validation: procedureRuntimeValidation,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    };
+
+    const getProcedureTree = (request: ReturnType<typeof procedureTreeGetRequestSchema.parse>) => {
+      const stored = database.getProcedureTree(request.treeId, request.revision);
+      return stored === null ? null : publicProcedureTreeRecord(stored);
+    };
+
+    const listProcedureTrees = (
+      request: ReturnType<typeof procedureTreeListRequestSchema.parse>,
+    ) => {
+      const afterSequence = request.afterSequence ?? 0;
+      const limit = request.limit ?? 50;
+      const records = database.listProcedureTrees(afterSequence, limit + 1, request.adapterId);
+      const hasMore = records.length > limit;
+      const visible = records.slice(0, limit).map(publicProcedureTreeSummary);
+      return procedureTreeListResultSchema.parse({
+        procedures: visible,
+        nextAfterSequence: hasMore ? (visible.at(-1)?.sequence ?? null) : null,
       });
     };
 
@@ -803,6 +978,181 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                   text: JSON.stringify({
                     error: 'procedure_compilation_failed',
                     message: error instanceof Error ? error.message : 'Unknown compilation error',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.store',
+        {
+          description:
+            'Validate and immutably store one ProcedureTree revision as a knowledge artifact. Duplicate identical revisions are idempotent; stale or conflicting revisions are rejected. This never proposes or executes Blender work.',
+          inputSchema: deferMcpInputValidation(procedureTreeStoreRequestSchema),
+          outputSchema: procedureTreeStoreResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTreeStoreRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_tree_store_request',
+                    message: 'Procedure tree store request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = storeProcedureTree(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            const revisionError = error instanceof ProcedureTreeRevisionError ? error : null;
+            const validationError = error instanceof ProcedureTreeValidationError;
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error:
+                      revisionError === null
+                        ? validationError
+                          ? 'procedure_tree_validation_failed'
+                          : 'procedure_tree_storage_failed'
+                        : `procedure_tree_revision_${revisionError.result}`,
+                    message:
+                      revisionError !== null || validationError
+                        ? error instanceof Error
+                          ? error.message
+                          : 'Procedure tree validation failed'
+                        : 'Procedure tree storage failed',
+                    ...(revisionError === null
+                      ? {}
+                      : {
+                          treeId: revisionError.treeId,
+                          revision: revisionError.revision,
+                          latestRevision: revisionError.latestRevision,
+                        }),
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.get',
+        {
+          description:
+            'Read one exact immutable ProcedureTree revision, or the latest revision when revision is omitted. This does not compile, propose, or execute it.',
+          inputSchema: procedureTreeGetRequestSchema,
+          outputSchema: storedProcedureTreeSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTreeGetRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_tree_get_request',
+                    message: 'Procedure tree get request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = getProcedureTree(parsedRequest.data);
+            if (result === null) {
+              return {
+                isError: true,
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                      error: 'procedure_tree_not_found',
+                      treeId: parsedRequest.data.treeId,
+                      revision: parsedRequest.data.revision ?? null,
+                    }),
+                  },
+                ],
+              };
+            }
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_tree_read_failed',
+                    message: 'Procedure tree read failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.list',
+        {
+          description:
+            'List immutable ProcedureTree revision summaries in stable storage order with bounded cursor pagination. Tree payloads are omitted.',
+          inputSchema: procedureTreeListRequestSchema,
+          outputSchema: procedureTreeListResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTreeListRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_tree_list_request',
+                    message: 'Procedure tree list request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = listProcedureTrees(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_tree_list_failed',
+                    message: 'Procedure tree list failed',
                   }),
                 },
               ],
@@ -1411,6 +1761,84 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply.code(422).send({
           error: 'procedure_compilation_failed',
           message: error instanceof Error ? error.message : 'Unknown compilation error',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/store', async (request, reply) => {
+      const parsedRequest = procedureTreeStoreRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tree_store_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return storeProcedureTree(parsedRequest.data);
+      } catch (error) {
+        if (error instanceof ProcedureTreeRevisionError) {
+          return reply.code(409).send({
+            error: `procedure_tree_revision_${error.result}`,
+            result: error.result,
+            treeId: error.treeId,
+            revision: error.revision,
+            latestRevision: error.latestRevision,
+            message: error.message,
+          });
+        }
+        if (error instanceof ProcedureTreeValidationError) {
+          return reply.code(422).send({
+            error: 'procedure_tree_validation_failed',
+            message: error.message,
+          });
+        }
+        request.log.error(error, 'Procedure tree storage failed');
+        return reply.code(500).send({
+          error: 'procedure_tree_storage_failed',
+          message: 'Procedure tree storage failed',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/procedure', async (request, reply) => {
+      const parsedRequest = procedureTreeGetHttpQuerySchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tree_get_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        const result = getProcedureTree(parsedRequest.data);
+        if (result === null) {
+          return reply.code(404).send({
+            error: 'procedure_tree_not_found',
+            treeId: parsedRequest.data.treeId,
+            revision: parsedRequest.data.revision ?? null,
+          });
+        }
+        return result;
+      } catch (error) {
+        request.log.error(error, 'Procedure tree read failed');
+        return reply.code(500).send({
+          error: 'procedure_tree_read_failed',
+          message: 'Procedure tree read failed',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/procedures', async (request, reply) => {
+      const parsedRequest = procedureTreeListHttpQuerySchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tree_list_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return listProcedureTrees(parsedRequest.data);
+      } catch (error) {
+        request.log.error(error, 'Procedure tree list failed');
+        return reply.code(500).send({
+          error: 'procedure_tree_list_failed',
+          message: 'Procedure tree list failed',
         });
       }
     });

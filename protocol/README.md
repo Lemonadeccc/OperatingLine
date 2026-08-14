@@ -26,6 +26,11 @@ track ID；`compileProcedureTreeToGuidePlan` 把层级、Action、Anchor、Obser
 ActionCatalog 及 host version range，返回 `interactionTracks: structural_only`、
 `proposalCreated: false` 和 `hostExecutionStarted: false`；宿主 InteractionCatalog 与真实 UI 回放验证
 仍是独立的后续门禁。
+`procedure-tree-store-*`、`procedure-tree-get-request`、`stored-procedure-tree` 和
+`procedure-tree-list-*` Schema 定义不可变资料库边界。Runtime 只在上述完整编译门禁通过后保存 revision；
+相同内容幂等，冲突或旧 revision 拒绝。完整读取会重算规范内容哈希，列表用稳定 sequence 游标只返回摘要；
+存取都不会发布 GuidePlan、创建 Proposal 或执行宿主。见
+`docs/adr/0043-immutable-procedure-tree-library.md`。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或

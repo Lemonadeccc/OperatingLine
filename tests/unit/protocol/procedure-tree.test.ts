@@ -7,7 +7,11 @@ import {
   compileProcedureTreeToGuidePlan,
   materializeProcedureOperations,
   parseProcedureTree,
+  procedureTreeGetRequestSchema,
+  procedureTreeListRequestSchema,
   procedureTreeSchema,
+  procedureTreeStoreRequestSchema,
+  storedProcedureTreeSchema,
   stableProcedureLeafOrder,
   validateProcedureTree,
   type ProcedureTree,
@@ -215,5 +219,38 @@ describe('procedure tree protocol', () => {
 
     const extra = { ...readFixture(), unexpected: true };
     expect(procedureTreeSchema.safeParse(extra).success).toBe(false);
+  });
+
+  it('keeps storage reads strict, integrity-addressed, and query-compatible', () => {
+    const tree = readFixture();
+    expect(procedureTreeStoreRequestSchema.safeParse({ tree, unexpected: true }).success).toBe(
+      false,
+    );
+    expect(procedureTreeGetRequestSchema.parse({ treeId: tree.id, revision: 1 })).toEqual({
+      treeId: tree.id,
+      revision: 1,
+    });
+    expect(
+      procedureTreeGetRequestSchema.safeParse({ treeId: tree.id, revision: true }).success,
+    ).toBe(false);
+    expect(procedureTreeListRequestSchema.parse({ afterSequence: 7, limit: 10 })).toEqual({
+      afterSequence: 7,
+      limit: 10,
+    });
+    expect(
+      procedureTreeListRequestSchema.safeParse({ afterSequence: ' ', limit: true }).success,
+    ).toBe(false);
+    expect(
+      storedProcedureTreeSchema.parse({
+        sequence: 1,
+        tree,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256: 'a'.repeat(64),
+        },
+        storedAt: '2026-08-14T00:00:00.000Z',
+      }),
+    ).toMatchObject({ tree: { id: tree.id, revision: 1 } });
   });
 });

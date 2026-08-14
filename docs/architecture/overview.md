@@ -23,6 +23,12 @@ ProcedureTree
   ├─ semanticRefs align unequal execution sequences
   └─ candidate/verified/rejected provenance before GuidePlan compilation
 
+Immutable Procedure Library
+  ├─ tree id + monotonic immutable revision
+  ├─ canonical SHA-256 integrity and atomic audit event
+  ├─ exact/latest reads + stable summary pagination
+  └─ validated knowledge only; no proposal or host execution
+
 GuidePlan
   ├─ presentation tree: parentId + order
   ├─ execution graph: dependsOn

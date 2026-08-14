@@ -224,6 +224,10 @@
   - [x] 只读 Runtime 编译入口：MCP `operatingline.procedure.compile` 与 HTTP
         `/api/v1/procedure/compile` 验证树、已安装精确 ActionCatalog 和 host version range，返回编译后的
         GuidePlan，但明确标记 interaction track 仅完成结构验证且不会创建 Proposal 或启动宿主执行。
+  - [x] 不可变 ProcedureTree 资料库：通过内容哈希、`tree id + revision` 唯一键、单调 revision、原子审计
+        事件及游标分页，持久保存经过完整编译门禁的树；MCP/HTTP 支持 store、精确/最新 get 和摘要 list，
+        重启后仍可读取，但不会发布 GuidePlan、创建 Proposal 或执行宿主。见
+        [ADR 0043](adr/0043-immutable-procedure-tree-library.md)。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的 Provider/RAG 路径，使不会 Blender 的用户能先审阅结构和参数，

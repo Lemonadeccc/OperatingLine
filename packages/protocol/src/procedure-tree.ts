@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { rollbackModeSchema } from './adapter.js';
+import { protocolJsonValueCanonicalization } from './canonical-json-value.js';
 import {
   guidePlanSchema,
   guideProtocolVersion,
@@ -243,6 +244,14 @@ export const procedureCompilationRequestSchema = z.strictObject({
 });
 export type ProcedureCompilationRequest = z.infer<typeof procedureCompilationRequestSchema>;
 
+export const procedureTreeRuntimeValidationSchema = z.strictObject({
+  procedureStructure: z.literal('validated'),
+  actionCatalogBinding: z.literal('validated'),
+  hostVersionRange: z.literal('validated_against_action_catalog'),
+  interactionTracks: z.literal('structural_only'),
+});
+export type ProcedureTreeRuntimeValidation = z.infer<typeof procedureTreeRuntimeValidationSchema>;
+
 export const procedureCompilationResultSchema = z.strictObject({
   formatVersion: procedureTreeFormatVersionSchema,
   procedureTreeId: guideStepIdSchema,
@@ -250,17 +259,74 @@ export const procedureCompilationResultSchema = z.strictObject({
   adapterId: z.string().min(1),
   actionCatalogVersion: catalogVersionSchema,
   interactionCatalogVersion: catalogVersionSchema,
-  validation: z.strictObject({
-    procedureStructure: z.literal('validated'),
-    actionCatalogBinding: z.literal('validated'),
-    hostVersionRange: z.literal('validated_against_action_catalog'),
-    interactionTracks: z.literal('structural_only'),
-  }),
+  validation: procedureTreeRuntimeValidationSchema,
   plan: guidePlanSchema,
   proposalCreated: z.literal(false),
   hostExecutionStarted: z.literal(false),
 });
 export type ProcedureCompilationResult = z.infer<typeof procedureCompilationResultSchema>;
+
+export const procedureTreeIntegritySchema = z.strictObject({
+  algorithm: z.literal('sha256'),
+  canonicalization: z.literal(protocolJsonValueCanonicalization),
+  contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type ProcedureTreeIntegrity = z.infer<typeof procedureTreeIntegritySchema>;
+
+export const storedProcedureTreeSchema = z.strictObject({
+  sequence: z.number().int().positive(),
+  tree: procedureTreeSchema,
+  integrity: procedureTreeIntegritySchema,
+  storedAt: z.iso.datetime({ offset: true }),
+});
+export type StoredProcedureTree = z.infer<typeof storedProcedureTreeSchema>;
+
+export const procedureTreeSummarySchema = z.strictObject({
+  sequence: z.number().int().positive(),
+  treeId: guideStepIdSchema,
+  revision: z.number().int().positive(),
+  title: z.string().min(1),
+  adapterId: z.string().min(1),
+  actionCatalogVersion: catalogVersionSchema,
+  interactionCatalogVersion: catalogVersionSchema,
+  hostVersionRange: stableVersionRangeSchema,
+  integrity: procedureTreeIntegritySchema,
+  storedAt: z.iso.datetime({ offset: true }),
+});
+export type ProcedureTreeSummary = z.infer<typeof procedureTreeSummarySchema>;
+
+export const procedureTreeStoreRequestSchema = z.strictObject({
+  tree: procedureTreeSchema,
+});
+export type ProcedureTreeStoreRequest = z.infer<typeof procedureTreeStoreRequestSchema>;
+
+export const procedureTreeStoreResultSchema = z.strictObject({
+  result: z.enum(['accepted', 'duplicate']),
+  record: storedProcedureTreeSchema,
+  validation: procedureTreeRuntimeValidationSchema,
+  proposalCreated: z.literal(false),
+  hostExecutionStarted: z.literal(false),
+});
+export type ProcedureTreeStoreResult = z.infer<typeof procedureTreeStoreResultSchema>;
+
+export const procedureTreeGetRequestSchema = z.strictObject({
+  treeId: guideStepIdSchema,
+  revision: z.number().int().positive().optional(),
+});
+export type ProcedureTreeGetRequest = z.infer<typeof procedureTreeGetRequestSchema>;
+
+export const procedureTreeListRequestSchema = z.strictObject({
+  adapterId: z.string().min(1).optional(),
+  afterSequence: z.number().int().nonnegative().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+export type ProcedureTreeListRequest = z.infer<typeof procedureTreeListRequestSchema>;
+
+export const procedureTreeListResultSchema = z.strictObject({
+  procedures: z.array(procedureTreeSummarySchema),
+  nextAfterSequence: z.number().int().positive().nullable(),
+});
+export type ProcedureTreeListResult = z.infer<typeof procedureTreeListResultSchema>;
 
 export const procedureTrackModalities = ['menu', 'shortcut', 'mcp'] as const;
 export type ProcedureTrackModality = (typeof procedureTrackModalities)[number];

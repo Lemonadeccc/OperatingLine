@@ -11,7 +11,7 @@ import { openOperatingLineDatabase } from '@operatingline/persistence';
 
 function recordWorkSlotFromWorker(
   databasePath: string,
-  operation: 'goal' | 'replan',
+  operation: 'goal' | 'replan' | 'procedure',
   payload: unknown,
 ): Promise<string> {
   return new Promise((resolveWorker, rejectWorker) => {
@@ -23,7 +23,9 @@ function recordWorkSlotFromWorker(
           try {
             const result = workerData.operation === 'goal'
               ? database.recordGuideGoalRequest(workerData.payload)
-              : database.recordCompanionReplanRun(workerData.payload);
+              : workerData.operation === 'replan'
+                ? database.recordCompanionReplanRun(workerData.payload)
+                : database.recordProcedureTree(workerData.payload).result;
             parentPort.postMessage(result);
           } finally {
             database.close();
@@ -249,7 +251,127 @@ function companionDialogueRun(
   };
 }
 
+function procedureTreeRecord(revision = 1, overrides: Record<string, unknown> = {}) {
+  const tree = {
+    formatVersion: '1.0.0',
+    id: 'snowman.eye.procedure',
+    revision,
+    title: `Snowman eye revision ${revision}`,
+    adapterId: 'blender',
+    actionCatalogVersion: '1.12.0',
+    interactionCatalogVersion: '1.0.0',
+    hostVersionRange: '>=4.3.0 <5.0.0',
+    rootNodeId: 'snowman',
+    sources: [],
+    evidence: [],
+    nodes: [],
+  };
+  return {
+    treeId: tree.id,
+    revision: tree.revision,
+    title: tree.title,
+    adapterId: tree.adapterId,
+    actionCatalogVersion: tree.actionCatalogVersion,
+    interactionCatalogVersion: tree.interactionCatalogVersion,
+    hostVersionRange: tree.hostVersionRange,
+    contentSha256: String(revision % 10).repeat(64),
+    tree,
+    ...overrides,
+  };
+}
+
 describe('OperatingLine persistence', () => {
+  it('stores immutable procedure revisions with stable reads, pagination, and audit events', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-tree-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const first = openOperatingLineDatabase(databasePath);
+      const revisionOne = procedureTreeRecord(1);
+      const accepted = first.recordProcedureTree(revisionOne);
+      expect(accepted).toMatchObject({ result: 'accepted', record: { revision: 1 } });
+      expect(first.recordProcedureTree(revisionOne)).toEqual({
+        result: 'duplicate',
+        record: accepted.result === 'accepted' ? accepted.record : undefined,
+      });
+      expect(
+        first.recordProcedureTree({
+          ...revisionOne,
+          tree: { ...(revisionOne.tree as Record<string, unknown>), title: 'Conflicting title' },
+        }),
+      ).toEqual({ result: 'conflict', latestRevision: 1 });
+
+      const revisionThree = procedureTreeRecord(3);
+      expect(first.recordProcedureTree(revisionThree)).toMatchObject({
+        result: 'accepted',
+        record: { revision: 3 },
+      });
+      expect(first.recordProcedureTree(procedureTreeRecord(2))).toEqual({
+        result: 'stale',
+        latestRevision: 3,
+      });
+      expect(first.recordProcedureTree(procedureTreeRecord(4, { adapterId: 'maya' }))).toEqual({
+        result: 'conflict',
+        latestRevision: 3,
+      });
+
+      const other = procedureTreeRecord(1, {
+        treeId: 'maya.eye.procedure',
+        title: 'Maya eye',
+        adapterId: 'maya',
+        tree: {
+          ...(procedureTreeRecord(1).tree as Record<string, unknown>),
+          id: 'maya.eye.procedure',
+          title: 'Maya eye',
+          adapterId: 'maya',
+        },
+      });
+      expect(first.recordProcedureTree(other)).toMatchObject({ result: 'accepted' });
+
+      expect(first.getProcedureTree(revisionOne.treeId, 1)).toMatchObject({
+        treeId: revisionOne.treeId,
+        revision: 1,
+        tree: revisionOne.tree,
+      });
+      expect(first.getProcedureTree(revisionOne.treeId)).toMatchObject({ revision: 3 });
+      const firstPage = first.listProcedureTrees(0, 1);
+      expect(firstPage).toHaveLength(1);
+      expect(first.listProcedureTrees(firstPage[0]!.sequence, 10)).toHaveLength(2);
+      expect(first.listProcedureTrees(0, 10, 'maya')).toMatchObject([
+        { treeId: 'maya.eye.procedure', adapterId: 'maya' },
+      ]);
+      expect(first.listExecutionEventsByTypes(['procedure.tree.stored'])).toHaveLength(3);
+      first.close();
+
+      const reopened = openOperatingLineDatabase(databasePath);
+      expect(reopened.getProcedureTree(revisionOne.treeId)).toMatchObject({ revision: 3 });
+      expect(reopened.recordProcedureTree(revisionThree)).toMatchObject({ result: 'duplicate' });
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes concurrent writes of the same procedure revision', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-race-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      openOperatingLineDatabase(databasePath).close();
+      const procedure = procedureTreeRecord();
+      await expect(
+        Promise.all([
+          recordWorkSlotFromWorker(databasePath, 'procedure', procedure),
+          recordWorkSlotFromWorker(databasePath, 'procedure', procedure),
+        ]),
+      ).resolves.toEqual(expect.arrayContaining(['accepted', 'duplicate']));
+      const database = openOperatingLineDatabase(databasePath);
+      expect(database.listProcedureTrees(0, 10)).toHaveLength(1);
+      expect(database.listExecutionEventsByTypes(['procedure.tree.stored'])).toHaveLength(1);
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('atomically records a semantic revision request with its dialogue transition', () => {
     const database = openOperatingLineDatabase(':memory:');
     const revision = revisionRequest();
@@ -1211,7 +1333,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 11,
+        count: 12,
       });
       expect(
         inspected
@@ -1274,6 +1396,34 @@ describe('OperatingLine persistence', () => {
         inspected.prepare('SELECT COUNT(*) AS count FROM companion_state_reports').get(),
       ).toEqual({ count: 0 });
       inspected.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rolls back a procedure revision when its audit event cannot be appended', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-rollback-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      openOperatingLineDatabase(databasePath).close();
+      const injected = new DatabaseSync(databasePath);
+      injected.exec(`
+        CREATE TRIGGER fail_procedure_event
+        BEFORE INSERT ON execution_events
+        WHEN NEW.event_type = 'procedure.tree.stored'
+        BEGIN
+          SELECT RAISE(FAIL, 'injected procedure event failure');
+        END;
+      `);
+      injected.close();
+
+      const database = openOperatingLineDatabase(databasePath);
+      expect(() => database.recordProcedureTree(procedureTreeRecord())).toThrow(
+        'injected procedure event failure',
+      );
+      expect(database.listProcedureTrees(0, 10)).toEqual([]);
+      expect(database.countEvents()).toBe(0);
+      database.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
