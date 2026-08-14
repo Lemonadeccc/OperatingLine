@@ -16,7 +16,10 @@ import {
   type ProcedureAuthoringCandidateTree,
 } from '@operatingline/protocol';
 
-import { materializeProcedureAuthoringCandidate } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
+import {
+  deriveSegmentFrameParameter,
+  materializeProcedureAuthoringCandidate,
+} from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
 
 function candidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
@@ -209,6 +212,57 @@ function planeCandidate(
   return tree;
 }
 
+function coneCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Cone candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cone',
+    arguments: {
+      resourceId: 'tutorial.cone.detail',
+      objectName: 'OperatingLine.DetailCone',
+      radiusStart: 1.25,
+      radiusEnd: 0.25,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
+    },
+  };
+  leaf.title = 'Create and configure one detailed Cone';
+  leaf.intent = 'Create a named Cone between exact endpoints with exact endpoint radii.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_cone',
+    description: 'Create one detailed Cone.',
+    parameters: { radiusStart: 1.25, radiusEnd: 0.25 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place and orient the Cone between its exact endpoints.',
+    parameters: { start: [1, 2, 3], end: [4, 6, 3] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Cone object.',
+    parameters: { name: 'OperatingLine.DetailCone' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [2.5, 4, 3] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cone_add',
+      menuPath: ['Add', 'Mesh', 'Cone'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.cone.detail' },
+  };
+  return tree;
+}
+
 function torusCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
 ): ProcedureAuthoringCandidateTree {
@@ -290,6 +344,58 @@ function sha256(value: unknown): string {
 }
 
 describe('procedure authoring materialization', () => {
+  it('derives canonical finite segment-frame parameters and rejects malformed segments', () => {
+    expect(deriveSegmentFrameParameter([1, 2, 3], [4, 6, 3], 'distance')).toBe(5);
+    expect(deriveSegmentFrameParameter([1, 2, 3], [4, 6, 3], 'midpoint')).toEqual([2.5, 4, 3]);
+    expect(deriveSegmentFrameParameter([1, 2, 3], [4, 6, 3], 'rotation_euler_xyz_align_z')).toEqual(
+      [0, Math.PI / 2, Math.atan2(4, 3)],
+    );
+    expect(
+      deriveSegmentFrameParameter([-0, -0, -0], [0, 0, 2], 'rotation_euler_xyz_align_z'),
+    ).toEqual([0, 0, 0]);
+    expect(deriveSegmentFrameParameter([-0, -0, -0], [0, 0, 2], 'midpoint')).toEqual([0, 0, 1]);
+    expect(deriveSegmentFrameParameter([0, 0, 2], [0, 0, 0], 'rotation_euler_xyz_align_z')).toEqual(
+      [0, Math.PI, 0],
+    );
+
+    for (const malformed of [null, [0, 0], [0, 0, 0, 0], [0, 'x', 0]]) {
+      expect(() => deriveSegmentFrameParameter(malformed, [0, 0, 1], 'distance')).toThrow(
+        'Segment frame start must be a finite numeric vector3',
+      );
+      expect(() => deriveSegmentFrameParameter([0, 0, 1], malformed, 'distance')).toThrow(
+        'Segment frame end must be a finite numeric vector3',
+      );
+    }
+    for (const nonFinite of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => deriveSegmentFrameParameter([0, 0, nonFinite], [0, 0, 1], 'distance')).toThrow(
+        'Segment frame start must be a finite numeric vector3',
+      );
+      expect(() => deriveSegmentFrameParameter([0, 0, 1], [0, nonFinite, 0], 'distance')).toThrow(
+        'Segment frame end must be a finite numeric vector3',
+      );
+    }
+    expect(() => deriveSegmentFrameParameter([1, 2, 3], [1, 2, 3], 'distance')).toThrow(
+      'Segment frame requires distinct finite endpoints with nonzero distance',
+    );
+    expect(() =>
+      deriveSegmentFrameParameter([Number.MAX_VALUE, 0, 0], [-Number.MAX_VALUE, 0, 0], 'distance'),
+    ).toThrow('Segment frame requires distinct finite endpoints with nonzero distance');
+    expect(() =>
+      deriveSegmentFrameParameter(
+        [Number.MAX_VALUE, 0, 0],
+        [Number.MAX_VALUE / 2, 0, 0],
+        'midpoint',
+      ),
+    ).toThrow('Segment frame midpoint component must be finite');
+    expect(() =>
+      deriveSegmentFrameParameter(
+        [0, 0, 0],
+        [0, 0, 1],
+        'unsupported' as 'rotation_euler_xyz_align_z',
+      ),
+    ).toThrow('Unsupported segment frame output: unsupported');
+  });
+
   it('materializes the exact declared UV sphere native path and preserves candidate validation', () => {
     const input = candidate();
     const result = materializeProcedureAuthoringCandidate(
@@ -797,6 +903,122 @@ describe('procedure authoring materialization', () => {
       majorRadius: 2.25,
       minorRadius: 0.4,
       location: [1.5, -2, 0.75],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact derived Cone segment frame without inventing shortcut or MCP support', () => {
+    const input = coneCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Cone leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_cone.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Cone menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_cone.native',
+      title: 'Add one cone from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.cone',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Cone'],
+        parameters: {
+          vertices: 32,
+          radius1: 1.25,
+          radius2: 0.25,
+          depth: 5,
+          end_fill_type: 'NGON',
+          calc_uvs: false,
+          enter_editmode: false,
+          align: 'WORLD',
+          location: [0, 0, 0],
+          rotation: [0, Math.PI / 2, Math.atan2(4, 3)],
+          scale: [1, 1, 1],
+        },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [2.5, 4, 3] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.DetailCone' },
+      },
+    ]);
+    expect(Object.keys(menuTrack.operations[3]!.parameters)).toEqual([
+      'vertices',
+      'radius1',
+      'radius2',
+      'depth',
+      'end_fill_type',
+      'calc_uvs',
+      'enter_editmode',
+      'align',
+      'location',
+      'rotation',
+      'scale',
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.cone.detail',
+      objectName: 'OperatingLine.DetailCone',
+      radiusStart: 1.25,
+      radiusEnd: 0.25,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
     });
     expect(leaf.shortcutTracks).toEqual([
       expect.objectContaining({

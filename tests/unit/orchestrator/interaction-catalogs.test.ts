@@ -139,7 +139,23 @@ describe('interaction catalog registry', () => {
       frozenPlane.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_torus')
         ?.procedureMaterialization,
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.16.0');
+    const frozenTorus = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.16.0',
+    });
+    expect(
+      frozenTorus.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_torus')
+        ?.procedureMaterialization?.menu,
+    ).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(
+      frozenTorus.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cone')
+        ?.procedureMaterialization,
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.17.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.shortcut;
@@ -262,6 +278,59 @@ describe('interaction catalog registry', () => {
     });
     expect(
       blenderInteractionCatalog.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_cone',
+      )?.procedureMaterialization,
+    ).toMatchObject({
+      menu: {
+        availability: 'available',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          expect.objectContaining({ name: 'vertices' }),
+          expect.objectContaining({ name: 'radius1' }),
+          expect.objectContaining({ name: 'radius2' }),
+          expect.objectContaining({
+            name: 'depth',
+            source: expect.objectContaining({
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              output: 'distance',
+            }),
+          }),
+          expect.objectContaining({ name: 'end_fill_type' }),
+          expect.objectContaining({ name: 'calc_uvs' }),
+          expect.objectContaining({ name: 'enter_editmode' }),
+          expect.objectContaining({ name: 'align' }),
+          expect.objectContaining({ name: 'location' }),
+          expect.objectContaining({
+            name: 'rotation',
+            source: expect.objectContaining({
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              output: 'rotation_euler_xyz_align_z',
+            }),
+          }),
+          expect.objectContaining({ name: 'scale' }),
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.cone',
+          operations: [
+            expect.objectContaining({ id: 'control.location' }),
+            expect.objectContaining({ id: 'control.object_name' }),
+          ],
+        },
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
+    expect(
+      blenderInteractionCatalog.recipes.find(
         (recipe) => recipe.actionName === 'blender.mesh.create_torus',
       )?.procedureMaterialization,
     ).toMatchObject({
@@ -355,6 +424,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       'a4d799f155eb58cf53d1ccc8689fc4b4b55cc87739ea2d1d54a8f03d1050e0d6',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.16.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.16.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '68945039a55f0cfef011d0472383e6f2e4809b181ca6def547cd78ff5660854f',
     );
   });
 

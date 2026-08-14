@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.16.0")
+        self.assertEqual(catalog.catalog_version, "1.17.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -459,6 +459,146 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("unavailable", "No approved action-level MCP tool is available."),
         )
+        cone = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_cone"
+        )
+        self.assertIsNotNone(cone.procedure_materialization)
+        assert cone.procedure_materialization is not None
+        cone_menu = cone.procedure_materialization.menu
+        self.assertEqual(cone_menu.availability, "available")
+        self.assertEqual(cone_menu.source, "guidance.native_path")
+        self.assertEqual(cone_menu.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            cone_menu.parameter_binding, "ordered_parameter_operations"
+        )
+        assert cone_menu.operator_parameters is not None
+        self.assertEqual(
+            tuple(parameter.name for parameter in cone_menu.operator_parameters),
+            (
+                "vertices",
+                "radius1",
+                "radius2",
+                "depth",
+                "end_fill_type",
+                "calc_uvs",
+                "enter_editmode",
+                "align",
+                "location",
+                "rotation",
+                "scale",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                parameter.source.value
+                for parameter in cone_menu.operator_parameters
+                if parameter.source.kind == "literal"
+            ),
+            (32, "NGON", False, False, "WORLD", [0, 0, 0], [1, 1, 1]),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.name,
+                    parameter.source.argument_name,
+                    parameter.source.transform,
+                )
+                for parameter in cone_menu.operator_parameters
+                if parameter.source.kind == "action_argument"
+            ),
+            (
+                ("radius1", "radiusStart", "identity"),
+                ("radius2", "radiusEnd", "identity"),
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.name,
+                    parameter.source.derivation,
+                    parameter.source.start_argument_name,
+                    parameter.source.end_argument_name,
+                    parameter.source.output,
+                )
+                for parameter in cone_menu.operator_parameters
+                if parameter.source.kind == "derived_action_arguments"
+            ),
+            (
+                ("depth", "segment_frame", "start", "end", "distance"),
+                (
+                    "rotation",
+                    "segment_frame",
+                    "start",
+                    "end",
+                    "rotation_euler_xyz_align_z",
+                ),
+            ),
+        )
+        assert cone_menu.control_operations is not None
+        self.assertEqual(
+            cone_menu.control_operations.insert_after_step_id, "operator.cone"
+        )
+        self.assertEqual(
+            tuple(
+                (operation.id, operation.path)
+                for operation in cone_menu.control_operations.operations
+            ),
+            (
+                (
+                    "control.location",
+                    ("Sidebar", "Item", "Transform", "Location"),
+                ),
+                ("control.object_name", ("Outliner", "Object Name")),
+            ),
+        )
+        cone_location_source = cone_menu.control_operations.operations[0].parameters[
+            0
+        ].source
+        self.assertEqual(
+            (
+                cone_location_source.derivation,
+                cone_location_source.start_argument_name,
+                cone_location_source.end_argument_name,
+                cone_location_source.output,
+            ),
+            ("segment_frame", "start", "end", "midpoint"),
+        )
+        cone_name_source = cone_menu.control_operations.operations[1].parameters[
+            0
+        ].source
+        self.assertEqual(
+            (cone_name_source.argument_name, cone_name_source.transform),
+            ("objectName", "identity"),
+        )
+        assert cone_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in cone_menu.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender control.",
+                ),
+            ),
+        )
+        self.assertEqual(
+            (
+                cone.procedure_materialization.shortcut.availability,
+                cone.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertEqual(
+            (
+                cone.procedure_materialization.mcp.availability,
+                cone.procedure_materialization.mcp.reason,
+            ),
+            ("unavailable", "No approved action-level MCP tool is available."),
+        )
         torus = next(
             recipe
             for recipe in catalog.recipes
@@ -562,6 +702,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_icosphere",
                     "blender.mesh.create_plane",
                     "blender.mesh.create_cube",
+                    "blender.mesh.create_cone",
                     "blender.mesh.create_torus",
                 }
             )
@@ -737,6 +878,38 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertIsNotNone(plane.procedure_materialization)
         self.assertIsNone(torus.procedure_materialization)
 
+    def test_loads_byte_frozen_torus_catalog_without_cone_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.16.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "68945039a55f0cfef011d0472383e6f2e4809b181ca6def547cd78ff5660854f",
+        )
+        self.assertEqual(frozen.catalog_version, "1.16.0")
+        torus = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_torus"
+        )
+        cone = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cone"
+        )
+        self.assertIsNotNone(torus.procedure_materialization)
+        self.assertIsNone(cone.procedure_materialization)
+
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())
         menu = catalog.recipes[0].procedure_materialization.menu
@@ -759,6 +932,100 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertEqual(control.parameters[0].source.transform, "uniform_vector3")
         self.assertEqual(control.parameters[1].source.value, True)
         self.assertEqual(menu.omitted_action_arguments, ())
+
+    def test_rejects_malformed_segment_frame_derivations(self) -> None:
+        def cone_menu(raw: dict) -> dict:
+            recipe = next(
+                item
+                for item in raw["recipes"]
+                if item["actionName"] == "blender.mesh.create_cone"
+            )
+            return recipe["procedureMaterialization"]["menu"]
+
+        def derived_sources(menu: dict) -> list[dict]:
+            parameters = list(menu["operatorParameters"])
+            parameters.extend(
+                parameter
+                for operation in menu["controlOperations"]["operations"]
+                for parameter in operation["parameters"]
+            )
+            return [
+                parameter["source"]
+                for parameter in parameters
+                if parameter["source"]["kind"] == "derived_action_arguments"
+            ]
+
+        same_endpoint = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        same_endpoint_sources = derived_sources(cone_menu(same_endpoint))
+        same_endpoint_sources[0]["endArgumentName"] = "start"
+        with self.assertRaisesRegex(
+            ValueError, "segment frame arguments must differ"
+        ):
+            self._load_raw(same_endpoint)
+
+        unsupported_derivation = json.loads(
+            RESOURCE_PATH.read_text(encoding="utf-8")
+        )
+        unsupported_sources = derived_sources(cone_menu(unsupported_derivation))
+        unsupported_sources[0]["derivation"] = "arbitrary_expression"
+        with self.assertRaisesRegex(ValueError, "unsupported derivation"):
+            self._load_raw(unsupported_derivation)
+
+        missing_output = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        missing_menu = cone_menu(missing_output)
+        missing_location = missing_menu["controlOperations"]["operations"][0]
+        missing_location["parameters"][0]["source"] = {
+            "kind": "literal",
+            "value": [0, 0, 0],
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            "output coverage mismatch; missing: midpoint; unknown: none",
+        ):
+            self._load_raw(missing_output)
+
+        duplicate_output = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        duplicate_sources = derived_sources(cone_menu(duplicate_output))
+        duplicate_sources[1]["output"] = "distance"
+        with self.assertRaisesRegex(
+            ValueError, "maps output distance more than once"
+        ):
+            self._load_raw(duplicate_output)
+
+        reversed_pair = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        reversed_sources = derived_sources(cone_menu(reversed_pair))
+        reversed_sources[2]["startArgumentName"] = "end"
+        reversed_sources[2]["endArgumentName"] = "start"
+        with self.assertRaisesRegex(
+            ValueError, "participates in more than one segment frame"
+        ):
+            self._load_raw(reversed_pair)
+
+        direct_mix = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        direct_menu = cone_menu(direct_mix)
+        direct_menu["operatorParameters"].append(
+            {
+                "name": "start_again",
+                "source": {
+                    "kind": "action_argument",
+                    "argumentName": "start",
+                    "transform": "identity",
+                },
+            }
+        )
+        with self.assertRaisesRegex(
+            ValueError, "cannot mix direct and segment-frame mappings"
+        ):
+            self._load_raw(direct_mix)
+
+        omitted_endpoint = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        cone_menu(omitted_endpoint)["omittedActionArguments"].append(
+            {"argumentName": "end", "reason": "Invalid overlap."}
+        )
+        with self.assertRaisesRegex(
+            ValueError, "both maps and omits action argument end"
+        ):
+            self._load_raw(omitted_endpoint)
 
     def test_rejects_malformed_ordered_parameter_operations(self) -> None:
         cases: list[tuple[str, Callable[[dict, dict], None], str]] = [

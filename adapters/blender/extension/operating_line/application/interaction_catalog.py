@@ -124,6 +124,10 @@ class ParameterAssignmentSourceDefinition:
     value: Any = None
     argument_name: str | None = None
     transform: str | None = None
+    derivation: str | None = None
+    start_argument_name: str | None = None
+    end_argument_name: str | None = None
+    output: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -506,6 +510,43 @@ def _parse_parameter_source(
                 raw["argumentName"], f"{label} argumentName"
             ),
             transform=transform,
+        )
+    if kind == "derived_action_arguments":
+        _expect_exact_keys(
+            raw,
+            required={
+                "kind",
+                "derivation",
+                "startArgumentName",
+                "endArgumentName",
+                "output",
+            },
+            label=label,
+        )
+        derivation = _expect_string(raw["derivation"], f"{label} derivation")
+        if derivation != "segment_frame":
+            raise ValueError(f"{label} has unsupported derivation")
+        start_argument_name = _expect_string(
+            raw["startArgumentName"], f"{label} startArgumentName"
+        )
+        end_argument_name = _expect_string(
+            raw["endArgumentName"], f"{label} endArgumentName"
+        )
+        if start_argument_name == end_argument_name:
+            raise ValueError(f"{label} segment frame arguments must differ")
+        output = _expect_string(raw["output"], f"{label} output")
+        if output not in {
+            "distance",
+            "midpoint",
+            "rotation_euler_xyz_align_z",
+        }:
+            raise ValueError(f"{label} has unsupported segment frame output")
+        return ParameterAssignmentSourceDefinition(
+            kind=kind,
+            derivation=derivation,
+            start_argument_name=start_argument_name,
+            end_argument_name=end_argument_name,
+            output=output,
         )
     raise ValueError(f"{label} has unknown kind")
 
@@ -928,6 +969,17 @@ def _parse_procedure_materialization(
     )
 
 
+def _is_fixed_numeric_vector3_schema(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("type") == "array"
+        and value.get("minItems") == 3
+        and value.get("maxItems") == 3
+        and isinstance(value.get("items"), dict)
+        and value["items"].get("type") in {"number", "integer"}
+    )
+
+
 def _validate_parameter_assignment_coverage(
     recipe: InteractionRecipe,
     action: dict[str, Any],
@@ -946,25 +998,54 @@ def _validate_parameter_assignment_coverage(
         f"Action {recipe.action_name} argument properties",
     )
     property_names = set(properties)
-    mapped_sources: dict[str, list[ParameterAssignmentSourceDefinition]] = {}
+    direct_sources: dict[str, list[ParameterAssignmentSourceDefinition]] = {}
+    segment_groups: dict[
+        tuple[str, str], dict[str, ParameterAssignmentSourceDefinition]
+    ] = {}
+    segment_argument_groups: dict[str, tuple[str, str]] = {}
     for parameter in parameters:
         source = parameter.source
-        if source.kind != "action_argument":
+        if source.kind == "literal":
             continue
-        assert source.argument_name is not None
-        mapped_sources.setdefault(source.argument_name, []).append(source)
+        if source.kind == "action_argument":
+            assert source.argument_name is not None
+            direct_sources.setdefault(source.argument_name, []).append(source)
+            continue
+        assert source.kind == "derived_action_arguments"
+        assert source.derivation == "segment_frame"
+        assert source.start_argument_name is not None
+        assert source.end_argument_name is not None
+        assert source.output is not None
+        group_key = (source.start_argument_name, source.end_argument_name)
+        for argument_name in group_key:
+            existing_group = segment_argument_groups.get(argument_name)
+            if existing_group is not None and existing_group != group_key:
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} action argument "
+                    f"{argument_name} participates in more than one segment frame"
+                )
+            segment_argument_groups[argument_name] = group_key
+        outputs = segment_groups.setdefault(group_key, {})
+        if source.output in outputs:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} {channel_name} segment frame "
+                f"{source.start_argument_name}->{source.end_argument_name} maps output "
+                f"{source.output} more than once"
+            )
+        outputs[source.output] = source
 
     omitted_names = {
         omitted.argument_name for omitted in channel.omitted_action_arguments
     }
-    overlap = set(mapped_sources) & omitted_names
+    mapped_names = set(direct_sources) | set(segment_argument_groups)
+    overlap = mapped_names & omitted_names
     if overlap:
         raise ValueError(
             f"Interaction recipe {recipe.id} both maps and omits action argument "
             f"{min(overlap)}"
         )
-    unknown = (set(mapped_sources) | omitted_names) - property_names
-    missing = property_names - set(mapped_sources) - omitted_names
+    unknown = (mapped_names | omitted_names) - property_names
+    missing = property_names - mapped_names - omitted_names
     if unknown or missing:
         raise ValueError(
             f"Interaction recipe {recipe.id} {channel_name} ordered parameter "
@@ -973,7 +1054,12 @@ def _validate_parameter_assignment_coverage(
             f"unknown: {', '.join(sorted(unknown)) or 'none'}"
         )
     component_transforms = {"vector3_x", "vector3_y", "vector3_z"}
-    for argument_name, sources in mapped_sources.items():
+    for argument_name, sources in direct_sources.items():
+        if argument_name in segment_argument_groups:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} {channel_name} action argument "
+                f"{argument_name} cannot mix direct and segment-frame mappings"
+            )
         transforms = [source.transform for source in sources]
         components = [
             transform for transform in transforms if transform in component_transforms
@@ -988,14 +1074,7 @@ def _validate_parameter_assignment_coverage(
             f"Action {recipe.action_name} argument {argument_name} schema",
         )
         if components:
-            items = property_schema.get("items")
-            if (
-                property_schema.get("type") != "array"
-                or property_schema.get("minItems") != 3
-                or property_schema.get("maxItems") != 3
-                or not isinstance(items, dict)
-                or items.get("type") not in {"number", "integer"}
-            ):
+            if not _is_fixed_numeric_vector3_schema(property_schema):
                 raise ValueError(
                     f"Interaction recipe {recipe.id} {channel_name} vector3 "
                     f"component source {argument_name} must have a fixed-length "
@@ -1038,6 +1117,36 @@ def _validate_parameter_assignment_coverage(
             raise ValueError(
                 f"Interaction recipe {recipe.id} uniform_vector3 source "
                 f"{argument_name} must have a numeric action schema"
+            )
+
+    required_segment_outputs = {
+        "distance",
+        "midpoint",
+        "rotation_euler_xyz_align_z",
+    }
+    for (start_argument_name, end_argument_name), outputs in segment_groups.items():
+        for argument_name in (start_argument_name, end_argument_name):
+            if argument_name in direct_sources:
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} action argument "
+                    f"{argument_name} cannot mix direct and segment-frame mappings"
+                )
+            property_schema = properties.get(argument_name)
+            if not _is_fixed_numeric_vector3_schema(property_schema):
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} segment frame "
+                    f"argument {argument_name} must have a fixed-length numeric "
+                    "vector3 action schema"
+                )
+        actual_outputs = set(outputs)
+        if actual_outputs != required_segment_outputs:
+            missing_outputs = required_segment_outputs - actual_outputs
+            unknown_outputs = actual_outputs - required_segment_outputs
+            raise ValueError(
+                f"Interaction recipe {recipe.id} {channel_name} segment frame "
+                f"{start_argument_name}->{end_argument_name} output coverage mismatch; "
+                f"missing: {', '.join(sorted(missing_outputs)) or 'none'}; "
+                f"unknown: {', '.join(sorted(unknown_outputs)) or 'none'}"
             )
 
 

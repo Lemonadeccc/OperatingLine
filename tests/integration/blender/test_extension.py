@@ -18,6 +18,7 @@ import uuid
 
 import bmesh
 import bpy
+from mathutils import Vector
 
 sys.dont_write_bytecode = True
 
@@ -2519,6 +2520,107 @@ def assert_torus_guided_menu_round_trip() -> None:
     ) == guided_signature
     assert bpy.ops.operating_line.back() == {"FINISHED"}
     assert bpy.data.objects.get(object_name) is None
+
+
+def assert_cone_materialized_operator_contract() -> None:
+    """Probe the catalog's native operator parameters, not a full UI replay."""
+    object_name = "OperatingLine.MaterializedConeContract"
+    start = Vector((1.0, 2.0, 3.0))
+    end = Vector((4.0, 6.0, 3.0))
+    midpoint = (start + end) / 2.0
+    direction = end - start
+    horizontal = math.hypot(direction.x, direction.y)
+    depth = math.hypot(horizontal, direction.z)
+    rotation = (
+        0.0,
+        math.atan2(horizontal, direction.z),
+        math.atan2(direction.y, direction.x),
+    )
+    radius_start = 1.25
+    radius_end = 0.25
+    object_count = len(bpy.data.objects)
+    mesh_count = len(bpy.data.meshes)
+    selected_before = tuple(bpy.context.selected_objects)
+    active_before = bpy.context.view_layer.objects.active
+
+    assert_absent(object_name)
+    cone = None
+    mesh = None
+    try:
+        assert bpy.ops.mesh.primitive_cone_add(
+            vertices=32,
+            radius1=radius_start,
+            radius2=radius_end,
+            depth=depth,
+            end_fill_type="NGON",
+            calc_uvs=False,
+            enter_editmode=False,
+            align="WORLD",
+            location=(0.0, 0.0, 0.0),
+            rotation=rotation,
+            scale=(1.0, 1.0, 1.0),
+        ) == {"FINISHED"}
+        cone = bpy.context.active_object
+        assert cone is not None and cone.type == "MESH" and cone.mode == "OBJECT"
+        mesh = cone.data
+        cone.name = object_name
+        cone.location = midpoint
+        bpy.context.view_layer.update()
+
+        assert cone.name == object_name
+        assert tuple(round(value, 6) for value in cone.location) == (2.5, 4.0, 3.0)
+        assert tuple(round(value, 6) for value in cone.rotation_euler) == tuple(
+            round(value, 6) for value in rotation
+        )
+        assert tuple(round(value, 6) for value in cone.scale) == (1.0, 1.0, 1.0)
+        assert len(mesh.uv_layers) == 0
+        assert len(mesh.vertices) == 64
+        assert sum(len(polygon.vertices) == 32 for polygon in mesh.polygons) == 2
+        assert sum(len(polygon.vertices) == 4 for polygon in mesh.polygons) == 32
+
+        local_start = Vector((0.0, 0.0, -depth / 2.0))
+        local_end = Vector((0.0, 0.0, depth / 2.0))
+        assert (cone.matrix_world @ local_start - start).length <= 1e-5
+        assert (cone.matrix_world @ local_end - end).length <= 1e-5
+
+        lower_ring = [
+            vertex.co
+            for vertex in mesh.vertices
+            if math.isclose(vertex.co.z, -depth / 2.0, abs_tol=1e-5)
+        ]
+        upper_ring = [
+            vertex.co
+            for vertex in mesh.vertices
+            if math.isclose(vertex.co.z, depth / 2.0, abs_tol=1e-5)
+        ]
+        assert len(lower_ring) == 32
+        assert len(upper_ring) == 32
+        assert all(
+            math.isclose(math.hypot(vertex.x, vertex.y), radius_start, abs_tol=1e-5)
+            for vertex in lower_ring
+        )
+        assert all(
+            math.isclose(math.hypot(vertex.x, vertex.y), radius_end, abs_tol=1e-5)
+            for vertex in upper_ring
+        )
+    finally:
+        if cone is not None and bpy.data.objects.get(cone.name) is cone:
+            bpy.data.objects.remove(cone, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+        for selected in bpy.context.selected_objects:
+            selected.select_set(False)
+        for selected in selected_before:
+            if bpy.data.objects.get(selected.name) is selected:
+                selected.select_set(True)
+        if (
+            active_before is None
+            or bpy.data.objects.get(active_before.name) is active_before
+        ):
+            bpy.context.view_layer.objects.active = active_before
+    assert_absent(object_name)
+    assert len(bpy.data.objects) == object_count
+    assert len(bpy.data.meshes) == mesh_count
 
 
 def assert_companion_and_plan_semantics() -> None:
@@ -5727,6 +5829,7 @@ def main() -> None:
     assert_torus_argument_boundaries()
     assert_torus_action_round_trip()
     assert_torus_maximum_topology()
+    assert_cone_materialized_operator_contract()
     assert_icosphere_argument_boundaries()
     assert_icosphere_action_round_trip()
     assert_cube_resource_id_boundaries()

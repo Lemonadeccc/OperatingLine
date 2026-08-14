@@ -52,7 +52,63 @@ interface MaterializationParameterAssignment {
         readonly argumentName: string;
         readonly transform:
           'identity' | 'uniform_vector3' | 'vector3_x' | 'vector3_y' | 'vector3_z';
+      }
+    | {
+        readonly kind: 'derived_action_arguments';
+        readonly derivation: 'segment_frame';
+        readonly startArgumentName: string;
+        readonly endArgumentName: string;
+        readonly output: 'distance' | 'midpoint' | 'rotation_euler_xyz_align_z';
       };
+}
+
+type SegmentFrameOutput = 'distance' | 'midpoint' | 'rotation_euler_xyz_align_z';
+type FiniteVector3 = readonly [number, number, number];
+
+function finiteVector3(value: unknown, label: string): FiniteVector3 {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 3 ||
+    value.some((component) => typeof component !== 'number' || !Number.isFinite(component))
+  ) {
+    throw new Error(`${label} must be a finite numeric vector3`);
+  }
+  return value as unknown as FiniteVector3;
+}
+
+function canonicalFiniteNumber(value: number, label: string): number {
+  if (!Number.isFinite(value)) throw new Error(`${label} must be finite`);
+  return Object.is(value, -0) ? 0 : value;
+}
+
+export function deriveSegmentFrameParameter(
+  startValue: unknown,
+  endValue: unknown,
+  output: SegmentFrameOutput,
+): number | [number, number, number] {
+  const start = finiteVector3(startValue, 'Segment frame start');
+  const end = finiteVector3(endValue, 'Segment frame end');
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const dz = end[2] - start[2];
+  const horizontal = Math.hypot(dx, dy);
+  const distance = Math.hypot(horizontal, dz);
+  if (!Number.isFinite(distance) || distance === 0) {
+    throw new Error('Segment frame requires distinct finite endpoints with nonzero distance');
+  }
+
+  if (output === 'distance') return canonicalFiniteNumber(distance, 'Segment frame distance');
+
+  const result =
+    output === 'midpoint'
+      ? [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2]
+      : output === 'rotation_euler_xyz_align_z'
+        ? [0, Math.atan2(horizontal, dz), horizontal === 0 ? 0 : Math.atan2(dy, dx)]
+        : undefined;
+  if (result === undefined) throw new Error(`Unsupported segment frame output: ${String(output)}`);
+  return result.map((component) =>
+    canonicalFiniteNumber(component, `Segment frame ${output} component`),
+  ) as [number, number, number];
 }
 
 function sha256(value: unknown): string {
@@ -150,6 +206,17 @@ function materializeParameters(
     const source = assignment.source;
     if (source.kind === 'literal') {
       defineParameter(assignment.name, structuredClone(source.value));
+      continue;
+    }
+    if (source.kind === 'derived_action_arguments') {
+      const start = actionArguments[source.startArgumentName];
+      const end = actionArguments[source.endArgumentName];
+      if (start === undefined || end === undefined) {
+        throw new Error(
+          `Ordered parameter ${assignment.name} references missing segment frame action arguments ${source.startArgumentName}/${source.endArgumentName}`,
+        );
+      }
+      defineParameter(assignment.name, deriveSegmentFrameParameter(start, end, source.output));
       continue;
     }
     const argument = actionArguments[source.argumentName];

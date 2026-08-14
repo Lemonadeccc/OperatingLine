@@ -91,6 +91,13 @@ export const parameterAssignmentSourceSchema = z.discriminatedUnion('kind', [
     argumentName: z.string().min(1),
     transform: z.enum(['identity', 'uniform_vector3', 'vector3_x', 'vector3_y', 'vector3_z']),
   }),
+  z.strictObject({
+    kind: z.literal('derived_action_arguments'),
+    derivation: z.literal('segment_frame'),
+    startArgumentName: z.string().min(1),
+    endArgumentName: z.string().min(1),
+    output: z.enum(['distance', 'midpoint', 'rotation_euler_xyz_align_z']),
+  }),
 ]);
 export type ParameterAssignmentSource = z.infer<typeof parameterAssignmentSourceSchema>;
 
@@ -294,6 +301,65 @@ function validateActionArgumentCoverage(
   modality: 'menu' | 'shortcut',
 ): void {
   const coverage = new Map<string, { whole: boolean; components: Set<'x' | 'y' | 'z'> }>();
+  const segmentFrameOutputs = ['distance', 'midpoint', 'rotation_euler_xyz_align_z'] as const;
+  const segmentFrames = new Map<
+    string,
+    {
+      startArgumentName: string;
+      endArgumentName: string;
+      outputs: Set<(typeof segmentFrameOutputs)[number]>;
+    }
+  >();
+  const segmentFramePairByArgument = new Map<string, string>();
+
+  for (const assignment of assignments) {
+    if (assignment.source.kind !== 'derived_action_arguments') continue;
+
+    const { startArgumentName, endArgumentName, output } = assignment.source;
+    if (startArgumentName === endArgumentName) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} segment_frame requires distinct start and end action arguments`,
+      );
+    }
+
+    for (const argumentName of [startArgumentName, endArgumentName]) {
+      if (!Object.hasOwn(argumentSchemas, argumentName)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} segment_frame references unknown action argument ${argumentName}`,
+        );
+      }
+      if (!isFixedNumericVector3Schema(argumentSchemas[argumentName])) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} segment_frame requires fixed three-item numeric array action argument ${argumentName}`,
+        );
+      }
+    }
+
+    const pairKey = JSON.stringify([startArgumentName, endArgumentName]);
+    for (const argumentName of [startArgumentName, endArgumentName]) {
+      const existingPairKey = segmentFramePairByArgument.get(argumentName);
+      if (existingPairKey !== undefined && existingPairKey !== pairKey) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} action argument ${argumentName} cannot participate in multiple segment_frame pairs`,
+        );
+      }
+      segmentFramePairByArgument.set(argumentName, pairKey);
+    }
+
+    const segmentFrame = segmentFrames.get(pairKey) ?? {
+      startArgumentName,
+      endArgumentName,
+      outputs: new Set<(typeof segmentFrameOutputs)[number]>(),
+    };
+    if (segmentFrame.outputs.has(output)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} maps segment_frame output ${output} more than once for action arguments ${startArgumentName}, ${endArgumentName}`,
+      );
+    }
+    segmentFrame.outputs.add(output);
+    segmentFrames.set(pairKey, segmentFrame);
+  }
+
   for (const assignment of assignments) {
     if (assignment.source.kind !== 'action_argument') continue;
 
@@ -301,6 +367,11 @@ function validateActionArgumentCoverage(
     if (!Object.hasOwn(argumentSchemas, argumentName)) {
       throw new Error(
         `Interaction recipe ${recipe.id} ${modality} references unknown action argument ${argumentName}`,
+      );
+    }
+    if (segmentFramePairByArgument.has(argumentName)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} action argument ${argumentName} cannot be both directly mapped and used in a segment_frame derivation`,
       );
     }
 
@@ -360,6 +431,17 @@ function validateActionArgumentCoverage(
     }
   }
 
+  for (const segmentFrame of segmentFrames.values()) {
+    const missingOutputs = segmentFrameOutputs.filter(
+      (output) => !segmentFrame.outputs.has(output),
+    );
+    if (missingOutputs.length > 0) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} action arguments ${segmentFrame.startArgumentName}, ${segmentFrame.endArgumentName} must map segment_frame outputs distance, midpoint, and rotation_euler_xyz_align_z exactly once; missing: ${missingOutputs.join(', ')}`,
+      );
+    }
+  }
+
   const omittedArguments = new Set<string>();
   for (const omitted of omittedActionArguments) {
     if (!Object.hasOwn(argumentSchemas, omitted.argumentName)) {
@@ -367,7 +449,10 @@ function validateActionArgumentCoverage(
         `Interaction recipe ${recipe.id} ${modality} omits unknown action argument ${omitted.argumentName}`,
       );
     }
-    if (coverage.has(omitted.argumentName)) {
+    if (
+      coverage.has(omitted.argumentName) ||
+      segmentFramePairByArgument.has(omitted.argumentName)
+    ) {
       throw new Error(
         `Interaction recipe ${recipe.id} ${modality} action argument ${omitted.argumentName} cannot be both mapped and omitted`,
       );
@@ -381,7 +466,10 @@ function validateActionArgumentCoverage(
   }
 
   const uncoveredArguments = Object.keys(argumentSchemas).filter(
-    (argumentName) => !coverage.has(argumentName) && !omittedArguments.has(argumentName),
+    (argumentName) =>
+      !coverage.has(argumentName) &&
+      !segmentFramePairByArgument.has(argumentName) &&
+      !omittedArguments.has(argumentName),
   );
   if (uncoveredArguments.length > 0) {
     throw new Error(

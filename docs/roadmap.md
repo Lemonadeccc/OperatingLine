@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.16.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0`/`1.14.0`/`1.15.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.17.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.16.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -288,7 +288,20 @@
           `candidate`/`structural_only`，没有完整 UI operation 的真实 Blender replay；原生菜单/operator 不
           复现 managed collection、resource tag、receipt、幂等或补偿语义。见
           [ADR 0052](adr/0052-torus-ordered-menu-materialization.md)。
-    - [ ] 增加经真实版本验证的 shortcut、获批 MCP recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
+    - [x] 第六个 action 的有序菜单物化：InteractionCatalog `1.17.0` 为 Cone 声明六步
+          ordered menu；四步 guidance 的 operator step 按序绑定 `vertices: 32`、
+          `radius1 ← radiusStart`、`radius2 ← radiusEnd`、`depth ← distance`、
+          `end_fill_type: NGON`、`calc_uvs: false`、`enter_editmode: false`、`align: WORLD`、
+          `location: [0,0,0]`、canonical zero-roll XYZ `rotation`、`scale: [1,1,1]`，再绑定
+          中点 Location 与 Object Name。封闭 `derived_action_arguments`/`segment_frame` 要求
+          `distance`、`midpoint`、`rotation_euler_xyz_align_z` 三个输出各恰好一次并规范化
+          `-0`。该 Euler 不声称与 managed executor quaternion/roll 精确等价。`resourceId`
+          省略，Result 使用 `1.1.0`，shortcut/MCP unavailable，历史 `1.16.0` 冻结并精确回放。
+          轨迹仍为 `candidate`/`structural_only`；Blender 4.5/5.1 原生 operator 双版本探针不是完整六步 UI replay，
+          也不复现 collection/tag/receipt/idempotency/compensation。见
+          [ADR 0053](adr/0053-cone-segment-frame-menu-materialization.md)。
+    - [ ] 下一个有序菜单物化：Cylinder；同时增加经真实版本验证的 shortcut、获批 MCP
+          recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，

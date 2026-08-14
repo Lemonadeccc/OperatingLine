@@ -323,6 +323,61 @@ function torusAuthoringCandidateFixture(
   return tree;
 }
 
+function coneAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Cone authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cone',
+    arguments: {
+      resourceId: 'tutorial.cone.detail',
+      objectName: 'OperatingLine.DetailCone',
+      radiusStart: 1.25,
+      radiusEnd: 0.25,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
+    },
+  };
+  leaf['title'] = 'Create and configure one detailed Cone';
+  leaf['intent'] = 'Create a named Cone between exact endpoints with exact endpoint radii.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_cone',
+    description: 'Create one detailed Cone.',
+    parameters: { radiusStart: 1.25, radiusEnd: 0.25 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place and orient the Cone between its exact endpoints.',
+    parameters: { start: [1, 2, 3], end: [4, 6, 3] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Cone object.',
+    parameters: { name: 'OperatingLine.DetailCone' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [2.5, 4, 3] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cone_add',
+      menuPath: ['Add', 'Mesh', 'Cone'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.cone.detail' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -346,6 +401,9 @@ describe('procedure compilation runtime', () => {
     const planeInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.15.0',
     );
+    const torusInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.16.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -367,6 +425,9 @@ describe('procedure compilation runtime', () => {
     if (planeInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.15.0 snapshot');
     }
+    if (torusInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.16.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -379,6 +440,7 @@ describe('procedure compilation runtime', () => {
         icosphereInteractionCatalog,
         cubeInteractionCatalog,
         planeInteractionCatalog,
+        torusInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -919,11 +981,18 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
+      const torusPrompt = await callMcpTool(runtime, 23, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: torusInteractionCatalog.catalogVersion,
+      });
+      const torusPacket = procedureAuthoringPromptPacketSchema.parse(
+        torusPrompt.result?.structuredContent,
+      );
       const torusMcp = await callMcpTool(
         runtime,
-        23,
+        24,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: torusAuthoringCandidateFixture(packet) },
+        { packet: torusPacket, tree: torusAuthoringCandidateFixture(torusPacket) },
       );
       expect(torusMcp.result?.isError).not.toBe(true);
       const torusMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -996,10 +1065,135 @@ describe('procedure compilation runtime', () => {
       const torusHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ packet, tree: torusAuthoringCandidateFixture(packet) }),
+        body: JSON.stringify({
+          packet: torusPacket,
+          tree: torusAuthoringCandidateFixture(torusPacket),
+        }),
       });
       expect(torusHttp.status).toBe(200);
       await expect(torusHttp.json()).resolves.toEqual(torusMaterialization);
+
+      const historicalCone = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 25, 'operatingline.procedure.authoring.materialize', {
+            packet: torusPacket,
+            tree: coneAuthoringCandidateFixture(torusPacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalCone).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: { interactionCatalogVersion: '1.16.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cone.native',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+
+      const coneMcp = await callMcpTool(
+        runtime,
+        26,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: coneAuthoringCandidateFixture(packet) },
+      );
+      expect(coneMcp.result?.isError).not.toBe(true);
+      const coneMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        coneMcp.result?.structuredContent,
+      );
+      expect(coneMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.17.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cone.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const coneLeaf = coneMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (coneLeaf?.kind !== 'leaf' || coneLeaf.action === null) {
+        throw new Error('Expected one materialized Cone leaf');
+      }
+      const coneMenu = coneLeaf.menuTracks[0];
+      if (coneMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Cone menu track');
+      }
+      expect(coneMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        {
+          vertices: 32,
+          radius1: 1.25,
+          radius2: 0.25,
+          depth: 5,
+          end_fill_type: 'NGON',
+          calc_uvs: false,
+          enter_editmode: false,
+          align: 'WORLD',
+          location: [0, 0, 0],
+          rotation: [0, Math.PI / 2, Math.atan2(4, 3)],
+          scale: [1, 1, 1],
+        },
+        { value: [2.5, 4, 3] },
+        { value: 'OperatingLine.DetailCone' },
+      ]);
+      expect(Object.keys(coneMenu.operations[3]!.parameters)).toEqual([
+        'vertices',
+        'radius1',
+        'radius2',
+        'depth',
+        'end_fill_type',
+        'calc_uvs',
+        'enter_editmode',
+        'align',
+        'location',
+        'rotation',
+        'scale',
+      ]);
+      expect(
+        coneMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(coneLeaf.action.arguments).toEqual({
+        resourceId: 'tutorial.cone.detail',
+        objectName: 'OperatingLine.DetailCone',
+        radiusStart: 1.25,
+        radiusEnd: 0.25,
+        start: [1, 2, 3],
+        end: [4, 6, 3],
+      });
+      expect(coneLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'shortcut',
+          reason: 'No verified shortcut procedure is available.',
+        }),
+      ]);
+      expect(coneLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(coneMcp.result?.content?.[0]?.text).toBe(JSON.stringify(coneMaterialization));
+      const coneHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: coneAuthoringCandidateFixture(packet) }),
+      });
+      expect(coneHttp.status).toBe(200);
+      await expect(coneHttp.json()).resolves.toEqual(coneMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,

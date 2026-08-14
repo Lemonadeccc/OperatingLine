@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.16.0",
+  "catalogVersion": "1.17.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.12.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -883,6 +883,160 @@
           "binding": "accepted_plan_action"
         },
         "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "vertices",
+              "source": {
+                "kind": "literal",
+                "value": 32
+              }
+            },
+            {
+              "name": "radius1",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radiusStart",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "radius2",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radiusEnd",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "depth",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "distance"
+              }
+            },
+            {
+              "name": "end_fill_type",
+              "source": {
+                "kind": "literal",
+                "value": "NGON"
+              }
+            },
+            {
+              "name": "calc_uvs",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "enter_editmode",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "align",
+              "source": {
+                "kind": "literal",
+                "value": "WORLD"
+              }
+            },
+            {
+              "name": "location",
+              "source": {
+                "kind": "literal",
+                "value": [0, 0, 0]
+              }
+            },
+            {
+              "name": "rotation",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "rotation_euler_xyz_align_z"
+              }
+            },
+            {
+              "name": "scale",
+              "source": {
+                "kind": "literal",
+                "value": [1, 1, 1]
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.cone",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "derived_action_arguments",
+                      "derivation": "segment_frame",
+                      "startArgumentName": "start",
+                      "endArgumentName": "end",
+                      "output": "midpoint"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No verified shortcut procedure is available."
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
       }
     },
     {

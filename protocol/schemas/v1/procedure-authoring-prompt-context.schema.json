@@ -878,6 +878,43 @@
                                                 "transform"
                                               ],
                                               "additionalProperties": false
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "const": "derived_action_arguments"
+                                                },
+                                                "derivation": {
+                                                  "type": "string",
+                                                  "const": "segment_frame"
+                                                },
+                                                "startArgumentName": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "endArgumentName": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "output": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "distance",
+                                                    "midpoint",
+                                                    "rotation_euler_xyz_align_z"
+                                                  ]
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "derivation",
+                                                "startArgumentName",
+                                                "endArgumentName",
+                                                "output"
+                                              ],
+                                              "additionalProperties": false
                                             }
                                           ]
                                         }
@@ -991,6 +1028,43 @@
                                                           "kind",
                                                           "argumentName",
                                                           "transform"
+                                                        ],
+                                                        "additionalProperties": false
+                                                      },
+                                                      {
+                                                        "type": "object",
+                                                        "properties": {
+                                                          "kind": {
+                                                            "type": "string",
+                                                            "const": "derived_action_arguments"
+                                                          },
+                                                          "derivation": {
+                                                            "type": "string",
+                                                            "const": "segment_frame"
+                                                          },
+                                                          "startArgumentName": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                          },
+                                                          "endArgumentName": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                          },
+                                                          "output": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                              "distance",
+                                                              "midpoint",
+                                                              "rotation_euler_xyz_align_z"
+                                                            ]
+                                                          }
+                                                        },
+                                                        "required": [
+                                                          "kind",
+                                                          "derivation",
+                                                          "startArgumentName",
+                                                          "endArgumentName",
+                                                          "output"
                                                         ],
                                                         "additionalProperties": false
                                                       }
@@ -1228,6 +1302,43 @@
                                                   "kind",
                                                   "argumentName",
                                                   "transform"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "derived_action_arguments"
+                                                  },
+                                                  "derivation": {
+                                                    "type": "string",
+                                                    "const": "segment_frame"
+                                                  },
+                                                  "startArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "endArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "output": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "distance",
+                                                      "midpoint",
+                                                      "rotation_euler_xyz_align_z"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "derivation",
+                                                  "startArgumentName",
+                                                  "endArgumentName",
+                                                  "output"
                                                 ],
                                                 "additionalProperties": false
                                               }

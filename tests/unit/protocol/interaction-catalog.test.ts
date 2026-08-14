@@ -106,11 +106,124 @@ function installOrderedShortcut(catalog: InteractionCatalog) {
   return materialization.shortcut;
 }
 
+function installConeSegmentFrame(catalog: InteractionCatalog) {
+  const recipe = recipeFor(catalog, 'blender.mesh.create_cone');
+  recipe.procedureMaterialization = {
+    menu: {
+      availability: 'available',
+      source: 'guidance.native_path',
+      semanticBinding: 'all_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      operatorParameters: [
+        {
+          name: 'radius1',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'radiusStart',
+            transform: 'identity',
+          },
+        },
+        {
+          name: 'radius2',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'radiusEnd',
+            transform: 'identity',
+          },
+        },
+        {
+          name: 'depth',
+          source: {
+            kind: 'derived_action_arguments',
+            derivation: 'segment_frame',
+            startArgumentName: 'start',
+            endArgumentName: 'end',
+            output: 'distance',
+          },
+        },
+      ],
+      controlOperations: {
+        insertAfterStepId: 'operator.cone',
+        operations: [
+          {
+            id: 'control.location',
+            label: 'Location',
+            target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+            path: ['Sidebar', 'Item', 'Transform', 'Location'],
+            parameters: [
+              {
+                name: 'value',
+                source: {
+                  kind: 'derived_action_arguments',
+                  derivation: 'segment_frame',
+                  startArgumentName: 'start',
+                  endArgumentName: 'end',
+                  output: 'midpoint',
+                },
+              },
+            ],
+          },
+          {
+            id: 'control.rotation',
+            label: 'Rotation',
+            target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.rotation_euler' },
+            path: ['Sidebar', 'Item', 'Transform', 'Rotation'],
+            parameters: [
+              {
+                name: 'value',
+                source: {
+                  kind: 'derived_action_arguments',
+                  derivation: 'segment_frame',
+                  startArgumentName: 'start',
+                  endArgumentName: 'end',
+                  output: 'rotation_euler_xyz_align_z',
+                },
+              },
+            ],
+          },
+          {
+            id: 'control.object_name',
+            label: 'Object Name',
+            target: { kind: 'control', hostId: 'OBJECT_PT_transform.name' },
+            path: ['Sidebar', 'Item', 'Object Name'],
+            parameters: [
+              {
+                name: 'value',
+                source: {
+                  kind: 'action_argument',
+                  argumentName: 'objectName',
+                  transform: 'identity',
+                },
+              },
+            ],
+          },
+        ],
+      },
+      omittedActionArguments: [
+        {
+          argumentName: 'resourceId',
+          reason: 'The logical identifier is not entered through Blender controls.',
+        },
+      ],
+    },
+    shortcut: {
+      availability: 'unavailable',
+      reason: 'The segment frame requires ordered numeric parameter operations.',
+    },
+    mcp: {
+      availability: 'unavailable',
+      reason: 'MCP projection is not defined by this interaction catalog.',
+    },
+  };
+
+  return recipe.procedureMaterialization.menu;
+}
+
 describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.16.0');
+    expect(catalog.catalogVersion).toBe('1.17.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -152,6 +265,7 @@ describe('interaction catalog protocol', () => {
       '1.14.0',
       '1.15.0',
       '1.16.0',
+      '1.17.0',
     ]);
 
     const sphere = recipeFor(catalog, 'blender.mesh.create_uv_sphere');
@@ -475,6 +589,134 @@ describe('interaction catalog protocol', () => {
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    const cone = recipeFor(catalog, 'blender.mesh.create_cone');
+    expect(cone.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'available',
+        source: 'guidance.native_path',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          {
+            name: 'vertices',
+            source: { kind: 'literal', value: 32 },
+          },
+          {
+            name: 'radius1',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'radiusStart',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'radius2',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'radiusEnd',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'depth',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'distance',
+            },
+          },
+          {
+            name: 'end_fill_type',
+            source: { kind: 'literal', value: 'NGON' },
+          },
+          {
+            name: 'calc_uvs',
+            source: { kind: 'literal', value: false },
+          },
+          {
+            name: 'enter_editmode',
+            source: { kind: 'literal', value: false },
+          },
+          {
+            name: 'align',
+            source: { kind: 'literal', value: 'WORLD' },
+          },
+          {
+            name: 'location',
+            source: { kind: 'literal', value: [0, 0, 0] },
+          },
+          {
+            name: 'rotation',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'rotation_euler_xyz_align_z',
+            },
+          },
+          {
+            name: 'scale',
+            source: { kind: 'literal', value: [1, 1, 1] },
+          },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.cone',
+          operations: [
+            {
+              id: 'control.location',
+              label: 'Location',
+              target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+              path: ['Sidebar', 'Item', 'Transform', 'Location'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'derived_action_arguments',
+                    derivation: 'segment_frame',
+                    startArgumentName: 'start',
+                    endArgumentName: 'end',
+                    output: 'midpoint',
+                  },
+                },
+              ],
+            },
+            {
+              id: 'control.object_name',
+              label: 'Object Name',
+              target: { kind: 'control', hostId: 'OUTLINER.object.name' },
+              path: ['Outliner', 'Object Name'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'objectName',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        omittedActionArguments: [
+          {
+            argumentName: 'resourceId',
+            reason: 'The logical resource identifier has no user-facing Blender control.',
+          },
+        ],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
     const torus = recipeFor(catalog, 'blender.mesh.create_torus');
     expect(torus.procedureMaterialization).toEqual({
       menu: {
@@ -581,6 +823,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
+      'blender.mesh.create_cone',
       'blender.mesh.create_torus',
     ]);
     expect(
@@ -722,6 +965,115 @@ describe('interaction catalog protocol', () => {
     missing.recipes.pop();
     expect(() => validateInteractionCatalog(missing, blenderActionCatalog)).toThrow(
       'action coverage mismatch',
+    );
+  });
+
+  it('validates a complete Cone segment-frame derivation', () => {
+    const catalog = structuredClone(blenderInteractionCatalog);
+    const menu = installConeSegmentFrame(catalog);
+
+    expect(() => validateInteractionCatalog(catalog, blenderActionCatalog)).not.toThrow();
+    expect(interactionCatalogSchema.parse(catalog)).toMatchObject({
+      recipes: expect.arrayContaining([
+        expect.objectContaining({
+          actionName: 'blender.mesh.create_cone',
+          procedureMaterialization: expect.objectContaining({
+            menu: expect.objectContaining({
+              operatorParameters: expect.arrayContaining([
+                expect.objectContaining({
+                  source: {
+                    kind: 'derived_action_arguments',
+                    derivation: 'segment_frame',
+                    startArgumentName: 'start',
+                    endArgumentName: 'end',
+                    output: 'distance',
+                  },
+                }),
+              ]),
+            }),
+          }),
+        }),
+      ]),
+    });
+    expect(menu.availability).toBe('available');
+  });
+
+  it('fails closed for invalid Cone segment-frame derivations', () => {
+    const sameEndpoint = structuredClone(blenderInteractionCatalog);
+    const sameEndpointSource = installConeSegmentFrame(sameEndpoint).operatorParameters[2]!.source;
+    if (sameEndpointSource.kind !== 'derived_action_arguments')
+      throw new Error('Expected derivation');
+    sameEndpointSource.endArgumentName = 'start';
+    expect(() => validateInteractionCatalog(sameEndpoint, blenderActionCatalog)).toThrow(
+      'requires distinct start and end action arguments',
+    );
+
+    const unknownEndpoint = structuredClone(blenderInteractionCatalog);
+    const unknownEndpointSource =
+      installConeSegmentFrame(unknownEndpoint).operatorParameters[2]!.source;
+    if (unknownEndpointSource.kind !== 'derived_action_arguments')
+      throw new Error('Expected derivation');
+    unknownEndpointSource.startArgumentName = 'missing';
+    expect(() => validateInteractionCatalog(unknownEndpoint, blenderActionCatalog)).toThrow(
+      'references unknown action argument missing',
+    );
+
+    const nonVectorEndpoint = structuredClone(blenderInteractionCatalog);
+    const nonVectorSource =
+      installConeSegmentFrame(nonVectorEndpoint).operatorParameters[2]!.source;
+    if (nonVectorSource.kind !== 'derived_action_arguments') throw new Error('Expected derivation');
+    nonVectorSource.startArgumentName = 'radiusStart';
+    expect(() => validateInteractionCatalog(nonVectorEndpoint, blenderActionCatalog)).toThrow(
+      'requires fixed three-item numeric array action argument radiusStart',
+    );
+
+    const missingOutput = structuredClone(blenderInteractionCatalog);
+    const missingOutputMenu = installConeSegmentFrame(missingOutput);
+    missingOutputMenu.controlOperations.operations[0]!.parameters[0]!.source = {
+      kind: 'literal',
+      value: [0, 0, 0],
+    };
+    expect(() => validateInteractionCatalog(missingOutput, blenderActionCatalog)).toThrow(
+      'must map segment_frame outputs distance, midpoint, and rotation_euler_xyz_align_z exactly once; missing: midpoint',
+    );
+
+    const duplicateOutput = structuredClone(blenderInteractionCatalog);
+    const duplicateOutputSource =
+      installConeSegmentFrame(duplicateOutput).controlOperations.operations[1]!.parameters[0]!
+        .source;
+    if (duplicateOutputSource.kind !== 'derived_action_arguments')
+      throw new Error('Expected derivation');
+    duplicateOutputSource.output = 'midpoint';
+    expect(() => validateInteractionCatalog(duplicateOutput, blenderActionCatalog)).toThrow(
+      'maps segment_frame output midpoint more than once',
+    );
+
+    const directlyMappedEndpoint = structuredClone(blenderInteractionCatalog);
+    installConeSegmentFrame(directlyMappedEndpoint).operatorParameters.push({
+      name: 'start',
+      source: { kind: 'action_argument', argumentName: 'start', transform: 'identity' },
+    });
+    expect(() => validateInteractionCatalog(directlyMappedEndpoint, blenderActionCatalog)).toThrow(
+      'action argument start cannot be both directly mapped and used in a segment_frame derivation',
+    );
+
+    const omittedEndpoint = structuredClone(blenderInteractionCatalog);
+    installConeSegmentFrame(omittedEndpoint).omittedActionArguments.push({
+      argumentName: 'end',
+      reason: 'Invalid overlap.',
+    });
+    expect(() => validateInteractionCatalog(omittedEndpoint, blenderActionCatalog)).toThrow(
+      'action argument end cannot be both mapped and omitted',
+    );
+
+    const reversedPair = structuredClone(blenderInteractionCatalog);
+    const reversedSource =
+      installConeSegmentFrame(reversedPair).controlOperations.operations[0]!.parameters[0]!.source;
+    if (reversedSource.kind !== 'derived_action_arguments') throw new Error('Expected derivation');
+    reversedSource.startArgumentName = 'end';
+    reversedSource.endArgumentName = 'start';
+    expect(() => validateInteractionCatalog(reversedPair, blenderActionCatalog)).toThrow(
+      'action argument end cannot participate in multiple segment_frame pairs',
     );
   });
 
