@@ -104,7 +104,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.12.0');
+    expect(catalog.catalogVersion).toBe('1.13.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -142,6 +142,7 @@ describe('interaction catalog protocol', () => {
       '1.10.0',
       '1.11.0',
       '1.12.0',
+      '1.13.0',
     ]);
 
     const sphere = catalog.recipes[0]!;
@@ -247,7 +248,85 @@ describe('interaction catalog protocol', () => {
       semanticBinding: 'all_leaf_operations',
       parameterBinding: 'accepted_action_arguments',
     });
-    expect(catalog.recipes.slice(1)).toSatisfy((recipes) =>
+    const icosphere = catalog.recipes[1]!;
+    expect(icosphere.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'available',
+        source: 'guidance.native_path',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          {
+            name: 'subdivisions',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'subdivisions',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'radius',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'radius',
+              transform: 'identity',
+            },
+          },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.icosphere',
+          operations: [
+            {
+              id: 'control.location',
+              label: 'Location',
+              target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+              path: ['Sidebar', 'Item', 'Transform', 'Location'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'location',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+            {
+              id: 'control.object_name',
+              label: 'Object Name',
+              target: { kind: 'control', hostId: 'OUTLINER.object.name' },
+              path: ['Outliner', 'Object Name'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'objectName',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        omittedActionArguments: [
+          {
+            argumentName: 'resourceId',
+            reason: 'The logical resource identifier has no user-facing Blender control.',
+          },
+        ],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
+    expect(catalog.recipes.slice(2)).toSatisfy((recipes) =>
       recipes.every((recipe) => recipe.procedureMaterialization === undefined),
     );
   });

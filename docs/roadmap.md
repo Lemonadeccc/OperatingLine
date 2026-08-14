@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.12.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.13.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -263,6 +263,11 @@
           chord/sequence、selection path、参数顺序与 `vector3_x/y/z` 分量投影均可安装期验证，结果格式为
           `1.2.0`。该轨迹仍是 `candidate_only`/`structural_only`，不构成 Blender 状态等价证明。见
           [ADR 0048](adr/0048-candidate-shortcut-procedure-materialization.md)。
+    - [x] 第二个 action 的有序菜单物化：InteractionCatalog `1.13.0` 为 Icosphere 声明六步 ordered menu；
+          四步原生 guidance 后依次绑定 Location 与 Object Name，并在 operator step 绑定
+          `subdivisions`/`radius`。`resourceId` 显式省略，Result 使用 `1.1.0`；shortcut 未声明，MCP 因没有
+          真实 action-level tool 仍 unavailable。历史 `1.12.0` 逐字回放。见
+          [ADR 0049](adr/0049-icosphere-ordered-menu-materialization.md)。
     - [ ] 增加经真实版本验证的 shortcut、获批 MCP recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。

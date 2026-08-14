@@ -34,10 +34,12 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.12.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0`/`1.10.0`/`1.11.0` 保持精确回放。`1.12.0` 只为 UV Sphere 声明目录绑定的七步 menu 与六步
-candidate shortcut 物化；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`，MCP 仍
-unavailable。radius→scale 与相对移动仍只是教学投影。
+`1.13.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0`/`1.10.0`/`1.11.0`/`1.12.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
+新增四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
+与 `objectName`，省略内部 `resourceId`。它没有已声明 shortcut；MCP 也仍因没有真实 action-level tool
+而 unavailable。所有这些轨迹仍只是 candidate 教学投影。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如

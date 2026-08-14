@@ -61,6 +61,56 @@ function candidate(
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
+function icosphereCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Icosphere candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_icosphere',
+    arguments: {
+      resourceId: 'tutorial.icosphere.detail',
+      objectName: 'OperatingLine.IcosphereDetail',
+      subdivisions: 3,
+      radius: 1.75,
+      location: [-1.25, 2.5, 0.75],
+    },
+  };
+  leaf.title = 'Create and configure one detailed Icosphere';
+  leaf.intent = 'Create a named Icosphere with exact subdivisions, radius, and location.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_icosphere',
+    description: 'Create one detailed Icosphere.',
+    parameters: { subdivisions: 3, radius: 1.75 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place the Icosphere at its exact world location.',
+    parameters: { location: [-1.25, 2.5, 0.75] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Icosphere object.',
+    parameters: { name: 'OperatingLine.IcosphereDetail' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [-1.25, 2.5, 0.75] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_ico_sphere_add',
+      menuPath: ['Add', 'Mesh', 'Ico Sphere'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.icosphere.detail' },
+  };
+  return tree;
+}
+
 function orderedMenu(catalog: InteractionCatalog) {
   const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
   if (
@@ -243,6 +293,96 @@ describe('procedure authoring materialization', () => {
       reason: 'No approved action-level MCP tool is available.',
       modality: 'mcp',
     });
+  });
+
+  it('materializes the exact Icosphere ordered menu without inventing shortcut or MCP support', () => {
+    const input = icosphereCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Icosphere leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_icosphere.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Icosphere menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_icosphere.native',
+      title: 'Add one Icosphere from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.icosphere',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Ico Sphere'],
+        parameters: { subdivisions: 3, radius: 1.75 },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [-1.25, 2.5, 0.75] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.IcosphereDetail' },
+      },
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.icosphere.detail',
+      objectName: 'OperatingLine.IcosphereDetail',
+      subdivisions: 3,
+      radius: 1.75,
+      location: [-1.25, 2.5, 0.75],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
   });
 
   it('preserves the exact 1.10 legacy materialization algorithm and result version', () => {

@@ -80,7 +80,17 @@ describe('interaction catalog registry', () => {
       availability: 'available',
       parameterBinding: 'ordered_parameter_operations',
     });
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.12.0');
+    const frozenShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.12.0',
+    });
+    expect(frozenShortcut.recipes[0]!.procedureMaterialization?.shortcut).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(frozenShortcut.recipes[1]!.procedureMaterialization).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.13.0');
     const latestShortcut = blenderInteractionCatalog.recipes[0]!.procedureMaterialization?.shortcut;
     expect(latestShortcut).toMatchObject({
       availability: 'available',
@@ -103,6 +113,26 @@ describe('interaction catalog registry', () => {
     expect(latestShortcut.omittedActionArguments).toEqual([
       expect.objectContaining({ argumentName: 'resourceId' }),
     ]);
+    expect(blenderInteractionCatalog.recipes[1]!.procedureMaterialization).toMatchObject({
+      menu: {
+        availability: 'available',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          expect.objectContaining({ name: 'subdivisions' }),
+          expect.objectContaining({ name: 'radius' }),
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.icosphere',
+          operations: [
+            expect.objectContaining({ id: 'control.location' }),
+            expect.objectContaining({ id: 'control.object_name' }),
+          ],
+        },
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      },
+      shortcut: { availability: 'unavailable' },
+      mcp: { availability: 'unavailable' },
+    });
   });
 
   it('keeps the InteractionCatalog 1.10.0 compatibility snapshot byte-for-byte frozen', () => {
@@ -122,6 +152,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '308cafdaa22bb64a66e98464e841c92916dcea5d4fead9be6689d1d931537880',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.12.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.12.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '1e02e7295d1e305887ddf79409e7113e4267ea89a5fd18e44caac5b254731375',
     );
   });
 

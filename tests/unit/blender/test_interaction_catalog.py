@@ -107,7 +107,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.12.0")
+        self.assertEqual(catalog.catalog_version, "1.13.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -220,10 +220,76 @@ class InteractionCatalogTests(unittest.TestCase):
             sphere.procedure_materialization.mcp.availability,
             "unavailable",
         )
+        icosphere = catalog.recipes[1]
+        self.assertIsNotNone(icosphere.procedure_materialization)
+        assert icosphere.procedure_materialization is not None
+        icosphere_menu = icosphere.procedure_materialization.menu
+        self.assertEqual(icosphere_menu.availability, "available")
+        self.assertEqual(
+            icosphere_menu.parameter_binding,
+            "ordered_parameter_operations",
+        )
+        assert icosphere_menu.operator_parameters is not None
+        self.assertEqual(
+            tuple(parameter.name for parameter in icosphere_menu.operator_parameters),
+            ("subdivisions", "radius"),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.source.argument_name,
+                    parameter.source.transform,
+                )
+                for parameter in icosphere_menu.operator_parameters
+            ),
+            (("subdivisions", "identity"), ("radius", "identity")),
+        )
+        assert icosphere_menu.control_operations is not None
+        self.assertEqual(
+            icosphere_menu.control_operations.insert_after_step_id,
+            "operator.icosphere",
+        )
+        self.assertEqual(
+            tuple(
+                operation.id
+                for operation in icosphere_menu.control_operations.operations
+            ),
+            ("control.location", "control.object_name"),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.parameters[0].name,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.transform,
+                )
+                for operation in icosphere_menu.control_operations.operations
+            ),
+            (
+                ("value", "location", "identity"),
+                ("value", "objectName", "identity"),
+            ),
+        )
+        assert icosphere_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                omission.argument_name
+                for omission in icosphere_menu.omitted_action_arguments
+            ),
+            ("resourceId",),
+        )
+        self.assertEqual(
+            icosphere.procedure_materialization.shortcut.availability,
+            "unavailable",
+        )
+        self.assertEqual(
+            icosphere.procedure_materialization.mcp.availability,
+            "unavailable",
+        )
         self.assertTrue(
             all(
                 recipe.procedure_materialization is None
-                for recipe in catalog.recipes[1:]
+                for recipe in catalog.recipes[2:]
             )
         )
 
@@ -281,6 +347,25 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(materialization.shortcut.availability, "unavailable")
         self.assertIsNone(materialization.shortcut.shortcut_operations)
+
+    def test_loads_frozen_shortcut_catalog_without_icosphere_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.12.0.json"
+        )
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(frozen.catalog_version, "1.12.0")
+        sphere_materialization = frozen.recipes[0].procedure_materialization
+        assert sphere_materialization is not None
+        self.assertEqual(sphere_materialization.shortcut.availability, "available")
+        self.assertIsNone(frozen.recipes[1].procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

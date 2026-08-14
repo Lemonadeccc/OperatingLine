@@ -326,19 +326,23 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.12.0` 为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.13.0` 为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
+Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
+`subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；`resourceId` 不进入 UI operation。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
-hash 与逐 leaf coverage；MCP 仍因没有获批 action-level tool 而 unavailable。leaf 仍为 candidate 且
+hash 与逐 leaf coverage；Icosphere shortcut 因未声明而 unavailable，MCP 仍因没有真实 action-level tool
+而 unavailable。leaf 仍为 candidate 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
-不是宿主状态等价证明。历史 `1.9.0`/`1.10.0`/`1.11.0` 继续精确回放，结果格式依实际使用能力为
+不是宿主状态等价证明。历史 `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0` 继续精确回放，结果格式依实际使用能力为
 `1.0.0`/`1.1.0`/`1.2.0`。该入口
 不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。目录证明只存在于完整 result 信封；
 单独抽出或交给通用 store 的 tree 只保留可重建引用，仍须视为 `structural_only`，不得作为训练、检索或执行
 grounding attestation。完整决策见
 [ADR 0046](../adr/0046-catalog-bound-procedure-materialization.md) 与
 [ADR 0047](../adr/0047-ordered-procedure-parameter-operations.md) 与
-[ADR 0048](../adr/0048-candidate-shortcut-procedure-materialization.md)。verified shortcut/MCP recipe、真实
+[ADR 0048](../adr/0048-candidate-shortcut-procedure-materialization.md) 与
+[ADR 0049](../adr/0049-icosphere-ordered-menu-materialization.md)。verified shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方

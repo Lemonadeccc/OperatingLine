@@ -102,6 +102,60 @@ function authoringCandidateFixture(
   return tree;
 }
 
+function icosphereAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Icosphere authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_icosphere',
+    arguments: {
+      resourceId: 'tutorial.icosphere.detail',
+      objectName: 'OperatingLine.IcosphereDetail',
+      subdivisions: 3,
+      radius: 1.75,
+      location: [-1.25, 2.5, 0.75],
+    },
+  };
+  leaf['title'] = 'Create and configure one detailed Icosphere';
+  leaf['intent'] = 'Create a named Icosphere with exact subdivisions, radius, and location.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_icosphere',
+    description: 'Create one detailed Icosphere.',
+    parameters: { subdivisions: 3, radius: 1.75 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place the Icosphere at its exact world location.',
+    parameters: { location: [-1.25, 2.5, 0.75] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Icosphere object.',
+    parameters: { name: 'OperatingLine.IcosphereDetail' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [-1.25, 2.5, 0.75] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_ico_sphere_add',
+      menuPath: ['Add', 'Mesh', 'Ico Sphere'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.icosphere.detail' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -113,6 +167,9 @@ describe('procedure compilation runtime', () => {
     const orderedMenuInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.11.0',
     );
+    const shortcutInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.12.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -122,6 +179,9 @@ describe('procedure compilation runtime', () => {
     if (orderedMenuInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.11.0 snapshot');
     }
+    if (shortcutInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.12.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -130,6 +190,7 @@ describe('procedure compilation runtime', () => {
         unavailableLegacyInteractionCatalog,
         legacyMaterializingInteractionCatalog,
         orderedMenuInteractionCatalog,
+        shortcutInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -403,6 +464,63 @@ describe('procedure compilation runtime', () => {
       expect(httpMaterialization.status).toBe(200);
       await expect(httpMaterialization.json()).resolves.toEqual(materialization);
 
+      const icosphereMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 11, 'operatingline.procedure.authoring.materialize', {
+            packet,
+            tree: icosphereAuthoringCandidateFixture(packet),
+          })
+        ).result?.structuredContent,
+      );
+      expect(icosphereMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_icosphere.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const icosphereLeaf = icosphereMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (icosphereLeaf?.kind !== 'leaf' || icosphereLeaf.action === null) {
+        throw new Error('Expected one materialized Icosphere leaf');
+      }
+      const icosphereMenu = icosphereLeaf.menuTracks[0];
+      if (icosphereMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Icosphere menu track');
+      }
+      expect(icosphereMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { subdivisions: 3, radius: 1.75 },
+        { value: [-1.25, 2.5, 0.75] },
+        { value: 'OperatingLine.IcosphereDetail' },
+      ]);
+      expect(
+        icosphereMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(icosphereLeaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(icosphereLeaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const icosphereHttpMaterialization = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            packet,
+            tree: icosphereAuthoringCandidateFixture(packet),
+          }),
+        },
+      );
+      expect(icosphereHttpMaterialization.status).toBe(200);
+      await expect(icosphereHttpMaterialization.json()).resolves.toEqual(icosphereMaterialization);
+
       const rebuiltPacket = buildProcedureAuthoringPromptPacket(
         request,
         blenderActionCatalog,
@@ -448,6 +566,35 @@ describe('procedure compilation runtime', () => {
           mcp: 'unavailable',
         },
       ]);
+
+      const shortcutPrompt = await callMcpTool(runtime, 12, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: shortcutInteractionCatalog.catalogVersion,
+      });
+      const shortcutPacket = procedureAuthoringPromptPacketSchema.parse(
+        shortcutPrompt.result?.structuredContent,
+      );
+      const shortcutMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 13, 'operatingline.procedure.authoring.materialize', {
+            packet: shortcutPacket,
+            tree: authoringCandidateFixture(shortcutPacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(shortcutMaterialization).toMatchObject({
+        formatVersion: '1.2.0',
+        catalogBinding: { interactionCatalogVersion: '1.12.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_uv_sphere.native',
+            menu: 'materialized',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
 
       const legacyMaterializingPrompt = await callMcpTool(
         runtime,

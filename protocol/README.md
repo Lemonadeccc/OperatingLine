@@ -58,7 +58,7 @@ canonical 大小为上限。该入口不调用模型、保存树、创建 Propos
 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 复用完全相同的原 packet + candidate，并重新执行 packet
 integrity、已安装目录、candidate-only 契约和 compile 校验。只有 InteractionCatalog recipe 的封闭
-`procedureMaterialization` 声明可以把轨迹变为 available。Blender InteractionCatalog `1.12.0` 的 UV Sphere
+`procedureMaterialization` 声明可以把轨迹变为 available。Blender InteractionCatalog `1.13.0` 的 UV Sphere
 同时声明七步 ordered menu 与六步 candidate shortcut；快捷键 operation 以 `keyMode` 区分 chord/sequence，
 并用封闭 `vector3_x/y/z` 投影把 location 三个分量绑定到 `G → X/Y/Z`。顶层 Action 参数必须在每条替代轨迹
 中分别恰好映射或带理由省略；`workspace`/`editor`/`mode`/`keymap` 前置条件各恰好一条，所有
@@ -69,13 +69,17 @@ operation ID 等于 recipe step/control/shortcut ID，再结合树顶层
 `validatedHostVersions` 仍为空。通用 compile 继续是 `structural_only`。该入口不调用模型/Provider、不保存
 树、不创建 Proposal、也不执行 Blender。完整 result 信封才是目录 grounding 证明；单独抽出或经通用 store
 保存的 tree 会丢失 digest/coverage attestation，只能按 `structural_only` 使用。Blender InteractionCatalog
-`1.12.0` 只为 UV Sphere opt in；shortcut 结果格式为 `1.2.0`，历史 `1.11.0` ordered menu 返回 `1.1.0`，
+`1.13.0` 还为 Icosphere opt in 六步 ordered menu：四步 guidance 后依次绑定 Location 与 Object Name，
+并在 operator step 精确保留 `subdivisions`/`radius`。内部 `resourceId` 被显式省略；Icosphere shortcut 和
+所有 MCP 轨迹仍 unavailable，因为目录没有相应 shortcut 声明，且没有真实 action-level MCP tool。
+UV Sphere shortcut 结果格式为 `1.2.0`，Icosphere menu-only 结果格式为 `1.1.0`；历史 `1.11.0` ordered menu 返回 `1.1.0`，
 `1.10.0` 四步算法与 `1.9.0` unavailable 回放继续返回 `1.0.0`。所有投影仍为 candidate，不证明宿主状态
 等价。Result 契约要求 `1.1.0` 至少含一条 materialized menu、`1.2.0` 至少含一条 materialized shortcut，
 避免版本声明高于实际 coverage。见
 `docs/adr/0046-catalog-bound-procedure-materialization.md` 与
 `docs/adr/0047-ordered-procedure-parameter-operations.md` 与
-`docs/adr/0048-candidate-shortcut-procedure-materialization.md`。
+`docs/adr/0048-candidate-shortcut-procedure-materialization.md` 与
+`docs/adr/0049-icosphere-ordered-menu-materialization.md`。
 
 Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。缺省或 `telemetry` 保留只读
 观察；`success_gate` 要求至少一条 expected observation，并显式选择 `rollback_step` 或
