@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.19.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.18.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.20.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.19.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -324,6 +324,17 @@
           `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`，也不提供
           collection/tag/receipt/idempotency/compensation 等价。见
           [ADR 0055](adr/0055-cube-candidate-shortcut-materialization.md)。
+    - [x] Plane 候选快捷键物化：InteractionCatalog `1.20.0` 继续精确绑定 ActionCatalog `1.12.0`，
+          冻结 `1.19.0`，保留既有 Plane 六步 menu，并声明 candidate-only 六步 shortcut。它复用 Cube
+          的六项精确前置条件与封闭 `divide_by_two`：`Shift+A → Mesh → Plane` 使用默认 `size: 2`、
+          origin，随后以 GLOBAL `G X`、`G Y`、`G Z` 绑定 `location` 三分量，`S` 绑定 `size / 2`，
+          `F2` 绑定 `objectName`。`resourceId` 显式省略，MCP unavailable，Result 使用 `1.2.0`；
+          Cube 与 UV Sphere shortcut 保持 available，Icosphere、Torus、Cone、Cylinder shortcut 保持
+          unavailable。冻结的 `1.19.0` 中 Plane shortcut 仍 unavailable。Blender 4.5.3/5.1.1 Plane
+          operator/transform 探针不是实际键盘事件或完整 UI replay；它保留默认未 bake Plane mesh 与
+          `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`，也不提供
+          collection/tag/receipt/idempotency/compensation 等价。见
+          [ADR 0056](adr/0056-plane-candidate-shortcut-materialization.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

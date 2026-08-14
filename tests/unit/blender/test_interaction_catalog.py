@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.19.0")
+        self.assertEqual(catalog.catalog_version, "1.20.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -365,12 +365,115 @@ class InteractionCatalogTests(unittest.TestCase):
                 ),
             ),
         )
+        plane_shortcut = plane.procedure_materialization.shortcut
+        self.assertEqual(plane_shortcut.availability, "available")
         self.assertEqual(
             (
-                plane.procedure_materialization.shortcut.availability,
-                plane.procedure_materialization.shortcut.reason,
+                plane_shortcut.source,
+                plane_shortcut.semantic_binding,
+                plane_shortcut.parameter_binding,
+                plane_shortcut.projection,
             ),
-            ("unavailable", "No verified shortcut procedure is available."),
+            (
+                "catalog.ordered_shortcut_operations",
+                "all_leaf_operations",
+                "ordered_parameter_operations",
+                "candidate_only",
+            ),
+        )
+        assert plane_shortcut.preconditions is not None
+        self.assertEqual(
+            tuple(
+                (precondition.kind, precondition.label, precondition.value)
+                for precondition in plane_shortcut.preconditions
+            ),
+            (
+                ("workspace", "Workspace", "Layout"),
+                ("editor", "Editor", "VIEW_3D"),
+                ("mode", "Mode", "OBJECT"),
+                ("keymap", "Keymap", "Blender"),
+                ("scene_state", "3D Cursor", "[0,0,0]"),
+                ("scene_state", "Transform Orientation", "GLOBAL"),
+            ),
+        )
+        assert plane_shortcut.shortcut_operations is not None
+        self.assertEqual(
+            tuple(
+                (operation.id, operation.key_mode, operation.keys)
+                for operation in plane_shortcut.shortcut_operations
+            ),
+            (
+                ("shortcut.add_plane", "chord", ("SHIFT", "A")),
+                ("shortcut.move_x", "sequence", ("G", "X")),
+                ("shortcut.move_y", "sequence", ("G", "Y")),
+                ("shortcut.move_z", "sequence", ("G", "Z")),
+                ("shortcut.scale", "sequence", ("S",)),
+                ("shortcut.rename", "sequence", ("F2",)),
+            ),
+        )
+        plane_add = plane_shortcut.shortcut_operations[0]
+        self.assertEqual(plane_add.selection_path, ("Mesh", "Plane"))
+        self.assertEqual(
+            tuple(
+                (parameter.name, parameter.source.kind, parameter.source.value)
+                for parameter in plane_add.parameters
+            ),
+            (
+                ("size", "literal", 2),
+                ("location", "literal", [0, 0, 0]),
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.parameters[0].name,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.transform,
+                    operation.parameters[1].name,
+                    operation.parameters[1].source.value,
+                )
+                for operation in plane_shortcut.shortcut_operations[1:4]
+            ),
+            (
+                ("value", "location", "vector3_x", "confirm", "ENTER"),
+                ("value", "location", "vector3_y", "confirm", "ENTER"),
+                ("value", "location", "vector3_z", "confirm", "ENTER"),
+            ),
+        )
+        plane_scale = plane_shortcut.shortcut_operations[4]
+        self.assertEqual(
+            (
+                plane_scale.parameters[0].name,
+                plane_scale.parameters[0].source.argument_name,
+                plane_scale.parameters[0].source.transform,
+                plane_scale.parameters[1].name,
+                plane_scale.parameters[1].source.value,
+            ),
+            ("value", "size", "divide_by_two", "confirm", "ENTER"),
+        )
+        plane_rename = plane_shortcut.shortcut_operations[5]
+        self.assertEqual(
+            (
+                plane_rename.parameters[0].name,
+                plane_rename.parameters[0].source.argument_name,
+                plane_rename.parameters[0].source.transform,
+                plane_rename.parameters[1].name,
+                plane_rename.parameters[1].source.value,
+            ),
+            ("text", "objectName", "identity", "confirm", "ENTER"),
+        )
+        assert plane_shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in plane_shortcut.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender shortcut input.",
+                ),
+            ),
         )
         self.assertEqual(
             (
@@ -1127,6 +1230,42 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNone(
             cube.procedure_materialization.shortcut.shortcut_operations
+        )
+
+    def test_loads_byte_frozen_cube_shortcut_catalog_without_plane_shortcut(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.19.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "7e1d454fcf36bbf52e76583bd15cb4e95c44791d644df8b8e5c1cf75cd12e1d0",
+        )
+        self.assertEqual(frozen.catalog_version, "1.19.0")
+        plane = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_plane"
+        )
+        assert plane.procedure_materialization is not None
+        self.assertEqual(
+            (
+                plane.procedure_materialization.shortcut.availability,
+                plane.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertIsNone(
+            plane.procedure_materialization.shortcut.shortcut_operations
         )
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:

@@ -326,18 +326,18 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.19.0` 精确绑定 ActionCatalog `1.12.0`，冻结 `1.18.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.20.0` 精确绑定 ActionCatalog `1.12.0`，冻结 `1.19.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
 `subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；`resourceId` 不进入 UI operation。
 Cube 与 Plane 同样各自声明六步 ordered menu：四步 guidance 的 operator step 以 identity 投影绑定 accepted
 action 的 `size`，随后绑定 Location 与 Object Name，并省略 `resourceId`。`size` 表示完整边长，不是
-transform scale。Cube 还声明 candidate-only 六步 shortcut：六项前置条件固定为 `Layout`、`VIEW_3D`、
+transform scale。Cube 与 Plane 还各自声明 candidate-only 六步 shortcut：六项前置条件固定为 `Layout`、`VIEW_3D`、
 `OBJECT`、Blender keymap、3D Cursor `[0,0,0]` 与 GLOBAL Transform Orientation；轨迹依次为
-`Shift+A → Mesh → Cube`（默认 `size: 2`、origin）、`G X`、`G Y`、`G Z`、`S` 与 `F2`。
+`Shift+A → Mesh → Cube` 或 `Shift+A → Mesh → Plane`（默认 `size: 2`、origin）、`G X`、`G Y`、
+`G Z`、`S` 与 `F2`。
 三个轴向移动用 `vector3_x/y/z` 绑定 accepted `location`，`S` 用封闭 `divide_by_two` 绑定
-`size / 2`，`F2` 绑定 `objectName`；`resourceId` 显式省略，MCP unavailable。Plane shortcut 与 MCP
-仍 unavailable。
+`size / 2`，`F2` 绑定 `objectName`；`resourceId` 显式省略，MCP unavailable。
 Torus 另行声明六步 ordered menu，在 operator step 按顺序以 identity 投影绑定 `majorSegments`、
 `minorSegments`，固定 literal `mode: MAJOR_MINOR`，再绑定 `majorRadius`、`minorRadius`，随后绑定 Location 与
 Object Name，并省略 `resourceId`；
@@ -365,13 +365,14 @@ hash 与逐 leaf coverage；Icosphere shortcut 因未声明而 unavailable。lea
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
 不是宿主状态等价证明。Cube/Plane 的 `size`、Torus 的四项 identity 投影与 Cone/Cylinder 的
 segment-frame 派生同样只证明参数来源；当前没有
-完整 UI operation 的真实 Blender replay。Cube 的 Blender 4.5.3/5.1.1 operator/transform 探针不是
-实际键盘事件或完整 UI replay，并保留 `scale = size / 2`，不等价于 managed executor 的 baked mesh/
-`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、receipt、幂等或补偿语义；
+完整 UI operation 的真实 Blender replay。Cube 与 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
+不是实际键盘事件或完整 UI replay，并保留默认未 bake mesh 与 `scale = size / 2`，不等价于 managed
+executor 的 baked mesh/`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、
+receipt、幂等或补偿语义；
 Cone/Cylinder 的 Blender 4.5/5.1 operator 双版本探针也不是六步 UI replay。历史
-`1.9.0` 至已冻结的 `1.18.0` 继续精确回放，结果格式依实际使用能力为
-`1.0.0`/`1.1.0`/`1.2.0`，其中 Cube 与 UV Sphere shortcut 结果为 `1.2.0`，Icosphere/Plane/Torus/
-Cone/Cylinder menu-only 结果为 `1.1.0`。该入口
+`1.9.0` 至已冻结的 `1.19.0` 继续精确回放；`1.19.0` 中 Plane shortcut 保持 unavailable。结果格式依实际
+使用能力为 `1.0.0`/`1.1.0`/`1.2.0`，其中 Plane、Cube 与 UV Sphere shortcut 结果为 `1.2.0`，
+Icosphere/Torus/Cone/Cylinder menu-only 结果为 `1.1.0`。该入口
 不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。目录证明只存在于完整 result 信封；
 单独抽出或交给通用 store 的 tree 只保留可重建引用，仍须视为 `structural_only`，不得作为训练、检索或执行
 grounding attestation。完整决策见
@@ -384,7 +385,8 @@ grounding attestation。完整决策见
 [ADR 0052](../adr/0052-torus-ordered-menu-materialization.md) 与
 [ADR 0053](../adr/0053-cone-segment-frame-menu-materialization.md) 与
 [ADR 0054](../adr/0054-cylinder-segment-frame-menu-materialization.md) 与
-[ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md)。更多 action 的封闭声明、verified
+[ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
+[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 

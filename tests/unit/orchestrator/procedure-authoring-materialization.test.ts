@@ -856,7 +856,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Plane ordered menu without inventing shortcut or MCP support', () => {
+  it('materializes the exact Plane ordered menu and candidate shortcut without inventing MCP support', () => {
     const input = planeCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -869,13 +869,13 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Plane leaf');
     }
 
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.2.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_plane.native',
         menu: 'materialized',
-        shortcut: 'unavailable',
+        shortcut: 'materialized',
         mcp: 'unavailable',
       },
     ]);
@@ -927,13 +927,84 @@ describe('procedure authoring materialization', () => {
       size: 12.5,
       location: [0, 0, -1.25],
     });
-    expect(leaf.shortcutTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'shortcut',
-        reason: 'No verified shortcut procedure is available.',
-      }),
+    const shortcutTrack = leaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available Plane shortcut track');
+    }
+    const planeRecipe = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.id === 'blender.mesh.create_plane.native',
+    );
+    if (planeRecipe?.procedureMaterialization?.shortcut?.availability !== 'available') {
+      throw new Error('expected catalog-grounded Plane shortcut fixture');
+    }
+    expect(shortcutTrack).toMatchObject({
+      id: 'blender.mesh.create_plane.native.shortcut',
+      title: 'Add one plane from the 3D Viewport shortcut projection',
+      modality: 'shortcut',
+      preconditions: planeRecipe.procedureMaterialization.shortcut.preconditions,
+    });
+    expect(
+      shortcutTrack.operations.map(({ id, order, keyMode, keys, selectionPath, parameters }) => ({
+        id,
+        order,
+        keyMode,
+        keys,
+        selectionPath,
+        parameters,
+      })),
+    ).toEqual([
+      {
+        id: 'shortcut.add_plane',
+        order: 1,
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'Plane'],
+        parameters: { size: 2, location: [0, 0, 0] },
+      },
+      {
+        id: 'shortcut.move_x',
+        order: 2,
+        keyMode: 'sequence',
+        keys: ['G', 'X'],
+        selectionPath: undefined,
+        parameters: { value: 0, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_y',
+        order: 3,
+        keyMode: 'sequence',
+        keys: ['G', 'Y'],
+        selectionPath: undefined,
+        parameters: { value: 0, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_z',
+        order: 4,
+        keyMode: 'sequence',
+        keys: ['G', 'Z'],
+        selectionPath: undefined,
+        parameters: { value: -1.25, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.scale',
+        order: 5,
+        keyMode: 'sequence',
+        keys: ['S'],
+        selectionPath: undefined,
+        parameters: { value: 6.25, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.rename',
+        order: 6,
+        keyMode: 'sequence',
+        keys: ['F2'],
+        selectionPath: undefined,
+        parameters: { text: 'OperatingLine.GroundPlane', confirm: 'ENTER' },
+      },
     ]);
+    expect(
+      shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
     expect(leaf.mcpTracks).toEqual([
       expect.objectContaining({
         availability: 'unavailable',

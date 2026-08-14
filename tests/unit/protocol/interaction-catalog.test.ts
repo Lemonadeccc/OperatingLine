@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.19.0');
+    expect(catalog.catalogVersion).toBe('1.20.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -268,6 +268,7 @@ describe('interaction catalog protocol', () => {
       '1.17.0',
       '1.18.0',
       '1.19.0',
+      '1.20.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -282,6 +283,16 @@ describe('interaction catalog protocol', () => {
     if (frozen118 === undefined) throw new Error('Expected frozen InteractionCatalog 1.18.0');
     expect(
       recipeFor(frozen118, 'blender.mesh.create_cube').procedureMaterialization?.shortcut,
+    ).toEqual({
+      availability: 'unavailable',
+      reason: 'No verified shortcut procedure is available.',
+    });
+    const frozen119 = blenderInteractionCatalogs.find(
+      (versionedCatalog) => versionedCatalog.catalogVersion === '1.19.0',
+    );
+    if (frozen119 === undefined) throw new Error('Expected frozen InteractionCatalog 1.19.0');
+    expect(
+      recipeFor(frozen119, 'blender.mesh.create_plane').procedureMaterialization?.shortcut,
     ).toEqual({
       availability: 'unavailable',
       reason: 'No verified shortcut procedure is available.',
@@ -529,15 +540,115 @@ describe('interaction catalog protocol', () => {
           },
         ],
       },
-      shortcut: {
-        availability: 'unavailable',
-        reason: 'No verified shortcut procedure is available.',
-      },
+      shortcut: expect.objectContaining({
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+        operations: expect.any(Array),
+      }),
       mcp: {
         availability: 'unavailable',
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    const planeShortcut = plane.procedureMaterialization?.shortcut;
+    if (planeShortcut?.availability !== 'available') {
+      throw new Error('Expected available Plane shortcut materialization');
+    }
+    expect(planeShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'scene_state', label: '3D Cursor', value: '[0,0,0]' },
+      { kind: 'scene_state', label: 'Transform Orientation', value: 'GLOBAL' },
+    ]);
+    expect(
+      planeShortcut.operations.map((operation) => ({
+        id: operation.id,
+        keyMode: operation.keyMode,
+        keys: operation.keys,
+      })),
+    ).toEqual([
+      { id: 'shortcut.add_plane', keyMode: 'chord', keys: ['SHIFT', 'A'] },
+      { id: 'shortcut.move_x', keyMode: 'sequence', keys: ['G', 'X'] },
+      { id: 'shortcut.move_y', keyMode: 'sequence', keys: ['G', 'Y'] },
+      { id: 'shortcut.move_z', keyMode: 'sequence', keys: ['G', 'Z'] },
+      { id: 'shortcut.scale', keyMode: 'sequence', keys: ['S'] },
+      { id: 'shortcut.rename', keyMode: 'sequence', keys: ['F2'] },
+    ]);
+    expect(planeShortcut.operations[0]).toMatchObject({
+      selectionPath: ['Mesh', 'Plane'],
+      parameters: [
+        { name: 'size', source: { kind: 'literal', value: 2 } },
+        { name: 'location', source: { kind: 'literal', value: [0, 0, 0] } },
+      ],
+    });
+    expect(planeShortcut.operations.slice(1, 4).map((operation) => operation.parameters)).toEqual([
+      [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'location',
+            transform: 'vector3_x',
+          },
+        },
+        { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+      ],
+      [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'location',
+            transform: 'vector3_y',
+          },
+        },
+        { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+      ],
+      [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'location',
+            transform: 'vector3_z',
+          },
+        },
+        { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+      ],
+    ]);
+    expect(planeShortcut.operations[4]!.parameters).toEqual([
+      {
+        name: 'value',
+        source: {
+          kind: 'action_argument',
+          argumentName: 'size',
+          transform: 'divide_by_two',
+        },
+      },
+      { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+    ]);
+    expect(planeShortcut.operations[5]!.parameters).toEqual([
+      {
+        name: 'text',
+        source: {
+          kind: 'action_argument',
+          argumentName: 'objectName',
+          transform: 'identity',
+        },
+      },
+      { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+    ]);
+    expect(planeShortcut.omittedActionArguments).toEqual([
+      {
+        argumentName: 'resourceId',
+        reason: 'The logical resource identifier has no user-facing Blender shortcut input.',
+      },
+    ]);
     const cube = recipeFor(catalog, 'blender.mesh.create_cube');
     expect(cube.procedureMaterialization).toEqual({
       menu: {

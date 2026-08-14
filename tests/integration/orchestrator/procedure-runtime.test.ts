@@ -464,6 +464,9 @@ describe('procedure compilation runtime', () => {
     const cylinderInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.18.0',
     );
+    const cubeShortcutInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.19.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -494,6 +497,9 @@ describe('procedure compilation runtime', () => {
     if (cylinderInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.18.0 snapshot');
     }
+    if (cubeShortcutInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.19.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -509,6 +515,7 @@ describe('procedure compilation runtime', () => {
         torusInteractionCatalog,
         coneInteractionCatalog,
         cylinderInteractionCatalog,
+        cubeShortcutInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -1405,17 +1412,32 @@ describe('procedure compilation runtime', () => {
       expect(cylinderHttp.status).toBe(200);
       await expect(cylinderHttp.json()).resolves.toEqual(cylinderMaterialization);
 
-      const latestCubeMcp = await callMcpTool(
+      const cubeShortcutPrompt = await callMcpTool(
         runtime,
         32,
+        'operatingline.procedure.prompt.get',
+        {
+          ...request,
+          interactionCatalogVersion: cubeShortcutInteractionCatalog.catalogVersion,
+        },
+      );
+      const cubeShortcutPacket = procedureAuthoringPromptPacketSchema.parse(
+        cubeShortcutPrompt.result?.structuredContent,
+      );
+      const cubeShortcutMcp = await callMcpTool(
+        runtime,
+        33,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: cubeAuthoringCandidateFixture(packet) },
+        {
+          packet: cubeShortcutPacket,
+          tree: cubeAuthoringCandidateFixture(cubeShortcutPacket),
+        },
       );
-      expect(latestCubeMcp.result?.isError).not.toBe(true);
-      const latestCubeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
-        latestCubeMcp.result?.structuredContent,
+      expect(cubeShortcutMcp.result?.isError).not.toBe(true);
+      const cubeShortcutMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        cubeShortcutMcp.result?.structuredContent,
       );
-      expect(latestCubeMaterialization).toMatchObject({
+      expect(cubeShortcutMaterialization).toMatchObject({
         formatVersion: '1.2.0',
         catalogBinding: { interactionCatalogVersion: '1.19.0' },
         coverage: [
@@ -1428,17 +1450,17 @@ describe('procedure compilation runtime', () => {
           },
         ],
       });
-      const latestCubeLeaf = latestCubeMaterialization.tree.nodes.find(
+      const cubeShortcutLeaf = cubeShortcutMaterialization.tree.nodes.find(
         (node) => node.id === 'snowman.head.eyes.left',
       );
-      if (latestCubeLeaf?.kind !== 'leaf' || latestCubeLeaf.action === null) {
-        throw new Error('Expected one latest materialized Cube leaf');
+      if (cubeShortcutLeaf?.kind !== 'leaf' || cubeShortcutLeaf.action === null) {
+        throw new Error('Expected one InteractionCatalog 1.19 materialized Cube leaf');
       }
-      const latestCubeMenu = latestCubeLeaf.menuTracks[0];
-      if (latestCubeMenu?.availability !== 'available') {
-        throw new Error('Expected one latest catalog-grounded Cube menu track');
+      const cubeShortcutMenu = cubeShortcutLeaf.menuTracks[0];
+      if (cubeShortcutMenu?.availability !== 'available') {
+        throw new Error('Expected one InteractionCatalog 1.19 Cube menu track');
       }
-      expect(latestCubeMenu.operations.map((operation) => operation.parameters)).toEqual([
+      expect(cubeShortcutMenu.operations.map((operation) => operation.parameters)).toEqual([
         {},
         {},
         {},
@@ -1446,12 +1468,12 @@ describe('procedure compilation runtime', () => {
         { value: [-1, 2, 0.5] },
         { value: 'OperatingLine.CubeBody' },
       ]);
-      const latestCubeShortcut = latestCubeLeaf.shortcutTracks[0];
-      if (latestCubeShortcut?.availability !== 'available') {
-        throw new Error('Expected one latest catalog-grounded Cube shortcut track');
+      const cubeShortcutTrack = cubeShortcutLeaf.shortcutTracks[0];
+      if (cubeShortcutTrack?.availability !== 'available') {
+        throw new Error('Expected one InteractionCatalog 1.19 Cube shortcut track');
       }
       expect(
-        latestCubeShortcut.operations.map(
+        cubeShortcutTrack.operations.map(
           ({ id, order, keyMode, keys, selectionPath, parameters }) => ({
             id,
             order,
@@ -1512,28 +1534,183 @@ describe('procedure compilation runtime', () => {
         },
       ]);
       expect(
-        latestCubeShortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
+        cubeShortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
       ).not.toContain('resourceId');
-      expect(latestCubeLeaf.mcpTracks).toEqual([
+      expect(cubeShortcutLeaf.mcpTracks).toEqual([
         expect.objectContaining({
           availability: 'unavailable',
           modality: 'mcp',
           reason: 'No approved action-level MCP tool is available.',
         }),
       ]);
-      expect(latestCubeMcp.result?.content?.[0]?.text).toBe(
-        JSON.stringify(latestCubeMaterialization),
+      expect(cubeShortcutMcp.result?.content?.[0]?.text).toBe(
+        JSON.stringify(cubeShortcutMaterialization),
       );
-      const latestCubeHttp = await fetch(
+      const cubeShortcutHttp = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
         {
           method: 'POST',
           headers,
-          body: JSON.stringify({ packet, tree: cubeAuthoringCandidateFixture(packet) }),
+          body: JSON.stringify({
+            packet: cubeShortcutPacket,
+            tree: cubeAuthoringCandidateFixture(cubeShortcutPacket),
+          }),
         },
       );
-      expect(latestCubeHttp.status).toBe(200);
-      await expect(latestCubeHttp.json()).resolves.toEqual(latestCubeMaterialization);
+      expect(cubeShortcutHttp.status).toBe(200);
+      await expect(cubeShortcutHttp.json()).resolves.toEqual(cubeShortcutMaterialization);
+
+      const historicalPlaneShortcut = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 34, 'operatingline.procedure.authoring.materialize', {
+            packet: cubeShortcutPacket,
+            tree: planeAuthoringCandidateFixture(cubeShortcutPacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalPlaneShortcut).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.19.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_plane.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+
+      const planeShortcutMcp = await callMcpTool(
+        runtime,
+        35,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: planeAuthoringCandidateFixture(packet) },
+      );
+      expect(planeShortcutMcp.result?.isError).not.toBe(true);
+      const planeShortcutMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        planeShortcutMcp.result?.structuredContent,
+      );
+      expect(planeShortcutMaterialization).toMatchObject({
+        formatVersion: '1.2.0',
+        catalogBinding: { interactionCatalogVersion: '1.20.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_plane.native',
+            menu: 'materialized',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const planeShortcutLeaf = planeShortcutMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (planeShortcutLeaf?.kind !== 'leaf' || planeShortcutLeaf.action === null) {
+        throw new Error('Expected one InteractionCatalog 1.20 materialized Plane leaf');
+      }
+      const planeShortcutMenu = planeShortcutLeaf.menuTracks[0];
+      if (planeShortcutMenu?.availability !== 'available') {
+        throw new Error('Expected one InteractionCatalog 1.20 Plane menu track');
+      }
+      expect(planeShortcutMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { size: 12.5 },
+        { value: [0, 0, -1.25] },
+        { value: 'OperatingLine.GroundPlane' },
+      ]);
+      const planeShortcutTrack = planeShortcutLeaf.shortcutTracks[0];
+      if (planeShortcutTrack?.availability !== 'available') {
+        throw new Error('Expected one InteractionCatalog 1.20 Plane shortcut track');
+      }
+      expect(
+        planeShortcutTrack.operations.map(
+          ({ id, order, keyMode, keys, selectionPath, parameters }) => ({
+            id,
+            order,
+            keyMode,
+            keys,
+            selectionPath,
+            parameters,
+          }),
+        ),
+      ).toEqual([
+        {
+          id: 'shortcut.add_plane',
+          order: 1,
+          keyMode: 'chord',
+          keys: ['SHIFT', 'A'],
+          selectionPath: ['Mesh', 'Plane'],
+          parameters: { size: 2, location: [0, 0, 0] },
+        },
+        {
+          id: 'shortcut.move_x',
+          order: 2,
+          keyMode: 'sequence',
+          keys: ['G', 'X'],
+          selectionPath: undefined,
+          parameters: { value: 0, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.move_y',
+          order: 3,
+          keyMode: 'sequence',
+          keys: ['G', 'Y'],
+          selectionPath: undefined,
+          parameters: { value: 0, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.move_z',
+          order: 4,
+          keyMode: 'sequence',
+          keys: ['G', 'Z'],
+          selectionPath: undefined,
+          parameters: { value: -1.25, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.scale',
+          order: 5,
+          keyMode: 'sequence',
+          keys: ['S'],
+          selectionPath: undefined,
+          parameters: { value: 6.25, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.rename',
+          order: 6,
+          keyMode: 'sequence',
+          keys: ['F2'],
+          selectionPath: undefined,
+          parameters: { text: 'OperatingLine.GroundPlane', confirm: 'ENTER' },
+        },
+      ]);
+      expect(
+        planeShortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(planeShortcutLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(planeShortcutMcp.result?.content?.[0]?.text).toBe(
+        JSON.stringify(planeShortcutMaterialization),
+      );
+      const planeShortcutHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: planeAuthoringCandidateFixture(packet) }),
+        },
+      );
+      expect(planeShortcutHttp.status).toBe(200);
+      await expect(planeShortcutHttp.json()).resolves.toEqual(planeShortcutMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,

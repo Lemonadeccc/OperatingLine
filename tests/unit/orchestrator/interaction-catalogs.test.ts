@@ -188,7 +188,23 @@ describe('interaction catalog registry', () => {
       availability: 'unavailable',
       reason: 'No verified shortcut procedure is available.',
     });
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.19.0');
+    const frozenCubeShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.19.0',
+    });
+    expect(
+      frozenCubeShortcut.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cube')
+        ?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenCubeShortcut.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_plane')
+        ?.procedureMaterialization?.shortcut,
+    ).toEqual({
+      availability: 'unavailable',
+      reason: 'No verified shortcut procedure is available.',
+    });
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.20.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -208,6 +224,83 @@ describe('interaction catalog registry', () => {
     if (uvShortcut?.availability !== 'available') {
       throw new Error('Expected the latest UV Sphere shortcut recipe to remain available');
     }
+    const planeShortcut = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_plane',
+    )?.procedureMaterialization?.shortcut;
+    if (planeShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Plane shortcut recipe to be available');
+    }
+    expect(planeShortcut.preconditions).toEqual(uvShortcut.preconditions);
+    expect(planeShortcut.operations).toEqual([
+      {
+        id: 'shortcut.add_plane',
+        label: 'Add Plane',
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'Plane'],
+        parameters: [
+          { name: 'size', source: { kind: 'literal', value: 2 } },
+          { name: 'location', source: { kind: 'literal', value: [0, 0, 0] } },
+        ],
+      },
+      ...(['X', 'Y', 'Z'] as const).map((axis) => ({
+        id: `shortcut.move_${axis.toLowerCase()}`,
+        label: `Move ${axis}`,
+        keyMode: 'sequence' as const,
+        keys: ['G', axis],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'location',
+              transform: `vector3_${axis.toLowerCase()}`,
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      })),
+      {
+        id: 'shortcut.scale',
+        label: 'Scale',
+        keyMode: 'sequence',
+        keys: ['S'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'size',
+              transform: 'divide_by_two',
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      },
+      {
+        id: 'shortcut.rename',
+        label: 'Rename Object',
+        keyMode: 'sequence',
+        keys: ['F2'],
+        parameters: [
+          {
+            name: 'text',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'objectName',
+              transform: 'identity',
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      },
+    ]);
+    expect(planeShortcut.omittedActionArguments).toEqual([
+      {
+        argumentName: 'resourceId',
+        reason: 'The logical resource identifier has no user-facing Blender shortcut input.',
+      },
+    ]);
     expect(latestShortcut.preconditions).toEqual(uvShortcut.preconditions);
     expect(latestShortcut.operations.map((operation) => operation.id)).toEqual([
       'shortcut.add_cube',
@@ -336,8 +429,9 @@ describe('interaction catalog registry', () => {
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       shortcut: {
-        availability: 'unavailable',
-        reason: 'No verified shortcut procedure is available.',
+        availability: 'available',
+        projection: 'candidate_only',
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       mcp: {
         availability: 'unavailable',
@@ -619,6 +713,41 @@ describe('interaction catalog registry', () => {
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       'f34350f6dbd3edc53360e933281457ab7d12db29a3a81311eae66470a48ff735',
     );
+  });
+
+  it('keeps the InteractionCatalog 1.19.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.19.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '7e1d454fcf36bbf52e76583bd15cb4e95c44791d644df8b8e5c1cf75cd12e1d0',
+    );
+  });
+
+  it('changes only the version and Plane shortcut after InteractionCatalog 1.19.0', () => {
+    const frozen = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.19.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const frozenPlaneShortcut = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_plane',
+    )?.procedureMaterialization?.shortcut;
+
+    expect({
+      ...blenderInteractionCatalog,
+      catalogVersion: frozen.catalogVersion,
+      recipes: blenderInteractionCatalog.recipes.map((recipe) =>
+        recipe.actionName === 'blender.mesh.create_plane'
+          ? {
+              ...recipe,
+              procedureMaterialization: {
+                ...recipe.procedureMaterialization,
+                shortcut: frozenPlaneShortcut,
+              },
+            }
+          : recipe,
+      ),
+    }).toEqual(frozen);
   });
 
   it('keeps the latest TypeScript and Blender extension catalogs byte-identical', () => {
