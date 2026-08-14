@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.17.0")
+        self.assertEqual(catalog.catalog_version, "1.18.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -599,6 +599,143 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("unavailable", "No approved action-level MCP tool is available."),
         )
+        cylinder = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_cylinder"
+        )
+        self.assertIsNotNone(cylinder.procedure_materialization)
+        assert cylinder.procedure_materialization is not None
+        cylinder_menu = cylinder.procedure_materialization.menu
+        self.assertEqual(cylinder_menu.availability, "available")
+        self.assertEqual(cylinder_menu.source, "guidance.native_path")
+        self.assertEqual(cylinder_menu.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            cylinder_menu.parameter_binding, "ordered_parameter_operations"
+        )
+        assert cylinder_menu.operator_parameters is not None
+        self.assertEqual(
+            tuple(parameter.name for parameter in cylinder_menu.operator_parameters),
+            (
+                "vertices",
+                "radius",
+                "depth",
+                "end_fill_type",
+                "calc_uvs",
+                "enter_editmode",
+                "align",
+                "location",
+                "rotation",
+                "scale",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                parameter.source.value
+                for parameter in cylinder_menu.operator_parameters
+                if parameter.source.kind == "literal"
+            ),
+            (32, "NGON", False, False, "WORLD", [0, 0, 0], [1, 1, 1]),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.name,
+                    parameter.source.argument_name,
+                    parameter.source.transform,
+                )
+                for parameter in cylinder_menu.operator_parameters
+                if parameter.source.kind == "action_argument"
+            ),
+            (("radius", "radius", "identity"),),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.name,
+                    parameter.source.derivation,
+                    parameter.source.start_argument_name,
+                    parameter.source.end_argument_name,
+                    parameter.source.output,
+                )
+                for parameter in cylinder_menu.operator_parameters
+                if parameter.source.kind == "derived_action_arguments"
+            ),
+            (
+                ("depth", "segment_frame", "start", "end", "distance"),
+                (
+                    "rotation",
+                    "segment_frame",
+                    "start",
+                    "end",
+                    "rotation_euler_xyz_align_z",
+                ),
+            ),
+        )
+        assert cylinder_menu.control_operations is not None
+        self.assertEqual(
+            cylinder_menu.control_operations.insert_after_step_id,
+            "operator.cylinder",
+        )
+        self.assertEqual(
+            tuple(
+                (operation.id, operation.path)
+                for operation in cylinder_menu.control_operations.operations
+            ),
+            (
+                (
+                    "control.location",
+                    ("Sidebar", "Item", "Transform", "Location"),
+                ),
+                ("control.object_name", ("Outliner", "Object Name")),
+            ),
+        )
+        cylinder_location_source = (
+            cylinder_menu.control_operations.operations[0].parameters[0].source
+        )
+        self.assertEqual(
+            (
+                cylinder_location_source.derivation,
+                cylinder_location_source.start_argument_name,
+                cylinder_location_source.end_argument_name,
+                cylinder_location_source.output,
+            ),
+            ("segment_frame", "start", "end", "midpoint"),
+        )
+        cylinder_name_source = (
+            cylinder_menu.control_operations.operations[1].parameters[0].source
+        )
+        self.assertEqual(
+            (cylinder_name_source.argument_name, cylinder_name_source.transform),
+            ("objectName", "identity"),
+        )
+        assert cylinder_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in cylinder_menu.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender control.",
+                ),
+            ),
+        )
+        self.assertEqual(
+            (
+                cylinder.procedure_materialization.shortcut.availability,
+                cylinder.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertEqual(
+            (
+                cylinder.procedure_materialization.mcp.availability,
+                cylinder.procedure_materialization.mcp.reason,
+            ),
+            ("unavailable", "No approved action-level MCP tool is available."),
+        )
         torus = next(
             recipe
             for recipe in catalog.recipes
@@ -703,6 +840,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_plane",
                     "blender.mesh.create_cube",
                     "blender.mesh.create_cone",
+                    "blender.mesh.create_cylinder",
                     "blender.mesh.create_torus",
                 }
             )
@@ -909,6 +1047,38 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNotNone(torus.procedure_materialization)
         self.assertIsNone(cone.procedure_materialization)
+
+    def test_loads_byte_frozen_cone_catalog_without_cylinder_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.17.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "7dac53c0ff399a54e91b460b91caf5354824827ad4d801b3fb24e016d665d132",
+        )
+        self.assertEqual(frozen.catalog_version, "1.17.0")
+        cone = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cone"
+        )
+        cylinder = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cylinder"
+        )
+        self.assertIsNotNone(cone.procedure_materialization)
+        self.assertIsNone(cylinder.procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.17.0');
+    expect(catalog.catalogVersion).toBe('1.18.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -266,7 +266,12 @@ describe('interaction catalog protocol', () => {
       '1.15.0',
       '1.16.0',
       '1.17.0',
+      '1.18.0',
     ]);
+    expect(
+      recipeFor(blenderInteractionCatalogs.at(-2)!, 'blender.mesh.create_cylinder')
+        .procedureMaterialization,
+    ).toBeUndefined();
 
     const sphere = recipeFor(catalog, 'blender.mesh.create_uv_sphere');
     expect(sphere.guidance.steps.map((step) => step.label)).toEqual([
@@ -717,6 +722,105 @@ describe('interaction catalog protocol', () => {
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    const cylinder = recipeFor(catalog, 'blender.mesh.create_cylinder');
+    expect(cylinder.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'available',
+        source: 'guidance.native_path',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          { name: 'vertices', source: { kind: 'literal', value: 32 } },
+          {
+            name: 'radius',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'radius',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'depth',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'distance',
+            },
+          },
+          { name: 'end_fill_type', source: { kind: 'literal', value: 'NGON' } },
+          { name: 'calc_uvs', source: { kind: 'literal', value: false } },
+          { name: 'enter_editmode', source: { kind: 'literal', value: false } },
+          { name: 'align', source: { kind: 'literal', value: 'WORLD' } },
+          { name: 'location', source: { kind: 'literal', value: [0, 0, 0] } },
+          {
+            name: 'rotation',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'rotation_euler_xyz_align_z',
+            },
+          },
+          { name: 'scale', source: { kind: 'literal', value: [1, 1, 1] } },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.cylinder',
+          operations: [
+            {
+              id: 'control.location',
+              label: 'Location',
+              target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+              path: ['Sidebar', 'Item', 'Transform', 'Location'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'derived_action_arguments',
+                    derivation: 'segment_frame',
+                    startArgumentName: 'start',
+                    endArgumentName: 'end',
+                    output: 'midpoint',
+                  },
+                },
+              ],
+            },
+            {
+              id: 'control.object_name',
+              label: 'Object Name',
+              target: { kind: 'control', hostId: 'OUTLINER.object.name' },
+              path: ['Outliner', 'Object Name'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'objectName',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        omittedActionArguments: [
+          {
+            argumentName: 'resourceId',
+            reason: 'The logical resource identifier has no user-facing Blender control.',
+          },
+        ],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
     const torus = recipeFor(catalog, 'blender.mesh.create_torus');
     expect(torus.procedureMaterialization).toEqual({
       menu: {
@@ -824,6 +928,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
       'blender.mesh.create_cone',
+      'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
     ]);
     expect(

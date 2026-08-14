@@ -155,7 +155,23 @@ describe('interaction catalog registry', () => {
       frozenTorus.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cone')
         ?.procedureMaterialization,
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.17.0');
+    const frozenCone = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.17.0',
+    });
+    expect(
+      frozenCone.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cone')
+        ?.procedureMaterialization?.menu,
+    ).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(
+      frozenCone.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cylinder')
+        ?.procedureMaterialization,
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.18.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.shortcut;
@@ -331,6 +347,65 @@ describe('interaction catalog registry', () => {
     });
     expect(
       blenderInteractionCatalog.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_cylinder',
+      )?.procedureMaterialization,
+    ).toMatchObject({
+      menu: {
+        availability: 'available',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          { name: 'vertices', source: { kind: 'literal', value: 32 } },
+          {
+            name: 'radius',
+            source: { kind: 'action_argument', argumentName: 'radius', transform: 'identity' },
+          },
+          {
+            name: 'depth',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'distance',
+            },
+          },
+          { name: 'end_fill_type', source: { kind: 'literal', value: 'NGON' } },
+          { name: 'calc_uvs', source: { kind: 'literal', value: false } },
+          { name: 'enter_editmode', source: { kind: 'literal', value: false } },
+          { name: 'align', source: { kind: 'literal', value: 'WORLD' } },
+          { name: 'location', source: { kind: 'literal', value: [0, 0, 0] } },
+          {
+            name: 'rotation',
+            source: {
+              kind: 'derived_action_arguments',
+              derivation: 'segment_frame',
+              startArgumentName: 'start',
+              endArgumentName: 'end',
+              output: 'rotation_euler_xyz_align_z',
+            },
+          },
+          { name: 'scale', source: { kind: 'literal', value: [1, 1, 1] } },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.cylinder',
+          operations: [
+            expect.objectContaining({ id: 'control.location' }),
+            expect.objectContaining({ id: 'control.object_name' }),
+          ],
+        },
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
+    expect(
+      blenderInteractionCatalog.recipes.find(
         (recipe) => recipe.actionName === 'blender.mesh.create_torus',
       )?.procedureMaterialization,
     ).toMatchObject({
@@ -434,6 +509,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '68945039a55f0cfef011d0472383e6f2e4809b181ca6def547cd78ff5660854f',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.17.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.17.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '7dac53c0ff399a54e91b460b91caf5354824827ad4d801b3fb24e016d665d132',
     );
   });
 

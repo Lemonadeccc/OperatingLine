@@ -378,6 +378,60 @@ function coneAuthoringCandidateFixture(
   return tree;
 }
 
+function cylinderAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Cylinder authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cylinder',
+    arguments: {
+      resourceId: 'tutorial.cylinder.detail',
+      objectName: 'OperatingLine.DetailCylinder',
+      radius: 0.75,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
+    },
+  };
+  leaf['title'] = 'Create and configure one detailed Cylinder';
+  leaf['intent'] = 'Create a named Cylinder between exact endpoints with an exact radius.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_cylinder',
+    description: 'Create one detailed Cylinder.',
+    parameters: { radius: 0.75 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place and orient the Cylinder between its exact endpoints.',
+    parameters: { start: [1, 2, 3], end: [4, 6, 3] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Cylinder object.',
+    parameters: { name: 'OperatingLine.DetailCylinder' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [2.5, 4, 3] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cylinder_add',
+      menuPath: ['Add', 'Mesh', 'Cylinder'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.cylinder.detail' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -404,6 +458,9 @@ describe('procedure compilation runtime', () => {
     const torusInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.16.0',
     );
+    const coneInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.17.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -428,6 +485,9 @@ describe('procedure compilation runtime', () => {
     if (torusInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.16.0 snapshot');
     }
+    if (coneInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.17.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -441,6 +501,7 @@ describe('procedure compilation runtime', () => {
         cubeInteractionCatalog,
         planeInteractionCatalog,
         torusInteractionCatalog,
+        coneInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -1095,11 +1156,18 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
+      const conePrompt = await callMcpTool(runtime, 26, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: coneInteractionCatalog.catalogVersion,
+      });
+      const conePacket = procedureAuthoringPromptPacketSchema.parse(
+        conePrompt.result?.structuredContent,
+      );
       const coneMcp = await callMcpTool(
         runtime,
-        26,
+        27,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: coneAuthoringCandidateFixture(packet) },
+        { packet: conePacket, tree: coneAuthoringCandidateFixture(conePacket) },
       );
       expect(coneMcp.result?.isError).not.toBe(true);
       const coneMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -1190,10 +1258,135 @@ describe('procedure compilation runtime', () => {
       const coneHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ packet, tree: coneAuthoringCandidateFixture(packet) }),
+        body: JSON.stringify({
+          packet: conePacket,
+          tree: coneAuthoringCandidateFixture(conePacket),
+        }),
       });
       expect(coneHttp.status).toBe(200);
       await expect(coneHttp.json()).resolves.toEqual(coneMaterialization);
+
+      const historicalCylinder = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 28, 'operatingline.procedure.authoring.materialize', {
+            packet: conePacket,
+            tree: cylinderAuthoringCandidateFixture(conePacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalCylinder).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: { interactionCatalogVersion: '1.17.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cylinder.native',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+
+      const cylinderMcp = await callMcpTool(
+        runtime,
+        29,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: cylinderAuthoringCandidateFixture(packet) },
+      );
+      expect(cylinderMcp.result?.isError).not.toBe(true);
+      const cylinderMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        cylinderMcp.result?.structuredContent,
+      );
+      expect(cylinderMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.18.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cylinder.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const cylinderLeaf = cylinderMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (cylinderLeaf?.kind !== 'leaf' || cylinderLeaf.action === null) {
+        throw new Error('Expected one materialized Cylinder leaf');
+      }
+      const cylinderMenu = cylinderLeaf.menuTracks[0];
+      if (cylinderMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Cylinder menu track');
+      }
+      expect(cylinderMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        {
+          vertices: 32,
+          radius: 0.75,
+          depth: 5,
+          end_fill_type: 'NGON',
+          calc_uvs: false,
+          enter_editmode: false,
+          align: 'WORLD',
+          location: [0, 0, 0],
+          rotation: [0, Math.PI / 2, Math.atan2(4, 3)],
+          scale: [1, 1, 1],
+        },
+        { value: [2.5, 4, 3] },
+        { value: 'OperatingLine.DetailCylinder' },
+      ]);
+      expect(Object.keys(cylinderMenu.operations[3]!.parameters)).toEqual([
+        'vertices',
+        'radius',
+        'depth',
+        'end_fill_type',
+        'calc_uvs',
+        'enter_editmode',
+        'align',
+        'location',
+        'rotation',
+        'scale',
+      ]);
+      expect(
+        cylinderMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(cylinderLeaf.action.arguments).toEqual({
+        resourceId: 'tutorial.cylinder.detail',
+        objectName: 'OperatingLine.DetailCylinder',
+        radius: 0.75,
+        start: [1, 2, 3],
+        end: [4, 6, 3],
+      });
+      expect(cylinderLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'shortcut',
+          reason: 'No verified shortcut procedure is available.',
+        }),
+      ]);
+      expect(cylinderLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(cylinderMcp.result?.content?.[0]?.text).toBe(JSON.stringify(cylinderMaterialization));
+      const cylinderHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: cylinderAuthoringCandidateFixture(packet) }),
+        },
+      );
+      expect(cylinderHttp.status).toBe(200);
+      await expect(cylinderHttp.json()).resolves.toEqual(cylinderMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,

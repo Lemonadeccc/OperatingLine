@@ -263,6 +263,56 @@ function coneCandidate(
   return tree;
 }
 
+function cylinderCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Cylinder candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_cylinder',
+    arguments: {
+      resourceId: 'tutorial.cylinder.detail',
+      objectName: 'OperatingLine.DetailCylinder',
+      radius: 0.75,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
+    },
+  };
+  leaf.title = 'Create and configure one detailed Cylinder';
+  leaf.intent = 'Create a named Cylinder between exact endpoints with an exact radius.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_cylinder',
+    description: 'Create one detailed Cylinder.',
+    parameters: { radius: 0.75 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place and orient the Cylinder between its exact endpoints.',
+    parameters: { start: [1, 2, 3], end: [4, 6, 3] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Cylinder object.',
+    parameters: { name: 'OperatingLine.DetailCylinder' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [2.5, 4, 3] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_cylinder_add',
+      menuPath: ['Add', 'Mesh', 'Cylinder'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.cylinder.detail' },
+  };
+  return tree;
+}
+
 function torusCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
 ): ProcedureAuthoringCandidateTree {
@@ -1017,6 +1067,119 @@ describe('procedure authoring materialization', () => {
       objectName: 'OperatingLine.DetailCone',
       radiusStart: 1.25,
       radiusEnd: 0.25,
+      start: [1, 2, 3],
+      end: [4, 6, 3],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact derived Cylinder segment frame without inventing shortcut or MCP support', () => {
+    const input = cylinderCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Cylinder leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_cylinder.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Cylinder menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_cylinder.native',
+      title: 'Add one cylinder from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.cylinder',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Cylinder'],
+        parameters: {
+          vertices: 32,
+          radius: 0.75,
+          depth: 5,
+          end_fill_type: 'NGON',
+          calc_uvs: false,
+          enter_editmode: false,
+          align: 'WORLD',
+          location: [0, 0, 0],
+          rotation: [0, Math.PI / 2, Math.atan2(4, 3)],
+          scale: [1, 1, 1],
+        },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [2.5, 4, 3] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.DetailCylinder' },
+      },
+    ]);
+    expect(Object.keys(menuTrack.operations[3]!.parameters)).toEqual([
+      'vertices',
+      'radius',
+      'depth',
+      'end_fill_type',
+      'calc_uvs',
+      'enter_editmode',
+      'align',
+      'location',
+      'rotation',
+      'scale',
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.cylinder.detail',
+      objectName: 'OperatingLine.DetailCylinder',
+      radius: 0.75,
       start: [1, 2, 3],
       end: [4, 6, 3],
     });
