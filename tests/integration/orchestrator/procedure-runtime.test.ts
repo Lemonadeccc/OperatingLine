@@ -209,6 +209,59 @@ function cubeAuthoringCandidateFixture(
   return tree;
 }
 
+function planeAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Plane authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_plane',
+    arguments: {
+      resourceId: 'tutorial.plane.ground',
+      objectName: 'OperatingLine.GroundPlane',
+      size: 12.5,
+      location: [0, 0, -1.25],
+    },
+  };
+  leaf['title'] = 'Create and configure one ground Plane';
+  leaf['intent'] = 'Create a named ground Plane with exact size and location.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_plane',
+    description: 'Create one ground Plane.',
+    parameters: { size: 12.5 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place the Plane at its exact world location.',
+    parameters: { location: [0, 0, -1.25] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Plane object.',
+    parameters: { name: 'OperatingLine.GroundPlane' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [0, 0, -1.25] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_plane_add',
+      menuPath: ['Add', 'Mesh', 'Plane'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.plane.ground' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -226,6 +279,9 @@ describe('procedure compilation runtime', () => {
     const icosphereInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.13.0',
     );
+    const cubeInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.14.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -241,6 +297,9 @@ describe('procedure compilation runtime', () => {
     if (icosphereInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.13.0 snapshot');
     }
+    if (cubeInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.14.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -251,6 +310,7 @@ describe('procedure compilation runtime', () => {
         orderedMenuInteractionCatalog,
         shortcutInteractionCatalog,
         icosphereInteractionCatalog,
+        cubeInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -581,11 +641,18 @@ describe('procedure compilation runtime', () => {
       expect(icosphereHttpMaterialization.status).toBe(200);
       await expect(icosphereHttpMaterialization.json()).resolves.toEqual(icosphereMaterialization);
 
+      const cubePrompt = await callMcpTool(runtime, 14, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: cubeInteractionCatalog.catalogVersion,
+      });
+      const cubePacket = procedureAuthoringPromptPacketSchema.parse(
+        cubePrompt.result?.structuredContent,
+      );
       const cubeMcp = await callMcpTool(
         runtime,
-        14,
+        18,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: cubeAuthoringCandidateFixture(packet) },
+        { packet: cubePacket, tree: cubeAuthoringCandidateFixture(cubePacket) },
       );
       expect(cubeMcp.result?.isError).not.toBe(true);
       const cubeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -649,10 +716,108 @@ describe('procedure compilation runtime', () => {
       const cubeHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ packet, tree: cubeAuthoringCandidateFixture(packet) }),
+        body: JSON.stringify({
+          packet: cubePacket,
+          tree: cubeAuthoringCandidateFixture(cubePacket),
+        }),
       });
       expect(cubeHttp.status).toBe(200);
       await expect(cubeHttp.json()).resolves.toEqual(cubeMaterialization);
+
+      const historicalPlane = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 19, 'operatingline.procedure.authoring.materialize', {
+            packet: cubePacket,
+            tree: planeAuthoringCandidateFixture(cubePacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalPlane).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: { interactionCatalogVersion: '1.14.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_plane.native',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+
+      const planeMcp = await callMcpTool(
+        runtime,
+        20,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: planeAuthoringCandidateFixture(packet) },
+      );
+      expect(planeMcp.result?.isError).not.toBe(true);
+      const planeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        planeMcp.result?.structuredContent,
+      );
+      expect(planeMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.15.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_plane.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const planeLeaf = planeMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (planeLeaf?.kind !== 'leaf' || planeLeaf.action === null) {
+        throw new Error('Expected one materialized Plane leaf');
+      }
+      const planeMenu = planeLeaf.menuTracks[0];
+      if (planeMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Plane menu track');
+      }
+      expect(planeMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { size: 12.5 },
+        { value: [0, 0, -1.25] },
+        { value: 'OperatingLine.GroundPlane' },
+      ]);
+      expect(
+        planeMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(planeLeaf.action.arguments).toEqual({
+        resourceId: 'tutorial.plane.ground',
+        objectName: 'OperatingLine.GroundPlane',
+        size: 12.5,
+        location: [0, 0, -1.25],
+      });
+      expect(planeLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'shortcut',
+          reason: 'No verified shortcut procedure is available.',
+        }),
+      ]);
+      expect(planeLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(planeMcp.result?.content?.[0]?.text).toBe(JSON.stringify(planeMaterialization));
+      const planeHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: planeAuthoringCandidateFixture(packet) }),
+      });
+      expect(planeHttp.status).toBe(200);
+      await expect(planeHttp.json()).resolves.toEqual(planeMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,
@@ -855,7 +1020,7 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
     }
-  });
+  }, 15_000);
 
   it('rejects tampered, resealed, identity-drifted, and non-candidate authoring input', async () => {
     const runtime = await startRuntime({

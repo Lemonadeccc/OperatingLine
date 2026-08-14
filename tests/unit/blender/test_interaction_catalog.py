@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.14.0")
+        self.assertEqual(catalog.catalog_version, "1.15.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -295,6 +295,90 @@ class InteractionCatalogTests(unittest.TestCase):
             icosphere.procedure_materialization.mcp.availability,
             "unavailable",
         )
+        plane = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_plane"
+        )
+        self.assertIsNotNone(plane.procedure_materialization)
+        assert plane.procedure_materialization is not None
+        plane_menu = plane.procedure_materialization.menu
+        self.assertEqual(plane_menu.availability, "available")
+        self.assertEqual(plane_menu.source, "guidance.native_path")
+        self.assertEqual(plane_menu.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            plane_menu.parameter_binding, "ordered_parameter_operations"
+        )
+        assert plane_menu.operator_parameters is not None
+        self.assertEqual(len(plane_menu.operator_parameters), 1)
+        plane_size = plane_menu.operator_parameters[0]
+        self.assertEqual(
+            (
+                plane_size.name,
+                plane_size.source.argument_name,
+                plane_size.source.transform,
+            ),
+            ("size", "size", "identity"),
+        )
+        assert plane_menu.control_operations is not None
+        self.assertEqual(
+            plane_menu.control_operations.insert_after_step_id, "operator.plane"
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.id,
+                    operation.path,
+                    operation.parameters[0].name,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.transform,
+                )
+                for operation in plane_menu.control_operations.operations
+            ),
+            (
+                (
+                    "control.location",
+                    ("Sidebar", "Item", "Transform", "Location"),
+                    "value",
+                    "location",
+                    "identity",
+                ),
+                (
+                    "control.object_name",
+                    ("Outliner", "Object Name"),
+                    "value",
+                    "objectName",
+                    "identity",
+                ),
+            ),
+        )
+        assert plane_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in plane_menu.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender control.",
+                ),
+            ),
+        )
+        self.assertEqual(
+            (
+                plane.procedure_materialization.shortcut.availability,
+                plane.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertEqual(
+            (
+                plane.procedure_materialization.mcp.availability,
+                plane.procedure_materialization.mcp.reason,
+            ),
+            ("unavailable", "No approved action-level MCP tool is available."),
+        )
         cube = next(
             recipe
             for recipe in catalog.recipes
@@ -383,6 +467,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 not in {
                     "blender.mesh.create_uv_sphere",
                     "blender.mesh.create_icosphere",
+                    "blender.mesh.create_plane",
                     "blender.mesh.create_cube",
                 }
             )
@@ -493,6 +578,38 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNotNone(icosphere.procedure_materialization)
         self.assertIsNone(cube.procedure_materialization)
+
+    def test_loads_byte_frozen_cube_catalog_without_plane_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.14.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "bcdd69b9b1f345d6e4c27ff2e316c4d44cb931355ab01f4e7f7a013022439746",
+        )
+        self.assertEqual(frozen.catalog_version, "1.14.0")
+        plane = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_plane"
+        )
+        cube = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cube"
+        )
+        self.assertIsNone(plane.procedure_materialization)
+        self.assertIsNotNone(cube.procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

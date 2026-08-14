@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.14.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.15.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0`/`1.14.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -274,6 +274,12 @@
           均 unavailable，历史 `1.13.0` 逐字回放。轨迹仍为 `candidate`/`structural_only`，没有真实 Blender
           replay；原生菜单/operator 不复现 managed collection、resource tag、receipt、幂等或补偿语义。见
           [ADR 0050](adr/0050-cube-ordered-menu-materialization.md)。
+    - [x] 第四个 action 的有序菜单物化：InteractionCatalog `1.15.0` 为 Plane 声明六步 ordered menu；四步
+          原生 guidance 的 operator step 以 identity 投影绑定完整边长 `size`，再依次绑定 Location 与 Object
+          Name，并显式省略 `resourceId`。`size` 不是 transform scale；Result 使用 `1.1.0`，shortcut/MCP
+          均 unavailable，历史 `1.14.0` 逐字回放。轨迹仍为 `candidate`/`structural_only`，没有完整 UI operation
+          的真实 Blender replay；原生菜单/operator 不复现 managed collection、resource tag、receipt、幂等或
+          补偿语义。见 [ADR 0051](adr/0051-plane-ordered-menu-materialization.md)。
     - [ ] 增加经真实版本验证的 shortcut、获批 MCP recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。

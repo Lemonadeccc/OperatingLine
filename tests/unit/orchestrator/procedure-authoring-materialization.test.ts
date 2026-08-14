@@ -160,6 +160,55 @@ function cubeCandidate(
   return tree;
 }
 
+function planeCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Plane candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_plane',
+    arguments: {
+      resourceId: 'tutorial.plane.ground',
+      objectName: 'OperatingLine.GroundPlane',
+      size: 12.5,
+      location: [0, 0, -1.25],
+    },
+  };
+  leaf.title = 'Create and configure one ground Plane';
+  leaf.intent = 'Create a named ground Plane with exact size and location.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_plane',
+    description: 'Create one ground Plane.',
+    parameters: { size: 12.5 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place the Plane at its exact world location.',
+    parameters: { location: [0, 0, -1.25] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Plane object.',
+    parameters: { name: 'OperatingLine.GroundPlane' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [0, 0, -1.25] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_plane_add',
+      menuPath: ['Add', 'Mesh', 'Plane'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.plane.ground' },
+  };
+  return tree;
+}
+
 function orderedMenu(catalog: InteractionCatalog) {
   const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
   if (
@@ -504,6 +553,95 @@ describe('procedure authoring materialization', () => {
       objectName: 'OperatingLine.CubeBody',
       size: 2.5,
       location: [-1, 2, 0.5],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Plane ordered menu without inventing shortcut or MCP support', () => {
+    const input = planeCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Plane leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_plane.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Plane menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_plane.native',
+      title: 'Add one plane from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.plane',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Plane'],
+        parameters: { size: 12.5 },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [0, 0, -1.25] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.GroundPlane' },
+      },
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.plane.ground',
+      objectName: 'OperatingLine.GroundPlane',
+      size: 12.5,
+      location: [0, 0, -1.25],
     });
     expect(leaf.shortcutTracks).toEqual([
       expect.objectContaining({
