@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.15.0")
+        self.assertEqual(catalog.catalog_version, "1.16.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -459,6 +459,99 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("unavailable", "No approved action-level MCP tool is available."),
         )
+        torus = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.create_torus"
+        )
+        self.assertIsNotNone(torus.procedure_materialization)
+        assert torus.procedure_materialization is not None
+        torus_menu = torus.procedure_materialization.menu
+        self.assertEqual(torus_menu.availability, "available")
+        self.assertEqual(torus_menu.source, "guidance.native_path")
+        self.assertEqual(torus_menu.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            torus_menu.parameter_binding, "ordered_parameter_operations"
+        )
+        assert torus_menu.operator_parameters is not None
+        self.assertEqual(
+            tuple(
+                (
+                    parameter.name,
+                    parameter.source.argument_name,
+                    parameter.source.transform,
+                )
+                for parameter in torus_menu.operator_parameters
+            ),
+            (
+                ("major_segments", "majorSegments", "identity"),
+                ("minor_segments", "minorSegments", "identity"),
+                ("mode", None, None),
+                ("major_radius", "majorRadius", "identity"),
+                ("minor_radius", "minorRadius", "identity"),
+            ),
+        )
+        mode = torus_menu.operator_parameters[2]
+        self.assertEqual(mode.source.value, "MAJOR_MINOR")
+        assert torus_menu.control_operations is not None
+        self.assertEqual(
+            torus_menu.control_operations.insert_after_step_id, "operator.torus"
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.id,
+                    operation.path,
+                    operation.parameters[0].name,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.transform,
+                )
+                for operation in torus_menu.control_operations.operations
+            ),
+            (
+                (
+                    "control.location",
+                    ("Sidebar", "Item", "Transform", "Location"),
+                    "value",
+                    "location",
+                    "identity",
+                ),
+                (
+                    "control.object_name",
+                    ("Outliner", "Object Name"),
+                    "value",
+                    "objectName",
+                    "identity",
+                ),
+            ),
+        )
+        assert torus_menu.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                (omission.argument_name, omission.reason)
+                for omission in torus_menu.omitted_action_arguments
+            ),
+            (
+                (
+                    "resourceId",
+                    "The logical resource identifier has no user-facing Blender control.",
+                ),
+            ),
+        )
+        self.assertEqual(
+            (
+                torus.procedure_materialization.shortcut.availability,
+                torus.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertEqual(
+            (
+                torus.procedure_materialization.mcp.availability,
+                torus.procedure_materialization.mcp.reason,
+            ),
+            ("unavailable", "No approved action-level MCP tool is available."),
+        )
         self.assertTrue(
             all(
                 recipe.procedure_materialization is None
@@ -469,6 +562,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_icosphere",
                     "blender.mesh.create_plane",
                     "blender.mesh.create_cube",
+                    "blender.mesh.create_torus",
                 }
             )
         )
@@ -610,6 +704,38 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNone(plane.procedure_materialization)
         self.assertIsNotNone(cube.procedure_materialization)
+
+    def test_loads_byte_frozen_plane_catalog_without_torus_materialization(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.15.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "a4d799f155eb58cf53d1ccc8689fc4b4b55cc87739ea2d1d54a8f03d1050e0d6",
+        )
+        self.assertEqual(frozen.catalog_version, "1.15.0")
+        plane = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_plane"
+        )
+        torus = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_torus"
+        )
+        self.assertIsNotNone(plane.procedure_materialization)
+        self.assertIsNone(torus.procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

@@ -262,6 +262,67 @@ function planeAuthoringCandidateFixture(
   return tree;
 }
 
+function torusAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Torus authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_torus',
+    arguments: {
+      resourceId: 'tutorial.torus.detail',
+      objectName: 'OperatingLine.DetailTorus',
+      majorSegments: 48,
+      minorSegments: 12,
+      majorRadius: 2.25,
+      minorRadius: 0.4,
+      location: [1.5, -2, 0.75],
+    },
+  };
+  leaf['title'] = 'Create and configure one detailed Torus';
+  leaf['intent'] = 'Create a named Torus with exact segments, radii, and location.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'create_torus',
+    description: 'Create one detailed Torus.',
+    parameters: {
+      majorSegments: 48,
+      minorSegments: 12,
+      majorRadius: 2.25,
+      minorRadius: 0.4,
+    },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Place the Torus at its exact world location.',
+    parameters: { location: [1.5, -2, 0.75] },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Rename the Torus object.',
+    parameters: { name: 'OperatingLine.DetailTorus' },
+  };
+  leaf['anchors'] = [
+    { kind: 'world_position', position: [1.5, -2, 0.75] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_torus_add',
+      menuPath: ['Add', 'Mesh', 'Torus'],
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.torus.detail' },
+  };
+  return tree;
+}
+
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
@@ -282,6 +343,9 @@ describe('procedure compilation runtime', () => {
     const cubeInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.14.0',
     );
+    const planeInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.15.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -300,6 +364,9 @@ describe('procedure compilation runtime', () => {
     if (cubeInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.14.0 snapshot');
     }
+    if (planeInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.15.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -311,6 +378,7 @@ describe('procedure compilation runtime', () => {
         shortcutInteractionCatalog,
         icosphereInteractionCatalog,
         cubeInteractionCatalog,
+        planeInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -746,11 +814,18 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
+      const planePrompt = await callMcpTool(runtime, 20, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: planeInteractionCatalog.catalogVersion,
+      });
+      const planePacket = procedureAuthoringPromptPacketSchema.parse(
+        planePrompt.result?.structuredContent,
+      );
       const planeMcp = await callMcpTool(
         runtime,
-        20,
+        21,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: planeAuthoringCandidateFixture(packet) },
+        { packet: planePacket, tree: planeAuthoringCandidateFixture(planePacket) },
       );
       expect(planeMcp.result?.isError).not.toBe(true);
       const planeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -814,10 +889,117 @@ describe('procedure compilation runtime', () => {
       const planeHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ packet, tree: planeAuthoringCandidateFixture(packet) }),
+        body: JSON.stringify({
+          packet: planePacket,
+          tree: planeAuthoringCandidateFixture(planePacket),
+        }),
       });
       expect(planeHttp.status).toBe(200);
       await expect(planeHttp.json()).resolves.toEqual(planeMaterialization);
+
+      const historicalTorus = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 22, 'operatingline.procedure.authoring.materialize', {
+            packet: planePacket,
+            tree: torusAuthoringCandidateFixture(planePacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(historicalTorus).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: { interactionCatalogVersion: '1.15.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_torus.native',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+
+      const torusMcp = await callMcpTool(
+        runtime,
+        23,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: torusAuthoringCandidateFixture(packet) },
+      );
+      expect(torusMcp.result?.isError).not.toBe(true);
+      const torusMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        torusMcp.result?.structuredContent,
+      );
+      expect(torusMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.16.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_torus.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const torusLeaf = torusMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (torusLeaf?.kind !== 'leaf' || torusLeaf.action === null) {
+        throw new Error('Expected one materialized Torus leaf');
+      }
+      const torusMenu = torusLeaf.menuTracks[0];
+      if (torusMenu?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Torus menu track');
+      }
+      expect(torusMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        {
+          major_segments: 48,
+          minor_segments: 12,
+          mode: 'MAJOR_MINOR',
+          major_radius: 2.25,
+          minor_radius: 0.4,
+        },
+        { value: [1.5, -2, 0.75] },
+        { value: 'OperatingLine.DetailTorus' },
+      ]);
+      expect(
+        torusMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(torusLeaf.action.arguments).toEqual({
+        resourceId: 'tutorial.torus.detail',
+        objectName: 'OperatingLine.DetailTorus',
+        majorSegments: 48,
+        minorSegments: 12,
+        majorRadius: 2.25,
+        minorRadius: 0.4,
+        location: [1.5, -2, 0.75],
+      });
+      expect(torusLeaf.shortcutTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'shortcut',
+          reason: 'No verified shortcut procedure is available.',
+        }),
+      ]);
+      expect(torusLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(torusMcp.result?.content?.[0]?.text).toBe(JSON.stringify(torusMaterialization));
+      const torusHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/materialize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ packet, tree: torusAuthoringCandidateFixture(packet) }),
+      });
+      expect(torusHttp.status).toBe(200);
+      await expect(torusHttp.json()).resolves.toEqual(torusMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,

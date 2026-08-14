@@ -209,6 +209,63 @@ function planeCandidate(
   return tree;
 }
 
+function torusCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Torus candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_torus',
+    arguments: {
+      resourceId: 'tutorial.torus.detail',
+      objectName: 'OperatingLine.DetailTorus',
+      majorSegments: 48,
+      minorSegments: 12,
+      majorRadius: 2.25,
+      minorRadius: 0.4,
+      location: [1.5, -2, 0.75],
+    },
+  };
+  leaf.title = 'Create and configure one detailed Torus';
+  leaf.intent = 'Create a named Torus with exact segments, radii, and location.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'create_torus',
+    description: 'Create one detailed Torus.',
+    parameters: {
+      majorSegments: 48,
+      minorSegments: 12,
+      majorRadius: 2.25,
+      minorRadius: 0.4,
+    },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Place the Torus at its exact world location.',
+    parameters: { location: [1.5, -2, 0.75] },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Rename the Torus object.',
+    parameters: { name: 'OperatingLine.DetailTorus' },
+  };
+  leaf.anchors = [
+    { kind: 'world_position', position: [1.5, -2, 0.75] },
+    {
+      kind: 'operator',
+      operatorId: 'mesh.primitive_torus_add',
+      menuPath: ['Add', 'Mesh', 'Torus'],
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.torus.detail' },
+  };
+  return tree;
+}
+
 function orderedMenu(catalog: InteractionCatalog) {
   const menu = catalog.recipes[0]!.procedureMaterialization?.menu;
   if (
@@ -642,6 +699,104 @@ describe('procedure authoring materialization', () => {
       objectName: 'OperatingLine.GroundPlane',
       size: 12.5,
       location: [0, 0, -1.25],
+    });
+    expect(leaf.shortcutTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'shortcut',
+        reason: 'No verified shortcut procedure is available.',
+      }),
+    ]);
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Torus ordered menu without inventing shortcut or MCP support', () => {
+    const input = torusCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Torus leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.create_torus.native',
+        menu: 'materialized',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    const menuTrack = leaf.menuTracks[0];
+    if (menuTrack?.availability !== 'available') {
+      throw new Error('expected available Torus menu track');
+    }
+    expect(menuTrack).toMatchObject({
+      id: 'blender.mesh.create_torus.native',
+      title: 'Add one torus from the 3D Viewport',
+      modality: 'menu',
+    });
+    expect(
+      menuTrack.operations.map(({ id, order, path, parameters }) => ({
+        id,
+        order,
+        path,
+        parameters,
+      })),
+    ).toEqual([
+      { id: 'workspace.layout', order: 1, path: ['Layout'], parameters: {} },
+      { id: 'menu.add', order: 2, path: ['Layout', 'Add'], parameters: {} },
+      { id: 'menu.mesh', order: 3, path: ['Layout', 'Add', 'Mesh'], parameters: {} },
+      {
+        id: 'operator.torus',
+        order: 4,
+        path: ['Layout', 'Add', 'Mesh', 'Torus'],
+        parameters: {
+          major_segments: 48,
+          minor_segments: 12,
+          mode: 'MAJOR_MINOR',
+          major_radius: 2.25,
+          minor_radius: 0.4,
+        },
+      },
+      {
+        id: 'control.location',
+        order: 5,
+        path: ['Sidebar', 'Item', 'Transform', 'Location'],
+        parameters: { value: [1.5, -2, 0.75] },
+      },
+      {
+        id: 'control.object_name',
+        order: 6,
+        path: ['Outliner', 'Object Name'],
+        parameters: { value: 'OperatingLine.DetailTorus' },
+      },
+    ]);
+    expect(
+      menuTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
+    expect(leaf.action.arguments).toEqual({
+      resourceId: 'tutorial.torus.detail',
+      objectName: 'OperatingLine.DetailTorus',
+      majorSegments: 48,
+      minorSegments: 12,
+      majorRadius: 2.25,
+      minorRadius: 0.4,
+      location: [1.5, -2, 0.75],
     });
     expect(leaf.shortcutTracks).toEqual([
       expect.objectContaining({

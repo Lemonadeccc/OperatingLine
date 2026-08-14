@@ -110,7 +110,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.15.0');
+    expect(catalog.catalogVersion).toBe('1.16.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -151,6 +151,7 @@ describe('interaction catalog protocol', () => {
       '1.13.0',
       '1.14.0',
       '1.15.0',
+      '1.16.0',
     ]);
 
     const sphere = recipeFor(catalog, 'blender.mesh.create_uv_sphere');
@@ -474,11 +475,113 @@ describe('interaction catalog protocol', () => {
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    const torus = recipeFor(catalog, 'blender.mesh.create_torus');
+    expect(torus.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'available',
+        source: 'guidance.native_path',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          {
+            name: 'major_segments',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'majorSegments',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'minor_segments',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'minorSegments',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'mode',
+            source: {
+              kind: 'literal',
+              value: 'MAJOR_MINOR',
+            },
+          },
+          {
+            name: 'major_radius',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'majorRadius',
+              transform: 'identity',
+            },
+          },
+          {
+            name: 'minor_radius',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'minorRadius',
+              transform: 'identity',
+            },
+          },
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.torus',
+          operations: [
+            {
+              id: 'control.location',
+              label: 'Location',
+              target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+              path: ['Sidebar', 'Item', 'Transform', 'Location'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'location',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+            {
+              id: 'control.object_name',
+              label: 'Object Name',
+              target: { kind: 'control', hostId: 'OUTLINER.object.name' },
+              path: ['Outliner', 'Object Name'],
+              parameters: [
+                {
+                  name: 'value',
+                  source: {
+                    kind: 'action_argument',
+                    argumentName: 'objectName',
+                    transform: 'identity',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        omittedActionArguments: [
+          {
+            argumentName: 'resourceId',
+            reason: 'The logical resource identifier has no user-facing Blender control.',
+          },
+        ],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
+      'blender.mesh.create_torus',
     ]);
     expect(
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),

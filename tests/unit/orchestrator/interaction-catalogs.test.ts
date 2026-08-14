@@ -123,7 +123,23 @@ describe('interaction catalog registry', () => {
       frozenCube.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_plane')
         ?.procedureMaterialization,
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.15.0');
+    const frozenPlane = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.15.0',
+    });
+    expect(
+      frozenPlane.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_plane')
+        ?.procedureMaterialization?.menu,
+    ).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(
+      frozenPlane.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_torus')
+        ?.procedureMaterialization,
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.16.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
     )?.procedureMaterialization?.shortcut;
@@ -244,6 +260,42 @@ describe('interaction catalog registry', () => {
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    expect(
+      blenderInteractionCatalog.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_torus',
+      )?.procedureMaterialization,
+    ).toMatchObject({
+      menu: {
+        availability: 'available',
+        parameterBinding: 'ordered_parameter_operations',
+        operatorParameters: [
+          expect.objectContaining({ name: 'major_segments' }),
+          expect.objectContaining({ name: 'minor_segments' }),
+          expect.objectContaining({
+            name: 'mode',
+            source: { kind: 'literal', value: 'MAJOR_MINOR' },
+          }),
+          expect.objectContaining({ name: 'major_radius' }),
+          expect.objectContaining({ name: 'minor_radius' }),
+        ],
+        controlOperations: {
+          insertAfterStepId: 'operator.torus',
+          operations: [
+            expect.objectContaining({ id: 'control.location' }),
+            expect.objectContaining({ id: 'control.object_name' }),
+          ],
+        },
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: 'No verified shortcut procedure is available.',
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
   });
 
   it('keeps the InteractionCatalog 1.10.0 compatibility snapshot byte-for-byte frozen', () => {
@@ -293,6 +345,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       'bcdd69b9b1f345d6e4c27ff2e316c4d44cb931355ab01f4e7f7a013022439746',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.15.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.15.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'a4d799f155eb58cf53d1ccc8689fc4b4b55cc87739ea2d1d54a8f03d1050e0d6',
     );
   });
 
