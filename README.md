@@ -89,30 +89,30 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   prompt，且以 256 KiB canonical 大小 fail closed。该入口不调用模型、不自动保存树、创建 Proposal 或执行
   宿主；当前也没有向量/语义 RAG、完整 Procedure Provider coordinator、可视化编辑器或训练导出。见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)。
-- **目录绑定的 Procedure 菜单物化**：供应商无关的 MCP
+- **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用菜单轨迹。Blender `1.11.0` 当前仅为 UV Sphere
-  使用 `ordered_parameter_operations`：先按 catalog step 生成 `Layout → Add → Mesh → UV Sphere`，再依次
-  生成带精确值的 Location、Scale、Object Name 控件；所有 Action 参数必须恰好映射或带理由省略，内部
-  `resourceId` 不进入 UI operation。旧 `1.10.0` 的 `accepted_action_arguments` 四步算法保持精确回放。
-  Track/operation ID 分别等于 recipe/step-or-control ID，结合树顶层 InteractionCatalog version 可重建 provenance；
-  结果另带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。shortcut/MCP 仍确定性 unavailable，
-  leaf 仍为 candidate 且 `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；radius→scale
-  只是教学投影，不是宿主状态等价证明。历史 `1.9.0`/`1.10.0` 保持可回放。只有完整 result 信封保留目录
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender `1.12.0` 为 UV Sphere 生成七步菜单，
+  以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
+  `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
+  `resourceId` 不进入 UI operation，MCP 仍 unavailable。旧 `1.10.0` 四步菜单与 `1.11.0` 七步菜单保持
+  精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage；最新快捷键结果格式为
+  `1.2.0`。leaf 仍为 candidate 且 `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
+  radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史 `1.9.0`/`1.10.0`/`1.11.0` 保持可回放。只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。见
   [ADR 0046](docs/adr/0046-catalog-bound-procedure-materialization.md) 与
-  [ADR 0047](docs/adr/0047-ordered-procedure-parameter-operations.md)。
+  [ADR 0047](docs/adr/0047-ordered-procedure-parameter-operations.md) 与
+  [ADR 0048](docs/adr/0048-candidate-shortcut-procedure-materialization.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.11.0` 精确绑定
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender 目录 `1.12.0` 精确绑定
   ActionCatalog `1.12.0` 的 22 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0`/`1.10.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0`/`1.10.0`/`1.11.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与

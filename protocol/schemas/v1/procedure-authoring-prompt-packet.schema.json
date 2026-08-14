@@ -872,7 +872,10 @@
                                                       "type": "string",
                                                       "enum": [
                                                         "identity",
-                                                        "uniform_vector3"
+                                                        "uniform_vector3",
+                                                        "vector3_x",
+                                                        "vector3_y",
+                                                        "vector3_z"
                                                       ]
                                                     }
                                                   },
@@ -984,7 +987,10 @@
                                                                 "type": "string",
                                                                 "enum": [
                                                                   "identity",
-                                                                  "uniform_vector3"
+                                                                  "uniform_vector3",
+                                                                  "vector3_x",
+                                                                  "vector3_y",
+                                                                  "vector3_z"
                                                                 ]
                                                               }
                                                             },
@@ -1061,22 +1067,233 @@
                             ]
                           },
                           "shortcut": {
-                            "type": "object",
-                            "properties": {
-                              "availability": {
-                                "type": "string",
-                                "const": "unavailable"
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "availability": {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  },
+                                  "reason": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "availability",
+                                  "reason"
+                                ],
+                                "additionalProperties": false
                               },
-                              "reason": {
-                                "type": "string",
-                                "minLength": 1
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "availability": {
+                                    "type": "string",
+                                    "const": "available"
+                                  },
+                                  "source": {
+                                    "type": "string",
+                                    "const": "catalog.ordered_shortcut_operations"
+                                  },
+                                  "semanticBinding": {
+                                    "type": "string",
+                                    "const": "all_leaf_operations"
+                                  },
+                                  "parameterBinding": {
+                                    "type": "string",
+                                    "const": "ordered_parameter_operations"
+                                  },
+                                  "projection": {
+                                    "type": "string",
+                                    "const": "candidate_only"
+                                  },
+                                  "preconditions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "workspace",
+                                            "editor",
+                                            "mode",
+                                            "selection",
+                                            "keymap",
+                                            "modal_state",
+                                            "scene_state"
+                                          ]
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "label",
+                                        "value"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "operations": {
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "keyMode": {
+                                          "type": "string",
+                                          "enum": [
+                                            "chord",
+                                            "sequence"
+                                          ]
+                                        },
+                                        "keys": {
+                                          "minItems": 1,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "selectionPath": {
+                                          "minItems": 1,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "parameters": {
+                                          "minItems": 1,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "name": {
+                                                "type": "string",
+                                                "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                                              },
+                                              "source": {
+                                                "oneOf": [
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "kind": {
+                                                        "type": "string",
+                                                        "const": "literal"
+                                                      },
+                                                      "value": {
+                                                        "$ref": "#/$defs/__schema0"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "kind",
+                                                      "value"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  },
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "kind": {
+                                                        "type": "string",
+                                                        "const": "action_argument"
+                                                      },
+                                                      "argumentName": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "transform": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                          "identity",
+                                                          "uniform_vector3",
+                                                          "vector3_x",
+                                                          "vector3_y",
+                                                          "vector3_z"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "kind",
+                                                      "argumentName",
+                                                      "transform"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "name",
+                                              "source"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "label",
+                                        "keyMode",
+                                        "keys",
+                                        "parameters"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "omittedActionArguments": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "argumentName": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "reason": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "argumentName",
+                                        "reason"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "availability",
+                                  "source",
+                                  "semanticBinding",
+                                  "parameterBinding",
+                                  "projection",
+                                  "preconditions",
+                                  "operations",
+                                  "omittedActionArguments"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "availability",
-                              "reason"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
                           "mcp": {
                             "type": "object",

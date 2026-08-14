@@ -71,7 +71,38 @@ describe('interaction catalog registry', () => {
       availability: 'available',
       parameterBinding: 'accepted_action_arguments',
     });
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.11.0');
+    const frozenOrderedMenu = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.11.0',
+    });
+    expect(frozenOrderedMenu.recipes[0]!.procedureMaterialization?.menu).toMatchObject({
+      availability: 'available',
+      parameterBinding: 'ordered_parameter_operations',
+    });
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.12.0');
+    const latestShortcut = blenderInteractionCatalog.recipes[0]!.procedureMaterialization?.shortcut;
+    expect(latestShortcut).toMatchObject({
+      availability: 'available',
+      source: 'catalog.ordered_shortcut_operations',
+      semanticBinding: 'all_leaf_operations',
+      parameterBinding: 'ordered_parameter_operations',
+      projection: 'candidate_only',
+    });
+    if (latestShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest UV Sphere shortcut recipe to be available');
+    }
+    expect(latestShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.add_uv_sphere',
+      'shortcut.move_x',
+      'shortcut.move_y',
+      'shortcut.move_z',
+      'shortcut.scale',
+      'shortcut.rename',
+    ]);
+    expect(latestShortcut.omittedActionArguments).toEqual([
+      expect.objectContaining({ argumentName: 'resourceId' }),
+    ]);
   });
 
   it('keeps the InteractionCatalog 1.10.0 compatibility snapshot byte-for-byte frozen', () => {
@@ -82,6 +113,27 @@ describe('interaction catalog registry', () => {
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '7341b663fe5b6a6ce096a0aa370fb35b2345f3021a46e515d3e9476a5b630bf4',
     );
+  });
+
+  it('keeps the InteractionCatalog 1.11.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.11.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '308cafdaa22bb64a66e98464e841c92916dcea5d4fead9be6689d1d931537880',
+    );
+  });
+
+  it('keeps the latest TypeScript and Blender extension catalogs byte-identical', () => {
+    const catalogBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog.json'),
+    );
+    const extensionBytes = readFileSync(
+      resolve('adapters/blender/extension/operating_line/resources/interaction-catalog.json'),
+    );
+
+    expect(extensionBytes).toEqual(catalogBytes);
   });
 
   it('rejects duplicate catalogs and missing action catalog bindings', () => {

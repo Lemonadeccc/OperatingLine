@@ -110,11 +110,17 @@ describe('procedure compilation runtime', () => {
     const legacyMaterializingInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.10.0',
     );
+    const orderedMenuInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.11.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
     if (legacyMaterializingInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.10.0 snapshot');
+    }
+    if (orderedMenuInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.11.0 snapshot');
     }
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -123,6 +129,7 @@ describe('procedure compilation runtime', () => {
       interactionCatalogs: [
         unavailableLegacyInteractionCatalog,
         legacyMaterializingInteractionCatalog,
+        orderedMenuInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -259,7 +266,7 @@ describe('procedure compilation runtime', () => {
         materializedMcp.result?.structuredContent,
       );
       expect(materialization).toMatchObject({
-        formatVersion: '1.1.0',
+        formatVersion: '1.2.0',
         packetContentSha256: packet.integrity.contentSha256,
         catalogBinding: {
           adapterId: 'blender',
@@ -271,7 +278,7 @@ describe('procedure compilation runtime', () => {
             leafId: 'snowman.head.eyes.left',
             recipeId: 'blender.mesh.create_uv_sphere.native',
             menu: 'materialized',
-            shortcut: 'unavailable',
+            shortcut: 'materialized',
             mcp: 'unavailable',
           },
         ],
@@ -328,8 +335,54 @@ describe('procedure compilation runtime', () => {
       expect(materializedLeaf.semanticOperations[2]!.parameters).toEqual({
         name: 'Forged.Semantic.Name',
       });
-      expect(materializedLeaf.shortcutTracks).toEqual([
-        expect.objectContaining({ availability: 'unavailable', modality: 'shortcut' }),
+      const shortcutTrack = materializedLeaf.shortcutTracks[0];
+      if (shortcutTrack?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded shortcut track');
+      }
+      expect(
+        shortcutTrack.operations.map(({ keyMode, keys, selectionPath, parameters }) => ({
+          keyMode,
+          keys,
+          selectionPath,
+          parameters,
+        })),
+      ).toEqual([
+        {
+          keyMode: 'chord',
+          keys: ['SHIFT', 'A'],
+          selectionPath: ['Mesh', 'UV Sphere'],
+          parameters: { radius: 1, location: [0, 0, 0] },
+        },
+        {
+          keyMode: 'sequence',
+          keys: ['G', 'X'],
+          selectionPath: undefined,
+          parameters: { value: 0.32, confirm: 'ENTER' },
+        },
+        {
+          keyMode: 'sequence',
+          keys: ['G', 'Y'],
+          selectionPath: undefined,
+          parameters: { value: -0.86, confirm: 'ENTER' },
+        },
+        {
+          keyMode: 'sequence',
+          keys: ['G', 'Z'],
+          selectionPath: undefined,
+          parameters: { value: 2.14, confirm: 'ENTER' },
+        },
+        {
+          keyMode: 'sequence',
+          keys: ['S'],
+          selectionPath: undefined,
+          parameters: { value: 0.12, confirm: 'ENTER' },
+        },
+        {
+          keyMode: 'sequence',
+          keys: ['F2'],
+          selectionPath: undefined,
+          parameters: { text: 'OperatingLine.EyeLeft', confirm: 'ENTER' },
+        },
       ]);
       expect(materializedLeaf.mcpTracks).toEqual([
         expect.objectContaining({ availability: 'unavailable', modality: 'mcp' }),
@@ -364,6 +417,37 @@ describe('procedure compilation runtime', () => {
       });
       const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
       await expect(guide.json()).resolves.toEqual({ plan: null });
+
+      const orderedMenuPrompt = await callMcpTool(
+        runtime,
+        9,
+        'operatingline.procedure.prompt.get',
+        {
+          ...request,
+          interactionCatalogVersion: orderedMenuInteractionCatalog.catalogVersion,
+        },
+      );
+      const orderedMenuPacket = procedureAuthoringPromptPacketSchema.parse(
+        orderedMenuPrompt.result?.structuredContent,
+      );
+      const orderedMenuMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 10, 'operatingline.procedure.authoring.materialize', {
+            packet: orderedMenuPacket,
+            tree: authoringCandidateFixture(orderedMenuPacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(orderedMenuMaterialization.formatVersion).toBe('1.1.0');
+      expect(orderedMenuMaterialization.coverage).toEqual([
+        {
+          leafId: 'snowman.head.eyes.left',
+          recipeId: 'blender.mesh.create_uv_sphere.native',
+          menu: 'materialized',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        },
+      ]);
 
       const legacyMaterializingPrompt = await callMcpTool(
         runtime,

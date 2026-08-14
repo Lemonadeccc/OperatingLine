@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.11.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.12.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0`/`1.10.0`/`1.11.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -259,7 +259,11 @@
           顶层 argument、identity/uniform-vector 转换。结果格式 `1.1.0`，旧 `1.10.0` 四步算法继续返回
           `1.0.0`。radius→scale 仍是 candidate 教学投影，不是宿主状态等价证明。见
           [ADR 0047](adr/0047-ordered-procedure-parameter-operations.md)。
-    - [ ] 增加经真实版本验证的 shortcut/MCP recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
+    - [x] 候选快捷键物化：InteractionCatalog `1.12.0` 为 UV Sphere 声明六步 ordered shortcut；
+          chord/sequence、selection path、参数顺序与 `vector3_x/y/z` 分量投影均可安装期验证，结果格式为
+          `1.2.0`。该轨迹仍是 `candidate_only`/`structural_only`，不构成 Blender 状态等价证明。见
+          [ADR 0048](adr/0048-candidate-shortcut-procedure-materialization.md)。
+    - [ ] 增加经真实版本验证的 shortcut、获批 MCP recipe，并将更多 action 的封闭声明接入同一确定性物化边界。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生
         Undo，并把宿主版本、结果和证据写回 verified 状态。
   - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，

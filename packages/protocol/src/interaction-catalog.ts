@@ -89,7 +89,7 @@ export const parameterAssignmentSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('action_argument'),
     argumentName: z.string().min(1),
-    transform: z.enum(['identity', 'uniform_vector3']),
+    transform: z.enum(['identity', 'uniform_vector3', 'vector3_x', 'vector3_y', 'vector3_z']),
   }),
 ]);
 export type ParameterAssignmentSource = z.infer<typeof parameterAssignmentSourceSchema>;
@@ -156,9 +156,55 @@ export const menuProcedureMaterializationSchema = z.union([
 ]);
 export type MenuProcedureMaterialization = z.infer<typeof menuProcedureMaterializationSchema>;
 
+export const orderedShortcutOperationSchema = z.strictObject({
+  id: guideStepIdSchema,
+  label: z.string().min(1),
+  keyMode: z.enum(['chord', 'sequence']),
+  keys: z.array(z.string().min(1)).min(1),
+  selectionPath: z.array(z.string().min(1)).min(1).optional(),
+  parameters: z.array(parameterAssignmentSchema).min(1),
+});
+export type OrderedShortcutOperation = z.infer<typeof orderedShortcutOperationSchema>;
+
+export const availableShortcutProcedureMaterializationSchema = z.strictObject({
+  availability: z.literal('available'),
+  source: z.literal('catalog.ordered_shortcut_operations'),
+  semanticBinding: z.literal('all_leaf_operations'),
+  parameterBinding: z.literal('ordered_parameter_operations'),
+  projection: z.literal('candidate_only'),
+  preconditions: z.array(
+    z.strictObject({
+      kind: z.enum([
+        'workspace',
+        'editor',
+        'mode',
+        'selection',
+        'keymap',
+        'modal_state',
+        'scene_state',
+      ]),
+      label: z.string().min(1),
+      value: z.string().min(1),
+    }),
+  ),
+  operations: z.array(orderedShortcutOperationSchema).min(1),
+  omittedActionArguments: z.array(omittedActionArgumentSchema),
+});
+export type AvailableShortcutProcedureMaterialization = z.infer<
+  typeof availableShortcutProcedureMaterializationSchema
+>;
+
+export const shortcutProcedureMaterializationSchema = z.union([
+  unavailableProcedureMaterializationSchema,
+  availableShortcutProcedureMaterializationSchema,
+]);
+export type ShortcutProcedureMaterialization = z.infer<
+  typeof shortcutProcedureMaterializationSchema
+>;
+
 export const procedureMaterializationSchema = z.strictObject({
   menu: menuProcedureMaterializationSchema,
-  shortcut: unavailableProcedureMaterializationSchema,
+  shortcut: shortcutProcedureMaterializationSchema,
   mcp: unavailableProcedureMaterializationSchema,
 });
 export type ProcedureMaterialization = z.infer<typeof procedureMaterializationSchema>;
@@ -216,6 +262,134 @@ function validateParameterNames(
   }
 }
 
+function isNumericSchema(schema: unknown): boolean {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    'type' in schema &&
+    (schema.type === 'number' || schema.type === 'integer')
+  );
+}
+
+function isFixedNumericVector3Schema(schema: unknown): boolean {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    'type' in schema &&
+    schema.type === 'array' &&
+    'items' in schema &&
+    isNumericSchema(schema.items) &&
+    'minItems' in schema &&
+    schema.minItems === 3 &&
+    'maxItems' in schema &&
+    schema.maxItems === 3
+  );
+}
+
+function validateActionArgumentCoverage(
+  recipe: InteractionRecipe,
+  argumentSchemas: Record<string, unknown>,
+  assignments: readonly ParameterAssignment[],
+  omittedActionArguments: readonly OmittedActionArgument[],
+  modality: 'menu' | 'shortcut',
+): void {
+  const coverage = new Map<string, { whole: boolean; components: Set<'x' | 'y' | 'z'> }>();
+  for (const assignment of assignments) {
+    if (assignment.source.kind !== 'action_argument') continue;
+
+    const { argumentName, transform } = assignment.source;
+    if (!Object.hasOwn(argumentSchemas, argumentName)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} references unknown action argument ${argumentName}`,
+      );
+    }
+
+    const state = coverage.get(argumentName) ?? {
+      whole: false,
+      components: new Set<'x' | 'y' | 'z'>(),
+    };
+    if (transform === 'uniform_vector3' && !isNumericSchema(argumentSchemas[argumentName])) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} uniform_vector3 requires numeric action argument ${argumentName}`,
+      );
+    }
+
+    if (transform.startsWith('vector3_')) {
+      if (!isFixedNumericVector3Schema(argumentSchemas[argumentName])) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} ${transform} requires fixed three-item numeric array action argument ${argumentName}`,
+        );
+      }
+      if (state.whole) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} action argument ${argumentName} cannot mix whole-value and vector3 component mappings`,
+        );
+      }
+      const component = transform.slice(-1) as 'x' | 'y' | 'z';
+      if (state.components.has(component)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} ${modality} maps action argument ${argumentName} vector3_${component} more than once`,
+        );
+      }
+      state.components.add(component);
+    } else {
+      if (state.whole || state.components.size > 0) {
+        const suffix =
+          state.components.size > 0
+            ? 'cannot mix whole-value and vector3 component mappings'
+            : `maps action argument ${argumentName} more than once`;
+        throw new Error(
+          state.components.size > 0
+            ? `Interaction recipe ${recipe.id} ${modality} action argument ${argumentName} ${suffix}`
+            : `Interaction recipe ${recipe.id} ${modality} ${suffix}`,
+        );
+      }
+      state.whole = true;
+    }
+    coverage.set(argumentName, state);
+  }
+
+  for (const [argumentName, state] of coverage) {
+    if (!state.whole && state.components.size !== 3) {
+      const missingComponents = (['x', 'y', 'z'] as const).filter(
+        (component) => !state.components.has(component),
+      );
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} action argument ${argumentName} must map vector3 components x, y, and z exactly once; missing: ${missingComponents.join(', ')}`,
+      );
+    }
+  }
+
+  const omittedArguments = new Set<string>();
+  for (const omitted of omittedActionArguments) {
+    if (!Object.hasOwn(argumentSchemas, omitted.argumentName)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} omits unknown action argument ${omitted.argumentName}`,
+      );
+    }
+    if (coverage.has(omitted.argumentName)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} action argument ${omitted.argumentName} cannot be both mapped and omitted`,
+      );
+    }
+    if (omittedArguments.has(omitted.argumentName)) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} omits action argument ${omitted.argumentName} more than once`,
+      );
+    }
+    omittedArguments.add(omitted.argumentName);
+  }
+
+  const uncoveredArguments = Object.keys(argumentSchemas).filter(
+    (argumentName) => !coverage.has(argumentName) && !omittedArguments.has(argumentName),
+  );
+  if (uncoveredArguments.length > 0) {
+    throw new Error(
+      `Interaction recipe ${recipe.id} ${modality} leaves action arguments unmapped: ${uncoveredArguments.sort().join(', ')}`,
+    );
+  }
+}
+
 function validateRecipe(recipe: InteractionRecipe): void {
   if (recipe.procedureMaterialization?.menu.availability === 'available') {
     if (
@@ -263,6 +437,65 @@ function validateRecipe(recipe: InteractionRecipe): void {
         controlLabels.add(control.label);
         validateParameterNames(recipe, `control ${control.id}`, control.parameters);
       }
+    }
+  }
+
+  const shortcut = recipe.procedureMaterialization?.shortcut;
+  if (shortcut?.availability === 'available') {
+    const singletonPreconditionKinds = new Set(['workspace', 'editor', 'mode', 'keymap']);
+    const singletonPreconditionCounts = new Map<string, number>();
+    const preconditionKeys = new Set<string>();
+    for (const precondition of shortcut.preconditions) {
+      const preconditionKey = `${precondition.kind}\u0000${precondition.label}`;
+      if (preconditionKeys.has(preconditionKey)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut contains duplicate precondition ${precondition.kind}:${precondition.label}`,
+        );
+      }
+      preconditionKeys.add(preconditionKey);
+      if (singletonPreconditionKinds.has(precondition.kind)) {
+        singletonPreconditionCounts.set(
+          precondition.kind,
+          (singletonPreconditionCounts.get(precondition.kind) ?? 0) + 1,
+        );
+      }
+    }
+    const duplicateSingletonKinds = [...singletonPreconditionCounts]
+      .filter(([, count]) => count > 1)
+      .map(([kind]) => kind)
+      .sort();
+    if (duplicateSingletonKinds.length > 0) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} shortcut must declare exactly one precondition for: ${duplicateSingletonKinds.join(', ')}`,
+      );
+    }
+    const preconditionKinds = new Set(
+      shortcut.preconditions.map((precondition) => precondition.kind),
+    );
+    const missingPreconditionKinds = (
+      ['workspace', 'editor', 'mode', 'keymap', 'scene_state'] as const
+    ).filter((kind) => !preconditionKinds.has(kind));
+    if (missingPreconditionKinds.length > 0) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} shortcut is missing required preconditions: ${missingPreconditionKinds.join(', ')}`,
+      );
+    }
+    const operationIds = new Set<string>();
+    const operationLabels = new Set<string>();
+    for (const operation of shortcut.operations) {
+      if (operationIds.has(operation.id)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut contains duplicate operation id ${operation.id}`,
+        );
+      }
+      if (operationLabels.has(operation.label)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut contains duplicate operation label ${operation.label}`,
+        );
+      }
+      operationIds.add(operation.id);
+      operationLabels.add(operation.label);
+      validateParameterNames(recipe, `shortcut operation ${operation.id}`, operation.parameters);
     }
   }
 
@@ -362,78 +595,33 @@ export function validateInteractionCatalog(
 
   const actionsByName = new Map(actionCatalog.actions.map((action) => [action.name, action]));
   for (const recipe of catalog.recipes) {
-    const menu = recipe.procedureMaterialization?.menu;
-    if (
-      menu?.availability !== 'available' ||
-      menu.parameterBinding !== 'ordered_parameter_operations'
-    ) {
-      continue;
-    }
-
     const action = actionsByName.get(recipe.actionName)!;
     const argumentSchemas = action.argumentsSchema.properties;
-    const coveredArguments = new Set<string>();
-    const assignments = [
-      ...menu.operatorParameters,
-      ...menu.controlOperations.operations.flatMap((control) => control.parameters),
-    ];
-    for (const assignment of assignments) {
-      if (assignment.source.kind !== 'action_argument') {
-        continue;
-      }
-      const argumentName = assignment.source.argumentName;
-      if (!Object.hasOwn(argumentSchemas, argumentName)) {
-        throw new Error(
-          `Interaction recipe ${recipe.id} references unknown action argument ${argumentName}`,
-        );
-      }
-      if (coveredArguments.has(argumentName)) {
-        throw new Error(
-          `Interaction recipe ${recipe.id} maps action argument ${argumentName} more than once`,
-        );
-      }
-      if (assignment.source.transform === 'uniform_vector3') {
-        const argumentSchema = argumentSchemas[argumentName];
-        if (
-          typeof argumentSchema !== 'object' ||
-          argumentSchema === null ||
-          !('type' in argumentSchema) ||
-          (argumentSchema.type !== 'number' && argumentSchema.type !== 'integer')
-        ) {
-          throw new Error(
-            `Interaction recipe ${recipe.id} uniform_vector3 requires numeric action argument ${argumentName}`,
-          );
-        }
-      }
-      coveredArguments.add(argumentName);
+    const menu = recipe.procedureMaterialization?.menu;
+    if (
+      menu?.availability === 'available' &&
+      menu.parameterBinding === 'ordered_parameter_operations'
+    ) {
+      validateActionArgumentCoverage(
+        recipe,
+        argumentSchemas,
+        [
+          ...menu.operatorParameters,
+          ...menu.controlOperations.operations.flatMap((control) => control.parameters),
+        ],
+        menu.omittedActionArguments,
+        'menu',
+      );
     }
 
-    const omittedArguments = new Set<string>();
-    for (const omitted of menu.omittedActionArguments) {
-      if (!Object.hasOwn(argumentSchemas, omitted.argumentName)) {
-        throw new Error(
-          `Interaction recipe ${recipe.id} omits unknown action argument ${omitted.argumentName}`,
-        );
-      }
-      if (coveredArguments.has(omitted.argumentName)) {
-        throw new Error(
-          `Interaction recipe ${recipe.id} action argument ${omitted.argumentName} cannot be both mapped and omitted`,
-        );
-      }
-      if (omittedArguments.has(omitted.argumentName)) {
-        throw new Error(
-          `Interaction recipe ${recipe.id} omits action argument ${omitted.argumentName} more than once`,
-        );
-      }
-      omittedArguments.add(omitted.argumentName);
-    }
-
-    const uncoveredArguments = Object.keys(argumentSchemas).filter(
-      (argumentName) => !coveredArguments.has(argumentName) && !omittedArguments.has(argumentName),
-    );
-    if (uncoveredArguments.length > 0) {
-      throw new Error(
-        `Interaction recipe ${recipe.id} leaves action arguments unmapped: ${uncoveredArguments.sort().join(', ')}`,
+    const shortcut = recipe.procedureMaterialization?.shortcut;
+    if (shortcut?.availability === 'available') {
+      validateActionArgumentCoverage(
+        recipe,
+        argumentSchemas,
+        shortcut.operations.flatMap((operation) => operation.parameters),
+        shortcut.omittedActionArguments,
+        'shortcut',
       );
     }
   }

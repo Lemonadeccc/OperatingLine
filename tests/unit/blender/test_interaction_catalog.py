@@ -101,10 +101,13 @@ class InteractionCatalogTests(unittest.TestCase):
         }
         return raw
 
+    def _ordered_shortcut_catalog(self) -> dict:
+        return json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.11.0")
+        self.assertEqual(catalog.catalog_version, "1.12.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -172,9 +175,46 @@ class InteractionCatalogTests(unittest.TestCase):
             tuple(item.argument_name for item in menu.omitted_action_arguments),
             ("resourceId",),
         )
+        shortcut = sphere.procedure_materialization.shortcut
+        self.assertEqual(shortcut.availability, "available")
+        self.assertEqual(shortcut.source, "catalog.ordered_shortcut_operations")
+        self.assertEqual(shortcut.semantic_binding, "all_leaf_operations")
+        self.assertEqual(shortcut.parameter_binding, "ordered_parameter_operations")
+        self.assertEqual(shortcut.projection, "candidate_only")
+        assert shortcut.preconditions is not None
+        self.assertTrue(
+            {"workspace", "editor", "mode", "keymap", "scene_state"}
+            <= {precondition.kind for precondition in shortcut.preconditions}
+        )
+        assert shortcut.shortcut_operations is not None
         self.assertEqual(
-            sphere.procedure_materialization.shortcut.availability,
-            "unavailable",
+            tuple(operation.id for operation in shortcut.shortcut_operations),
+            (
+                "shortcut.add_uv_sphere",
+                "shortcut.move_x",
+                "shortcut.move_y",
+                "shortcut.move_z",
+                "shortcut.scale",
+                "shortcut.rename",
+            ),
+        )
+        self.assertEqual(shortcut.shortcut_operations[0].key_mode, "chord")
+        self.assertEqual(shortcut.shortcut_operations[0].keys, ("SHIFT", "A"))
+        self.assertEqual(
+            shortcut.shortcut_operations[0].selection_path,
+            ("Mesh", "UV Sphere"),
+        )
+        self.assertEqual(
+            tuple(
+                operation.parameters[0].source.transform
+                for operation in shortcut.shortcut_operations[1:4]
+            ),
+            ("vector3_x", "vector3_y", "vector3_z"),
+        )
+        assert shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(item.argument_name for item in shortcut.omitted_action_arguments),
+            ("resourceId",),
         )
         self.assertEqual(
             sphere.procedure_materialization.mcp.availability,
@@ -221,6 +261,26 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertIsNone(menu.operator_parameters)
         self.assertIsNone(menu.control_operations)
         self.assertIsNone(menu.omitted_action_arguments)
+
+    def test_loads_frozen_ordered_menu_without_shortcut_operations(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.11.0.json"
+        )
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        materialization = frozen.recipes[0].procedure_materialization
+        assert materialization is not None
+
+        self.assertEqual(
+            materialization.menu.parameter_binding,
+            "ordered_parameter_operations",
+        )
+        self.assertEqual(materialization.shortcut.availability, "unavailable")
+        self.assertIsNone(materialization.shortcut.shortcut_operations)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())
@@ -387,6 +447,194 @@ class InteractionCatalogTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "non-portable parameter name"):
                     self._load_raw(raw)
 
+    def test_rejects_malformed_ordered_shortcut_operations(self) -> None:
+        cases: list[tuple[str, Callable[[dict], None], str]] = [
+            (
+                "unsupported source",
+                lambda shortcut: shortcut.__setitem__("source", "guidance.native_path"),
+                "shortcut has unsupported source",
+            ),
+            (
+                "non-candidate projection",
+                lambda shortcut: shortcut.__setitem__("projection", "verified"),
+                "projection must be candidate_only",
+            ),
+            (
+                "missing keymap precondition",
+                lambda shortcut: shortcut.__setitem__(
+                    "preconditions",
+                    [
+                        item
+                        for item in shortcut["preconditions"]
+                        if item["kind"] != "keymap"
+                    ],
+                ),
+                "missing required kinds: keymap",
+            ),
+            (
+                "unknown precondition kind",
+                lambda shortcut: shortcut["preconditions"][0].__setitem__(
+                    "kind", "window"
+                ),
+                "has unknown kind window",
+            ),
+            (
+                "duplicate singleton precondition",
+                lambda shortcut: shortcut["preconditions"].append(
+                    {
+                        "kind": "workspace",
+                        "label": "Alternate workspace",
+                        "value": "Modeling",
+                    }
+                ),
+                "must declare exactly one precondition for workspace",
+            ),
+            (
+                "duplicate labeled precondition",
+                lambda shortcut: shortcut["preconditions"].append(
+                    deepcopy(shortcut["preconditions"][4])
+                ),
+                "contains duplicate precondition scene_state:3D Cursor",
+            ),
+            (
+                "empty operations",
+                lambda shortcut: shortcut.__setitem__("operations", []),
+                "shortcut operations must be a non-empty array",
+            ),
+            (
+                "duplicate operation id",
+                lambda shortcut: shortcut["operations"][1].__setitem__(
+                    "id", shortcut["operations"][0]["id"]
+                ),
+                "duplicate operation id",
+            ),
+            (
+                "duplicate operation label",
+                lambda shortcut: shortcut["operations"][1].__setitem__(
+                    "label", shortcut["operations"][0]["label"]
+                ),
+                "duplicate operation label",
+            ),
+            (
+                "unsupported key mode",
+                lambda shortcut: shortcut["operations"][0].__setitem__(
+                    "keyMode", "hold"
+                ),
+                "unsupported keyMode",
+            ),
+            (
+                "empty keys",
+                lambda shortcut: shortcut["operations"][0].__setitem__("keys", []),
+                "keys must be a non-empty array",
+            ),
+            (
+                "empty selection path",
+                lambda shortcut: shortcut["operations"][0].__setitem__(
+                    "selectionPath", []
+                ),
+                "selectionPath must be a non-empty array",
+            ),
+            (
+                "empty parameters",
+                lambda shortcut: shortcut["operations"][0].__setitem__(
+                    "parameters", []
+                ),
+                "must be a non-empty array",
+            ),
+            (
+                "missing vector component",
+                lambda shortcut: shortcut["operations"].pop(3),
+                "must map vector3 components x, y, and z exactly once",
+            ),
+            (
+                "duplicate vector component",
+                lambda shortcut: shortcut["operations"][3]["parameters"][0][
+                    "source"
+                ].__setitem__("transform", "vector3_x"),
+                "maps action argument location vector3_x more than once",
+            ),
+            (
+                "whole and component mapping",
+                lambda shortcut: shortcut["operations"][4]["parameters"].append(
+                    {
+                        "name": "location",
+                        "source": {
+                            "kind": "action_argument",
+                            "argumentName": "location",
+                            "transform": "identity",
+                        },
+                    }
+                ),
+                "mixes whole and component mappings",
+            ),
+            (
+                "missing shortcut action coverage",
+                lambda shortcut: shortcut["operations"].pop(),
+                "shortcut ordered parameter action coverage mismatch; "
+                "missing: objectName",
+            ),
+            (
+                "mapped and omitted action argument",
+                lambda shortcut: shortcut["omittedActionArguments"].append(
+                    {
+                        "argumentName": "radius",
+                        "reason": "Invalid overlap.",
+                    }
+                ),
+                "both maps and omits action argument radius",
+            ),
+            (
+                "unknown omitted action argument",
+                lambda shortcut: shortcut["omittedActionArguments"][0].__setitem__(
+                    "argumentName", "missing"
+                ),
+                "shortcut ordered parameter action coverage mismatch; "
+                "missing: resourceId; unknown: missing",
+            ),
+            (
+                "duplicate omitted action argument",
+                lambda shortcut: shortcut["omittedActionArguments"].append(
+                    deepcopy(shortcut["omittedActionArguments"][0])
+                ),
+                "duplicate argument resourceId",
+            ),
+            (
+                "uncovered action argument",
+                lambda shortcut: shortcut.__setitem__("omittedActionArguments", []),
+                "shortcut ordered parameter action coverage mismatch; "
+                "missing: resourceId",
+            ),
+        ]
+
+        for name, mutate, message in cases:
+            with self.subTest(name=name):
+                raw = self._ordered_shortcut_catalog()
+                shortcut = raw["recipes"][0]["procedureMaterialization"]["shortcut"]
+                mutate(shortcut)
+                with self.assertRaisesRegex(ValueError, message):
+                    self._load_raw(raw)
+
+        invalid_vector_source = self._ordered_shortcut_catalog()
+        invalid_shortcut = invalid_vector_source["recipes"][0][
+            "procedureMaterialization"
+        ]["shortcut"]
+        for operation in invalid_shortcut["operations"][1:4]:
+            operation["parameters"][0]["source"]["argumentName"] = "radius"
+        invalid_shortcut["operations"][4]["parameters"][0]["source"] = {
+            "kind": "literal",
+            "value": 1,
+        }
+        invalid_shortcut["omittedActionArguments"].append(
+            {
+                "argumentName": "location",
+                "reason": "Replaced only to exercise the invalid component schema.",
+            }
+        )
+        with self.assertRaisesRegex(
+            ValueError, "must have a fixed-length numeric vector3 action schema"
+        ):
+            self._load_raw(invalid_vector_source)
+
     def test_rejects_non_finite_numbers_in_nested_literal_values(self) -> None:
         for value in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(value=value):
@@ -430,7 +678,7 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         available_shortcut = deepcopy(raw)
         available_shortcut["recipes"][0]["procedureMaterialization"]["shortcut"] = {
-            "availability": "available",
+            "availability": "unknown",
             "reason": "Unsupported",
         }
         unsupported_menu_target = deepcopy(raw)
@@ -467,7 +715,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 load_interaction_catalog(semantic_path, ACTION_CATALOG_PATH)
             with self.assertRaisesRegex(
                 ValueError,
-                "shortcut availability must be unavailable",
+                "shortcut has unknown availability",
             ):
                 load_interaction_catalog(shortcut_path, ACTION_CATALOG_PATH)
             with self.assertRaisesRegex(

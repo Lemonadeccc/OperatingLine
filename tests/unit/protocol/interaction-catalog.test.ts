@@ -27,11 +27,84 @@ function orderedMenu(catalog: InteractionCatalog) {
   return menu;
 }
 
+function installOrderedShortcut(catalog: InteractionCatalog) {
+  const materialization = catalog.recipes[0]!.procedureMaterialization;
+  if (materialization === undefined) throw new Error('Expected procedure materialization fixture');
+  materialization.shortcut = {
+    availability: 'available',
+    source: 'catalog.ordered_shortcut_operations',
+    semanticBinding: 'all_leaf_operations',
+    parameterBinding: 'ordered_parameter_operations',
+    projection: 'candidate_only',
+    preconditions: [
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'scene_state', label: 'Cursor', value: 'World Origin' },
+    ],
+    operations: [
+      {
+        id: 'shortcut.add_sphere',
+        label: 'Add UV Sphere',
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'UV Sphere'],
+        parameters: [
+          {
+            name: 'radius',
+            source: { kind: 'action_argument', argumentName: 'radius', transform: 'identity' },
+          },
+        ],
+      },
+      ...(['x', 'y', 'z'] as const).map((component) => ({
+        id: `shortcut.move_${component}`,
+        label: `Move ${component.toUpperCase()}`,
+        keyMode: 'sequence' as const,
+        keys: ['G', component.toUpperCase()],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument' as const,
+              argumentName: 'location',
+              transform: `vector3_${component}` as const,
+            },
+          },
+        ],
+      })),
+      {
+        id: 'shortcut.rename',
+        label: 'Rename Object',
+        keyMode: 'sequence',
+        keys: ['F2'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'objectName',
+              transform: 'identity',
+            },
+          },
+        ],
+      },
+    ],
+    omittedActionArguments: [
+      {
+        argumentName: 'resourceId',
+        reason: 'The logical identifier is not entered through a Blender shortcut.',
+      },
+    ],
+  };
+  return materialization.shortcut;
+}
+
 describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.11.0');
+    expect(catalog.catalogVersion).toBe('1.12.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -68,6 +141,7 @@ describe('interaction catalog protocol', () => {
       '1.9.0',
       '1.10.0',
       '1.11.0',
+      '1.12.0',
     ]);
 
     const sphere = catalog.recipes[0]!;
@@ -146,15 +220,28 @@ describe('interaction catalog protocol', () => {
         ],
       },
       shortcut: {
-        availability: 'unavailable',
-        reason: 'No versioned shortcut recipe is available.',
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+        operations: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'shortcut.move_x',
+            keyMode: 'sequence',
+            keys: ['G', 'X'],
+          }),
+        ]),
       },
       mcp: {
         availability: 'unavailable',
         reason: 'No approved action-level MCP tool is available.',
       },
     });
-    expect(blenderInteractionCatalogs.at(-2)!.recipes[0]!.procedureMaterialization?.menu).toEqual({
+    expect(
+      blenderInteractionCatalogs.find((versioned) => versioned.catalogVersion === '1.10.0')!
+        .recipes[0]!.procedureMaterialization?.menu,
+    ).toEqual({
       availability: 'available',
       source: 'guidance.native_path',
       semanticBinding: 'all_leaf_operations',
@@ -307,6 +394,132 @@ describe('interaction catalog protocol', () => {
     expect(schema.additionalProperties).toBe(false);
   });
 
+  it('validates ordered shortcut mappings independently from menu mappings', () => {
+    const catalog = structuredClone(blenderInteractionCatalog);
+    const shortcut = installOrderedShortcut(catalog);
+    expect(() => validateInteractionCatalog(catalog, blenderActionCatalog)).not.toThrow();
+    expect(shortcut.operations.map((operation) => operation.keyMode)).toEqual([
+      'chord',
+      'sequence',
+      'sequence',
+      'sequence',
+      'sequence',
+    ]);
+
+    const missingPrecondition = structuredClone(catalog);
+    const missingPreconditionShortcut = installOrderedShortcut(missingPrecondition);
+    missingPreconditionShortcut.preconditions = missingPreconditionShortcut.preconditions.filter(
+      (precondition) => precondition.kind !== 'scene_state',
+    );
+    expect(() => validateInteractionCatalog(missingPrecondition, blenderActionCatalog)).toThrow(
+      'shortcut is missing required preconditions: scene_state',
+    );
+
+    const duplicateSingletonPrecondition = structuredClone(catalog);
+    installOrderedShortcut(duplicateSingletonPrecondition).preconditions.push({
+      kind: 'workspace',
+      label: 'Alternate workspace',
+      value: 'Modeling',
+    });
+    expect(() =>
+      validateInteractionCatalog(duplicateSingletonPrecondition, blenderActionCatalog),
+    ).toThrow('shortcut must declare exactly one precondition for: workspace');
+
+    const duplicateLabeledPrecondition = structuredClone(catalog);
+    const duplicateLabeledShortcut = installOrderedShortcut(duplicateLabeledPrecondition);
+    duplicateLabeledShortcut.preconditions.push(
+      structuredClone(
+        duplicateLabeledShortcut.preconditions.find(
+          (precondition) => precondition.kind === 'scene_state',
+        )!,
+      ),
+    );
+    expect(() =>
+      validateInteractionCatalog(duplicateLabeledPrecondition, blenderActionCatalog),
+    ).toThrow('shortcut contains duplicate precondition scene_state:Cursor');
+
+    const incompleteComponents = structuredClone(catalog);
+    const incompleteShortcut = installOrderedShortcut(incompleteComponents);
+    incompleteShortcut.operations.splice(3, 1);
+    expect(() => validateInteractionCatalog(incompleteComponents, blenderActionCatalog)).toThrow(
+      'must map vector3 components x, y, and z exactly once; missing: z',
+    );
+
+    const duplicateComponent = structuredClone(catalog);
+    const duplicateSource =
+      installOrderedShortcut(duplicateComponent).operations[3]!.parameters[0]!.source;
+    if (duplicateSource.kind !== 'action_argument') throw new Error('Expected action argument');
+    duplicateSource.transform = 'vector3_x';
+    expect(() => validateInteractionCatalog(duplicateComponent, blenderActionCatalog)).toThrow(
+      'maps action argument location vector3_x more than once',
+    );
+
+    const mixedWholeAndComponents = structuredClone(catalog);
+    const mixedSource =
+      installOrderedShortcut(mixedWholeAndComponents).operations[3]!.parameters[0]!.source;
+    if (mixedSource.kind !== 'action_argument') throw new Error('Expected action argument');
+    mixedSource.transform = 'identity';
+    expect(() => validateInteractionCatalog(mixedWholeAndComponents, blenderActionCatalog)).toThrow(
+      'cannot mix whole-value and vector3 component mappings',
+    );
+
+    const nonVectorArgument = structuredClone(catalog);
+    const nonVectorSource =
+      installOrderedShortcut(nonVectorArgument).operations[0]!.parameters[0]!.source;
+    if (nonVectorSource.kind !== 'action_argument') throw new Error('Expected action argument');
+    nonVectorSource.transform = 'vector3_x';
+    expect(() => validateInteractionCatalog(nonVectorArgument, blenderActionCatalog)).toThrow(
+      'requires fixed three-item numeric array action argument radius',
+    );
+
+    const duplicateOperation = structuredClone(catalog);
+    const duplicateOperationShortcut = installOrderedShortcut(duplicateOperation);
+    duplicateOperationShortcut.operations[1]!.id = duplicateOperationShortcut.operations[0]!.id;
+    expect(() => validateInteractionCatalog(duplicateOperation, blenderActionCatalog)).toThrow(
+      'shortcut contains duplicate operation id shortcut.add_sphere',
+    );
+
+    const duplicateShortcutParameter = structuredClone(catalog);
+    const duplicateShortcutParameterOperation = installOrderedShortcut(duplicateShortcutParameter)
+      .operations[0]!;
+    duplicateShortcutParameterOperation.parameters.push(
+      structuredClone(duplicateShortcutParameterOperation.parameters[0]!),
+    );
+    expect(() =>
+      validateInteractionCatalog(duplicateShortcutParameter, blenderActionCatalog),
+    ).toThrow('shortcut operation shortcut.add_sphere contains duplicate parameter radius');
+
+    const mappedAndOmitted = structuredClone(catalog);
+    installOrderedShortcut(mappedAndOmitted).omittedActionArguments.push({
+      argumentName: 'radius',
+      reason: 'Invalid overlap.',
+    });
+    expect(() => validateInteractionCatalog(mappedAndOmitted, blenderActionCatalog)).toThrow(
+      'action argument radius cannot be both mapped and omitted',
+    );
+
+    const unknownOmission = structuredClone(catalog);
+    installOrderedShortcut(unknownOmission).omittedActionArguments[0]!.argumentName = 'missing';
+    expect(() => validateInteractionCatalog(unknownOmission, blenderActionCatalog)).toThrow(
+      'omits unknown action argument missing',
+    );
+
+    const duplicateOmission = structuredClone(catalog);
+    const duplicateOmissionShortcut = installOrderedShortcut(duplicateOmission);
+    duplicateOmissionShortcut.omittedActionArguments.push(
+      structuredClone(duplicateOmissionShortcut.omittedActionArguments[0]!),
+    );
+    expect(() => validateInteractionCatalog(duplicateOmission, blenderActionCatalog)).toThrow(
+      'omits action argument resourceId more than once',
+    );
+
+    const uncoveredArgument = structuredClone(catalog);
+    installOrderedShortcut(uncoveredArgument).omittedActionArguments = [];
+    expect(() => validateInteractionCatalog(uncoveredArgument, blenderActionCatalog)).toThrow(
+      'leaves action arguments unmapped: resourceId',
+    );
+  });
+
   it('keeps ordered parameter operations exact in Zod and public JSON Schema', async () => {
     const emptyControls = structuredClone(blenderInteractionCatalog);
     orderedMenu(emptyControls).controlOperations.operations = [];
@@ -336,11 +549,43 @@ describe('interaction catalog protocol', () => {
       },
     );
 
+    const emptyShortcutParameters = structuredClone(blenderInteractionCatalog);
+    installOrderedShortcut(emptyShortcutParameters).operations[0]!.parameters = [];
+    const emptySelectionPath = structuredClone(blenderInteractionCatalog);
+    installOrderedShortcut(emptySelectionPath).operations[0]!.selectionPath = [];
+    const missingKeyMode = structuredClone(blenderInteractionCatalog) as unknown as Record<
+      string,
+      unknown
+    >;
+    const missingKeyModeRecipes = missingKeyMode['recipes'] as Array<Record<string, unknown>>;
+    const missingKeyModeMaterialization = missingKeyModeRecipes[0]![
+      'procedureMaterialization'
+    ] as Record<string, unknown>;
+    const missingKeyModeShortcut = missingKeyModeMaterialization['shortcut'] as Record<
+      string,
+      unknown
+    >;
+    const missingKeyModeOperations = missingKeyModeShortcut['operations'] as Array<
+      Record<string, unknown>
+    >;
+    delete missingKeyModeOperations[0]!['keyMode'];
+
     const cases = [
       { value: blenderInteractionCatalog, accepted: true },
       { value: frozen, accepted: true },
+      {
+        value: (() => {
+          const catalog = structuredClone(blenderInteractionCatalog);
+          installOrderedShortcut(catalog);
+          return catalog;
+        })(),
+        accepted: true,
+      },
       { value: emptyControls, accepted: false },
       { value: emptyParameters, accepted: false },
+      { value: emptyShortcutParameters, accepted: false },
+      { value: emptySelectionPath, accepted: false },
+      { value: missingKeyMode, accepted: false },
       { value: extraField, accepted: false },
       ...unsafeParameterNames.map((value) => ({ value, accepted: false as const })),
     ] as const;

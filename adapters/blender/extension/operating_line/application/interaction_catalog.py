@@ -45,6 +45,23 @@ MENU_PROCEDURE_TARGET_KINDS = frozenset(
 )
 STEP_INTENTS = frozenset({"navigate", "configure", "execute", "verify"})
 PRECONDITION_KINDS = frozenset({"workspace", "editor", "mode", "selection"})
+SHORTCUT_PRECONDITION_KINDS = frozenset(
+    {
+        "workspace",
+        "editor",
+        "mode",
+        "selection",
+        "keymap",
+        "modal_state",
+        "scene_state",
+    }
+)
+REQUIRED_SHORTCUT_PRECONDITION_KINDS = frozenset(
+    {"workspace", "editor", "mode", "keymap", "scene_state"}
+)
+SINGLETON_SHORTCUT_PRECONDITION_KINDS = frozenset(
+    {"workspace", "editor", "mode", "keymap"}
+)
 RESERVED_PARAMETER_NAMES = frozenset({"__proto__", "prototype", "constructor"})
 PARAMETER_ASSIGNMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 
@@ -94,6 +111,9 @@ class ProcedureMaterializationChannel:
     omitted_action_arguments: (
         tuple["OmittedActionArgumentDefinition", ...] | None
     ) = None
+    projection: str | None = None
+    preconditions: tuple["ShortcutPreconditionDefinition", ...] | None = None
+    shortcut_operations: tuple["ShortcutOperationDefinition", ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +159,27 @@ class OmittedActionArgumentDefinition:
 
     argument_name: str
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutPreconditionDefinition:
+    """One declared prerequisite for replaying a shortcut candidate."""
+
+    kind: str
+    label: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutOperationDefinition:
+    """One ordered shortcut operation from an adapter-owned candidate recipe."""
+
+    id: str
+    label: str
+    key_mode: str
+    keys: tuple[str, ...]
+    parameters: tuple[ParameterAssignmentDefinition, ...]
+    selection_path: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,7 +492,13 @@ def _parse_parameter_source(
             label=label,
         )
         transform = _expect_string(raw["transform"], f"{label} transform")
-        if transform not in {"identity", "uniform_vector3"}:
+        if transform not in {
+            "identity",
+            "uniform_vector3",
+            "vector3_x",
+            "vector3_y",
+            "vector3_z",
+        }:
             raise ValueError(f"{label} has unsupported transform")
         return ParameterAssignmentSourceDefinition(
             kind=kind,
@@ -597,6 +644,171 @@ def _parse_omitted_action_arguments(
     return tuple(omitted)
 
 
+def _parse_shortcut_preconditions(
+    value: Any,
+    recipe_id: str,
+) -> tuple[ShortcutPreconditionDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} shortcut preconditions"
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    preconditions: list[ShortcutPreconditionDefinition] = []
+    kinds: set[str] = set()
+    singleton_kinds: set[str] = set()
+    kind_labels: set[tuple[str, str]] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} entry")
+        _expect_exact_keys(
+            raw,
+            required={"kind", "label", "value"},
+            label=f"{label} entry",
+        )
+        kind = _expect_string(raw["kind"], f"{label} kind")
+        if kind not in SHORTCUT_PRECONDITION_KINDS:
+            raise ValueError(f"{label} has unknown kind {kind}")
+        precondition_label = _expect_string(raw["label"], f"{label} label")
+        kind_label = (kind, precondition_label)
+        if kind_label in kind_labels:
+            raise ValueError(
+                f"{label} contains duplicate precondition "
+                f"{kind}:{precondition_label}"
+            )
+        if kind in SINGLETON_SHORTCUT_PRECONDITION_KINDS:
+            if kind in singleton_kinds:
+                raise ValueError(
+                    f"{label} must declare exactly one precondition for {kind}"
+                )
+            singleton_kinds.add(kind)
+        kind_labels.add(kind_label)
+        kinds.add(kind)
+        preconditions.append(
+            ShortcutPreconditionDefinition(
+                kind=kind,
+                label=precondition_label,
+                value=_expect_string(raw["value"], f"{label} value"),
+            )
+        )
+    missing = REQUIRED_SHORTCUT_PRECONDITION_KINDS - kinds
+    if missing:
+        raise ValueError(
+            f"{label} missing required kinds: {', '.join(sorted(missing))}"
+        )
+    return tuple(preconditions)
+
+
+def _parse_shortcut_operations(
+    value: Any,
+    recipe_id: str,
+) -> tuple[ShortcutOperationDefinition, ...]:
+    label = f"Interaction recipe {recipe_id} shortcut operations"
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    operations: list[ShortcutOperationDefinition] = []
+    ids: set[str] = set()
+    labels: set[str] = set()
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} operation")
+        _expect_exact_keys(
+            raw,
+            required={"id", "label", "keyMode", "keys", "parameters"},
+            optional={"selectionPath"},
+            label=f"{label} operation",
+        )
+        operation_id = _expect_string(raw["id"], f"{label} operation id")
+        if STEP_ID_PATTERN.fullmatch(operation_id) is None:
+            raise ValueError(f"{label} has invalid operation id")
+        operation_label = _expect_string(raw["label"], f"{label} operation label")
+        if operation_id in ids:
+            raise ValueError(f"{label} contains duplicate operation id {operation_id}")
+        if operation_label in labels:
+            raise ValueError(
+                f"{label} contains duplicate operation label {operation_label}"
+            )
+        key_mode = _expect_string(raw["keyMode"], f"{label} operation keyMode")
+        if key_mode not in {"chord", "sequence"}:
+            raise ValueError(f"{label} operation has unsupported keyMode")
+        raw_keys = raw["keys"]
+        if not isinstance(raw_keys, list) or not raw_keys:
+            raise ValueError(f"{label} operation keys must be a non-empty array")
+        keys = tuple(
+            _expect_string(item, f"{label} operation key") for item in raw_keys
+        )
+        selection_path = None
+        if "selectionPath" in raw:
+            raw_selection_path = raw["selectionPath"]
+            if not isinstance(raw_selection_path, list) or not raw_selection_path:
+                raise ValueError(
+                    f"{label} operation selectionPath must be a non-empty array"
+                )
+            selection_path = tuple(
+                _expect_string(item, f"{label} operation selectionPath item")
+                for item in raw_selection_path
+            )
+        ids.add(operation_id)
+        labels.add(operation_label)
+        operations.append(
+            ShortcutOperationDefinition(
+                id=operation_id,
+                label=operation_label,
+                key_mode=key_mode,
+                keys=keys,
+                selection_path=selection_path,
+                parameters=_parse_parameters(
+                    raw["parameters"],
+                    f"{label} operation {operation_id}",
+                    require_nonempty=True,
+                ),
+            )
+        )
+    return tuple(operations)
+
+
+def _parse_shortcut_materialization(
+    value: Any,
+    recipe_id: str,
+) -> ProcedureMaterializationChannel:
+    label = f"Interaction recipe {recipe_id} procedureMaterialization shortcut"
+    raw = _expect_object(value, label)
+    availability = _expect_string(raw.get("availability"), f"{label} availability")
+    if availability == "unavailable":
+        return _parse_unavailable_materialization(raw, label)
+    if availability != "available":
+        raise ValueError(f"{label} has unknown availability")
+    _expect_exact_keys(
+        raw,
+        required={
+            "availability",
+            "source",
+            "semanticBinding",
+            "parameterBinding",
+            "projection",
+            "preconditions",
+            "operations",
+            "omittedActionArguments",
+        },
+        label=label,
+    )
+    if raw["source"] != "catalog.ordered_shortcut_operations":
+        raise ValueError(f"{label} has unsupported source")
+    if raw["semanticBinding"] != "all_leaf_operations":
+        raise ValueError(f"{label} has unsupported semanticBinding")
+    if raw["parameterBinding"] != "ordered_parameter_operations":
+        raise ValueError(f"{label} has unsupported parameterBinding")
+    if raw["projection"] != "candidate_only":
+        raise ValueError(f"{label} projection must be candidate_only")
+    return ProcedureMaterializationChannel(
+        availability="available",
+        source="catalog.ordered_shortcut_operations",
+        semantic_binding="all_leaf_operations",
+        parameter_binding="ordered_parameter_operations",
+        projection="candidate_only",
+        preconditions=_parse_shortcut_preconditions(raw["preconditions"], recipe_id),
+        shortcut_operations=_parse_shortcut_operations(raw["operations"], recipe_id),
+        omitted_action_arguments=_parse_omitted_action_arguments(
+            raw["omittedActionArguments"], recipe_id
+        ),
+    )
+
+
 def _parse_procedure_materialization(
     value: Any,
     recipe_id: str,
@@ -711,28 +923,19 @@ def _parse_procedure_materialization(
 
     return ProcedureMaterializationDefinition(
         menu=menu,
-        shortcut=_parse_unavailable_materialization(
-            raw["shortcut"], f"{label} shortcut"
-        ),
+        shortcut=_parse_shortcut_materialization(raw["shortcut"], recipe_id),
         mcp=_parse_unavailable_materialization(raw["mcp"], f"{label} mcp"),
     )
 
 
-def _validate_ordered_parameter_operations(
+def _validate_parameter_assignment_coverage(
     recipe: InteractionRecipe,
     action: dict[str, Any],
+    channel_name: str,
+    channel: ProcedureMaterializationChannel,
+    parameters: list[ParameterAssignmentDefinition],
 ) -> None:
-    materialization = recipe.procedure_materialization
-    if (
-        materialization is None
-        or materialization.menu.parameter_binding
-        != "ordered_parameter_operations"
-    ):
-        return
-    menu = materialization.menu
-    assert menu.operator_parameters is not None
-    assert menu.control_operations is not None
-    assert menu.omitted_action_arguments is not None
+    assert channel.omitted_action_arguments is not None
 
     argument_schema = _expect_object(
         action.get("argumentsSchema"),
@@ -743,24 +946,16 @@ def _validate_ordered_parameter_operations(
         f"Action {recipe.action_name} argument properties",
     )
     property_names = set(properties)
-    mapped_sources: dict[str, ParameterAssignmentSourceDefinition] = {}
-    parameters = list(menu.operator_parameters)
-    for operation in menu.control_operations.operations:
-        parameters.extend(operation.parameters)
+    mapped_sources: dict[str, list[ParameterAssignmentSourceDefinition]] = {}
     for parameter in parameters:
         source = parameter.source
         if source.kind != "action_argument":
             continue
         assert source.argument_name is not None
-        if source.argument_name in mapped_sources:
-            raise ValueError(
-                f"Interaction recipe {recipe.id} maps action argument "
-                f"{source.argument_name} more than once"
-            )
-        mapped_sources[source.argument_name] = source
+        mapped_sources.setdefault(source.argument_name, []).append(source)
 
     omitted_names = {
-        omitted.argument_name for omitted in menu.omitted_action_arguments
+        omitted.argument_name for omitted in channel.omitted_action_arguments
     }
     overlap = set(mapped_sources) & omitted_names
     if overlap:
@@ -772,22 +967,106 @@ def _validate_ordered_parameter_operations(
     missing = property_names - set(mapped_sources) - omitted_names
     if unknown or missing:
         raise ValueError(
-            f"Interaction recipe {recipe.id} ordered parameter action coverage mismatch; "
+            f"Interaction recipe {recipe.id} {channel_name} ordered parameter "
+            "action coverage mismatch; "
             f"missing: {', '.join(sorted(missing)) or 'none'}; "
             f"unknown: {', '.join(sorted(unknown)) or 'none'}"
         )
-    for argument_name, source in mapped_sources.items():
-        if source.transform != "uniform_vector3":
-            continue
+    component_transforms = {"vector3_x", "vector3_y", "vector3_z"}
+    for argument_name, sources in mapped_sources.items():
+        transforms = [source.transform for source in sources]
+        components = [
+            transform for transform in transforms if transform in component_transforms
+        ]
+        whole = [
+            transform
+            for transform in transforms
+            if transform not in component_transforms
+        ]
         property_schema = _expect_object(
             properties[argument_name],
             f"Action {recipe.action_name} argument {argument_name} schema",
         )
+        if components:
+            items = property_schema.get("items")
+            if (
+                property_schema.get("type") != "array"
+                or property_schema.get("minItems") != 3
+                or property_schema.get("maxItems") != 3
+                or not isinstance(items, dict)
+                or items.get("type") not in {"number", "integer"}
+            ):
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} vector3 "
+                    f"component source {argument_name} must have a fixed-length "
+                    "numeric vector3 action schema"
+                )
+        if components and whole:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} {channel_name} mixes whole and "
+                f"component mappings for action argument {argument_name}"
+            )
+        if components:
+            duplicate_component = next(
+                (
+                    component
+                    for component in component_transforms
+                    if components.count(component) > 1
+                ),
+                None,
+            )
+            if duplicate_component is not None:
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} maps action "
+                    f"argument {argument_name} {duplicate_component} more than once"
+                )
+            if len(components) != 3 or set(components) != component_transforms:
+                raise ValueError(
+                    f"Interaction recipe {recipe.id} {channel_name} must map "
+                    f"vector3 components x, y, and z exactly once for action argument "
+                    f"{argument_name}"
+                )
+        elif len(whole) != 1:
+            raise ValueError(
+                f"Interaction recipe {recipe.id} maps action argument "
+                f"{argument_name} more than once"
+            )
+        source = sources[0]
+        if source.transform != "uniform_vector3":
+            continue
         if property_schema.get("type") not in {"number", "integer"}:
             raise ValueError(
                 f"Interaction recipe {recipe.id} uniform_vector3 source "
                 f"{argument_name} must have a numeric action schema"
             )
+
+
+def _validate_ordered_parameter_operations(
+    recipe: InteractionRecipe,
+    action: dict[str, Any],
+) -> None:
+    materialization = recipe.procedure_materialization
+    if materialization is None:
+        return
+    menu = materialization.menu
+    if menu.parameter_binding == "ordered_parameter_operations":
+        assert menu.operator_parameters is not None
+        assert menu.control_operations is not None
+        parameters = list(menu.operator_parameters)
+        for operation in menu.control_operations.operations:
+            parameters.extend(operation.parameters)
+        _validate_parameter_assignment_coverage(
+            recipe, action, "menu", menu, parameters
+        )
+    shortcut = materialization.shortcut
+    if shortcut.parameter_binding == "ordered_parameter_operations":
+        assert shortcut.shortcut_operations is not None
+        parameters = []
+        for operation in shortcut.shortcut_operations:
+            parameters.extend(operation.parameters)
+        _validate_parameter_assignment_coverage(
+            recipe, action, "shortcut", shortcut, parameters
+        )
 
 
 def load_interaction_catalog(
@@ -939,5 +1218,7 @@ __all__ = (
     "ProcedureMaterializationChannel",
     "ProcedureMaterializationDefinition",
     "RESOURCE_PATH",
+    "ShortcutOperationDefinition",
+    "ShortcutPreconditionDefinition",
     "load_interaction_catalog",
 )

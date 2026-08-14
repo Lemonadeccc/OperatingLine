@@ -111,6 +111,7 @@ export type MenuProcedureOperation = z.infer<typeof menuProcedureOperationSchema
 
 export const shortcutProcedureOperationSchema = z.strictObject({
   ...procedureOperationBaseShape,
+  keyMode: z.enum(['chord', 'sequence']).optional(),
   keys: z.array(z.string().min(1)).min(1),
   selectionPath: z.array(z.string().min(1)).optional(),
   parameters: z.record(z.string().min(1), z.json()),

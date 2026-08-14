@@ -31,6 +31,7 @@ import interactionCatalog170Json from '../v1/interaction-catalog-1.7.0.json' wit
 import interactionCatalog180Json from '../v1/interaction-catalog-1.8.0.json' with { type: 'json' };
 import interactionCatalog190Json from '../v1/interaction-catalog-1.9.0.json' with { type: 'json' };
 import interactionCatalog1100Json from '../v1/interaction-catalog-1.10.0.json' with { type: 'json' };
+import interactionCatalog1110Json from '../v1/interaction-catalog-1.11.0.json' with { type: 'json' };
 import interactionCatalogJson from '../v1/interaction-catalog.json' with { type: 'json' };
 
 export const blenderActionCatalog: ActionCatalog = actionCatalogSchema.parse(catalogJson);
@@ -77,6 +78,9 @@ const blenderInteractionCatalog190: InteractionCatalog =
 const blenderInteractionCatalog1100: InteractionCatalog = interactionCatalogSchema.parse(
   interactionCatalog1100Json,
 );
+const blenderInteractionCatalog1110: InteractionCatalog = interactionCatalogSchema.parse(
+  interactionCatalog1110Json,
+);
 export const blenderInteractionCatalog: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalogJson);
 export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.freeze([
@@ -91,6 +95,7 @@ export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.
   blenderInteractionCatalog180,
   blenderInteractionCatalog190,
   blenderInteractionCatalog1100,
+  blenderInteractionCatalog1110,
   blenderInteractionCatalog,
 ]);
 
@@ -105,4 +110,5 @@ validateInteractionCatalog(blenderInteractionCatalog170, blenderActionCatalogs[1
 validateInteractionCatalog(blenderInteractionCatalog180, blenderActionCatalogs[11]!);
 validateInteractionCatalog(blenderInteractionCatalog190, blenderActionCatalog);
 validateInteractionCatalog(blenderInteractionCatalog1100, blenderActionCatalog);
+validateInteractionCatalog(blenderInteractionCatalog1110, blenderActionCatalog);
 validateInteractionCatalog(blenderInteractionCatalog, blenderActionCatalog);

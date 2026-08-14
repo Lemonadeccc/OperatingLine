@@ -52,10 +52,36 @@ describe('procedure tree protocol', () => {
     expect(
       shortcut.operations.find((operation) => operation.id === 'shortcut.move_z')?.parameters,
     ).toEqual({ value: 2.14, confirm: 'ENTER' });
+    expect(shortcut.operations.map((operation) => operation.keyMode)).toEqual([
+      'chord',
+      'sequence',
+      'sequence',
+      'sequence',
+      'sequence',
+      'sequence',
+    ]);
     expect(leaf.mcpTracks[0]).toMatchObject({
       availability: 'unavailable',
       modality: 'mcp',
     });
+  });
+
+  it('accepts optional shortcut key mode while keeping legacy trees compatible', () => {
+    const legacyTree = structuredClone(readFixture());
+    const leaf = legacyTree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    const shortcut = leaf.shortcutTracks[0]!;
+    if (shortcut.availability !== 'available') throw new Error('Expected shortcut track');
+    for (const operation of shortcut.operations) delete operation.keyMode;
+    expect(() => validateProcedureTree(legacyTree)).not.toThrow();
+
+    const invalid = structuredClone(readFixture()) as unknown as Record<string, unknown>;
+    const nodes = invalid['nodes'] as Array<Record<string, unknown>>;
+    const invalidLeaf = nodes.find((node) => node['kind'] === 'leaf')!;
+    const tracks = invalidLeaf['shortcutTracks'] as Array<Record<string, unknown>>;
+    const operations = tracks[0]!['operations'] as Array<Record<string, unknown>>;
+    operations[0]!['keyMode'] = 'simultaneous';
+    expect(procedureTreeSchema.safeParse(invalid).success).toBe(false);
   });
 
   it('accepts an MCP call that covers several semantic operations with concrete arguments', () => {

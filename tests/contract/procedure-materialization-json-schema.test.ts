@@ -7,6 +7,7 @@ import {
   compileProcedureTreeToGuidePlan,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationLegacyFormatVersion,
+  procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
@@ -202,7 +203,7 @@ describe('public procedure authoring materialization JSON Schemas', () => {
     leaf.menuTracks = structuredClone(fixtureLeaf.menuTracks);
 
     const result = {
-      formatVersion: procedureAuthoringMaterializationFormatVersion,
+      formatVersion: procedureAuthoringMaterializationOrderedMenuFormatVersion,
       packetContentSha256: 'a'.repeat(64),
       inputTreeContentSha256: 'b'.repeat(64),
       outputTreeContentSha256: 'c'.repeat(64),
@@ -263,6 +264,88 @@ describe('public procedure authoring materialization JSON Schemas', () => {
       throw new Error('Expected shortcut procedure leaf');
     }
     availableShortcutLeaf.shortcutTracks = structuredClone(fixtureLeaf.shortcutTracks);
+    const validAvailableShortcutTree = structuredClone(availableShortcutTree);
+    const validAvailableShortcutLeaf = validAvailableShortcutTree.nodes.find(
+      (node) => node.kind === 'leaf',
+    );
+    if (validAvailableShortcutLeaf?.kind !== 'leaf') {
+      throw new Error('Expected valid shortcut procedure leaf');
+    }
+    const validAvailableShortcutTrack = validAvailableShortcutLeaf.shortcutTracks[0]!;
+    if (validAvailableShortcutTrack.availability !== 'available') {
+      throw new Error('Expected valid available shortcut track');
+    }
+    expect(validAvailableShortcutTrack.operations.map((operation) => operation.keyMode)).toEqual([
+      'chord',
+      'sequence',
+      'sequence',
+      'sequence',
+      'sequence',
+      'sequence',
+    ]);
+    const missingKeyModeTrack = availableShortcutLeaf.shortcutTracks[0]!;
+    if (missingKeyModeTrack.availability !== 'available') {
+      throw new Error('Expected invalid available shortcut track');
+    }
+    delete missingKeyModeTrack.operations[0]!.keyMode;
+
+    const shortcutResult = {
+      ...result,
+      formatVersion: procedureAuthoringMaterializationFormatVersion,
+      coverage: [
+        {
+          ...result.coverage[0],
+          shortcut: 'materialized',
+        },
+      ],
+      tree: validAvailableShortcutTree,
+    } as const;
+
+    const emptySelectionPathTree = structuredClone(validAvailableShortcutTree);
+    const emptySelectionPathLeaf = emptySelectionPathTree.nodes.find(
+      (node) => node.kind === 'leaf',
+    );
+    if (emptySelectionPathLeaf?.kind !== 'leaf') {
+      throw new Error('Expected invalid shortcut procedure leaf');
+    }
+    const emptySelectionPathTrack = emptySelectionPathLeaf.shortcutTracks[0]!;
+    if (emptySelectionPathTrack.availability !== 'available') {
+      throw new Error('Expected invalid available shortcut track');
+    }
+    emptySelectionPathTrack.operations[0]!.selectionPath = [];
+
+    const shortcutOnlyTree = structuredClone(validAvailableShortcutTree);
+    const shortcutOnlyLeaf = shortcutOnlyTree.nodes.find((node) => node.kind === 'leaf');
+    if (shortcutOnlyLeaf?.kind !== 'leaf') throw new Error('Expected shortcut-only leaf');
+    shortcutOnlyLeaf.menuTracks = structuredClone(readCandidateProcedureTree().nodes).find(
+      (node) => node.kind === 'leaf',
+    )!.menuTracks;
+    const shortcutOnlyResult = {
+      ...shortcutResult,
+      coverage: [
+        {
+          ...shortcutResult.coverage[0],
+          menu: 'unavailable',
+        },
+      ],
+      tree: shortcutOnlyTree,
+    } as const;
+
+    const unavailableTree = readCandidateProcedureTree();
+    const unavailableResult = {
+      ...result,
+      formatVersion: procedureAuthoringMaterializationLegacyFormatVersion,
+      coverage: [
+        {
+          leafId: leaf.id,
+          recipeId: null,
+          menu: 'unavailable',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        },
+      ],
+      tree: unavailableTree,
+    } as const;
 
     const duplicateMenuTree = structuredClone(tree);
     const duplicateMenuLeaf = duplicateMenuTree.nodes.find((node) => node.kind === 'leaf');
@@ -278,7 +361,39 @@ describe('public procedure authoring materialization JSON Schemas', () => {
         },
         accepted: true,
       },
-      { value: { ...result, formatVersion: '1.2.0' }, accepted: false },
+      {
+        value: {
+          ...result,
+          formatVersion: procedureAuthoringMaterializationFormatVersion,
+        },
+        accepted: false,
+      },
+      { value: shortcutResult, accepted: true },
+      { value: shortcutOnlyResult, accepted: true },
+      { value: unavailableResult, accepted: true },
+      {
+        value: {
+          ...unavailableResult,
+          formatVersion: procedureAuthoringMaterializationOrderedMenuFormatVersion,
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...unavailableResult,
+          formatVersion: procedureAuthoringMaterializationFormatVersion,
+        },
+        accepted: false,
+      },
+      { value: { ...shortcutResult, tree: emptySelectionPathTree }, accepted: false },
+      {
+        value: {
+          ...shortcutResult,
+          formatVersion: procedureAuthoringMaterializationOrderedMenuFormatVersion,
+        },
+        accepted: false,
+      },
+      { value: { ...result, formatVersion: '1.3.0' }, accepted: false },
       { value: { ...result, procedureStored: true }, accepted: false },
       { value: { ...result, outputTreeContentSha256: 'C'.repeat(64) }, accepted: false },
       { value: { ...result, provider: 'example' }, accepted: false },
@@ -303,15 +418,8 @@ describe('public procedure authoring materialization JSON Schemas', () => {
         },
         accepted: false,
       },
-      {
-        value: {
-          ...result,
-          coverage: [{ ...result.coverage[0], shortcut: 'materialized' }],
-        },
-        accepted: false,
-      },
       { value: { ...result, tree: verifiedTree }, accepted: false },
-      { value: { ...result, tree: availableShortcutTree }, accepted: false },
+      { value: { ...shortcutResult, tree: availableShortcutTree }, accepted: false },
       { value: { ...result, tree: duplicateMenuTree }, accepted: false },
       {
         value: {

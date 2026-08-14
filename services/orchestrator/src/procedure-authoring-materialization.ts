@@ -8,6 +8,7 @@ import {
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationLegacyFormatVersion,
+  procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
   stableProcedureLeafOrder,
   validateActionArguments,
@@ -30,6 +31,7 @@ type MaterializationCoverage = ProcedureAuthoringMaterializationResult['coverage
 export interface ProcedureAuthoringMaterialization {
   readonly formatVersion:
     | typeof procedureAuthoringMaterializationLegacyFormatVersion
+    | typeof procedureAuthoringMaterializationOrderedMenuFormatVersion
     | typeof procedureAuthoringMaterializationFormatVersion;
   readonly tree: ProcedureAuthoringMaterializedTree;
   readonly coverage: MaterializationCoverage;
@@ -48,7 +50,8 @@ interface MaterializationParameterAssignment {
     | {
         readonly kind: 'action_argument';
         readonly argumentName: string;
-        readonly transform: 'identity' | 'uniform_vector3';
+        readonly transform:
+          'identity' | 'uniform_vector3' | 'vector3_x' | 'vector3_y' | 'vector3_z';
       };
 }
 
@@ -152,19 +155,34 @@ function materializeParameters(
     const argument = actionArguments[source.argumentName];
     if (argument === undefined) {
       throw new Error(
-        `Ordered menu parameter ${assignment.name} references missing action argument ${source.argumentName}`,
+        `Ordered parameter ${assignment.name} references missing action argument ${source.argumentName}`,
       );
     }
     if (source.transform === 'identity') {
       defineParameter(assignment.name, structuredClone(argument));
       continue;
     }
-    if (typeof argument !== 'number' || !Number.isFinite(argument)) {
+    if (source.transform === 'uniform_vector3') {
+      if (typeof argument !== 'number' || !Number.isFinite(argument)) {
+        throw new Error(
+          `Ordered parameter ${assignment.name} requires a finite numeric action argument`,
+        );
+      }
+      defineParameter(assignment.name, [argument, argument, argument]);
+      continue;
+    }
+    if (
+      !Array.isArray(argument) ||
+      argument.length !== 3 ||
+      argument.some((component) => typeof component !== 'number' || !Number.isFinite(component))
+    ) {
       throw new Error(
-        `Ordered menu parameter ${assignment.name} requires a finite numeric action argument`,
+        `Ordered parameter ${assignment.name} requires a finite numeric vector3 action argument`,
       );
     }
-    defineParameter(assignment.name, [argument, argument, argument]);
+    const componentIndex =
+      source.transform === 'vector3_x' ? 0 : source.transform === 'vector3_y' ? 1 : 2;
+    defineParameter(assignment.name, argument[componentIndex]!);
   }
   return parameters;
 }
@@ -188,6 +206,8 @@ function materializeLeaf(
     declaration.menu.parameterBinding === 'ordered_parameter_operations'
       ? declaration.menu
       : undefined;
+  const shortcutDeclaration =
+    declaration?.shortcut.availability === 'available' ? declaration.shortcut : undefined;
   const semanticOperations = [...leaf.semanticOperations].sort(
     (left, right) => left.order - right.order,
   );
@@ -254,17 +274,42 @@ function materializeLeaf(
         ),
       ];
 
-  const shortcutTracks = [
-    unavailableTrack(
-      leaf,
-      'shortcut',
-      recipe,
-      declaration?.shortcut.reason ??
-        (recipe === undefined
-          ? 'No InteractionCatalog recipe is available for this leaf action.'
-          : 'The InteractionCatalog recipe does not declare shortcut materialization.'),
-    ),
-  ];
+  const shortcutTracks =
+    shortcutDeclaration === undefined
+      ? [
+          unavailableTrack(
+            leaf,
+            'shortcut',
+            recipe,
+            declaration?.shortcut.availability === 'unavailable'
+              ? declaration.shortcut.reason
+              : recipe === undefined
+                ? 'No InteractionCatalog recipe is available for this leaf action.'
+                : 'The InteractionCatalog recipe does not declare shortcut materialization.',
+          ),
+        ]
+      : [
+          {
+            id: `${recipe!.id}.shortcut`,
+            availability: 'available' as const,
+            title: `${recipe!.title} shortcut projection`,
+            preconditions: structuredClone(shortcutDeclaration.preconditions),
+            modality: 'shortcut' as const,
+            operations: shortcutDeclaration.operations.map((operation, index) => ({
+              id: operation.id,
+              order: index + 1,
+              semanticRefs: [...semanticRefs],
+              description: operation.label,
+              evidenceRefs: [...evidenceRefs],
+              keyMode: operation.keyMode,
+              keys: [...operation.keys],
+              ...(operation.selectionPath === undefined
+                ? {}
+                : { selectionPath: [...operation.selectionPath] }),
+              parameters: materializeParameters(operation.parameters, leaf.action?.arguments ?? {}),
+            })),
+          },
+        ];
   const mcpTracks = [
     unavailableTrack(
       leaf,
@@ -276,6 +321,38 @@ function materializeLeaf(
           : 'The InteractionCatalog recipe does not declare MCP materialization.'),
     ),
   ];
+
+  const coverage: MaterializationCoverage[number] = menuAvailable
+    ? shortcutDeclaration === undefined
+      ? {
+          leafId: leaf.id,
+          recipeId: recipe!.id,
+          menu: 'materialized',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        }
+      : {
+          leafId: leaf.id,
+          recipeId: recipe!.id,
+          menu: 'materialized',
+          shortcut: 'materialized',
+          mcp: 'unavailable',
+        }
+    : shortcutDeclaration === undefined
+      ? {
+          leafId: leaf.id,
+          recipeId: recipe?.id ?? null,
+          menu: 'unavailable',
+          shortcut: 'unavailable',
+          mcp: 'unavailable',
+        }
+      : {
+          leafId: leaf.id,
+          recipeId: recipe!.id,
+          menu: 'unavailable',
+          shortcut: 'materialized',
+          mcp: 'unavailable',
+        };
 
   return {
     leaf: {
@@ -293,21 +370,7 @@ function materializeLeaf(
       rollback: structuredClone(leaf.rollback),
       validation: structuredClone(leaf.validation),
     },
-    coverage: menuAvailable
-      ? {
-          leafId: leaf.id,
-          recipeId: nativeRecipe!.recipe.id,
-          menu: 'materialized',
-          shortcut: 'unavailable',
-          mcp: 'unavailable',
-        }
-      : {
-          leafId: leaf.id,
-          recipeId: recipe?.id ?? null,
-          menu: 'unavailable',
-          shortcut: 'unavailable',
-          mcp: 'unavailable',
-        },
+    coverage,
   };
 }
 
@@ -361,6 +424,10 @@ export function materializeProcedureAuthoringCandidate(
       recipe.procedureMaterialization.menu.parameterBinding === 'ordered_parameter_operations'
     );
   });
+  const usesShortcutMaterialization = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return recipe?.procedureMaterialization?.shortcut.availability === 'available';
+  });
   for (const leaf of orderedCandidateLeaves) {
     if (leaf.action === null) continue;
     const action = actionsByName.get(leaf.action.name);
@@ -398,9 +465,11 @@ export function materializeProcedureAuthoringCandidate(
   );
 
   return {
-    formatVersion: usesOrderedParameterOperations
+    formatVersion: usesShortcutMaterialization
       ? procedureAuthoringMaterializationFormatVersion
-      : procedureAuthoringMaterializationLegacyFormatVersion,
+      : usesOrderedParameterOperations
+        ? procedureAuthoringMaterializationOrderedMenuFormatVersion
+        : procedureAuthoringMaterializationLegacyFormatVersion,
     tree,
     coverage,
     inputTreeContentSha256: sha256(candidate),

@@ -210,6 +210,7 @@
             {
               "id": "shortcut.add_sphere",
               "order": 1,
+              "keyMode": "chord",
               "semanticRefs": ["semantic.create"],
               "description": "使用 Add 快捷键并选择 UV Sphere。",
               "evidenceRefs": ["evidence.prompt"],
@@ -220,6 +221,7 @@
             {
               "id": "shortcut.move_x",
               "order": 2,
+              "keyMode": "sequence",
               "semanticRefs": ["semantic.transform"],
               "description": "沿 X 轴移动到目标坐标。",
               "evidenceRefs": ["evidence.prompt"],
@@ -229,6 +231,7 @@
             {
               "id": "shortcut.move_y",
               "order": 3,
+              "keyMode": "sequence",
               "semanticRefs": ["semantic.transform"],
               "description": "沿 Y 轴移动到目标坐标。",
               "evidenceRefs": ["evidence.prompt"],
@@ -238,6 +241,7 @@
             {
               "id": "shortcut.move_z",
               "order": 4,
+              "keyMode": "sequence",
               "semanticRefs": ["semantic.transform"],
               "description": "沿 Z 轴移动到目标坐标。",
               "evidenceRefs": ["evidence.prompt"],
@@ -247,6 +251,7 @@
             {
               "id": "shortcut.scale",
               "order": 5,
+              "keyMode": "sequence",
               "semanticRefs": ["semantic.transform"],
               "description": "统一缩放眼睛球体。",
               "evidenceRefs": ["evidence.prompt"],
@@ -256,6 +261,7 @@
             {
               "id": "shortcut.rename",
               "order": 6,
+              "keyMode": "sequence",
               "semanticRefs": ["semantic.rename"],
               "description": "重命名当前对象。",
               "evidenceRefs": ["evidence.prompt"],

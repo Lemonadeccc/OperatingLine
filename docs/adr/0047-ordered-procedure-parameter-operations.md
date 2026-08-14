@@ -59,9 +59,10 @@ MaterializationResult 对旧 `accepted_action_arguments` 算法继续使用格�
 ## 兼容性与后果
 
 上一版 InteractionCatalog `1.10.0` 逐字冻结，精确请求仍产生四步、MaterializationResult `1.0.0`，最终
-operator 保留完整 Action 参数。`1.9.0` 仍无物化声明并 fail closed 为 unavailable。最新 `1.11.0` 使用七步
-ordered 输出与结果格式 `1.1.0`。
+operator 保留完整 Action 参数。`1.9.0` 仍无物化声明并 fail closed 为 unavailable。本 ADR 发布的 `1.11.0`
+使用七步 ordered 输出与结果格式 `1.1.0`，并在 ADR 0048 发布 `1.12.0` 时逐字冻结。
 
-本切片仍不实现 shortcut/MCP 参数配方、更多 action 的逐控件声明、真实 Blender 回放、持久化 attestation、
-Provider/RAG、教学视频采集、编辑器或训练数据治理。完整 MaterializationResult 信封仍是目录 grounding
-证明；单独抽取或经通用 store 保存的 tree 只能按 `structural_only` 使用。
+本切片不实现 shortcut/MCP 参数配方、更多 action 的逐控件声明、真实 Blender 回放、持久化 attestation、
+Provider/RAG、教学视频采集、编辑器或训练数据治理；后续 ADR 0048 仅补充 candidate shortcut 配方，真实
+回放与 verified 证明仍未完成。完整 MaterializationResult 信封仍是目录 grounding 证明；单独抽取或经通用
+store 保存的 tree 只能按 `structural_only` 使用。

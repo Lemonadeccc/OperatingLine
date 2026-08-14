@@ -72,6 +72,14 @@ function orderedMenu(catalog: InteractionCatalog) {
   return menu;
 }
 
+function orderedShortcut(catalog: InteractionCatalog) {
+  const shortcut = catalog.recipes[0]!.procedureMaterialization?.shortcut;
+  if (shortcut?.availability !== 'available') {
+    throw new Error('Expected ordered shortcut operations fixture');
+  }
+  return shortcut;
+}
+
 function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
@@ -84,7 +92,7 @@ describe('procedure authoring materialization', () => {
       blenderActionCatalog,
       blenderInteractionCatalog,
     );
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.2.0');
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     expect(leaf?.kind).toBe('leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected leaf');
@@ -153,19 +161,82 @@ describe('procedure authoring materialization', () => {
         leafId: 'snowman.head.eyes.left',
         recipeId: 'blender.mesh.create_uv_sphere.native',
         menu: 'materialized',
-        shortcut: 'unavailable',
+        shortcut: 'materialized',
         mcp: 'unavailable',
       },
     ]);
-    expect(leaf.shortcutTracks).toEqual([
+    const shortcutTrack = leaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available shortcut track');
+    }
+    expect(shortcutTrack).toMatchObject({
+      id: 'blender.mesh.create_uv_sphere.native.shortcut',
+      title: 'Add one UV sphere from the 3D Viewport shortcut projection',
+      modality: 'shortcut',
+      preconditions: orderedShortcut(blenderInteractionCatalog).preconditions,
+    });
+    expect(
+      shortcutTrack.operations.map(({ id, order, keyMode, keys, selectionPath, parameters }) => ({
+        id,
+        order,
+        keyMode,
+        keys,
+        selectionPath,
+        parameters,
+      })),
+    ).toEqual([
       {
-        id: 'blender.mesh.create_uv_sphere.native.shortcut',
-        availability: 'unavailable',
-        title: 'Add one UV sphere from the 3D Viewport',
-        reason: 'No versioned shortcut recipe is available.',
-        modality: 'shortcut',
+        id: 'shortcut.add_uv_sphere',
+        order: 1,
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'UV Sphere'],
+        parameters: { radius: 1, location: [0, 0, 0] },
+      },
+      {
+        id: 'shortcut.move_x',
+        order: 2,
+        keyMode: 'sequence',
+        keys: ['G', 'X'],
+        selectionPath: undefined,
+        parameters: { value: 0.32, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_y',
+        order: 3,
+        keyMode: 'sequence',
+        keys: ['G', 'Y'],
+        selectionPath: undefined,
+        parameters: { value: -0.86, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_z',
+        order: 4,
+        keyMode: 'sequence',
+        keys: ['G', 'Z'],
+        selectionPath: undefined,
+        parameters: { value: 2.14, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.scale',
+        order: 5,
+        keyMode: 'sequence',
+        keys: ['S'],
+        selectionPath: undefined,
+        parameters: { value: 0.12, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.rename',
+        order: 6,
+        keyMode: 'sequence',
+        keys: ['F2'],
+        selectionPath: undefined,
+        parameters: { text: 'OperatingLine.EyeLeft', confirm: 'ENTER' },
       },
     ]);
+    expect(
+      shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
     expect(leaf.mcpTracks[0]).toMatchObject({
       id: 'blender.mesh.create_uv_sphere.native.mcp',
       availability: 'unavailable',
@@ -195,6 +266,69 @@ describe('procedure authoring materialization', () => {
     expect(track.operations.at(-1)?.parameters).toEqual(leaf.action.arguments);
   });
 
+  it('preserves the exact 1.11 ordered-menu result without shortcut materialization', () => {
+    const orderedMenuCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.11.0',
+    );
+    if (orderedMenuCatalog === undefined) throw new Error('expected InteractionCatalog 1.11.0');
+
+    const result = materializeProcedureAuthoringCandidate(
+      candidate(orderedMenuCatalog),
+      blenderActionCatalog,
+      orderedMenuCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected ordered menu leaf');
+
+    expect(result.formatVersion).toBe('1.1.0');
+    expect(leaf.menuTracks[0]).toMatchObject({ availability: 'available' });
+    if (leaf.menuTracks[0]?.availability !== 'available') {
+      throw new Error('expected ordered menu track');
+    }
+    expect(leaf.menuTracks[0].operations).toHaveLength(7);
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'No versioned shortcut recipe is available.',
+    });
+  });
+
+  it('materializes a declared shortcut when the menu channel is unavailable', () => {
+    const shortcutOnlyCatalog = structuredClone(blenderInteractionCatalog);
+    const materialization = shortcutOnlyCatalog.recipes[0]!.procedureMaterialization;
+    if (materialization === undefined) throw new Error('expected procedure materialization');
+    materialization.menu = {
+      availability: 'unavailable',
+      reason: 'No native menu projection is available.',
+    };
+
+    const result = materializeProcedureAuthoringCandidate(
+      candidate(shortcutOnlyCatalog),
+      blenderActionCatalog,
+      shortcutOnlyCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected shortcut-only leaf');
+
+    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: shortcutOnlyCatalog.recipes[0]!.id,
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'No native menu projection is available.',
+    });
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'available',
+      modality: 'shortcut',
+    });
+  });
+
   it('uses result format 1.0.0 when a latest-catalog tree has only actionless leaves', () => {
     const input = candidate();
     const leaf = input.nodes.find((node) => node.kind === 'leaf');
@@ -220,7 +354,7 @@ describe('procedure authoring materialization', () => {
     ]);
   });
 
-  it('uses result format 1.1.0 when an ordered leaf is mixed with an actionless leaf', () => {
+  it('uses result format 1.2.0 when a shortcut leaf is mixed with an actionless leaf', () => {
     const input = candidate();
     const orderedLeaf = input.nodes.find((node) => node.kind === 'leaf');
     if (orderedLeaf?.kind !== 'leaf') throw new Error('expected leaf');
@@ -239,7 +373,7 @@ describe('procedure authoring materialization', () => {
       blenderInteractionCatalog,
     );
 
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.2.0');
     expect(
       result.coverage.map(({ leafId, recipeId, menu }) => ({ leafId, recipeId, menu })),
     ).toEqual([
@@ -283,6 +417,18 @@ describe('procedure authoring materialization', () => {
       ]);
       expect(operation.evidenceRefs).toEqual(['evidence.prompt', 'evidence.extra']);
     }
+    const shortcutTrack = outputLeaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available shortcut track');
+    }
+    for (const operation of shortcutTrack.operations) {
+      expect(operation.semanticRefs).toEqual([
+        'semantic.create',
+        'semantic.transform',
+        'semantic.rename',
+      ]);
+      expect(operation.evidenceRefs).toEqual(['evidence.prompt', 'evidence.extra']);
+    }
   });
 
   it('derives ordered control values only from validated action arguments', () => {
@@ -309,6 +455,18 @@ describe('procedure authoring materialization', () => {
       { value: [0.32, -0.86, 2.14] },
       { value: [0.12, 0.12, 0.12] },
       { value: 'OperatingLine.EyeLeft' },
+    ]);
+    const shortcutTrack = outputLeaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available shortcut track');
+    }
+    expect(shortcutTrack.operations.map((operation) => operation.parameters)).toEqual([
+      { radius: 1, location: [0, 0, 0] },
+      { value: 0.32, confirm: 'ENTER' },
+      { value: -0.86, confirm: 'ENTER' },
+      { value: 2.14, confirm: 'ENTER' },
+      { value: 0.12, confirm: 'ENTER' },
+      { text: 'OperatingLine.EyeLeft', confirm: 'ENTER' },
     ]);
   });
 

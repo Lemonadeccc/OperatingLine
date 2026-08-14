@@ -1434,7 +1434,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.authoring.materialize',
         {
           description:
-            'Revalidate a candidate against its exact authoring packet, then deterministically materialize only InteractionCatalog-declared tracks. Catalog-grounded menu paths and ordered candidate teaching controls may become available; they do not prove host-state equivalence, and unverified shortcut/MCP tracks remain unavailable. This does not store, propose, accept, or execute anything.',
+            'Revalidate a candidate against its exact authoring packet, then deterministically materialize only InteractionCatalog-declared tracks. Catalog-grounded menu paths, ordered teaching controls, and explicitly candidate-only shortcut projections may become available; none proves host-state equivalence, and undeclared shortcuts or MCP tracks remain unavailable. This does not store, propose, accept, or execute anything.',
           inputSchema: deferMcpInputValidation(procedureAuthoringMaterializationRequestSchema),
           outputSchema: procedureAuthoringMaterializationResultSchema,
         },
