@@ -461,6 +461,9 @@ describe('procedure compilation runtime', () => {
     const coneInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.17.0',
     );
+    const cylinderInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.18.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -488,6 +491,9 @@ describe('procedure compilation runtime', () => {
     if (coneInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.17.0 snapshot');
     }
+    if (cylinderInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.18.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -502,6 +508,7 @@ describe('procedure compilation runtime', () => {
         planeInteractionCatalog,
         torusInteractionCatalog,
         coneInteractionCatalog,
+        cylinderInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -1288,11 +1295,18 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
+      const cylinderPrompt = await callMcpTool(runtime, 30, 'operatingline.procedure.prompt.get', {
+        ...request,
+        interactionCatalogVersion: cylinderInteractionCatalog.catalogVersion,
+      });
+      const cylinderPacket = procedureAuthoringPromptPacketSchema.parse(
+        cylinderPrompt.result?.structuredContent,
+      );
       const cylinderMcp = await callMcpTool(
         runtime,
-        29,
+        31,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: cylinderAuthoringCandidateFixture(packet) },
+        { packet: cylinderPacket, tree: cylinderAuthoringCandidateFixture(cylinderPacket) },
       );
       expect(cylinderMcp.result?.isError).not.toBe(true);
       const cylinderMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -1382,11 +1396,144 @@ describe('procedure compilation runtime', () => {
         {
           method: 'POST',
           headers,
-          body: JSON.stringify({ packet, tree: cylinderAuthoringCandidateFixture(packet) }),
+          body: JSON.stringify({
+            packet: cylinderPacket,
+            tree: cylinderAuthoringCandidateFixture(cylinderPacket),
+          }),
         },
       );
       expect(cylinderHttp.status).toBe(200);
       await expect(cylinderHttp.json()).resolves.toEqual(cylinderMaterialization);
+
+      const latestCubeMcp = await callMcpTool(
+        runtime,
+        32,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: cubeAuthoringCandidateFixture(packet) },
+      );
+      expect(latestCubeMcp.result?.isError).not.toBe(true);
+      const latestCubeMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        latestCubeMcp.result?.structuredContent,
+      );
+      expect(latestCubeMaterialization).toMatchObject({
+        formatVersion: '1.2.0',
+        catalogBinding: { interactionCatalogVersion: '1.19.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_cube.native',
+            menu: 'materialized',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      const latestCubeLeaf = latestCubeMaterialization.tree.nodes.find(
+        (node) => node.id === 'snowman.head.eyes.left',
+      );
+      if (latestCubeLeaf?.kind !== 'leaf' || latestCubeLeaf.action === null) {
+        throw new Error('Expected one latest materialized Cube leaf');
+      }
+      const latestCubeMenu = latestCubeLeaf.menuTracks[0];
+      if (latestCubeMenu?.availability !== 'available') {
+        throw new Error('Expected one latest catalog-grounded Cube menu track');
+      }
+      expect(latestCubeMenu.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { size: 2.5 },
+        { value: [-1, 2, 0.5] },
+        { value: 'OperatingLine.CubeBody' },
+      ]);
+      const latestCubeShortcut = latestCubeLeaf.shortcutTracks[0];
+      if (latestCubeShortcut?.availability !== 'available') {
+        throw new Error('Expected one latest catalog-grounded Cube shortcut track');
+      }
+      expect(
+        latestCubeShortcut.operations.map(
+          ({ id, order, keyMode, keys, selectionPath, parameters }) => ({
+            id,
+            order,
+            keyMode,
+            keys,
+            selectionPath,
+            parameters,
+          }),
+        ),
+      ).toEqual([
+        {
+          id: 'shortcut.add_cube',
+          order: 1,
+          keyMode: 'chord',
+          keys: ['SHIFT', 'A'],
+          selectionPath: ['Mesh', 'Cube'],
+          parameters: { size: 2, location: [0, 0, 0] },
+        },
+        {
+          id: 'shortcut.move_x',
+          order: 2,
+          keyMode: 'sequence',
+          keys: ['G', 'X'],
+          selectionPath: undefined,
+          parameters: { value: -1, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.move_y',
+          order: 3,
+          keyMode: 'sequence',
+          keys: ['G', 'Y'],
+          selectionPath: undefined,
+          parameters: { value: 2, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.move_z',
+          order: 4,
+          keyMode: 'sequence',
+          keys: ['G', 'Z'],
+          selectionPath: undefined,
+          parameters: { value: 0.5, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.scale',
+          order: 5,
+          keyMode: 'sequence',
+          keys: ['S'],
+          selectionPath: undefined,
+          parameters: { value: 1.25, confirm: 'ENTER' },
+        },
+        {
+          id: 'shortcut.rename',
+          order: 6,
+          keyMode: 'sequence',
+          keys: ['F2'],
+          selectionPath: undefined,
+          parameters: { text: 'OperatingLine.CubeBody', confirm: 'ENTER' },
+        },
+      ]);
+      expect(
+        latestCubeShortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
+      expect(latestCubeLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'unavailable',
+          modality: 'mcp',
+          reason: 'No approved action-level MCP tool is available.',
+        }),
+      ]);
+      expect(latestCubeMcp.result?.content?.[0]?.text).toBe(
+        JSON.stringify(latestCubeMaterialization),
+      );
+      const latestCubeHttp = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ packet, tree: cubeAuthoringCandidateFixture(packet) }),
+        },
+      );
+      expect(latestCubeHttp.status).toBe(200);
+      await expect(latestCubeHttp.json()).resolves.toEqual(latestCubeMaterialization);
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,
@@ -1589,7 +1736,7 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
     }
-  }, 15_000);
+  }, 25_000);
 
   it('rejects tampered, resealed, identity-drifted, and non-candidate authoring input', async () => {
     const runtime = await startRuntime({

@@ -696,7 +696,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Cube ordered menu without inventing shortcut or MCP support', () => {
+  it('materializes the exact Cube ordered menu and candidate shortcut without inventing MCP support', () => {
     const input = cubeCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -709,13 +709,13 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Cube leaf');
     }
 
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.2.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_cube.native',
         menu: 'materialized',
-        shortcut: 'unavailable',
+        shortcut: 'materialized',
         mcp: 'unavailable',
       },
     ]);
@@ -767,13 +767,84 @@ describe('procedure authoring materialization', () => {
       size: 2.5,
       location: [-1, 2, 0.5],
     });
-    expect(leaf.shortcutTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'shortcut',
-        reason: 'No verified shortcut procedure is available.',
-      }),
+    const shortcutTrack = leaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available Cube shortcut track');
+    }
+    const cubeRecipe = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.id === 'blender.mesh.create_cube.native',
+    );
+    if (cubeRecipe?.procedureMaterialization?.shortcut?.availability !== 'available') {
+      throw new Error('expected catalog-grounded Cube shortcut fixture');
+    }
+    expect(shortcutTrack).toMatchObject({
+      id: 'blender.mesh.create_cube.native.shortcut',
+      title: 'Add one cube from the 3D Viewport shortcut projection',
+      modality: 'shortcut',
+      preconditions: cubeRecipe.procedureMaterialization.shortcut.preconditions,
+    });
+    expect(
+      shortcutTrack.operations.map(({ id, order, keyMode, keys, selectionPath, parameters }) => ({
+        id,
+        order,
+        keyMode,
+        keys,
+        selectionPath,
+        parameters,
+      })),
+    ).toEqual([
+      {
+        id: 'shortcut.add_cube',
+        order: 1,
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'Cube'],
+        parameters: { size: 2, location: [0, 0, 0] },
+      },
+      {
+        id: 'shortcut.move_x',
+        order: 2,
+        keyMode: 'sequence',
+        keys: ['G', 'X'],
+        selectionPath: undefined,
+        parameters: { value: -1, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_y',
+        order: 3,
+        keyMode: 'sequence',
+        keys: ['G', 'Y'],
+        selectionPath: undefined,
+        parameters: { value: 2, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.move_z',
+        order: 4,
+        keyMode: 'sequence',
+        keys: ['G', 'Z'],
+        selectionPath: undefined,
+        parameters: { value: 0.5, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.scale',
+        order: 5,
+        keyMode: 'sequence',
+        keys: ['S'],
+        selectionPath: undefined,
+        parameters: { value: 1.25, confirm: 'ENTER' },
+      },
+      {
+        id: 'shortcut.rename',
+        order: 6,
+        keyMode: 'sequence',
+        keys: ['F2'],
+        selectionPath: undefined,
+        parameters: { text: 'OperatingLine.CubeBody', confirm: 'ENTER' },
+      },
     ]);
+    expect(
+      shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
     expect(leaf.mcpTracks).toEqual([
       expect.objectContaining({
         availability: 'unavailable',

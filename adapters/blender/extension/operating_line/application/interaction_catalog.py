@@ -498,6 +498,7 @@ def _parse_parameter_source(
         transform = _expect_string(raw["transform"], f"{label} transform")
         if transform not in {
             "identity",
+            "divide_by_two",
             "uniform_vector3",
             "vector3_x",
             "vector3_y",
@@ -1111,11 +1112,11 @@ def _validate_parameter_assignment_coverage(
                 f"{argument_name} more than once"
             )
         source = sources[0]
-        if source.transform != "uniform_vector3":
+        if source.transform not in {"divide_by_two", "uniform_vector3"}:
             continue
         if property_schema.get("type") not in {"number", "integer"}:
             raise ValueError(
-                f"Interaction recipe {recipe.id} uniform_vector3 source "
+                f"Interaction recipe {recipe.id} {source.transform} source "
                 f"{argument_name} must have a numeric action schema"
             )
 

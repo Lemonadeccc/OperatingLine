@@ -171,9 +171,26 @@ describe('interaction catalog registry', () => {
       frozenCone.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cylinder')
         ?.procedureMaterialization,
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.18.0');
+    const frozenUvShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.18.0',
+    });
+    expect(
+      frozenUvShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available' });
+    expect(
+      frozenUvShortcut.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_cube')
+        ?.procedureMaterialization?.shortcut,
+    ).toEqual({
+      availability: 'unavailable',
+      reason: 'No verified shortcut procedure is available.',
+    });
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.19.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
-      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+      (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
     expect(latestShortcut).toMatchObject({
       availability: 'available',
@@ -183,15 +200,86 @@ describe('interaction catalog registry', () => {
       projection: 'candidate_only',
     });
     if (latestShortcut?.availability !== 'available') {
-      throw new Error('Expected the latest UV Sphere shortcut recipe to be available');
+      throw new Error('Expected the latest Cube shortcut recipe to be available');
     }
+    const uvShortcut = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    )?.procedureMaterialization?.shortcut;
+    if (uvShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest UV Sphere shortcut recipe to remain available');
+    }
+    expect(latestShortcut.preconditions).toEqual(uvShortcut.preconditions);
     expect(latestShortcut.operations.map((operation) => operation.id)).toEqual([
-      'shortcut.add_uv_sphere',
+      'shortcut.add_cube',
       'shortcut.move_x',
       'shortcut.move_y',
       'shortcut.move_z',
       'shortcut.scale',
       'shortcut.rename',
+    ]);
+    expect(latestShortcut.operations).toEqual([
+      {
+        id: 'shortcut.add_cube',
+        label: 'Add Cube',
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'Cube'],
+        parameters: [
+          { name: 'size', source: { kind: 'literal', value: 2 } },
+          { name: 'location', source: { kind: 'literal', value: [0, 0, 0] } },
+        ],
+      },
+      ...(['X', 'Y', 'Z'] as const).map((axis) => ({
+        id: `shortcut.move_${axis.toLowerCase()}`,
+        label: `Move ${axis}`,
+        keyMode: 'sequence' as const,
+        keys: ['G', axis],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'location',
+              transform: `vector3_${axis.toLowerCase()}`,
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      })),
+      {
+        id: 'shortcut.scale',
+        label: 'Scale',
+        keyMode: 'sequence',
+        keys: ['S'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'size',
+              transform: 'divide_by_two',
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      },
+      {
+        id: 'shortcut.rename',
+        label: 'Rename Object',
+        keyMode: 'sequence',
+        keys: ['F2'],
+        parameters: [
+          {
+            name: 'text',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'objectName',
+              transform: 'identity',
+            },
+          },
+          { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+        ],
+      },
     ]);
     expect(latestShortcut.omittedActionArguments).toEqual([
       expect.objectContaining({ argumentName: 'resourceId' }),
@@ -284,8 +372,9 @@ describe('interaction catalog registry', () => {
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       shortcut: {
-        availability: 'unavailable',
-        reason: 'No verified shortcut procedure is available.',
+        availability: 'available',
+        projection: 'candidate_only',
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       mcp: {
         availability: 'unavailable',
@@ -519,6 +608,16 @@ describe('interaction catalog registry', () => {
 
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '7dac53c0ff399a54e91b460b91caf5354824827ad4d801b3fb24e016d665d132',
+    );
+  });
+
+  it('keeps the InteractionCatalog 1.18.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.18.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'f34350f6dbd3edc53360e933281457ab7d12db29a3a81311eae66470a48ff735',
     );
   });
 

@@ -89,7 +89,14 @@ export const parameterAssignmentSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('action_argument'),
     argumentName: z.string().min(1),
-    transform: z.enum(['identity', 'uniform_vector3', 'vector3_x', 'vector3_y', 'vector3_z']),
+    transform: z.enum([
+      'identity',
+      'divide_by_two',
+      'uniform_vector3',
+      'vector3_x',
+      'vector3_y',
+      'vector3_z',
+    ]),
   }),
   z.strictObject({
     kind: z.literal('derived_action_arguments'),
@@ -382,6 +389,11 @@ function validateActionArgumentCoverage(
     if (transform === 'uniform_vector3' && !isNumericSchema(argumentSchemas[argumentName])) {
       throw new Error(
         `Interaction recipe ${recipe.id} ${modality} uniform_vector3 requires numeric action argument ${argumentName}`,
+      );
+    }
+    if (transform === 'divide_by_two' && !isNumericSchema(argumentSchemas[argumentName])) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} ${modality} divide_by_two requires numeric action argument ${argumentName}`,
       );
     }
 

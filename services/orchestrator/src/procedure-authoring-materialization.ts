@@ -51,7 +51,12 @@ interface MaterializationParameterAssignment {
         readonly kind: 'action_argument';
         readonly argumentName: string;
         readonly transform:
-          'identity' | 'uniform_vector3' | 'vector3_x' | 'vector3_y' | 'vector3_z';
+          | 'identity'
+          | 'uniform_vector3'
+          | 'divide_by_two'
+          | 'vector3_x'
+          | 'vector3_y'
+          | 'vector3_z';
       }
     | {
         readonly kind: 'derived_action_arguments';
@@ -227,6 +232,19 @@ function materializeParameters(
     }
     if (source.transform === 'identity') {
       defineParameter(assignment.name, structuredClone(argument));
+      continue;
+    }
+    if (source.transform === 'divide_by_two') {
+      if (typeof argument !== 'number' || !Number.isFinite(argument)) {
+        throw new Error(
+          `Ordered parameter ${assignment.name} requires a finite numeric action argument`,
+        );
+      }
+      const value = argument / 2;
+      if (!Number.isFinite(value)) {
+        throw new Error(`Ordered parameter ${assignment.name} produced a non-finite value`);
+      }
+      defineParameter(assignment.name, Object.is(value, -0) ? 0 : value);
       continue;
     }
     if (source.transform === 'uniform_vector3') {

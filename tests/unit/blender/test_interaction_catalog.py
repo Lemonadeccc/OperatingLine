@@ -108,7 +108,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.18.0")
+        self.assertEqual(catalog.catalog_version, "1.19.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -445,12 +445,30 @@ class InteractionCatalogTests(unittest.TestCase):
                 ),
             ),
         )
+        cube_shortcut = cube.procedure_materialization.shortcut
+        self.assertEqual(cube_shortcut.availability, "available")
+        assert cube_shortcut.shortcut_operations is not None
+        self.assertEqual(
+            tuple(
+                (operation.id, operation.key_mode, operation.keys)
+                for operation in cube_shortcut.shortcut_operations
+            ),
+            (
+                ("shortcut.add_cube", "chord", ("SHIFT", "A")),
+                ("shortcut.move_x", "sequence", ("G", "X")),
+                ("shortcut.move_y", "sequence", ("G", "Y")),
+                ("shortcut.move_z", "sequence", ("G", "Z")),
+                ("shortcut.scale", "sequence", ("S",)),
+                ("shortcut.rename", "sequence", ("F2",)),
+            ),
+        )
+        cube_scale_source = cube_shortcut.shortcut_operations[4].parameters[0].source
         self.assertEqual(
             (
-                cube.procedure_materialization.shortcut.availability,
-                cube.procedure_materialization.shortcut.reason,
+                cube_scale_source.argument_name,
+                cube_scale_source.transform,
             ),
-            ("unavailable", "No verified shortcut procedure is available."),
+            ("size", "divide_by_two"),
         )
         self.assertEqual(
             (
@@ -1080,6 +1098,37 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertIsNotNone(cone.procedure_materialization)
         self.assertIsNone(cylinder.procedure_materialization)
 
+    def test_loads_byte_frozen_cylinder_catalog_without_cube_shortcut(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.18.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "f34350f6dbd3edc53360e933281457ab7d12db29a3a81311eae66470a48ff735",
+        )
+        self.assertEqual(frozen.catalog_version, "1.18.0")
+        cube = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_cube"
+        )
+        assert cube.procedure_materialization is not None
+        self.assertEqual(
+            cube.procedure_materialization.shortcut.availability,
+            "unavailable",
+        )
+        self.assertIsNone(
+            cube.procedure_materialization.shortcut.shortcut_operations
+        )
+
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())
         menu = catalog.recipes[0].procedure_materialization.menu
@@ -1280,6 +1329,20 @@ class InteractionCatalogTests(unittest.TestCase):
                     "source"
                 ].__setitem__("transform", "uniform_vector3"),
                 "uniform_vector3 source location must have a numeric action schema",
+            ),
+            (
+                "divide by two from array",
+                lambda menu, _recipe: menu["operatorParameters"][2][
+                    "source"
+                ].__setitem__("transform", "divide_by_two"),
+                "divide_by_two source location must have a numeric action schema",
+            ),
+            (
+                "unknown closed transform",
+                lambda menu, _recipe: menu["operatorParameters"][0][
+                    "source"
+                ].__setitem__("transform", "divide_by_three"),
+                "unsupported transform",
             ),
         ]
 

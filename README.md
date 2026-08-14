@@ -92,15 +92,21 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.18.0` 为
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.19.0` 为
   UV Sphere 生成七步菜单，
   以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
   `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
   `resourceId` 不进入 UI operation。Icosphere 同版本生成四步原生菜单加 Location、Object Name 两步参数
   控件，精确保留 `subdivisions`、`radius`、`location` 和 `objectName`，但不虚构 shortcut 或 MCP；MCP
-  仍因没有真实 action-level tool 而 unavailable。Cube 与 Plane 同版本各生成六步 ordered menu：四步原生
+  仍因没有真实 action-level tool 而 unavailable；Icosphere shortcut 也仍 unavailable。Cube 与 Plane
+  各生成六步 ordered menu：四步原生
   guidance 的最终 operator 以 identity 投影绑定 accepted action 的 `size`，随后依次绑定 Location 与 Object
-  Name；`size` 是完整边长，不是 Blender transform scale，内部 `resourceId` 同样省略，shortcut/MCP 均
+  Name；`size` 是完整边长，不是 Blender transform scale，内部 `resourceId` 同样省略。Cube 另有严格
+  `candidate_only` 的六步 shortcut：在 `Layout`、`VIEW_3D`、`OBJECT`、Blender keymap、3D Cursor
+  `[0,0,0]`、GLOBAL Transform Orientation 六项前置条件下，依次执行 `Shift+A → Mesh → Cube`
+  （默认 `size: 2`、`location: [0,0,0]`）、`G X`、`G Y`、`G Z`、`S` 与 `F2`；三次移动分别以
+  `vector3_x/y/z` 绑定 accepted `location`，`S` 通过封闭 `divide_by_two` 绑定 `size / 2`，`F2`
+  绑定 `objectName`。Cube `resourceId` 仍显式省略，MCP unavailable。Plane shortcut/MCP 均
   unavailable。Torus 同版本在 operator step 按顺序绑定 `major_segments`、`minor_segments`、literal
   `mode: MAJOR_MINOR`、`major_radius` 与 `minor_radius`，再绑定 Location 与 Object Name；内部 `resourceId` 同样省略，
   shortcut/MCP 均 unavailable。Cone 同版本生成六步 ordered menu：四步原生 guidance 的 operator step 严格按序绑定
@@ -122,20 +128,21 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `segment_frame` 公式及三个输出各恰好一次的约束；canonical zero-roll XYZ Euler 将本地
   `+Z` 对齐 `end-start`，本地 `-Z` 端对应 `start`，本地 `+Z` 端对应
   `end`，两端使用同一 `radius`。该 Euler 同样不声称与 managed executor 的
-  quaternion/roll 精确等价；`resourceId` 省略，shortcut/MCP 均 unavailable。UV Sphere shortcut
-  结果格式仍为 `1.2.0`，Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 的 menu-only
+  quaternion/roll 精确等价；`resourceId` 省略，shortcut/MCP 均 unavailable。UV Sphere 与 Cube
+  shortcut 结果格式为 `1.2.0`，Icosphere、Plane、Torus、Cone 与 Cylinder 的 menu-only
   结果格式为 `1.1.0`。旧 `1.10.0` 四步菜单、`1.11.0` 七步菜单、`1.12.0` UV Sphere
   快捷键、`1.13.0` Icosphere、`1.14.0` Cube 与 `1.15.0` Plane 菜单结果保持
   精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。leaf 仍为 `candidate` 且
   `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
   radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史
-  `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0`/`1.14.0`/`1.15.0`/`1.16.0`/`1.17.0`
-  保持可回放；`1.17.0` 已冻结。只有完整 result 信封保留目录
+  `1.9.0`/`1.10.0`/`1.11.0`/`1.12.0`/`1.13.0`/`1.14.0`/`1.15.0`/`1.16.0`/`1.17.0`/`1.18.0`
+  保持可回放；`1.18.0` 已冻结。只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender；
   当前 Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 轨迹都未经过完整 UI operation 的真实
-  Blender replay。Cone/Cylinder 的 Blender 4.5/5.1 原生 operator 双版本探针也不等于六步 UI
-  replay。原生菜单/operator 不能复现 action executor 的 managed
+  Blender replay。Cube 的 Blender 4.5.3/5.1.1 operator/transform 双版本探针不是实际键盘事件或完整 UI
+  replay；它保留 `scale = size / 2`，不同于 managed executor 的 baked mesh/`scale = 1`。Cone/Cylinder
+  的原生 operator 双版本探针也不等于六步 UI replay。原生菜单/operator 不能复现 action executor 的 managed
   collection 归属、resource tag、receipt、幂等或补偿语义。见
   [ADR 0046](docs/adr/0046-catalog-bound-procedure-materialization.md) 与
   [ADR 0047](docs/adr/0047-ordered-procedure-parameter-operations.md) 与
@@ -145,16 +152,17 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0051](docs/adr/0051-plane-ordered-menu-materialization.md) 与
   [ADR 0052](docs/adr/0052-torus-ordered-menu-materialization.md) 与
   [ADR 0053](docs/adr/0053-cone-segment-frame-menu-materialization.md) 与
-  [ADR 0054](docs/adr/0054-cylinder-segment-frame-menu-materialization.md)。
+  [ADR 0054](docs/adr/0054-cylinder-segment-frame-menu-materialization.md) 与
+  [ADR 0055](docs/adr/0055-cube-candidate-shortcut-materialization.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.18.0` 精确绑定
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.19.0` 精确绑定
   ActionCatalog `1.12.0` 的 22 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.17.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.18.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与

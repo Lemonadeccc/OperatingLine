@@ -2174,6 +2174,111 @@ def assert_cube_guided_menu_round_trip() -> None:
     assert native_menu_guidance_enabled() is False
 
 
+def assert_cube_candidate_shortcut_projection_contract() -> None:
+    """Probe operator/transform projection, not keyboard events or full UI replay.
+
+    It is not equivalent to managed executor baked mesh/scale output: its mesh
+    remains the default two-unit cube and its 1.25 scale is not baked.
+    """
+    object_name = "OperatingLine.CubeShortcutProjection"
+    translation = (-1.0, 2.0, 0.5)
+    translation_steps = (
+        ((-1.0, 0.0, 0.0), (True, False, False), (-1.0, 0.0, 0.0)),
+        ((0.0, 2.0, 0.0), (False, True, False), (-1.0, 2.0, 0.0)),
+        ((0.0, 0.0, 0.5), (False, False, True), translation),
+    )
+    resize_factor = 2.5 / 2.0
+    operator_properties = bpy.ops.mesh.primitive_cube_add.get_rna_type().properties
+    object_count = len(bpy.data.objects)
+    mesh_count = len(bpy.data.meshes)
+    collection_count = len(bpy.data.collections)
+    selected_before = tuple(bpy.context.selected_objects)
+    selected_pointers_before = tuple(item.as_pointer() for item in selected_before)
+    active_before = bpy.context.view_layer.objects.active
+
+    assert math.isclose(operator_properties["size"].default, 2.0)
+    assert tuple(operator_properties["location"].default_array) == (0.0, 0.0, 0.0)
+    assert operator_properties["align"].default == "WORLD"
+    assert_absent(object_name)
+    cube = None
+    mesh = None
+    try:
+        assert bpy.ops.mesh.primitive_cube_add() == {"FINISHED"}
+        cube = bpy.context.active_object
+        assert cube is not None and cube.type == "MESH" and cube.mode == "OBJECT"
+        assert cube in bpy.context.selected_objects
+        mesh = cube.data
+        default_mesh_name = mesh.name
+
+        for value, constraint_axis, expected_location in translation_steps:
+            assert bpy.ops.transform.translate(
+                value=value,
+                orient_type="GLOBAL",
+                constraint_axis=constraint_axis,
+            ) == {"FINISHED"}
+            assert tuple(round(component, 6) for component in cube.location) == (
+                expected_location
+            )
+        assert bpy.ops.transform.resize(
+            value=(resize_factor,) * 3,
+            orient_type="GLOBAL",
+        ) == {"FINISHED"}
+        cube.name = object_name
+        bpy.context.view_layer.update()
+
+        assert bpy.context.view_layer.objects.active is cube
+        assert tuple(bpy.context.selected_objects) == (cube,)
+        assert cube.name == object_name
+        assert tuple(round(value, 6) for value in cube.location) == translation
+        assert tuple(round(value, 6) for value in cube.dimensions) == (2.5, 2.5, 2.5)
+        assert tuple(round(value, 6) for value in cube.scale) == (
+            resize_factor,
+            resize_factor,
+            resize_factor,
+        )
+        assert (
+            cube.data is mesh and mesh.name == default_mesh_name and mesh.users == 1
+        )
+        assert isinstance(mesh, bpy.types.Mesh)
+        assert bpy.data.meshes.get(default_mesh_name) is mesh
+        assert len(cube.users_collection) == 1
+        assert (len(mesh.vertices), len(mesh.edges), len(mesh.polygons)) == (8, 12, 6)
+        assert all(len(polygon.vertices) == 4 for polygon in mesh.polygons)
+        assert {
+            tuple(round(component, 6) for component in vertex.co)
+            for vertex in mesh.vertices
+        } == {
+            (x, y, z)
+            for x in (-1.0, 1.0)
+            for y in (-1.0, 1.0)
+            for z in (-1.0, 1.0)
+        }
+    finally:
+        if cube is not None and bpy.data.objects.get(cube.name) is cube:
+            bpy.data.objects.remove(cube, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+        for selected in bpy.context.selected_objects:
+            selected.select_set(False)
+        for selected in selected_before:
+            if bpy.data.objects.get(selected.name) is selected:
+                selected.select_set(True)
+        if (
+            active_before is None
+            or bpy.data.objects.get(active_before.name) is active_before
+        ):
+            bpy.context.view_layer.objects.active = active_before
+
+    assert_absent(object_name)
+    assert len(bpy.data.objects) == object_count
+    assert len(bpy.data.meshes) == mesh_count
+    assert len(bpy.data.collections) == collection_count
+    assert tuple(
+        item.as_pointer() for item in bpy.context.selected_objects
+    ) == selected_pointers_before
+    assert bpy.context.view_layer.objects.active is active_before
+
+
 def assert_icosphere_action_round_trip() -> None:
     object_name = "OperatingLine.IcosphereRoundTrip"
     radius = 1.25
@@ -5941,6 +6046,7 @@ def main() -> None:
     assert_icosphere_action_round_trip()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
+    assert_cube_candidate_shortcut_projection_contract()
     assert_editing_argument_boundaries()
     assert_edit_modifier_geometry_nodes_round_trip()
     assert_extrude_region_round_trip_and_guards()

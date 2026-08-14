@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.18.0');
+    expect(catalog.catalogVersion).toBe('1.19.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -267,11 +267,25 @@ describe('interaction catalog protocol', () => {
       '1.16.0',
       '1.17.0',
       '1.18.0',
+      '1.19.0',
     ]);
+    const frozen117 = blenderInteractionCatalogs.find(
+      (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
+    );
+    if (frozen117 === undefined) throw new Error('Expected frozen InteractionCatalog 1.17.0');
     expect(
-      recipeFor(blenderInteractionCatalogs.at(-2)!, 'blender.mesh.create_cylinder')
-        .procedureMaterialization,
+      recipeFor(frozen117, 'blender.mesh.create_cylinder').procedureMaterialization,
     ).toBeUndefined();
+    const frozen118 = blenderInteractionCatalogs.find(
+      (versionedCatalog) => versionedCatalog.catalogVersion === '1.18.0',
+    );
+    if (frozen118 === undefined) throw new Error('Expected frozen InteractionCatalog 1.18.0');
+    expect(
+      recipeFor(frozen118, 'blender.mesh.create_cube').procedureMaterialization?.shortcut,
+    ).toEqual({
+      availability: 'unavailable',
+      reason: 'No verified shortcut procedure is available.',
+    });
 
     const sphere = recipeFor(catalog, 'blender.mesh.create_uv_sphere');
     expect(sphere.guidance.steps.map((step) => step.label)).toEqual([
@@ -585,13 +599,39 @@ describe('interaction catalog protocol', () => {
           },
         ],
       },
-      shortcut: {
-        availability: 'unavailable',
-        reason: 'No verified shortcut procedure is available.',
-      },
+      shortcut: expect.objectContaining({
+        availability: 'available',
+        operations: expect.any(Array),
+      }),
       mcp: {
         availability: 'unavailable',
         reason: 'No approved action-level MCP tool is available.',
+      },
+    });
+    const cubeShortcut = cube.procedureMaterialization?.shortcut;
+    if (cubeShortcut?.availability !== 'available') {
+      throw new Error('Expected available Cube shortcut materialization');
+    }
+    expect(
+      cubeShortcut.operations.map((operation) => ({
+        id: operation.id,
+        keyMode: operation.keyMode,
+        keys: operation.keys,
+      })),
+    ).toEqual([
+      { id: 'shortcut.add_cube', keyMode: 'chord', keys: ['SHIFT', 'A'] },
+      { id: 'shortcut.move_x', keyMode: 'sequence', keys: ['G', 'X'] },
+      { id: 'shortcut.move_y', keyMode: 'sequence', keys: ['G', 'Y'] },
+      { id: 'shortcut.move_z', keyMode: 'sequence', keys: ['G', 'Z'] },
+      { id: 'shortcut.scale', keyMode: 'sequence', keys: ['S'] },
+      { id: 'shortcut.rename', keyMode: 'sequence', keys: ['F2'] },
+    ]);
+    expect(cubeShortcut.operations[4]!.parameters[0]).toEqual({
+      name: 'value',
+      source: {
+        kind: 'action_argument',
+        argumentName: 'size',
+        transform: 'divide_by_two',
       },
     });
     const cone = recipeFor(catalog, 'blender.mesh.create_cone');
@@ -1028,6 +1068,16 @@ describe('interaction catalog protocol', () => {
       'uniform_vector3 requires numeric action argument location',
     );
 
+    const invalidHalvedValue = structuredClone(blenderInteractionCatalog);
+    const invalidHalvedSource =
+      orderedMenu(invalidHalvedValue).controlOperations.operations[0]!.parameters[0]!.source;
+    if (invalidHalvedSource.kind !== 'action_argument')
+      throw new Error('Expected action argument fixture');
+    invalidHalvedSource.transform = 'divide_by_two';
+    expect(() => validateInteractionCatalog(invalidHalvedValue, blenderActionCatalog)).toThrow(
+      'divide_by_two requires numeric action argument location',
+    );
+
     const duplicateMapping = structuredClone(blenderInteractionCatalog);
     const duplicateMappingSource =
       orderedMenu(duplicateMapping).controlOperations.operations[2]!.parameters[0]!.source;
@@ -1382,6 +1432,40 @@ describe('interaction catalog protocol', () => {
       { value: emptySelectionPath, accepted: false },
       { value: missingKeyMode, accepted: false },
       { value: extraField, accepted: false },
+      {
+        value: (() => {
+          const catalog = structuredClone(blenderInteractionCatalog);
+          const source =
+            orderedMenu(catalog).controlOperations.operations[0]!.parameters[0]!.source;
+          if (source.kind !== 'action_argument')
+            throw new Error('Expected action argument fixture');
+          source.transform = 'divide_by_two';
+          return catalog;
+        })(),
+        accepted: true,
+      },
+      {
+        value: (() => {
+          const catalog = structuredClone(blenderInteractionCatalog) as unknown as Record<
+            string,
+            unknown
+          >;
+          const recipes = catalog['recipes'] as Array<Record<string, unknown>>;
+          const materialization = recipes[0]!['procedureMaterialization'] as Record<
+            string,
+            unknown
+          >;
+          const menu = materialization['menu'] as Record<string, unknown>;
+          const operations = (menu['controlOperations'] as Record<string, unknown>)[
+            'operations'
+          ] as Array<Record<string, unknown>>;
+          const parameters = operations[0]!['parameters'] as Array<Record<string, unknown>>;
+          const source = parameters[0]!['source'] as Record<string, unknown>;
+          source['transform'] = 'divide_by_three';
+          return catalog;
+        })(),
+        accepted: false,
+      },
       ...unsafeParameterNames.map((value) => ({ value, accepted: false as const })),
     ] as const;
     for (const contractCase of cases) {

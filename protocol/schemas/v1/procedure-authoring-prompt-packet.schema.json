@@ -872,6 +872,7 @@
                                                       "type": "string",
                                                       "enum": [
                                                         "identity",
+                                                        "divide_by_two",
                                                         "uniform_vector3",
                                                         "vector3_x",
                                                         "vector3_y",
@@ -1024,6 +1025,7 @@
                                                                 "type": "string",
                                                                 "enum": [
                                                                   "identity",
+                                                                  "divide_by_two",
                                                                   "uniform_vector3",
                                                                   "vector3_x",
                                                                   "vector3_y",
@@ -1298,6 +1300,7 @@
                                                         "type": "string",
                                                         "enum": [
                                                           "identity",
+                                                          "divide_by_two",
                                                           "uniform_vector3",
                                                           "vector3_x",
                                                           "vector3_y",
