@@ -10,6 +10,7 @@ from .editing import (
     execute_bevel,
     execute_edit_bevel_edges,
     execute_edit_inset_faces,
+    execute_edit_poke_faces,
     execute_extrude_region,
     execute_geometry_nodes_transform,
     execute_solidify,
@@ -19,6 +20,7 @@ from .editing import (
     validate_bevel,
     validate_edit_bevel_edges,
     validate_edit_inset_faces,
+    validate_edit_poke_faces,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
@@ -167,6 +169,12 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             reserve(step.id, (definition.result_mesh_id,))
             execute = _bind_action(
                 execute_edit_inset_faces, step.id, action, definition
+            )
+        elif action.name == "blender.mesh.edit_poke_faces":
+            definition = validate_edit_poke_faces(arguments)
+            reserve(step.id, (definition.result_mesh_id,))
+            execute = _bind_action(
+                execute_edit_poke_faces, step.id, action, definition
             )
         elif action.name == "blender.modifier.add_bevel":
             definition = validate_bevel(arguments)

@@ -463,6 +463,58 @@ function editInsetAuthoringCandidateFixture(
   return tree;
 }
 
+function editPokeAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Edit Mode Poke candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_poke_faces',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.poked.mesh',
+      resultMeshName: 'OperatingLine.Cube.Poked',
+      offset: 0.2,
+    },
+  };
+  leaf['title'] = 'Poke every face of the accepted Cube in Edit Mode';
+  leaf['intent'] = 'Poke every Cube face with the exact offset.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'poke_mesh_faces',
+    description: 'Poke every face of the accepted Cube.',
+    parameters: { offset: 0.2 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Poked' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.poke' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'mesh_faces_poked',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.poked.mesh',
+    },
+  };
+  return tree;
+}
+
 function cubeAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1119,7 +1171,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.25.0' },
+        catalogBinding: { interactionCatalogVersion: '1.26.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2443,7 +2495,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.25.0' },
+        catalogBinding: { interactionCatalogVersion: '1.26.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2695,8 +2747,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.15.0',
-          interactionCatalogVersion: '1.25.0',
+          actionCatalogVersion: '1.16.0',
+          interactionCatalogVersion: '1.26.0',
         },
         coverage: [
           {
@@ -2810,7 +2862,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.15.0',
+        actionCatalogVersion: '1.16.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2867,8 +2919,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.15.0',
-          interactionCatalogVersion: '1.25.0',
+          actionCatalogVersion: '1.16.0',
+          interactionCatalogVersion: '1.26.0',
         },
         coverage: [
           {
@@ -2983,7 +3035,150 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.15.0',
+        actionCatalogVersion: '1.16.0',
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes and structurally compiles the active Edit Mode Poke Faces candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Poke every Cube face with offset 0.2.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: editPokeAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(materializedMcp.result.content?.[0]?.text ?? 'Poke materialization failed');
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Edit Mode Poke leaf');
+      }
+
+      expect(materialization).toMatchObject({
+        formatVersion: '1.3.0',
+        catalogBinding: {
+          actionCatalogVersion: '1.16.0',
+          interactionCatalogVersion: '1.26.0',
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.mesh.edit_poke_faces.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.poked.mesh',
+        resultMeshName: 'OperatingLine.Cube.Poked',
+        offset: 0.2,
+      });
+      expect(leaf.expectedObservations).toEqual([
+        {
+          kind: 'mesh_faces_poked',
+          parameters: {
+            targetId: 'tutorial.cube',
+            resultMeshId: 'tutorial.cube.poked.mesh',
+          },
+        },
+      ]);
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Poke shortcut');
+      }
+      expect(shortcut.operations.map((operation) => operation.id)).toEqual([
+        'shortcut.enter_edit_mode',
+        'shortcut.select_face_mode',
+        'shortcut.select_all_faces',
+        'shortcut.open_operator_search',
+        'shortcut.execute_poke_faces',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_poke_offset',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ]);
+      expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        { query: 'poke faces' },
+        { offset: 0, use_relative_offset: false, center_mode: 'MEDIAN_WEIGHTED' },
+        {},
+        { value: 0.2 },
+        {},
+        {},
+      ]);
+      expect(shortcut.operations[3]).toMatchObject({
+        keys: ['F3'],
+        selectionPath: ['Poke Faces'],
+      });
+      expect(shortcut.operations[4]).toMatchObject({ keys: ['ENTER'] });
+      expect(shortcut.operations[5]).toMatchObject({
+        keys: ['F9'],
+        opensSurface: {
+          sourceOperationId: 'shortcut.execute_poke_faces',
+          expectedOperatorId: 'mesh.poke',
+        },
+      });
+      expect(shortcut.operations[6]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.poke.offset' },
+        path: ['Adjust Last Operation', 'Offset'],
+      });
+      expect(shortcut.operations[7]).toMatchObject({
+        keys: ['ENTER'],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      });
+      expect(shortcut.operations[8]).toMatchObject({ keys: ['TAB'] });
+      expect(
+        shortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toEqual(expect.arrayContaining(['targetId', 'resultMeshId', 'resultMeshName']));
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: '1.16.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3604,7 +3799,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.15.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.16.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

@@ -293,7 +293,7 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `operatingline.plan_and_propose` MCP Prompt、调用 `operatingline.planning.prompt.get` Tool，或直接调用
 `operatingline.planning.context`，取得目标宿主的精确版本化目录、Companion 状态、revision 提示、
 计划约束和目录声明的有序阶段。客户端根据自然语言目标选择 `requiredPhaseIds` 并生成完整
-GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.15.0` 目录提供十七项适配器自有
+GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.16.0` 目录提供十八项适配器自有
 `semanticCapabilities`；capability-aware 规划必须在 `planning.capabilityCoverage` 中声明
 `requirement -> capability -> executable leaf` 链。quality baseline `1.1.0` 除既有阶段树、阶段顺序、
 资源创建与依赖、语义锚点和预期观察外，还确定性检查能力/步骤存在、步骤可执行且 action 属于相应能力。
@@ -326,7 +326,7 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.25.0` 精确绑定 ActionCatalog `1.15.0`，冻结 `1.24.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.26.0` 精确绑定 ActionCatalog `1.16.0`，冻结 `1.25.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
 `subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；九步 candidate shortcut 依次为
@@ -354,6 +354,13 @@ Individual Inset Faces 保留 managed replacement Mesh `semantic_path`，并声�
 和 literal `true` 写入 Thickness、Depth、Individual，最后以 `ENTER` 和 `TAB` 关闭 surface 并返回 Object Mode。
 `targetId`、`resultMeshId`、`resultMeshName` 显式省略；menu/MCP unavailable，因为原生路径就地修改当前
 Mesh，不能表达 managed replacement identity 与 transaction。
+Poke Faces 保留 managed replacement Mesh `semantic_path`，并声明 candidate-only 九步 shortcut：
+`TAB` 进入 Edit Mode、`3` 切换 Face Select、`A` 选择全部面、`F3` 携带 literal query
+`poke faces`、`ENTER` 以 UI 默认 `offset=0`、`use_relative_offset=false`、
+`center_mode=MEDIAN_WEIGHTED` 执行 `mesh.poke`，`F9` 打开 Adjust Last Operation，Offset 绑定 accepted
+`offset`，最后以 `ENTER` 和 `TAB` 关闭 surface 并返回 Object Mode。`targetId`、`resultMeshId`、
+`resultMeshName` 显式省略；menu/MCP unavailable。现代默认 keymap 没有 Poke Faces 直达键，legacy
+`Alt+P` 不进入默认轨迹。
 Cube 与 Plane 同样各自声明六步 ordered menu：四步 guidance 的 operator step 以 identity 投影绑定 accepted
 action 的 `size`，随后绑定 Location 与 Object Name，并省略 `resourceId`。`size` 表示完整边长，不是
 transform scale。Cube 与 Plane 还各自声明 candidate-only 六步 shortcut：六项前置条件固定为 `Layout`、`VIEW_3D`、
@@ -385,7 +392,7 @@ Cylinder 同样声明六步 ordered menu：四步 guidance operator 严格按序
 `end`，两端使用同一 `radius`，且不声称与 managed executor quaternion/roll 精确等价。
 `resourceId` 省略，shortcut/MCP unavailable。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
-hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
+hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
 不是宿主状态等价证明。Cube/Plane 的 `size`、Torus 的四项 identity 投影与 Cone/Cylinder 的
 segment-frame 派生同样只证明参数来源；Icosphere 的创建与 F9 参数链已在 Blender 4.5.3/5.1.1
@@ -403,13 +410,17 @@ receipt、Observation、补偿或原生 Undo。Individual Inset Faces 的十步�
 `thickness=0.2`、`depth=0.1`、`use_individual=true`，得到 32 vertices、60 edges、30 polygons、
 全部 quad、6/30 结果面选择和 ±1.1 坐标边界，Mesh data pointer 与 datablock 数量保持不变。
 Harness 同样只证明已发送 popup 关闭事件；原生 in-place mutation 仍不等价于 managed
-replacement Mesh、receipt、Observation、补偿或原生 Undo。Cube 与
+replacement Mesh、receipt、Observation、补偿或原生 Undo。Poke Faces 的九步真实前台事件回放在两个
+版本均验证 `offset=0.2`，Cube 从 8/12/6 变为 14/36/24，24 个结果面全部为 selected triangle，
+坐标边界为 ±1.2，Mesh data pointer 与 datablock 数量保持不变。UI RNA 的
+`MEDIAN_WEIGHTED` 与 managed BMesh 路径的 `MEAN_WEIGHTED` 是不同接口的字面量；原生 in-place
+mutation 仍不等价于 managed transaction。Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
 不是实际键盘事件或完整 UI replay，并保留默认未 bake mesh 与 `scale = size / 2`，不等价于 managed
 executor 的 baked mesh/`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、
 receipt、幂等或补偿语义；
 Cone/Cylinder 的 Blender 4.5/5.1 operator 双版本探针也不是六步 UI replay。历史
-`1.9.0` 至已冻结的 `1.24.0` 继续精确回放；`1.24.0` 中 Individual Inset Faces action 尚不存在。结果格式依实际
+`1.9.0` 至已冻结的 `1.25.0` 继续精确回放；`1.25.0` 中 Poke Faces action 尚不存在。结果格式依实际
 使用能力为 `1.0.0`/`1.1.0`/`1.2.0`/`1.3.0`，其中 Icosphere shortcut 结果为 `1.3.0`，Plane、Cube 与
 UV Sphere shortcut 结果为 `1.2.0`，Subdivide shortcut 结果为 `1.3.0`，Torus/Cone/Cylinder menu-only
 结果为 `1.1.0`。该入口
@@ -431,7 +442,8 @@ grounding attestation。完整决策见
 [ADR 0059](../adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md) 与
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
-[ADR 0062](../adr/0062-bounded-individual-inset-faces.md)。
+[ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数
@@ -442,16 +454,18 @@ ProcedureTree `1.1.0` / MaterializationResult `1.3.0`。Schema 14 将 operation 
 `semantic_path` 的 opener 从唯一 execute/operator guidance step 取得 expected operator，并据此声明
 Subdivide shortcut；`1.23.0` 用同一 surface 形状声明 Subdivision Surface 的 `Ctrl+1 → F9 → Level →
 ENTER`；`1.24.0` 声明 Edit Mode Bevel 的 `Ctrl+B → F9 → Width → Segments → Profile → ENTER` 参数链；
-`1.25.0` 声明 Individual Inset Faces 的 `I → F9 → Thickness → Depth → Individual true → ENTER` 参数链。
+`1.25.0` 声明 Individual Inset Faces 的 `I → F9 → Thickness → Depth → Individual true → ENTER` 参数链；
+`1.26.0` 声明 Poke Faces 的 `F3(query="poke faces") → ENTER → F9 → Offset → ENTER` 参数链。
 真实 Blender 4.5.3/5.1.1 前台回放已证明这些 UI 轨迹的事件和参数链，但结果仍是
-candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel 与 Individual Inset Faces action 另有完整 Observation、
+candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Individual Inset Faces 与 Poke Faces action 另有完整 Observation、
 补偿与原生 Undo 证据；这些执行层能力不使 UI candidate 与 managed action 等价。见
 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
 [ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md) 与
 [ADR 0059](../adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md) 与
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
-[ADR 0062](../adr/0062-bounded-individual-inset-faces.md)。更多 action 的封闭声明、verified
+[ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
@@ -465,7 +479,7 @@ Orchestrator 不内置模型，也不通过关键词假装理解目标；目标�
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。目录约束 coverage 决策见
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
-节点局部重规划对当前 Blender `1.15.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
+节点局部重规划对当前 Blender `1.16.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
 `1.0.0`。MCP
 `operatingline.replan.prompt.get` 与 HTTP `POST /api/v1/replan/prompt` 从一个仍 pending 的线性 thread
 head 构建相同 packet；其中绑定完整 immutable base Plan、引用节点、精确 ActionCatalog、发起实例最新

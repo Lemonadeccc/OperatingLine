@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.15.0",
+  "catalogVersion": "1.16.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide, Triangulate, Bevel Edges, and Individual Inset Faces edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, and Subdivision Surface modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate, Extrude Region, Bevel Edges, and Individual Inset Faces require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Bevel Edges processes every edge of one closed manifold mesh, with width 0.0001..100, segments 1..16, and profile 0..1. Individual Inset Faces processes every face of one closed, nondegenerate manifold mesh with thickness 0.0001..100 and depth -100..100; for source topology V/E/F its result must be exactly V+2E vertices, 5E edges, and F+2E polygons. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide, Triangulate, Bevel Edges, Individual Inset Faces, and Poke Faces edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, and Subdivision Surface modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate, Extrude Region, Bevel Edges, Individual Inset Faces, and Poke Faces require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Bevel Edges processes every edge of one closed manifold mesh, with width 0.0001..100, segments 1..16, and profile 0..1. Individual Inset Faces processes every face of one closed, nondegenerate manifold mesh with thickness 0.0001..100 and depth -100..100; for source topology V/E/F its result must be exactly V+2E vertices, 5E edges, and F+2E polygons. Poke Faces processes every face of one closed, nondegenerate manifold mesh with offset -100..100 and fixed use_relative_offset=false and center_mode=MEAN_WEIGHTED; for source topology V/E/F with L face loops its result must be exactly V+F vertices, E+L edges, and L triangle polygons. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -36,6 +36,7 @@
         "blender.mesh.edit_extrude_region",
         "blender.mesh.edit_bevel_edges",
         "blender.mesh.edit_inset_faces",
+        "blender.mesh.edit_poke_faces",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.modifier.add_subdivision_surface",
@@ -139,6 +140,13 @@
       "description": "Replace an owned object's mesh data with one deterministic individual inset of every face on a closed, nondegenerate manifold surface.",
       "selectionGuidance": "Select when the goal requires a separate inset region on every face of one complete closed manifold mesh.",
       "actionNames": ["blender.mesh.edit_inset_faces"]
+    },
+    {
+      "id": "geometry.edit_poke_faces",
+      "title": "Bounded Edit Mode face poking",
+      "description": "Replace an owned object's mesh data with one deterministic whole-mesh Poke Faces result.",
+      "selectionGuidance": "Select when the goal requires every source face to be replaced by triangles around one weighted center vertex.",
+      "actionNames": ["blender.mesh.edit_poke_faces"]
     },
     {
       "id": "geometry.bevel_modifier",
@@ -1148,6 +1156,65 @@
       ],
       "supportedAnchorKinds": ["object", "operator", "unavailable"],
       "supportedObservationKinds": ["resource_exists", "mesh_faces_inset"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.mesh.edit_poke_faces",
+      "title": "Poke every face of one owned closed manifold mesh",
+      "description": "Creates a bounded whole-mesh Poke Faces result and swaps it onto an earlier owned mesh object without mutating the source mesh datablock. The target must be in Object Mode, have no modifiers or shape keys, and be a closed, nondegenerate manifold mesh whose every vertex forms one manifold face fan. For source topology V/E/F with L face loops, the result is required to contain exactly V+F vertices, E+L edges, and L triangle polygons within the global 8192 vertex, 16384 edge, and 8192 polygon bounds.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "resultMeshId", "resultMeshName", "offset"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Logical ID of an owned mesh object created by an earlier action."
+          },
+          "resultMeshId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "maxLength": 180,
+            "description": "Plan-unique logical ID for the replacement poked mesh datablock."
+          },
+          "resultMeshName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "offset": {
+            "type": "number",
+            "minimum": -100,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Swaps the owned object's mesh link to the generated Poke Faces result after Object Mode, modifier, shape-key, closed-manifold, nondegeneracy, exact-topology, and bounds validation."
+        },
+        {
+          "access": "create",
+          "resourceType": "MESH",
+          "argumentPath": "resultMeshId",
+          "derivedResourceTypes": [],
+          "description": "Creates the bounded poked mesh while retaining the source for compensation."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "operator", "unavailable"],
+      "supportedObservationKinds": ["resource_exists", "mesh_faces_poked"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",

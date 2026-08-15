@@ -309,6 +309,52 @@ function editInsetCandidate(): ProcedureAuthoringCandidateTree {
   return tree;
 }
 
+function editPokeCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Edit Mode Poke candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_poke_faces',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.poked.mesh',
+      resultMeshName: 'OperatingLine.Cube.Poked',
+      offset: 0.2,
+    },
+  };
+  leaf.title = 'Poke every face of the accepted Cube in Edit Mode';
+  leaf.intent = 'Poke every Cube face with the exact offset.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'poke_mesh_faces',
+    description: 'Poke every face of the accepted Cube.',
+    parameters: { offset: 0.2 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Poked' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.poke' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'mesh_faces_poked',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.poked.mesh',
+    },
+  };
+  return tree;
+}
+
 function cubeCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
 ): ProcedureAuthoringCandidateTree {
@@ -1648,6 +1694,145 @@ describe('procedure authoring materialization', () => {
       closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
     });
     expect(shortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+    const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+      Object.keys(operation.parameters),
+    );
+    for (const managedArgument of ['targetId', 'resultMeshId', 'resultMeshName']) {
+      expect(shortcutParameterNames).not.toContain(managedArgument);
+    }
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Edit Mode Poke Faces search/F9 shortcut', () => {
+    const input = editPokeCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Edit Mode Poke leaf');
+    }
+
+    expect(result).toMatchObject({ formatVersion: '1.3.0' });
+    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_poke_faces.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.poked.mesh',
+      resultMeshName: 'OperatingLine.Cube.Poked',
+      offset: 0.2,
+    });
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'mesh_faces_poked',
+        parameters: {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.poked.mesh',
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+    expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+    const shortcut = leaf.shortcutTracks[0];
+    if (shortcut?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Poke shortcut track');
+    }
+    expect(shortcut).toMatchObject({
+      id: 'blender.mesh.edit_poke_faces.semantic.shortcut',
+      modality: 'shortcut',
+    });
+    expect(shortcut.preconditions).toHaveLength(11);
+    expect(
+      shortcut.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      { kind: 'key_input', id: 'shortcut.enter_edit_mode', order: 1, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_face_mode', order: 2, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_all_faces', order: 3, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_operator_search',
+        order: 4,
+        parameters: { query: 'poke faces' },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.execute_poke_faces',
+        order: 5,
+        parameters: {
+          offset: 0,
+          use_relative_offset: false,
+          center_mode: 'MEDIAN_WEIGHTED',
+        },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 6,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_poke_offset',
+        order: 7,
+        parameters: { value: 0.2 },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 8,
+        parameters: {},
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.return_to_object_mode',
+        order: 9,
+        parameters: {},
+      },
+    ]);
+    expect(shortcut.operations[0]).toMatchObject({ keys: ['TAB'] });
+    expect(shortcut.operations[1]).toMatchObject({ keys: ['3'] });
+    expect(shortcut.operations[2]).toMatchObject({ keys: ['A'] });
+    expect(shortcut.operations[3]).toMatchObject({
+      keys: ['F3'],
+      selectionPath: ['Poke Faces'],
+    });
+    expect(shortcut.operations[4]).toMatchObject({ keys: ['ENTER'] });
+    expect(shortcut.operations[5]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.execute_poke_faces',
+        expectedOperatorId: 'mesh.poke',
+      },
+    });
+    expect(shortcut.operations[6]).toMatchObject({
+      target: { kind: 'control', hostId: 'mesh.poke.offset' },
+      path: ['Adjust Last Operation', 'Offset'],
+    });
+    expect(shortcut.operations[7]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(shortcut.operations[8]).toMatchObject({ keys: ['TAB'] });
     const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
       Object.keys(operation.parameters),
     );

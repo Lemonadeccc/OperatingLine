@@ -102,19 +102,24 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     COLLECTION_NAME,
     OWNER_VALUE,
     ensure_receipts_intact,
+    mesh_content_signature,
+    tag_resource,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
     _ensure_edit_bevel_topology_is_bounded,
     _ensure_edit_inset_topology_is_bounded,
+    _ensure_edit_poke_topology_is_bounded,
     _ensure_extrude_topology_is_bounded,
     _ensure_triangulate_topology_is_bounded,
     _extrude_region_geometry,
     _normalized_squared_vector_length,
     _validate_edit_bevel_source,
     _validate_edit_inset_source,
+    _validate_edit_poke_source,
     validate_bevel,
     validate_edit_bevel_edges,
     validate_edit_inset_faces,
+    validate_edit_poke_faces,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
@@ -2687,6 +2692,582 @@ def assert_edit_inset_faces_round_trip_and_guards() -> None:
         assert gated_session.back() is not None
 
 
+def edit_poke_faces_steps(
+    *,
+    object_name: str = "OperatingLine.EditPokeCube",
+    result_mesh_id: str = "edit_poke.cube.result_mesh",
+    result_mesh_name: str = "OperatingLine.EditPokeCube.ResultMesh",
+    offset: float = 0.1,
+) -> list[dict]:
+    return [
+        step("root", None, 0),
+        step(
+            "edit_poke.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "edit_poke.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "edit_poke.faces",
+            "root",
+            2,
+            depends_on=["edit_poke.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_poke_faces",
+                "arguments": {
+                    "targetId": "edit_poke.cube",
+                    "resultMeshId": result_mesh_id,
+                    "resultMeshName": result_mesh_name,
+                    "offset": offset,
+                },
+            },
+        ),
+    ]
+
+
+def assert_edit_poke_faces_round_trip_and_guards() -> None:
+    object_name = "OperatingLine.EditPokeCube"
+    result_mesh_name = "OperatingLine.EditPokeCube.ResultMesh"
+    root = load_temporary_plan(edit_poke_faces_steps())
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    target = bpy.data.objects[object_name]
+    source_mesh = target.data
+    source_signature = tuple(tuple(vertex.co) for vertex in source_mesh.vertices)
+    assert session.next() is not None
+    result_mesh = target.data
+    assert result_mesh is not source_mesh
+    assert result_mesh.name == result_mesh_name
+    assert (
+        len(result_mesh.vertices),
+        len(result_mesh.edges),
+        len(result_mesh.polygons),
+    ) == (14, 36, 24)
+    assert all(len(face.vertices) == 3 for face in result_mesh.polygons)
+    result_coordinates = tuple(
+        float(component)
+        for vertex in result_mesh.vertices
+        for component in vertex.co
+    )
+    assert math.isclose(min(result_coordinates), -1.1, rel_tol=0.0, abs_tol=1e-6)
+    assert math.isclose(max(result_coordinates), 1.1, rel_tol=0.0, abs_tol=1e-6)
+    assert tuple(tuple(vertex.co) for vertex in source_mesh.vertices) == source_signature
+    receipt = session.receipts["edit_poke.faces"]
+    assert receipt.action_name == "blender.mesh.edit_poke_faces"
+    assert tuple(mutation.attribute for mutation in receipt.mutations) == (
+        "data",
+        "mesh_content",
+        "mesh_content",
+    )
+    assert receipt.mutations[1].resource.pointer == source_mesh.as_pointer()
+    assert receipt.mutations[1].before == receipt.mutations[1].after
+
+    parameters = {
+        "targetId": "edit_poke.cube",
+        "resultMeshId": "edit_poke.cube.result_mesh",
+    }
+    observations = observation_module.evaluate_observations(
+        (
+            {"kind": "mesh_faces_poked", "parameters": parameters},
+            {
+                "kind": "mesh_faces_poked",
+                "parameters": {**parameters, "unexpected": True},
+            },
+            {
+                "kind": "mesh_faces_poked",
+                "parameters": {**parameters, "resultMeshId": "wrong.mesh"},
+            },
+        ),
+        session.receipts,
+    )
+    assert tuple(item["satisfied"] for item in observations) == (
+        True,
+        False,
+        False,
+    ), observations
+    assert observations[0]["details"]["sourceLoopCount"] == 24
+    assert observations[0]["details"]["allTriangles"] is True
+
+    original_result_vertex = result_mesh.vertices[0].co.copy()
+    result_mesh.vertices[0].co.x += 0.25
+    assert not observation_module.evaluate_observations(
+        ({"kind": "mesh_faces_poked", "parameters": parameters},),
+        session.receipts,
+    )[0]["satisfied"]
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited poke result meshes must block rollback")
+    result_mesh.vertices[0].co = original_result_vertex
+
+    original_source_vertex = source_mesh.vertices[0].co.copy()
+    source_mesh.vertices[0].co.x += 0.25
+    assert not observation_module.evaluate_observations(
+        ({"kind": "mesh_faces_poked", "parameters": parameters},),
+        session.receipts,
+    )[0]["satisfied"]
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited poke source meshes must block rollback")
+    source_mesh.vertices[0].co = original_source_vertex
+    assert observation_module.evaluate_observations(
+        ({"kind": "mesh_faces_poked", "parameters": parameters},),
+        session.receipts,
+    )[0]["satisfied"]
+    assert session.back() is not None
+    assert target.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    assert session.back() is not None
+
+    triangle_name = "OperatingLine.EditPokeIcosphere"
+    triangle_result_name = f"{triangle_name}.ResultMesh"
+    triangle_steps = [
+        step("root", None, 0),
+        step(
+            "edit_poke.triangles",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_icosphere",
+                "arguments": {
+                    "resourceId": "edit_poke.triangles",
+                    "objectName": triangle_name,
+                    "subdivisions": 1,
+                    "radius": 1.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "edit_poke.triangle_faces",
+            "root",
+            2,
+            depends_on=["edit_poke.triangles"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_poke_faces",
+                "arguments": {
+                    "targetId": "edit_poke.triangles",
+                    "resultMeshId": "edit_poke.triangles.result_mesh",
+                    "resultMeshName": triangle_result_name,
+                    "offset": 0.05,
+                },
+            },
+        ),
+    ]
+    triangle_root = load_temporary_plan(triangle_steps)
+    triangle_session = DemoSession(triangle_root, action_registry(triangle_root))
+    triangle_session.start()
+    assert triangle_session.next() is not None
+    triangle_target = bpy.data.objects[triangle_name]
+    triangle_source = triangle_target.data
+    assert triangle_session.next() is not None
+    triangle_result = triangle_target.data
+    assert (
+        len(triangle_result.vertices),
+        len(triangle_result.edges),
+        len(triangle_result.polygons),
+    ) == (32, 90, 60)
+    assert all(len(face.vertices) == 3 for face in triangle_result.polygons)
+    assert triangle_session.back() is not None
+    assert triangle_target.data is triangle_source
+    assert triangle_session.back() is not None
+
+    for label, mutate, cleanup in (
+        (
+            "modifier",
+            lambda item: item.modifiers.new("External", "BEVEL"),
+            lambda item: item.modifiers.clear(),
+        ),
+        (
+            "shape_key",
+            lambda item: item.shape_key_add(name="Basis"),
+            lambda item: item.shape_key_clear(),
+        ),
+    ):
+        guarded_name = f"OperatingLine.EditPokeGuard.{label}"
+        guarded_root = load_temporary_plan(
+            edit_poke_faces_steps(
+                object_name=guarded_name,
+                result_mesh_name=f"{guarded_name}.ResultMesh",
+            )
+        )
+        guarded_session = DemoSession(guarded_root, action_registry(guarded_root))
+        guarded_session.start()
+        assert guarded_session.next() is not None
+        guarded_target = bpy.data.objects[guarded_name]
+        mutate(guarded_target)
+        try:
+            guarded_session.next()
+        except RuntimeError as error:
+            assert "modified" in str(error) or "must not have" in str(error)
+        else:
+            raise AssertionError(f"Edit Poke must reject a {label} target")
+        cleanup(guarded_target)
+        assert guarded_session.back() is not None
+
+    mode_name = "OperatingLine.EditPokeGuard.EditMode"
+    mode_root = load_temporary_plan(
+        edit_poke_faces_steps(
+            object_name=mode_name,
+            result_mesh_name=f"{mode_name}.ResultMesh",
+        )
+    )
+    mode_session = DemoSession(mode_root, action_registry(mode_root))
+    mode_session.start()
+    assert mode_session.next() is not None
+    mode_target = bpy.data.objects[mode_name]
+    bpy.context.view_layer.objects.active = mode_target
+    mode_target.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        mode_session.next()
+    except RuntimeError as error:
+        assert "modified" in str(error) or "Object Mode" in str(error)
+    else:
+        raise AssertionError("Edit Poke must reject Edit Mode targets")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    assert mode_session.back() is not None
+
+    invalid_meshes = []
+    for name, vertices, faces, expected in (
+        ("Empty", [], [], "nonempty"),
+        (
+            "Open",
+            [(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (0.0, 1.0, 0.0)],
+            [(0, 1, 2)],
+            "exactly two adjacent faces",
+        ),
+        (
+            "NonManifold",
+            [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1)],
+            [(0, 1, 2), (1, 0, 3), (0, 1, 4)],
+            "exactly two adjacent faces",
+        ),
+        (
+            "IsolatedVertex",
+            [
+                (0, 0, 0),
+                (1, 0, 0),
+                (0, 1, 0),
+                (0, 0, 1),
+                (3, 3, 3),
+            ],
+            [(0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)],
+            "one manifold face fan",
+        ),
+        (
+            "BowTieVertex",
+            [
+                (0, 0, 0),
+                (1, 0, 0),
+                (0, 1, 0),
+                (0, 0, 1),
+                (-1, 0, 0),
+                (0, -1, 0),
+                (0, 0, -1),
+            ],
+            [
+                (0, 2, 1),
+                (0, 1, 3),
+                (1, 2, 3),
+                (2, 0, 3),
+                (0, 4, 5),
+                (0, 6, 4),
+                (4, 6, 5),
+                (5, 6, 0),
+            ],
+            "one manifold face fan",
+        ),
+        (
+            "Degenerate",
+            [(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 1, 0)],
+            [(0, 1, 2), (0, 3, 1), (1, 3, 2), (2, 3, 0)],
+            "finite positive area",
+        ),
+    ):
+        mesh = bpy.data.meshes.new(f"OperatingLine.EditPoke.{name}")
+        mesh.from_pydata(vertices, [], faces)
+        invalid_meshes.append(mesh)
+        try:
+            _validate_edit_poke_source(mesh)
+        except ValueError as error:
+            assert expected in str(error)
+        else:
+            raise AssertionError(f"Edit Poke must reject {name} topology")
+    for mesh in invalid_meshes:
+        bpy.data.meshes.remove(mesh)
+
+    oversized_source = bpy.data.meshes.new("OperatingLine.EditPoke.OversizedSource")
+    oversized_source.from_pydata(
+        [(float(index), 0.0, 0.0) for index in range(8193)], [], []
+    )
+    try:
+        try:
+            _validate_edit_poke_source(oversized_source)
+        except ValueError as error:
+            assert "source exceeds the supported topology limits" in str(error)
+        else:
+            raise AssertionError("Edit Poke must reject oversized sources")
+    finally:
+        bpy.data.meshes.remove(oversized_source)
+
+    _ensure_edit_poke_topology_is_bounded((8192, 16384, 8192), "boundary")
+    for topology in ((8193, 0, 0), (0, 16385, 0), (0, 0, 8193)):
+        try:
+            _ensure_edit_poke_topology_is_bounded(topology, "result")
+        except ValueError as error:
+            assert "supported topology limits" in str(error)
+        else:
+            raise AssertionError("Edit Poke must reject out-of-bounds topology")
+
+    overflow_name = "OperatingLine.EditPokeOverflow"
+    overflow_result_name = f"{overflow_name}.ResultMesh"
+    overflow_steps = [
+        step("root", None, 0),
+        step(
+            "edit_poke.torus",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_torus",
+                "arguments": {
+                    "resourceId": "edit_poke.cube",
+                    "objectName": overflow_name,
+                    "majorRadius": 2.0,
+                    "minorRadius": 0.5,
+                    "majorSegments": 65,
+                    "minorSegments": 64,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        edit_poke_faces_steps(result_mesh_name=overflow_result_name)[2],
+    ]
+    overflow_steps[2]["dependsOn"] = ["edit_poke.torus"]
+    overflow_root = load_temporary_plan(overflow_steps)
+    overflow_session = DemoSession(overflow_root, action_registry(overflow_root))
+    overflow_session.start()
+    assert overflow_session.next() is not None
+    overflow_target = bpy.data.objects[overflow_name]
+    overflow_source = overflow_target.data
+    try:
+        overflow_session.next()
+    except ValueError as error:
+        assert "result exceeds the supported topology limits" in str(error)
+    else:
+        raise AssertionError("Edit Poke must reject predicted result overflow")
+    assert overflow_target.data is overflow_source
+    assert bpy.data.meshes.get(overflow_result_name) is None
+    assert overflow_session.back() is not None
+
+    conflict_root = load_temporary_plan(
+        edit_poke_faces_steps(result_mesh_id="edit_poke.cube.mesh")
+    )
+    try:
+        action_registry(conflict_root)
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Edit Poke result IDs must be reserved")
+
+    collision_name = "OperatingLine.EditPokeCollision.ResultMesh"
+    collision_root = load_temporary_plan(
+        edit_poke_faces_steps(
+            object_name="OperatingLine.EditPokeCollision",
+            result_mesh_name=collision_name,
+        )
+    )
+    collision_session = DemoSession(collision_root, action_registry(collision_root))
+    collision_session.start()
+    assert collision_session.next() is not None
+    collision_target = bpy.data.objects["OperatingLine.EditPokeCollision"]
+    collision_source = collision_target.data
+    collision = bpy.data.meshes.new(collision_name)
+    try:
+        try:
+            collision_session.next()
+        except RuntimeError as error:
+            assert "Cannot replace existing mesh" in str(error)
+        else:
+            raise AssertionError("Edit Poke result names must be unique")
+        assert collision_target.data is collision_source
+    finally:
+        bpy.data.meshes.remove(collision)
+    assert collision_session.back() is not None
+
+    def gated_steps(result_mesh_id: str) -> list[dict]:
+        result = edit_poke_faces_steps(
+            object_name="OperatingLine.EditPokeGateCube",
+            result_mesh_name="OperatingLine.EditPokeGateCube.ResultMesh",
+        )
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "mesh_faces_poked",
+                "parameters": {
+                    "targetId": "edit_poke.cube",
+                    "resultMeshId": result_mesh_id,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    for result_mesh_id, should_pass in (
+        ("edit_poke.cube.result_mesh", True),
+        ("edit_poke.cube.wrong_mesh", False),
+    ):
+        gated_root = load_task_tree_data(
+            {
+                "protocolVersion": "1.2.0",
+                "rootStepId": "root",
+                "steps": gated_steps(result_mesh_id),
+            }
+        )
+        gated_session = DemoSession(
+            gated_root,
+            action_registry(gated_root),
+            observation_evaluator=observation_module.evaluate_observations,
+        )
+        gated_session.start()
+        assert gated_session.next() is not None
+        gated_target = bpy.data.objects["OperatingLine.EditPokeGateCube"]
+        gated_source = gated_target.data
+        if should_pass:
+            assert gated_session.next() is not None
+            assert gated_session.back() is not None
+        else:
+            try:
+                gated_session.next()
+            except RuntimeError as error:
+                assert "Observation gate failed" in str(error)
+            else:
+                raise AssertionError("Wrong poke mesh IDs must fail the success gate")
+            assert gated_target.data is gated_source
+            assert "edit_poke.faces" not in gated_session.receipts
+        assert gated_session.back() is not None
+
+
+def assert_edit_poke_weighted_center_matches_ui() -> None:
+    vertices = [
+        (-1.2, -0.8, 0.0),
+        (1.4, -0.7, 0.0),
+        (1.1, 0.5, 0.0),
+        (0.2, 1.3, 0.0),
+        (-1.0, 0.7, 0.0),
+        (0.15, 0.1, 1.7),
+    ]
+    faces = [
+        (4, 3, 2, 1, 0),
+        (0, 1, 5),
+        (1, 2, 5),
+        (2, 3, 5),
+        (3, 4, 5),
+        (4, 0, 5),
+    ]
+    managed_source = bpy.data.meshes.new("OperatingLine.EditPokeAlias.Source")
+    managed_source.from_pydata(vertices, [], faces)
+    managed_object = bpy.data.objects.new(
+        "OperatingLine.EditPokeAlias.Managed", managed_source
+    )
+    bpy.context.scene.collection.objects.link(managed_object)
+    ui_mesh = bpy.data.meshes.new("OperatingLine.EditPokeAlias.UI")
+    ui_mesh.from_pydata(vertices, [], faces)
+    ui_object = bpy.data.objects.new("OperatingLine.EditPokeAlias.UI", ui_mesh)
+    bpy.context.scene.collection.objects.link(ui_object)
+
+    source_receipt_id = "edit-poke-asymmetric-source"
+    source_receipt = ActionReceipt(
+        source_receipt_id,
+        "edit_poke.asymmetric_source",
+        "test.create_asymmetric_source",
+        created=(
+            tag_resource(
+                managed_object,
+                "edit_poke.asymmetric",
+                source_receipt_id,
+                "edit_poke.asymmetric_source",
+                "test.create_asymmetric_source",
+            ),
+            tag_resource(
+                managed_source,
+                "edit_poke.asymmetric.mesh",
+                source_receipt_id,
+                "edit_poke.asymmetric_source",
+                "test.create_asymmetric_source",
+            ),
+        ),
+    )
+    root = load_temporary_plan(
+        [
+            step("root", None, 0),
+            step(
+                "edit_poke.asymmetric_faces",
+                "root",
+                1,
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.mesh.edit_poke_faces",
+                    "arguments": {
+                        "targetId": "edit_poke.asymmetric",
+                        "resultMeshId": "edit_poke.asymmetric.result_mesh",
+                        "resultMeshName": "OperatingLine.EditPokeAlias.Result",
+                        "offset": 0.17,
+                    },
+                },
+            ),
+        ]
+    )
+    execute, rollback = action_registry(root)["edit_poke.asymmetric_faces"]
+    managed_receipt = None
+    try:
+        managed_receipt = execute({"edit_poke.asymmetric_source": source_receipt})
+        managed_signature = mesh_content_signature(managed_object.data)
+
+        bpy.ops.object.select_all(action="DESELECT")
+        ui_object.select_set(True)
+        bpy.context.view_layer.objects.active = ui_object
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        assert bpy.ops.mesh.poke(
+            offset=0.17,
+            use_relative_offset=False,
+            center_mode="MEDIAN_WEIGHTED",
+        ) == {"FINISHED"}
+        bpy.ops.object.mode_set(mode="OBJECT")
+        assert mesh_content_signature(ui_mesh) == managed_signature
+    finally:
+        if ui_object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        if managed_receipt is not None:
+            rollback(managed_receipt)
+        bpy.data.objects.remove(ui_object, do_unlink=True)
+        bpy.data.meshes.remove(ui_mesh)
+        bpy.data.objects.remove(managed_object, do_unlink=True)
+        bpy.data.meshes.remove(managed_source)
+
+
 def assert_editing_argument_boundaries() -> None:
     assert _normalized_squared_vector_length((1e308, 1e308), 1.1e308) > 1.0
     assert _normalized_squared_vector_length((5e-201, 0.0), 1e-200) < 1.0
@@ -2742,6 +3323,23 @@ def assert_editing_argument_boundaries() -> None:
             "depth": 100.0,
         }
     ).depth == 100.0
+    edit_poke = validate_edit_poke_faces(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.poked.mesh",
+            "resultMeshName": "OperatingLine.PokedMesh",
+            "offset": -100.0,
+        }
+    )
+    assert edit_poke.offset == -100.0
+    assert validate_edit_poke_faces(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.poked.mesh",
+            "resultMeshName": "OperatingLine.PokedMesh",
+            "offset": 100.0,
+        }
+    ).offset == 100.0
     rejected_boundary_translation = [491.34180453259, 870.9668369798349, 0.0]
     try:
         validate_extrude_region(
@@ -2824,6 +3422,57 @@ def assert_editing_argument_boundaries() -> None:
     assert geometry_nodes.scale == (0.0001, 1000.0, 1.0)
 
     invalid_cases = (
+        (
+            validate_edit_poke_faces,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.poked.mesh",
+                "resultMeshName": "OperatingLine.PokedMesh",
+                "offset": True,
+            },
+            "arguments.offset",
+        ),
+        (
+            validate_edit_poke_faces,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.poked.mesh",
+                "resultMeshName": "OperatingLine.PokedMesh",
+                "offset": -100.0001,
+            },
+            "arguments.offset",
+        ),
+        (
+            validate_edit_poke_faces,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.poked.mesh",
+                "resultMeshName": "OperatingLine.PokedMesh",
+                "offset": 100.0001,
+            },
+            "arguments.offset",
+        ),
+        (
+            validate_edit_poke_faces,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.poked.mesh",
+                "resultMeshName": "OperatingLine.PokedMesh",
+                "offset": float("inf"),
+            },
+            "arguments.offset",
+        ),
+        (
+            validate_edit_poke_faces,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.poked.mesh",
+                "resultMeshName": "OperatingLine.PokedMesh",
+                "offset": 0.0,
+                "unexpected": True,
+            },
+            "unsupported fields",
+        ),
         (
             validate_edit_inset_faces,
             {
@@ -7408,6 +8057,8 @@ def main() -> None:
     assert_extrude_region_observation_success_gate()
     assert_edit_bevel_edges_round_trip_and_guards()
     assert_edit_inset_faces_round_trip_and_guards()
+    assert_edit_poke_faces_round_trip_and_guards()
+    assert_edit_poke_weighted_center_matches_ui()
     assert_triangulate_round_trip_and_guards()
     assert_triangulate_ngon_conflicts_and_boundaries()
     assert_triangulate_observation_success_gate()

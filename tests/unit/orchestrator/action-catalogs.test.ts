@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.15.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.16.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.14.0' }).catalogVersion,
     ).toBe('1.14.0');
@@ -125,7 +125,9 @@ describe('action catalog registry', () => {
     );
 
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.15.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.planningNotes = frozen.planningNotes;
     active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
@@ -136,6 +138,30 @@ describe('action catalog registry', () => {
     );
     active.actions = active.actions.filter(
       (action) => action.name !== 'blender.mesh.edit_inset_faces',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.15.0 and changes only Poke Faces coverage in 1.16.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.15.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'f203a1dbb8630cab0026d5d607ffe255c5c40ceff4cf3182bafc3f0df661539d',
+    );
+
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
+      (actionName) => actionName !== 'blender.mesh.edit_poke_faces',
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'geometry.edit_poke_faces',
+    );
+    active.actions = active.actions.filter(
+      (action) => action.name !== 'blender.mesh.edit_poke_faces',
     );
     expect(active).toEqual(frozen);
   });

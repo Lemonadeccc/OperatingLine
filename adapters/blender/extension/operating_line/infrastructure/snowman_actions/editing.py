@@ -55,6 +55,9 @@ MAX_EDIT_BEVEL_POLYGONS = 8192
 MAX_EDIT_INSET_VERTICES = 8192
 MAX_EDIT_INSET_EDGES = 16384
 MAX_EDIT_INSET_POLYGONS = 8192
+MAX_EDIT_POKE_VERTICES = 8192
+MAX_EDIT_POKE_EDGES = 16384
+MAX_EDIT_POKE_POLYGONS = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +102,14 @@ class EditInsetFacesDefinition:
     result_mesh_name: str
     thickness: float
     depth: float
+
+
+@dataclass(frozen=True, slots=True)
+class EditPokeFacesDefinition:
+    target_id: str
+    result_mesh_id: str
+    result_mesh_name: str
+    offset: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,6 +336,30 @@ def validate_edit_inset_faces(
         depth=number(
             arguments["depth"],
             "arguments.depth",
+            minimum=-100.0,
+            maximum=100.0,
+        ),
+    )
+
+
+def validate_edit_poke_faces(
+    arguments: Mapping[str, Any],
+) -> EditPokeFacesDefinition:
+    fields = {"targetId", "resultMeshId", "resultMeshName", "offset"}
+    require_keys(arguments, fields, fields, "arguments")
+    return EditPokeFacesDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        result_mesh_id=logical_id(
+            arguments["resultMeshId"], "arguments.resultMeshId"
+        ),
+        result_mesh_name=text(
+            arguments["resultMeshName"],
+            "arguments.resultMeshName",
+            prefix="OperatingLine.",
+        ),
+        offset=number(
+            arguments["offset"],
+            "arguments.offset",
             minimum=-100.0,
             maximum=100.0,
         ),
@@ -779,6 +814,23 @@ def _ensure_edit_inset_topology_is_bounded(
         )
 
 
+def _ensure_edit_poke_topology_is_bounded(
+    topology: tuple[int, int, int], label: str
+) -> None:
+    limits = (
+        MAX_EDIT_POKE_VERTICES,
+        MAX_EDIT_POKE_EDGES,
+        MAX_EDIT_POKE_POLYGONS,
+    )
+    if any(actual > limit for actual, limit in zip(topology, limits)):
+        raise ValueError(
+            f"Edit Poke {label} exceeds the supported topology limits: "
+            f"vertices <= {MAX_EDIT_POKE_VERTICES}, "
+            f"edges <= {MAX_EDIT_POKE_EDGES}, "
+            f"polygons <= {MAX_EDIT_POKE_POLYGONS}"
+        )
+
+
 def _validate_edit_inset_source(
     mesh: bpy.types.Mesh,
 ) -> tuple[tuple[int, int, int], int]:
@@ -804,7 +856,55 @@ def _validate_edit_inset_source(
     return topology, loop_count
 
 
+def _validate_edit_poke_source(
+    mesh: bpy.types.Mesh,
+) -> tuple[tuple[int, int, int], int]:
+    topology = (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
+    _ensure_edit_poke_topology_is_bounded(topology, "source")
+    if not all(topology):
+        raise ValueError("Edit Poke target topology must be nonempty")
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        if any(len(edge.link_faces) != 2 for edge in bm.edges):
+            raise ValueError(
+                "Edit Poke target must have exactly two adjacent faces per edge"
+            )
+        if any(not vert.is_manifold for vert in bm.verts):
+            raise ValueError(
+                "Edit Poke target vertices must each form one manifold face fan"
+            )
+        if any(
+            not isfinite(area) or area <= 0.0
+            for area in (face.calc_area() for face in bm.faces)
+        ):
+            raise ValueError("Edit Poke target faces must have finite positive area")
+        loop_count = sum(len(face.verts) for face in bm.faces)
+    finally:
+        bm.free()
+    return topology, loop_count
+
+
 def _edit_inset_result_is_finite_and_nondegenerate(
+    bm: bmesh.types.BMesh,
+) -> bool:
+    return bool(
+        bm.verts
+        and bm.edges
+        and bm.faces
+        and all(isfinite(component) for vert in bm.verts for component in vert.co)
+        and all(
+            isfinite(length) and length > 0.0
+            for length in (edge.calc_length() for edge in bm.edges)
+        )
+        and all(
+            isfinite(area) and area > 0.0
+            for area in (face.calc_area() for face in bm.faces)
+        )
+    )
+
+
+def _edit_poke_result_is_finite_and_nondegenerate(
     bm: bmesh.types.BMesh,
 ) -> bool:
     return bool(
@@ -897,6 +997,121 @@ def execute_edit_inset_faces(
         _ensure_edit_inset_topology_is_bounded(converted_topology, "actual result")
         if converted_topology != predicted_topology:
             raise RuntimeError("Edit Inset topology changed during mesh conversion")
+        target.data = result_mesh
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                source_mesh_identity,
+                result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                source_mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                result_identity,
+                "mesh_content",
+                None,
+                mesh_content_signature(result_mesh),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
+
+
+def execute_edit_poke_faces(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: EditPokeFacesDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, source_mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    if target.mode != "OBJECT":
+        raise RuntimeError("Edit Poke target must be in Object Mode")
+    if target.modifiers:
+        raise RuntimeError("Edit Poke target must not have modifiers")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Edit Poke target must not have shape keys")
+    source_topology, loop_count = _validate_edit_poke_source(target.data)
+    source_mesh_content = mesh_content_signature(target.data)
+    predicted_topology = (
+        source_topology[0] + source_topology[2],
+        source_topology[1] + loop_count,
+        loop_count,
+    )
+    _ensure_edit_poke_topology_is_bounded(predicted_topology, "result")
+    ensure_logical_ids_available(registry, (definition.result_mesh_id,))
+    ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    try:
+        result_mesh = target.data.copy()
+        result_mesh.name = definition.result_mesh_name
+        result_identity = tag_resource(
+            result_mesh,
+            definition.result_mesh_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        created.append(result_identity)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(result_mesh)
+            bmesh.ops.poke(
+                bm,
+                faces=tuple(bm.faces),
+                offset=definition.offset,
+                center_mode="MEAN_WEIGHTED",
+                use_relative_offset=False,
+            )
+            bm.normal_update()
+            actual_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+            if actual_topology != predicted_topology:
+                raise RuntimeError(
+                    "Edit Poke topology does not match the supported exact formula"
+                )
+            if any(len(face.verts) != 3 for face in bm.faces):
+                raise RuntimeError("Edit Poke did not produce only triangle faces")
+            if not _edit_poke_result_is_finite_and_nondegenerate(bm):
+                raise RuntimeError("Edit Poke produced degenerate or non-finite geometry")
+            bm.to_mesh(result_mesh)
+        finally:
+            bm.free()
+        result_mesh.update()
+        converted_topology = (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        _ensure_edit_poke_topology_is_bounded(converted_topology, "actual result")
+        if converted_topology != predicted_topology:
+            raise RuntimeError("Edit Poke topology changed during mesh conversion")
+        if any(len(face.vertices) != 3 for face in result_mesh.polygons):
+            raise RuntimeError("Edit Poke mesh conversion produced non-triangle faces")
         target.data = result_mesh
         mutations.append(
             MutationRecord(

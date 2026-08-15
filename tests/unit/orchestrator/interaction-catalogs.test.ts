@@ -283,7 +283,22 @@ describe('interaction catalog registry', () => {
         (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
       ),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.25.0');
+    const frozenInsetFaces = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: '1.15.0',
+      interactionCatalogVersion: '1.25.0',
+    });
+    expect(
+      frozenInsetFaces.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenInsetFaces.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_poke_faces',
+      ),
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.26.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -1313,12 +1328,32 @@ describe('interaction catalog registry', () => {
       '769404cc6f8f7d80f248892320eb857b28ad37d4d7b2e246160a9f7ac116c2f7',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.25.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.actionCatalogVersion = frozen.actionCatalogVersion;
     active.description = frozen.description;
     active.recipes = active.recipes.filter(
       (recipe) => recipe.actionName !== 'blender.mesh.edit_inset_faces',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.25.0 and changes only the binding and Poke Faces recipe', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.25.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'e24008348de4ac90585eb32a4aa5d484bd6cde2aa9cb1d0dbec3fae11d54af88',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== 'blender.mesh.edit_poke_faces',
     );
     expect(active).toEqual(frozen);
   });

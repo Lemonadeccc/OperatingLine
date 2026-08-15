@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.25.0');
+    expect(catalog.catalogVersion).toBe('1.26.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -244,7 +244,7 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(18);
+    ).toHaveLength(19);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -274,6 +274,7 @@ describe('interaction catalog protocol', () => {
       '1.23.0',
       '1.24.0',
       '1.25.0',
+      '1.26.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1546,6 +1547,83 @@ describe('interaction catalog protocol', () => {
       'resultMeshId',
       'resultMeshName',
     ]);
+    const pokeFaces = recipeFor(catalog, 'blender.mesh.edit_poke_faces');
+    expect(pokeFaces.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    if (pokeFaces.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic Poke Faces guidance');
+    }
+    expect(
+      pokeFaces.guidance.steps.map((step) => [step.intent, step.target.kind, step.target.hostId]),
+    ).toEqual([
+      ['navigate', 'workspace', 'Layout'],
+      ['configure', 'semantic', 'operatingline.blender.owned_mesh'],
+      ['navigate', 'mode', 'EDIT_MESH'],
+      ['navigate', 'menu', 'VIEW3D_MT_edit_mesh_faces'],
+      ['execute', 'operator', 'mesh.poke'],
+      ['configure', 'semantic', 'operatingline.blender.managed_poke_faces'],
+    ]);
+    expect(pokeFaces.guidance.reason).toContain(
+      'UI MEDIAN_WEIGHTED center_mode is the literal UI spelling equivalent to the managed BMesh MEAN_WEIGHTED contract',
+    );
+    const pokeShortcut = pokeFaces.procedureMaterialization?.shortcut;
+    if (pokeShortcut?.availability !== 'available') {
+      throw new Error('Expected Poke Faces shortcut materialization');
+    }
+    expect(pokeShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_face_mode',
+      'shortcut.select_all_faces',
+      'shortcut.open_operator_search',
+      'shortcut.execute_poke_faces',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_poke_offset',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    expect(pokeShortcut.operations[3]).toMatchObject({
+      keys: ['F3'],
+      selectionPath: ['Poke Faces'],
+      parameters: [{ name: 'query', source: { kind: 'literal', value: 'poke faces' } }],
+    });
+    expect(pokeShortcut.operations[4]?.parameters).toEqual([
+      { name: 'offset', source: { kind: 'literal', value: 0 } },
+      { name: 'use_relative_offset', source: { kind: 'literal', value: false } },
+      { name: 'center_mode', source: { kind: 'literal', value: 'MEDIAN_WEIGHTED' } },
+    ]);
+    expect(pokeShortcut.operations[5]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.execute_poke_faces',
+        expectedOperatorId: 'mesh.poke',
+      },
+    });
+    expect(pokeShortcut.operations[6]).toMatchObject({
+      target: { kind: 'control', hostId: 'mesh.poke.offset' },
+      path: ['Adjust Last Operation', 'Offset'],
+      parameters: [
+        { source: { kind: 'action_argument', argumentName: 'offset', transform: 'identity' } },
+      ],
+    });
+    expect(pokeShortcut.operations[7]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(pokeShortcut.operations[8]).toMatchObject({ keys: ['TAB'] });
+    expect(pokeShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1557,6 +1635,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.edit_subdivide',
       'blender.mesh.edit_bevel_edges',
       'blender.mesh.edit_inset_faces',
+      'blender.mesh.edit_poke_faces',
       'blender.modifier.add_subdivision_surface',
     ]);
     expect(

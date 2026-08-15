@@ -67,7 +67,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             snapshot.recipe_id,
             "blender.mesh.create_uv_sphere.native",
         )
-        self.assertEqual(snapshot.catalog_version, "1.25.0")
+        self.assertEqual(snapshot.catalog_version, "1.26.0")
         self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
         self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
@@ -248,6 +248,30 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             all(item.role is MenuGuidanceRole.LOCKED for item in inset_snapshot.items)
         )
         self.assertFalse(inset_snapshot.accepts("mesh.inset"))
+
+        poke = action_step(
+            action_name="blender.mesh.edit_poke_faces",
+            operator_id="mesh.poke",
+            menu_path=("Face", "Poke Faces"),
+        )
+        poke_snapshot = self.tracker.snapshot(poke)
+        assert poke_snapshot is not None
+        self.assertEqual(poke_snapshot.path_kind, InteractionPathKind.SEMANTIC)
+        self.assertEqual(
+            tuple(item.label for item in poke_snapshot.items),
+            (
+                "Layout",
+                "Owned Mesh",
+                "Edit Mode",
+                "Face",
+                "Poke Faces",
+                "Managed Poke Contract",
+            ),
+        )
+        self.assertTrue(
+            all(item.role is MenuGuidanceRole.LOCKED for item in poke_snapshot.items)
+        )
+        self.assertFalse(poke_snapshot.accepts("mesh.poke"))
 
 
 if __name__ == "__main__":

@@ -149,6 +149,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.edit_extrude_region",
         "blender.mesh.edit_bevel_edges",
         "blender.mesh.edit_inset_faces",
+        "blender.mesh.edit_poke_faces",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.modifier.add_subdivision_surface",
