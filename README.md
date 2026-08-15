@@ -11,7 +11,7 @@
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.14.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> Orchestrator 现在可以查询 Blender `1.15.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
 > `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:status`/`eval:review` →
@@ -19,7 +19,7 @@
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.14.0` 目录提供十六项 `semanticCapabilities`，要求
+> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.15.0` 目录提供十七项 `semanticCapabilities`，要求
 > provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
@@ -32,7 +32,7 @@
 > 本机 Codex/Claude CLI Provider 和各自独立的 opt-in composition root；默认 standalone 仍不加载这些
 > Provider 或凭据。MCP HTTP 与 stdio bridge 已自动协商稳定版 `2026-07-28`，同时兼容旧客户端。Blender 内已有可折叠的
 > Revision Workspace，用于结构化节点引用、Provider handoff、Run 状态、历史、diff 和提案审批；ActionCatalog 还新增了
-> 有界整网格 Subdivide/Triangulate/Edit Mode Bevel、显式连通面区域 Extrude、非应用 Bevel/Solidify/Subdivision Surface Modifier、首个 Transform Geometry Nodes、显式归一化蒙皮权重和
+> 有界整网格 Subdivide/Triangulate/Edit Mode Bevel/Individual Inset Faces、显式连通面区域 Extrude、非应用 Bevel/Solidify/Subdivision Surface Modifier、首个 Transform Geometry Nodes、显式归一化蒙皮权重和
 > pose location/rotation/scale 动画切片。完成真实采集与独立盲审的任意目标语义数据集、
 > 自动评分/训练治理和第二宿主仍在路线图中。
 
@@ -82,12 +82,13 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
-  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.24.0`
-  已用该形状声明 Icosphere、Edit Mode Subdivide、Edit Mode Bevel 与 Subdivision Surface Modifier 的 candidate shortcut；
-  四条轨迹均有 Blender 4.5.3/5.1.1 前台事件证据，但仍保持 `structural_only`，不冒充 managed action
+  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.25.0`
+  已用该形状声明 Icosphere、Edit Mode Subdivide、Edit Mode Bevel、Individual Inset Faces 与 Subdivision Surface Modifier 的 candidate shortcut；
+  五条轨迹均有 Blender 4.5.3/5.1.1 前台事件证据，但仍保持 `structural_only`，不冒充 managed action
   等价执行。见 [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md) 与
   [ADR 0060](docs/adr/0060-bounded-subdivision-surface-modifier.md) 与
-  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md)。
+  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md) 与
+  [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md)。
 - **自然语言 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
   `POST /api/v1/procedure/prompt` 返回供应商无关的 `1.0.0` packet，精确绑定 ActionCatalog、
   InteractionCatalog、tree identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
@@ -101,7 +102,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.24.0` 为
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.25.0` 为
   UV Sphere 生成七步菜单，
   以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
   `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
@@ -150,6 +151,15 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   省略，menu/MCP unavailable。Blender 4.5.3/5.1.1 的真实前台回放均得到 `0.2/3/0.6` 与
   96/192/98 topology，并证明 Mesh pointer/datablock 数量不变；该原生 in-place mutation 不等价于
   managed replacement Mesh transaction。
+  Individual Inset Faces 也保留 managed replacement Mesh `semantic_path`，并提供十步
+  candidate shortcut：`TAB → 3 → A → I → F9 → Thickness → Depth → Individual true → ENTER → TAB`。
+  `I` 步骤带完整 literal operator 默认值和内嵌 `ENTER`；F9 控件依次绑定 accepted
+  `thickness`、`depth` 和 literal `use_individual=true`。`targetId`、`resultMeshId`、`resultMeshName`
+  显式省略，menu/MCP unavailable。Blender 4.5.3/5.1.1 的真实前台回放均得到
+  `thickness=0.2`、`depth=0.1`、`use_individual=true` 和 32/60/30 topology；全部结果面
+  为 quad，面选择从 6/6 变为 6/30，坐标边界为 ±1.1，Mesh pointer/datablock 数量不变。
+  Harness 只证明已发送 popup 关闭事件；该原生 in-place mutation 不等价于 managed
+  replacement transaction。
   UV Sphere、Cube 与 Plane
   shortcut 结果格式为 `1.2.0`，Icosphere、Torus、Cone 与 Cylinder 的 menu-only
   结果格式为 `1.1.0`。旧 `1.10.0` 四步菜单、`1.11.0` 七步菜单、`1.12.0` UV Sphere
@@ -157,7 +167,7 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。leaf 仍为 `candidate` 且
   `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
   radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史
-  `1.9.0` 至已冻结的 `1.23.0` 保持可回放；只有完整 result 信封保留目录
+  `1.9.0` 至已冻结的 `1.24.0` 保持可回放；只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender；
   当前 Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 轨迹都未经过完整 UI operation 的真实
@@ -179,16 +189,17 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   [ADR 0056](docs/adr/0056-plane-candidate-shortcut-materialization.md) 与
   [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md) 与
   [ADR 0060](docs/adr/0060-bounded-subdivision-surface-modifier.md) 与
-  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md)。
+  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md) 与
+  [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.24.0` 精确绑定
-  ActionCatalog `1.14.0` 的 24 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.25.0` 精确绑定
+  ActionCatalog `1.15.0` 的 25 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.23.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.24.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与
@@ -200,10 +211,11 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   [ADR 0038](docs/adr/0038-bounded-edit-triangulate.md)、
   [ADR 0041](docs/adr/0041-bounded-edit-extrude-region.md) 与
   [ADR 0060](docs/adr/0060-bounded-subdivision-surface-modifier.md) 与
-  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md)。
-- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.14.0` 把 24 个动作划分为 Geometry、Materials、
+  [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md) 与
+  [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md)。
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.15.0` 把 25 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
-  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十六项目录语义能力进一步要求 provider
+  阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十七项目录语义能力进一步要求 provider
   声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的
   映射会产生 error，使生成结果成为 `needs_revision`，不会创建 Proposal。Proposal 会再次执行同一
   确定性门禁。当前目录使用 quality baseline `1.1.0`；历史目录仍以 `1.0.0` 回放。报告只有可追溯的
@@ -350,8 +362,8 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   再完成材质、头部组件与手臂的四骨骼刚性绑定、三段姿态关键帧、
   隔离渲染场景、双 Area Light、相机和帧 20 的 320 × 320 Eevee PNG；`Back` 可以逐步反向补偿
   整条执行链。
-- **有界 Edit/Modifier/Geometry Nodes 切片**：ActionCatalog 另提供整网格 Subdivide/Triangulate/Edit Mode Bevel、显式连通面区域 Extrude、非应用
-  Bevel/Solidify/Subdivision Surface Modifier 和固定 Transform Geometry Nodes 图八个动作。Extrude 在读取 polygon index 前验证源 Mesh 内容与 Object→Mesh receipt 链，
+- **有界 Edit/Modifier/Geometry Nodes 切片**：ActionCatalog 另提供整网格 Subdivide/Triangulate/Edit Mode Bevel/Individual Inset Faces、显式连通面区域 Extrude、非应用
+  Bevel/Solidify/Subdivision Surface Modifier 和固定 Transform Geometry Nodes 图九个动作。Extrude 在读取 polygon index 前验证源 Mesh 内容与 Object→Mesh receipt 链，
   并规范化输出索引以支持跨 Blender 4.5/5.1 的连续 Extrude。Solidify 只开放 thickness 与
   offset，只接受 receipt-tracked 前置 Modifier，且源与求值 topology 上限均为 8192 vertices、16384 edges、8192 polygons，并固定
   `solidify_mode=EXTRUDE`、`use_even_offset=true`、`use_rim=true`、`use_rim_only=false`。Subdivision Surface
@@ -359,7 +371,12 @@ Profile → ENTER → TAB`。`Ctrl+B` 固定完整来源 operator 默认值并�
   投影输出 topology。Edit Mode Bevel 只接受 `width: 0.0001..100`、`segments: 1..16`、`profile: 0..1`，
   要求 Object Mode、无 Modifier/Shape Key、每条边恰好连接两个面的 closed manifold Mesh；执行器固定
   其余 BMesh 参数，对全部边生成受 8192/16384/8192 上限约束的 replacement Mesh，并要求三项 topology
-  严格增长。Mesh、modifier 与 node group 都进入
+  严格增长。Individual Inset Faces 只接受 `thickness: 0.0001..100` 与 `depth: -100..100`，
+  要求相同的 Object Mode、Modifier/Shape Key 和 topology 上限，且源 Mesh 非空、closed manifold，
+  所有面面积有限且严格为正。执行器对全部面固定调用 `bmesh.ops.inset_individual`，其中
+  `use_even_offset=true`、`use_interpolate=true`、`use_relative_offset=false`；若源拓扑为 `V/E/F`、
+  面环总数为 `L`，结果必须精确为 `V+L / E+2L / F+L`。对 closed manifold，`L=2E`，
+  因而等价于 `V+2E / 5E / F+2E`。Mesh、modifier 与 node group 都进入
   receipt 和专用 observation；若用户在执行后修改其拓扑、属性或节点图，`Back` 会保留现场与 receipt
   并拒绝覆盖，恢复到动作写入状态后可重试。受控执行锚点仍是灰色 `semantic_path`；candidate shortcut
   只生成教学投影，不伪装成 managed action 的原生等价点击。
@@ -386,8 +403,8 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > OperatingLine 不内置或绑定某一家模型。Codex、Claude 等客户端现在可以先选择
 > `operatingline.plan_and_propose` Prompt 或调用 `operatingline.planning.prompt.get` Tool 取得统一规划
 > packet；也可继续直接调用 `operatingline.planning.context`。客户端依据阶段画像生成候选计划，再调用
-> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录覆盖 24 个已验证动作和
-> 十六项适配器声明的语义能力，
+> `operatingline.planning.evaluate` 后提交 GuideProposal。当前 Blender 目录覆盖 25 个已验证动作和
+> 十七项适配器声明的语义能力，
 > 阶段选择仍由外部模型或显式注入的 provider 根据目标声明，因此这不等于已经内置“任意任务自动
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
@@ -430,7 +447,7 @@ native extension      native companion
 任务树的 `parentId + order` 负责展示和编号，`dependsOn` 形成实际执行 DAG。每个叶子节点
 可包含动作名、经校验的参数、语义锚点、预期观察和回退方式。
 
-Blender 当前允许 24 个版本化 action，覆盖七种单体 Mesh、原子基础体批次、Subdivide、Triangulate、显式连通面区域 Extrude、Edit Mode Bevel、Bevel、Solidify、Subdivision Surface、
+Blender 当前允许 25 个版本化 action，覆盖七种单体 Mesh、原子基础体批次、Subdivide、Triangulate、显式连通面区域 Extrude、Edit Mode Bevel、Individual Inset Faces、Bevel、Solidify、Subdivision Surface、
 Transform Geometry Nodes、两种材质赋值、Armature、显式蒙皮权重、pose transform 动画、隔离渲染
 场景、灯光相机组与受限临时 PNG。动作注册表按步骤 ID 绑定执行器；同一种 action 可以安全地出现在
 多个步骤中。
@@ -932,6 +949,7 @@ annotation 和 0 个 adjudication；report 会把全部案例标记为缺少 liv
 pnpm test:blender
 pnpm test:blender:companion
 pnpm test:blender:edit-bevel
+pnpm test:blender:edit-inset
 pnpm test:blender:subdivision-surface
 pnpm test:blender:undo
 pnpm test:blender:visual
@@ -953,10 +971,14 @@ Start/Next/Back、决策与状态回传，验证审批前零执行、默认 Cube
 `pnpm test:blender:edit-bevel` 在两个版本中回放
 `TAB → 2 → A → Ctrl+B → F9 → Width → Segments → Profile → Enter → TAB`，核对完整 operator 属性、
 96/192/98 topology、全部边选择和源 Mesh 身份不变。
+`pnpm test:blender:edit-inset` 在两个版本中回放
+`TAB → 3 → A → I → F9 → Thickness → Depth → Individual → Enter → TAB`，核对完整 operator 属性、
+`0.2/0.1/true`、32/60/30 topology、全部 quad、6/30 结果面选择、±1.1 坐标边界和源 Mesh 身份不变。
 `pnpm test:blender:undo` 在每个检测到的 Blender 4.5/5.1 GUI 中真实执行
 Cube → Subdivide → Triangulate → Extrude Region → Edit Bevel → Bevel → Solidify → Subdivision Surface → Geometry Nodes → Material，验证 Ctrl-Z/Redo 的 Session 恢复、
 ID/Modifier/外部材质引用重绑定、不相关用户 Undo 的静默同步、Back 往返，以及哈希保护的文件产物
-删除/恢复/冲突拒绝。
+删除/恢复/冲突拒绝；同一命令还独立验证 Individual Inset replacement Mesh 的删除、恢复和
+receipt pointer 重绑定。
 `pnpm test:blender:visual` 会为二十三个互相隔离的真实 GUI 状态启动 Blender，始终保留默认
 Cube、Camera 和 Light，并捕获 `guidance-initial.png`、`guidance-goal-request.png`、`guidance-revision-request.png`、
 `guidance-revision-collapsed.png`、`guidance-proposal-review.png`、

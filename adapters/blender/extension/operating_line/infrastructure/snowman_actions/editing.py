@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import pi
+from math import isfinite, pi
 from typing import Any
 
 import bmesh
@@ -52,6 +52,9 @@ MAX_EXTRUDE_TRANSLATION = 1000.0
 MAX_EDIT_BEVEL_VERTICES = 8192
 MAX_EDIT_BEVEL_EDGES = 16384
 MAX_EDIT_BEVEL_POLYGONS = 8192
+MAX_EDIT_INSET_VERTICES = 8192
+MAX_EDIT_INSET_EDGES = 16384
+MAX_EDIT_INSET_POLYGONS = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,6 +90,15 @@ class EditBevelEdgesDefinition:
     width: float
     segments: int
     profile: float
+
+
+@dataclass(frozen=True, slots=True)
+class EditInsetFacesDefinition:
+    target_id: str
+    result_mesh_id: str
+    result_mesh_name: str
+    thickness: float
+    depth: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +291,42 @@ def validate_edit_bevel_edges(
             "arguments.profile",
             minimum=0.0,
             maximum=1.0,
+        ),
+    )
+
+
+def validate_edit_inset_faces(
+    arguments: Mapping[str, Any],
+) -> EditInsetFacesDefinition:
+    fields = {
+        "targetId",
+        "resultMeshId",
+        "resultMeshName",
+        "thickness",
+        "depth",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    return EditInsetFacesDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        result_mesh_id=logical_id(
+            arguments["resultMeshId"], "arguments.resultMeshId"
+        ),
+        result_mesh_name=text(
+            arguments["resultMeshName"],
+            "arguments.resultMeshName",
+            prefix="OperatingLine.",
+        ),
+        thickness=number(
+            arguments["thickness"],
+            "arguments.thickness",
+            minimum=0.0001,
+            maximum=100.0,
+        ),
+        depth=number(
+            arguments["depth"],
+            "arguments.depth",
+            minimum=-100.0,
+            maximum=100.0,
         ),
     )
 
@@ -712,6 +760,180 @@ def _ensure_edit_bevel_topology_is_bounded(
             f"edges <= {MAX_EDIT_BEVEL_EDGES}, "
             f"polygons <= {MAX_EDIT_BEVEL_POLYGONS}"
         )
+
+
+def _ensure_edit_inset_topology_is_bounded(
+    topology: tuple[int, int, int], label: str
+) -> None:
+    limits = (
+        MAX_EDIT_INSET_VERTICES,
+        MAX_EDIT_INSET_EDGES,
+        MAX_EDIT_INSET_POLYGONS,
+    )
+    if any(actual > limit for actual, limit in zip(topology, limits)):
+        raise ValueError(
+            f"Edit Inset {label} exceeds the supported topology limits: "
+            f"vertices <= {MAX_EDIT_INSET_VERTICES}, "
+            f"edges <= {MAX_EDIT_INSET_EDGES}, "
+            f"polygons <= {MAX_EDIT_INSET_POLYGONS}"
+        )
+
+
+def _validate_edit_inset_source(
+    mesh: bpy.types.Mesh,
+) -> tuple[tuple[int, int, int], int]:
+    topology = (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
+    _ensure_edit_inset_topology_is_bounded(topology, "source")
+    if not all(topology):
+        raise ValueError("Edit Inset target topology must be nonempty")
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        if any(len(edge.link_faces) != 2 for edge in bm.edges):
+            raise ValueError(
+                "Edit Inset target must have exactly two adjacent faces per edge"
+            )
+        if any(
+            not isfinite(area) or area <= 0.0
+            for area in (face.calc_area() for face in bm.faces)
+        ):
+            raise ValueError("Edit Inset target faces must have finite positive area")
+        loop_count = sum(len(face.verts) for face in bm.faces)
+    finally:
+        bm.free()
+    return topology, loop_count
+
+
+def _edit_inset_result_is_finite_and_nondegenerate(
+    bm: bmesh.types.BMesh,
+) -> bool:
+    return bool(
+        bm.verts
+        and bm.edges
+        and bm.faces
+        and all(isfinite(component) for vert in bm.verts for component in vert.co)
+        and all(
+            isfinite(length) and length > 0.0
+            for length in (edge.calc_length() for edge in bm.edges)
+        )
+        and all(
+            isfinite(area) and area > 0.0
+            for area in (face.calc_area() for face in bm.faces)
+        )
+    )
+
+
+def execute_edit_inset_faces(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: EditInsetFacesDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, source_mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    if target.mode != "OBJECT":
+        raise RuntimeError("Edit Inset target must be in Object Mode")
+    if target.modifiers:
+        raise RuntimeError("Edit Inset target must not have modifiers")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Edit Inset target must not have shape keys")
+    source_topology, loop_count = _validate_edit_inset_source(target.data)
+    source_mesh_content = mesh_content_signature(target.data)
+    predicted_topology = (
+        source_topology[0] + loop_count,
+        source_topology[1] + 2 * loop_count,
+        source_topology[2] + loop_count,
+    )
+    _ensure_edit_inset_topology_is_bounded(predicted_topology, "result")
+    ensure_logical_ids_available(registry, (definition.result_mesh_id,))
+    ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    try:
+        result_mesh = target.data.copy()
+        result_mesh.name = definition.result_mesh_name
+        result_identity = tag_resource(
+            result_mesh,
+            definition.result_mesh_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        created.append(result_identity)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(result_mesh)
+            bmesh.ops.inset_individual(
+                bm,
+                faces=tuple(bm.faces),
+                thickness=definition.thickness,
+                depth=definition.depth,
+                use_even_offset=True,
+                use_interpolate=True,
+                use_relative_offset=False,
+            )
+            bm.normal_update()
+            actual_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+            if actual_topology != predicted_topology:
+                raise RuntimeError(
+                    "Edit Inset topology does not match the supported exact formula"
+                )
+            if not _edit_inset_result_is_finite_and_nondegenerate(bm):
+                raise RuntimeError("Edit Inset produced degenerate or non-finite geometry")
+            bm.to_mesh(result_mesh)
+        finally:
+            bm.free()
+        result_mesh.update()
+        converted_topology = (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        _ensure_edit_inset_topology_is_bounded(converted_topology, "actual result")
+        if converted_topology != predicted_topology:
+            raise RuntimeError("Edit Inset topology changed during mesh conversion")
+        target.data = result_mesh
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                source_mesh_identity,
+                result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                source_mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                result_identity,
+                "mesh_content",
+                None,
+                mesh_content_signature(result_mesh),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
 
 
 def execute_edit_bevel_edges(

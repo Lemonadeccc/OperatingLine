@@ -262,6 +262,53 @@ function editBevelCandidate(): ProcedureAuthoringCandidateTree {
   return tree;
 }
 
+function editInsetCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Edit Mode Inset candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_inset_faces',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.inset.mesh',
+      resultMeshName: 'OperatingLine.Cube.Inset',
+      thickness: 0.2,
+      depth: 0.1,
+    },
+  };
+  leaf.title = 'Inset every face of the accepted Cube individually in Edit Mode';
+  leaf.intent = 'Inset every Cube face individually with exact thickness and depth.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'inset_mesh_faces',
+    description: 'Inset every face of the accepted Cube individually.',
+    parameters: { thickness: 0.2, depth: 0.1, individual: true },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Inset' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.inset' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'mesh_faces_inset',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.inset.mesh',
+    },
+  };
+  return tree;
+}
+
 function cubeCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
 ): ProcedureAuthoringCandidateTree {
@@ -1424,6 +1471,177 @@ describe('procedure authoring materialization', () => {
       surfaceOperationId: 'shortcut.open_adjust_last_operation',
       target: { kind: 'control', hostId: 'mesh.bevel.profile' },
       path: ['Adjust Last Operation', 'Profile Shape'],
+    });
+    expect(shortcut.operations[8]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(shortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+    const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+      Object.keys(operation.parameters),
+    );
+    for (const managedArgument of ['targetId', 'resultMeshId', 'resultMeshName']) {
+      expect(shortcutParameterNames).not.toContain(managedArgument);
+    }
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Edit Mode Inset F9 shortcut without projecting managed IDs', () => {
+    const input = editInsetCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Edit Mode Inset leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_inset_faces.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.inset.mesh',
+      resultMeshName: 'OperatingLine.Cube.Inset',
+      thickness: 0.2,
+      depth: 0.1,
+    });
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'mesh_faces_inset',
+        parameters: {
+          targetId: 'tutorial.cube',
+          resultMeshId: 'tutorial.cube.inset.mesh',
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'menu',
+      reason:
+        "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track.",
+    });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'mcp',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    const shortcut = leaf.shortcutTracks[0];
+    if (shortcut?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Inset shortcut track');
+    }
+    expect(shortcut).toMatchObject({
+      id: 'blender.mesh.edit_inset_faces.semantic.shortcut',
+      modality: 'shortcut',
+    });
+    expect(shortcut.preconditions).toHaveLength(10);
+    expect(
+      shortcut.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      { kind: 'key_input', id: 'shortcut.enter_edit_mode', order: 1, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_face_mode', order: 2, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_all_faces', order: 3, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.inset_faces',
+        order: 4,
+        parameters: {
+          use_boundary: true,
+          use_even_offset: true,
+          use_relative_offset: false,
+          use_edge_rail: false,
+          thickness: 0,
+          depth: 0,
+          use_outset: false,
+          use_select_inset: false,
+          use_individual: false,
+          use_interpolate: true,
+          release_confirm: false,
+          confirm: 'ENTER',
+        },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 5,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_inset_thickness',
+        order: 6,
+        parameters: { value: 0.2 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_inset_depth',
+        order: 7,
+        parameters: { value: 0.1 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_inset_individual',
+        order: 8,
+        parameters: { value: true },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 9,
+        parameters: {},
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.return_to_object_mode',
+        order: 10,
+        parameters: {},
+      },
+    ]);
+    expect(shortcut.operations[0]).toMatchObject({ keys: ['TAB'] });
+    expect(shortcut.operations[1]).toMatchObject({ keys: ['3'] });
+    expect(shortcut.operations[2]).toMatchObject({ keys: ['A'] });
+    expect(shortcut.operations[3]).toMatchObject({ keys: ['I'] });
+    expect(shortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.inset_faces',
+        expectedOperatorId: 'mesh.inset',
+      },
+    });
+    expect(shortcut.operations[5]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.inset.thickness' },
+      path: ['Adjust Last Operation', 'Thickness'],
+    });
+    expect(shortcut.operations[6]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.inset.depth' },
+      path: ['Adjust Last Operation', 'Depth'],
+    });
+    expect(shortcut.operations[7]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.inset.use_individual' },
+      path: ['Adjust Last Operation', 'Individual'],
     });
     expect(shortcut.operations[8]).toMatchObject({
       keys: ['ENTER'],

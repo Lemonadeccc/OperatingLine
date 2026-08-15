@@ -24,9 +24,9 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.24.0` 与 ActionCatalog `1.14.0` 一一覆盖 24 个动作，历史 `1.9.0` 至已冻结的 `1.23.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
-      4.5/5.1 验证的 `native_path`，其他十七个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
-      其中 Subdivide、Edit Mode Bevel 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
+      `1.25.0` 与 ActionCatalog `1.15.0` 一一覆盖 25 个动作，历史 `1.9.0` 至已冻结的 `1.24.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      4.5/5.1 验证的 `native_path`，其他十八个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      其中 Subdivide、Edit Mode Bevel、Individual Inset Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
@@ -36,7 +36,8 @@
       [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md)、
       [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md) 与
       [ADR 0060](adr/0060-bounded-subdivision-surface-modifier.md) 与
-      [ADR 0061](adr/0061-bounded-edit-mode-bevel-edges.md)。
+      [ADR 0061](adr/0061-bounded-edit-mode-bevel-edges.md) 与
+      [ADR 0062](adr/0062-bounded-individual-inset-faces.md)。
 - [x] 雪人教学粒度：revision 5 把眼睛、鼻子、五个嘴点、三个纽扣和两条手臂拆成一部件一叶节点；
       ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
       Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
@@ -106,6 +107,17 @@
       `1.24.0` 冻结 `1.23.0`，声明 `TAB → 2 → A → Ctrl+B → F9 → Width → Segments → Profile → ENTER → TAB`
       十步 candidate shortcut；menu/MCP unavailable，且原生 in-place mutation 不等价于 managed
       replacement transaction。见 [ADR 0061](adr/0061-bounded-edit-mode-bevel-edges.md)。
+- [x] Blender 有界整网格 Individual Inset Faces：ActionCatalog `1.15.0` 冻结 `1.14.0`，新增
+      `blender.mesh.edit_inset_faces`；只接受 IDs/受管名称、`thickness: 0.0001..100` 和
+      `depth: -100..100`。目标必须是 Object Mode、无 Modifier/Shape Key 的 receipt-owned 非空
+      closed manifold Mesh，且所有面面积有限为正。动作固定 BMesh individual inset 的
+      even/interpolate 为 true、relative 为 false，复制、标记并换链 replacement Mesh。若面环总数为
+      `L`，结果精确为 `V+L / E+2L / F+L`；closed manifold 下等价于 `V+2E / 5E / F+2E`，
+      源/结果均受 8192/16384/8192 上限约束。它使用专用 `mesh_faces_inset` Observation、
+      fail-closed 补偿和独立 Blender 原生 Undo/Redo。InteractionCatalog `1.25.0` 冻结 `1.24.0`，
+      声明 `TAB → 3 → A → I → F9 → Thickness → Depth → Individual true → ENTER → TAB` 十步
+      candidate shortcut；menu/MCP unavailable，且原生 in-place mutation 不等价于 managed
+      replacement transaction。见 [ADR 0062](adr/0062-bounded-individual-inset-faces.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -123,7 +135,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.14.0` 提供十六项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.15.0` 提供十七项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -392,6 +404,16 @@
           Mesh pointer 与 datablock 数量不变。menu/MCP unavailable，三个 managed identity 参数显式省略；
           轨迹仍为 candidate/structural-only，不声称与 managed replacement Mesh、Observation、补偿或
           原生 Undo 等价。见 [ADR 0061](adr/0061-bounded-edit-mode-bevel-edges.md)。
+    - [x] Individual Inset Faces F9 候选快捷键物化：InteractionCatalog `1.25.0` 绑定
+          ActionCatalog `1.15.0`，冻结 `1.24.0`，并声明 `TAB`、Face Select `3`、`A`、`I`、`F9`、
+          Thickness、Depth、Individual true、`ENTER`、`TAB` 十步 ordered shortcut。`I` 来源步骤包含
+          完整 literal 默认值和内嵌 `ENTER`。Blender 4.5.3/5.1.1 的真实前台 event replay 均把
+          `thickness/depth/individual` 设置为 `0.2/0.1/true`，得到 32 vertices、60 edges、
+          30 个全 quad polygons、6/30 结果面选择和 ±1.1 坐标边界，并证明 Mesh pointer 与
+          datablock 数量不变。Harness 只证明已发送 popup 关闭事件。menu/MCP unavailable，
+          三个 managed identity 参数显式省略；轨迹仍为 candidate/structural-only，不声称与
+          managed replacement Mesh、Observation、补偿或原生 Undo 等价。见
+          [ADR 0062](adr/0062-bounded-individual-inset-faces.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

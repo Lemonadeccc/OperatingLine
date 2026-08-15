@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.14.0');
+    expect(catalog.catalogVersion).toBe('1.15.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -34,6 +34,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.edit_triangulate',
       'blender.mesh.edit_extrude_region',
       'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
       'blender.modifier.add_subdivision_surface',
@@ -64,6 +65,7 @@ describe('action catalog protocol', () => {
       'geometry.edit_triangulate',
       'geometry.edit_extrude_region',
       'geometry.edit_bevel_edges',
+      'geometry.edit_inset_faces',
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
       'geometry.subdivision_surface_modifier',
@@ -93,6 +95,7 @@ describe('action catalog protocol', () => {
       '1.12.0',
       '1.13.0',
       '1.14.0',
+      '1.15.0',
     ]);
   });
 
@@ -554,6 +557,52 @@ describe('action catalog protocol', () => {
       'segments must be at most 16',
       'profile must be at least 0',
     ]);
+    const insetFacesSchema = schemaFor('blender.mesh.edit_inset_faces');
+    const insetFacesAction = blenderActionCatalog.actions.find(
+      (action) => action.name === 'blender.mesh.edit_inset_faces',
+    );
+    expect(insetFacesAction).toMatchObject({
+      resourceEffects: [
+        { access: 'mutate', resourceType: 'OBJECT', argumentPath: 'targetId' },
+        { access: 'create', resourceType: 'MESH', argumentPath: 'resultMeshId' },
+      ],
+      supportedAnchorKinds: ['object', 'operator', 'unavailable'],
+      supportedObservationKinds: ['resource_exists', 'mesh_faces_inset'],
+      rollbackModes: ['compensating_action'],
+    });
+    expect(insetFacesSchema.additionalProperties).toBe(false);
+    expect(insetFacesSchema.required).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+      'thickness',
+      'depth',
+    ]);
+    expect(Object.keys(insetFacesSchema.properties)).toEqual(insetFacesSchema.required);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.inset_mesh',
+          resultMeshName: 'OperatingLine.Body.InsetMesh',
+          thickness: 0.0001,
+          depth: -100,
+        },
+        insetFacesSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.inset_mesh',
+          resultMeshName: 'OperatingLine.Body.InsetMesh',
+          thickness: 0,
+          depth: 101,
+        },
+        insetFacesSchema,
+      ),
+    ).toEqual(['thickness must be at least 0.0001', 'depth must be at most 100']);
     const solidifySchema = schemaFor('blender.modifier.add_solidify');
     expect(solidifySchema.additionalProperties).toBe(false);
     expect(solidifySchema.required).toEqual([

@@ -787,6 +787,165 @@ def _mesh_edges_beveled(
     )
 
 
+def _mesh_faces_inset(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    allowed_parameters = {"targetId", "resultMeshId"}
+    target_id = parameters.get("targetId")
+    result_mesh_id = parameters.get("resultMeshId")
+    parameters_valid = bool(
+        set(parameters) == allowed_parameters
+        and isinstance(target_id, str)
+        and target_id
+        and isinstance(result_mesh_id, str)
+        and result_mesh_id
+    )
+    registry = build_resource_registry(receipts)
+    target_identity = registry.get(target_id) if parameters_valid else None
+    result_identity = registry.get(result_mesh_id) if parameters_valid else None
+    target = resolve_resource(target_identity) if target_identity is not None else None
+    result_mesh = (
+        resolve_resource(result_identity) if result_identity is not None else None
+    )
+    matching_receipts = tuple(
+        receipt
+        for receipt in receipts.values()
+        if receipt.action_name == "blender.mesh.edit_inset_faces"
+        and result_identity is not None
+        and result_identity in receipt.created
+    )
+    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+    data_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.attribute == "data"
+            and mutation.resource == target_identity
+            and mutation.after == result_identity
+        )
+        if receipt is not None
+        else ()
+    )
+    content_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.attribute == "mesh_content"
+            and mutation.resource == result_identity
+        )
+        if receipt is not None
+        else ()
+    )
+    data_mutation = data_mutations[0] if len(data_mutations) == 1 else None
+    content_mutation = (
+        content_mutations[0] if len(content_mutations) == 1 else None
+    )
+    source_mesh = (
+        resolve_resource(data_mutation.before)
+        if data_mutation is not None and data_mutation.before is not None
+        else None
+    )
+    source_counts = (
+        (
+            len(source_mesh.vertices),
+            len(source_mesh.edges),
+            len(source_mesh.polygons),
+        )
+        if isinstance(source_mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    result_counts = (
+        (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        if isinstance(result_mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    loop_count = (
+        sum(len(polygon.vertices) for polygon in source_mesh.polygons)
+        if isinstance(source_mesh, bpy.types.Mesh)
+        else 0
+    )
+    expected_counts = (
+        source_counts[0] + loop_count,
+        source_counts[1] + 2 * loop_count,
+        source_counts[2] + loop_count,
+    )
+    topology_matches = bool(loop_count and result_counts == expected_counts)
+    within_limits = bool(
+        source_counts[0] <= 8192
+        and source_counts[1] <= 16384
+        and source_counts[2] <= 8192
+        and result_counts[0] <= 8192
+        and result_counts[1] <= 16384
+        and result_counts[2] <= 8192
+    )
+    assigned = bool(
+        isinstance(target, bpy.types.Object)
+        and target.type == "MESH"
+        and isinstance(result_mesh, bpy.types.Mesh)
+        and target.data is result_mesh
+    )
+    content_intact = bool(
+        isinstance(result_mesh, bpy.types.Mesh)
+        and content_mutation is not None
+        and content_mutation.after is not None
+        and mesh_content_signature(result_mesh) == content_mutation.after
+    )
+    result_nondegenerate = bool(
+        isinstance(result_mesh, bpy.types.Mesh)
+        and all(
+            math.isfinite(component)
+            for vertex in result_mesh.vertices
+            for component in vertex.co
+        )
+        and all(
+            math.isfinite(polygon.area) and polygon.area > 0.0
+            for polygon in result_mesh.polygons
+        )
+    )
+    receipt_matches = bool(
+        receipt is not None
+        and data_mutation is not None
+        and content_mutation is not None
+        and isinstance(source_mesh, bpy.types.Mesh)
+    )
+    satisfied = bool(
+        parameters_valid
+        and assigned
+        and receipt_matches
+        and topology_matches
+        and within_limits
+        and content_intact
+        and result_nondegenerate
+    )
+    return satisfied, {
+        "targetId": target_id if isinstance(target_id, str) else None,
+        "resultMeshId": (
+            result_mesh_id if isinstance(result_mesh_id, str) else None
+        ),
+        "parametersValid": parameters_valid,
+        "assigned": assigned,
+        "receiptMatches": receipt_matches,
+        "topologyMatches": topology_matches,
+        "withinLimits": within_limits,
+        "contentIntact": content_intact,
+        "resultNondegenerate": result_nondegenerate,
+        "sourceLoopCount": loop_count,
+        "sourceVertexCount": source_counts[0],
+        "sourceEdgeCount": source_counts[1],
+        "sourceFaceCount": source_counts[2],
+        "expectedVertexCount": expected_counts[0],
+        "expectedEdgeCount": expected_counts[1],
+        "expectedFaceCount": expected_counts[2],
+        "vertexCount": result_counts[0],
+        "edgeCount": result_counts[1],
+        "faceCount": result_counts[2],
+    }
+
+
 def _modifier_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
@@ -1036,6 +1195,7 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "mesh_triangulated": _mesh_triangulated,
     "mesh_region_extruded": _mesh_region_extruded,
     "mesh_edges_beveled": _mesh_edges_beveled,
+    "mesh_faces_inset": _mesh_faces_inset,
     "modifier_ready": _modifier_ready,
     "geometry_nodes_ready": _geometry_nodes_ready,
 }

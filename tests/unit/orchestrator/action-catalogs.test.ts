@@ -11,7 +11,10 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.14.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.15.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.14.0' }).catalogVersion,
+    ).toBe('1.14.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.13.0' }).catalogVersion,
     ).toBe('1.13.0');
@@ -96,7 +99,9 @@ describe('action catalog registry', () => {
     );
 
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.14.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.planningNotes = frozen.planningNotes;
     active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
@@ -107,6 +112,30 @@ describe('action catalog registry', () => {
     );
     active.actions = active.actions.filter(
       (action) => action.name !== 'blender.mesh.edit_bevel_edges',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.14.0 and changes only Inset Faces coverage in 1.15.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.14.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '2ce43ec9df153468872a3549e7a77b393c3c9bccc849bc8f2da480691bc59524',
+    );
+
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
+      (actionName) => actionName !== 'blender.mesh.edit_inset_faces',
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'geometry.edit_inset_faces',
+    );
+    active.actions = active.actions.filter(
+      (action) => action.name !== 'blender.mesh.edit_inset_faces',
     );
     expect(active).toEqual(frozen);
   });

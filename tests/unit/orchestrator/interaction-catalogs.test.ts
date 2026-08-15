@@ -268,7 +268,22 @@ describe('interaction catalog registry', () => {
         (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
       ),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.24.0');
+    const frozenBevelEdges = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: '1.14.0',
+      interactionCatalogVersion: '1.24.0',
+    });
+    expect(
+      frozenBevelEdges.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenBevelEdges.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
+      ),
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.25.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -384,6 +399,51 @@ describe('interaction catalog registry', () => {
       },
     });
     expect(bevelShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
+    const insetFaces = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_inset_faces',
+    );
+    expect(insetFaces?.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'available', projection: 'candidate_only' },
+      mcp: { availability: 'unavailable' },
+    });
+    const insetShortcut = insetFaces?.procedureMaterialization?.shortcut;
+    if (insetShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Inset Faces shortcut recipe to be available');
+    }
+    expect(insetShortcut.operations).toHaveLength(10);
+    expect(insetShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_face_mode',
+      'shortcut.select_all_faces',
+      'shortcut.inset_faces',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_inset_thickness',
+      'shortcut.set_inset_depth',
+      'shortcut.set_inset_individual',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    expect(insetShortcut.operations[3]).toMatchObject({
+      keys: ['I'],
+      parameters: expect.arrayContaining([
+        { name: 'use_boundary', source: { kind: 'literal', value: true } },
+        { name: 'use_individual', source: { kind: 'literal', value: false } },
+        { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+      ]),
+    });
+    expect(insetShortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.inset_faces',
+        expectedOperatorId: 'mesh.inset',
+      },
+    });
+    expect(insetShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
       'targetId',
       'resultMeshId',
       'resultMeshName',
@@ -1233,12 +1293,32 @@ describe('interaction catalog registry', () => {
       '6f875d895fc0ea7c8aab9c01c612e9eaf20f3958f7804231e061b2076696b8d5',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.24.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.actionCatalogVersion = frozen.actionCatalogVersion;
     active.description = frozen.description;
     active.recipes = active.recipes.filter(
       (recipe) => recipe.actionName !== 'blender.mesh.edit_bevel_edges',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.24.0 and changes only the binding and Inset Faces recipe', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.24.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '769404cc6f8f7d80f248892320eb857b28ad37d4d7b2e246160a9f7ac116c2f7',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== 'blender.mesh.edit_inset_faces',
     );
     expect(active).toEqual(frozen);
   });

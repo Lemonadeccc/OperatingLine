@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.24.0');
+    expect(catalog.catalogVersion).toBe('1.25.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -244,7 +244,7 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(17);
+    ).toHaveLength(18);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -273,6 +273,7 @@ describe('interaction catalog protocol', () => {
       '1.22.0',
       '1.23.0',
       '1.24.0',
+      '1.25.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1455,6 +1456,96 @@ describe('interaction catalog protocol', () => {
       'resultMeshId',
       'resultMeshName',
     ]);
+    const insetFaces = recipeFor(catalog, 'blender.mesh.edit_inset_faces');
+    expect(insetFaces.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    if (insetFaces.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic Inset Faces guidance');
+    }
+    expect(
+      insetFaces.guidance.steps.map((step) => [step.intent, step.target.kind, step.target.hostId]),
+    ).toEqual([
+      ['navigate', 'workspace', 'Layout'],
+      ['configure', 'semantic', 'operatingline.blender.owned_mesh'],
+      ['navigate', 'mode', 'EDIT_MESH'],
+      ['navigate', 'menu', 'VIEW3D_MT_edit_mesh_faces'],
+      ['execute', 'operator', 'mesh.inset'],
+      ['configure', 'semantic', 'operatingline.blender.managed_inset_faces'],
+    ]);
+    const insetShortcut = insetFaces.procedureMaterialization?.shortcut;
+    if (insetShortcut?.availability !== 'available') {
+      throw new Error('Expected Inset Faces shortcut materialization');
+    }
+    expect(insetShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_face_mode',
+      'shortcut.select_all_faces',
+      'shortcut.inset_faces',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_inset_thickness',
+      'shortcut.set_inset_depth',
+      'shortcut.set_inset_individual',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    expect(
+      insetShortcut.operations[3]?.parameters.map((parameter) => [
+        parameter.name,
+        parameter.source,
+      ]),
+    ).toEqual([
+      ['use_boundary', { kind: 'literal', value: true }],
+      ['use_even_offset', { kind: 'literal', value: true }],
+      ['use_relative_offset', { kind: 'literal', value: false }],
+      ['use_edge_rail', { kind: 'literal', value: false }],
+      ['thickness', { kind: 'literal', value: 0 }],
+      ['depth', { kind: 'literal', value: 0 }],
+      ['use_outset', { kind: 'literal', value: false }],
+      ['use_select_inset', { kind: 'literal', value: false }],
+      ['use_individual', { kind: 'literal', value: false }],
+      ['use_interpolate', { kind: 'literal', value: true }],
+      ['release_confirm', { kind: 'literal', value: false }],
+      ['confirm', { kind: 'literal', value: 'ENTER' }],
+    ]);
+    expect(insetShortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.inset_faces',
+        expectedOperatorId: 'mesh.inset',
+      },
+    });
+    expect(insetShortcut.operations.slice(5, 8)).toMatchObject([
+      {
+        target: { kind: 'control', hostId: 'mesh.inset.thickness' },
+        parameters: [
+          { source: { kind: 'action_argument', argumentName: 'thickness', transform: 'identity' } },
+        ],
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.inset.depth' },
+        parameters: [
+          { source: { kind: 'action_argument', argumentName: 'depth', transform: 'identity' } },
+        ],
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.inset.use_individual' },
+        parameters: [{ source: { kind: 'literal', value: true } }],
+      },
+    ]);
+    expect(insetShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1465,6 +1556,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
       'blender.mesh.edit_bevel_edges',
+      'blender.mesh.edit_inset_faces',
       'blender.modifier.add_subdivision_surface',
     ]);
     expect(

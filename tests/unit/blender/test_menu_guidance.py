@@ -67,7 +67,7 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
             snapshot.recipe_id,
             "blender.mesh.create_uv_sphere.native",
         )
-        self.assertEqual(snapshot.catalog_version, "1.24.0")
+        self.assertEqual(snapshot.catalog_version, "1.25.0")
         self.assertEqual(snapshot.path_kind, InteractionPathKind.NATIVE)
         self.assertTrue(snapshot.native)
         self.assertEqual(snapshot.operator_id, "mesh.primitive_uv_sphere_add")
@@ -224,6 +224,30 @@ class MenuGuidanceTrackerTests(unittest.TestCase):
         )
         self.assertFalse(semantic_snapshot.accepts("material.new"))
         self.assertFalse(self.tracker.reveal(semantic, "Material"))
+
+        inset = action_step(
+            action_name="blender.mesh.edit_inset_faces",
+            operator_id="mesh.inset",
+            menu_path=("Face", "Inset Faces"),
+        )
+        inset_snapshot = self.tracker.snapshot(inset)
+        assert inset_snapshot is not None
+        self.assertEqual(inset_snapshot.path_kind, InteractionPathKind.SEMANTIC)
+        self.assertEqual(
+            tuple(item.label for item in inset_snapshot.items),
+            (
+                "Layout",
+                "Owned Mesh",
+                "Edit Mode",
+                "Face",
+                "Inset Faces",
+                "Managed Individual Inset Faces Contract",
+            ),
+        )
+        self.assertTrue(
+            all(item.role is MenuGuidanceRole.LOCKED for item in inset_snapshot.items)
+        )
+        self.assertFalse(inset_snapshot.accepts("mesh.inset"))
 
 
 if __name__ == "__main__":

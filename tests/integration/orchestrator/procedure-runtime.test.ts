@@ -410,6 +410,59 @@ function editBevelAuthoringCandidateFixture(
   return tree;
 }
 
+function editInsetAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Edit Mode Inset candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_inset_faces',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.inset.mesh',
+      resultMeshName: 'OperatingLine.Cube.Inset',
+      thickness: 0.2,
+      depth: 0.1,
+    },
+  };
+  leaf['title'] = 'Inset every face of the accepted Cube individually in Edit Mode';
+  leaf['intent'] = 'Inset every Cube face individually with exact thickness and depth.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'inset_mesh_faces',
+    description: 'Inset every face of the accepted Cube individually.',
+    parameters: { thickness: 0.2, depth: 0.1, individual: true },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Inset' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.inset' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'mesh_faces_inset',
+    parameters: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.inset.mesh',
+    },
+  };
+  return tree;
+}
+
 function cubeAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1066,7 +1119,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.24.0' },
+        catalogBinding: { interactionCatalogVersion: '1.25.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2390,7 +2443,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.24.0' },
+        catalogBinding: { interactionCatalogVersion: '1.25.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2642,8 +2695,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.14.0',
-          interactionCatalogVersion: '1.24.0',
+          actionCatalogVersion: '1.15.0',
+          interactionCatalogVersion: '1.25.0',
         },
         coverage: [
           {
@@ -2757,7 +2810,180 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.14.0',
+        actionCatalogVersion: '1.15.0',
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes and structurally compiles the active Edit Mode Inset F9 candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Inset every Cube face individually with thickness 0.2 and depth 0.1.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: editInsetAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Edit Mode Inset materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Edit Mode Inset leaf');
+      }
+
+      expect(materialization).toMatchObject({
+        formatVersion: '1.3.0',
+        catalogBinding: {
+          actionCatalogVersion: '1.15.0',
+          interactionCatalogVersion: '1.25.0',
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.mesh.edit_inset_faces.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.inset.mesh',
+        resultMeshName: 'OperatingLine.Cube.Inset',
+        thickness: 0.2,
+        depth: 0.1,
+      });
+      expect(leaf.expectedObservations).toEqual([
+        {
+          kind: 'mesh_faces_inset',
+          parameters: {
+            targetId: 'tutorial.cube',
+            resultMeshId: 'tutorial.cube.inset.mesh',
+          },
+        },
+      ]);
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Inset shortcut');
+      }
+      expect(shortcut.operations.map((operation) => operation.id)).toEqual([
+        'shortcut.enter_edit_mode',
+        'shortcut.select_face_mode',
+        'shortcut.select_all_faces',
+        'shortcut.inset_faces',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_inset_thickness',
+        'shortcut.set_inset_depth',
+        'shortcut.set_inset_individual',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ]);
+      expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        {
+          use_boundary: true,
+          use_even_offset: true,
+          use_relative_offset: false,
+          use_edge_rail: false,
+          thickness: 0,
+          depth: 0,
+          use_outset: false,
+          use_select_inset: false,
+          use_individual: false,
+          use_interpolate: true,
+          release_confirm: false,
+          confirm: 'ENTER',
+        },
+        {},
+        { value: 0.2 },
+        { value: 0.1 },
+        { value: true },
+        {},
+        {},
+      ]);
+      expect(shortcut.operations[0]).toMatchObject({ keys: ['TAB'] });
+      expect(shortcut.operations[1]).toMatchObject({ keys: ['3'] });
+      expect(shortcut.operations[2]).toMatchObject({ keys: ['A'] });
+      expect(shortcut.operations[3]).toMatchObject({ keys: ['I'] });
+      expect(shortcut.operations[4]).toMatchObject({
+        keys: ['F9'],
+        opensSurface: {
+          kind: 'adjust_last_operation',
+          hostId: 'screen.redo_last',
+          sourceOperationId: 'shortcut.inset_faces',
+          expectedOperatorId: 'mesh.inset',
+        },
+      });
+      expect(shortcut.operations[5]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.inset.thickness' },
+        path: ['Adjust Last Operation', 'Thickness'],
+      });
+      expect(shortcut.operations[6]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.inset.depth' },
+        path: ['Adjust Last Operation', 'Depth'],
+      });
+      expect(shortcut.operations[7]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.inset.use_individual' },
+        path: ['Adjust Last Operation', 'Individual'],
+      });
+      expect(shortcut.operations[8]).toMatchObject({
+        keys: ['ENTER'],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      });
+      expect(shortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+      const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+        Object.keys(operation.parameters),
+      );
+      for (const managedArgument of ['targetId', 'resultMeshId', 'resultMeshName']) {
+        expect(shortcutParameterNames).not.toContain(managedArgument);
+      }
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: '1.15.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3378,7 +3604,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.14.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.15.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

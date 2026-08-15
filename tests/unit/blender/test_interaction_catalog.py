@@ -41,6 +41,14 @@ FROZEN_ACTION_CATALOG_113_PATH = (
     / "v1"
     / "action-catalog-1.13.0.json"
 )
+FROZEN_ACTION_CATALOG_114_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "action-catalog-1.14.0.json"
+)
 load_interaction_catalog = catalog_module.load_interaction_catalog
 
 
@@ -275,13 +283,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.24.0")
-        self.assertEqual(catalog.action_catalog_version, "1.14.0")
+        self.assertEqual(catalog.catalog_version, "1.25.0")
+        self.assertEqual(catalog.action_catalog_version, "1.15.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
         )
-        self.assertEqual(len(catalog.recipes), 24)
+        self.assertEqual(len(catalog.recipes), 25)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -311,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 recipe.guidance.kind is InteractionPathKind.SEMANTIC
                 for recipe in catalog.recipes
             ),
-            17,
+            18,
         )
         subdivision_surface = next(
             recipe
@@ -1492,6 +1500,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_torus",
                     "blender.mesh.edit_subdivide",
                     "blender.mesh.edit_bevel_edges",
+                    "blender.mesh.edit_inset_faces",
                     "blender.modifier.add_subdivision_surface",
                 }
             )
@@ -1638,6 +1647,106 @@ class InteractionCatalogTests(unittest.TestCase):
             ("targetId", "resultMeshId", "resultMeshName"),
         )
 
+    def test_exposes_candidate_only_individual_inset_faces_shortcut(self) -> None:
+        recipe = next(
+            recipe
+            for recipe in BUNDLED_INTERACTION_CATALOG.recipes
+            if recipe.action_name == "blender.mesh.edit_inset_faces"
+        )
+        self.assertEqual(
+            tuple(
+                (step.intent, step.target_kind, step.target_id)
+                for step in recipe.guidance.steps
+            ),
+            (
+                ("navigate", "workspace", "Layout"),
+                ("configure", "semantic", "operatingline.blender.owned_mesh"),
+                ("navigate", "mode", "EDIT_MESH"),
+                ("navigate", "menu", "VIEW3D_MT_edit_mesh_faces"),
+                ("execute", "operator", "mesh.inset"),
+                (
+                    "configure",
+                    "semantic",
+                    "operatingline.blender.managed_inset_faces",
+                ),
+            ),
+        )
+        assert recipe.procedure_materialization is not None
+        materialization = recipe.procedure_materialization
+        self.assertEqual(materialization.menu.availability, "unavailable")
+        self.assertEqual(materialization.mcp.availability, "unavailable")
+        shortcut = materialization.shortcut
+        self.assertEqual(
+            (shortcut.availability, shortcut.projection),
+            ("available", "candidate_only"),
+        )
+        assert shortcut.shortcut_operations is not None
+        operations = shortcut.shortcut_operations
+        self.assertEqual(
+            tuple(operation.id for operation in operations),
+            (
+                "shortcut.enter_edit_mode",
+                "shortcut.select_face_mode",
+                "shortcut.select_all_faces",
+                "shortcut.inset_faces",
+                "shortcut.open_adjust_last_operation",
+                "shortcut.set_inset_thickness",
+                "shortcut.set_inset_depth",
+                "shortcut.set_inset_individual",
+                "shortcut.close_adjust_last_operation",
+                "shortcut.return_to_object_mode",
+            ),
+        )
+        source = operations[3]
+        self.assertEqual((source.key_mode, source.keys), ("sequence", ("I",)))
+        self.assertEqual(
+            tuple((parameter.name, parameter.source.value) for parameter in source.parameters),
+            (
+                ("use_boundary", True),
+                ("use_even_offset", True),
+                ("use_relative_offset", False),
+                ("use_edge_rail", False),
+                ("thickness", 0),
+                ("depth", 0),
+                ("use_outset", False),
+                ("use_select_inset", False),
+                ("use_individual", False),
+                ("use_interpolate", True),
+                ("release_confirm", False),
+                ("confirm", "ENTER"),
+            ),
+        )
+        opener = operations[4]
+        assert opener.opens_surface is not None
+        self.assertEqual(
+            (
+                opener.keys,
+                opener.opens_surface.source_operation_id,
+                opener.opens_surface.expected_operator_id,
+            ),
+            (("F9",), "shortcut.inset_faces", "mesh.inset"),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.target_id,
+                    operation.parameters[0].source.argument_name,
+                    operation.parameters[0].source.value,
+                )
+                for operation in operations[5:8]
+            ),
+            (
+                ("mesh.inset.thickness", "thickness", None),
+                ("mesh.inset.depth", "depth", None),
+                ("mesh.inset.use_individual", None, True),
+            ),
+        )
+        assert shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(item.argument_name for item in shortcut.omitted_action_arguments),
+            ("targetId", "resultMeshId", "resultMeshName"),
+        )
+
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
         self,
     ) -> None:
@@ -1662,6 +1771,38 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertFalse(
             any(
                 recipe.action_name == "blender.mesh.edit_bevel_edges"
+                for recipe in frozen.recipes
+            )
+        )
+
+    def test_loads_byte_frozen_bevel_catalog_without_inset_faces(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.24.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_114_PATH
+        )
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "769404cc6f8f7d80f248892320eb857b28ad37d4d7b2e246160a9f7ac116c2f7",
+        )
+        self.assertEqual(frozen.catalog_version, "1.24.0")
+        self.assertEqual(frozen.action_catalog_version, "1.14.0")
+        self.assertTrue(
+            any(
+                recipe.action_name == "blender.mesh.edit_bevel_edges"
+                for recipe in frozen.recipes
+            )
+        )
+        self.assertFalse(
+            any(
+                recipe.action_name == "blender.mesh.edit_inset_faces"
                 for recipe in frozen.recipes
             )
         )
