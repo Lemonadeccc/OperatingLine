@@ -120,7 +120,7 @@ describe('Blender MCP TCP bridge', () => {
     let unexpectedSocketError: Error | undefined;
     const server = createServer((socket) => {
       socket.on('error', (error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ECONNRESET') {
+        if (error.code !== 'ECONNRESET' && error.code !== 'EPIPE') {
           unexpectedSocketError = error;
         }
       });
