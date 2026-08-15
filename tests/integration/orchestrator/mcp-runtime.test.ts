@@ -384,7 +384,7 @@ describe('OperatingLine runtime', () => {
         planningPhases?: Array<{ id?: string }>;
       };
       expect(catalog).toMatchObject({ catalogVersion });
-      expect(catalog.actions).toHaveLength(23);
+      expect(catalog.actions).toHaveLength(24);
       expect(catalog.planningPhases?.map((phase) => phase.id)).toEqual([
         'geometry',
         'materials',

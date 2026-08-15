@@ -636,8 +636,10 @@ def _mesh_triangulated(
     }
 
 
-def _mesh_region_extruded(
-    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+def _replacement_mesh_grew(
+    parameters: Mapping[str, Any],
+    receipts: Mapping[str, ActionReceipt],
+    action_name: str,
 ) -> ObservationResult:
     allowed_parameters = {"targetId", "resultMeshId"}
     target_id = parameters.get("targetId")
@@ -659,7 +661,7 @@ def _mesh_region_extruded(
     matching_receipts = tuple(
         receipt
         for receipt in receipts.values()
-        if receipt.action_name == "blender.mesh.edit_extrude_region"
+        if receipt.action_name == action_name
         and result_identity is not None
         and result_identity in receipt.created
     )
@@ -767,6 +769,22 @@ def _mesh_region_extruded(
         "edgeCount": result_counts[1],
         "faceCount": result_counts[2],
     }
+
+
+def _mesh_region_extruded(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _replacement_mesh_grew(
+        parameters, receipts, "blender.mesh.edit_extrude_region"
+    )
+
+
+def _mesh_edges_beveled(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _replacement_mesh_grew(
+        parameters, receipts, "blender.mesh.edit_bevel_edges"
+    )
 
 
 def _modifier_ready(
@@ -1017,6 +1035,7 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "mesh_topology_matches": _mesh_topology_matches,
     "mesh_triangulated": _mesh_triangulated,
     "mesh_region_extruded": _mesh_region_extruded,
+    "mesh_edges_beveled": _mesh_edges_beveled,
     "modifier_ready": _modifier_ready,
     "geometry_nodes_ready": _geometry_nodes_ready,
 }

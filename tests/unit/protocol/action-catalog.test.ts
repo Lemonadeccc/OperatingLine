@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.13.0');
+    expect(catalog.catalogVersion).toBe('1.14.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -33,6 +33,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.edit_subdivide',
       'blender.mesh.edit_triangulate',
       'blender.mesh.edit_extrude_region',
+      'blender.mesh.edit_bevel_edges',
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
       'blender.modifier.add_subdivision_surface',
@@ -62,6 +63,7 @@ describe('action catalog protocol', () => {
       'geometry.edit_subdivide',
       'geometry.edit_triangulate',
       'geometry.edit_extrude_region',
+      'geometry.edit_bevel_edges',
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
       'geometry.subdivision_surface_modifier',
@@ -90,6 +92,7 @@ describe('action catalog protocol', () => {
       '1.11.0',
       '1.12.0',
       '1.13.0',
+      '1.14.0',
     ]);
   });
 
@@ -492,6 +495,65 @@ describe('action catalog protocol', () => {
         schemaFor('blender.modifier.add_bevel'),
       ),
     ).toEqual([]);
+    const bevelEdgesSchema = schemaFor('blender.mesh.edit_bevel_edges');
+    const bevelEdgesAction = blenderActionCatalog.actions.find(
+      (action) => action.name === 'blender.mesh.edit_bevel_edges',
+    );
+    expect(bevelEdgesAction).toMatchObject({
+      resourceEffects: [
+        { access: 'mutate', resourceType: 'OBJECT', argumentPath: 'targetId' },
+        { access: 'create', resourceType: 'MESH', argumentPath: 'resultMeshId' },
+      ],
+      supportedAnchorKinds: ['object', 'operator', 'unavailable'],
+      supportedObservationKinds: ['resource_exists', 'mesh_edges_beveled'],
+      rollbackModes: ['compensating_action'],
+      safety: {
+        sideEffect: 'scene_write',
+        requiresPlanApproval: true,
+        networkAccess: false,
+        fileAccess: 'none',
+      },
+    });
+    expect(bevelEdgesSchema.additionalProperties).toBe(false);
+    expect(bevelEdgesSchema.required).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+      'width',
+      'segments',
+      'profile',
+    ]);
+    expect(Object.keys(bevelEdgesSchema.properties)).toEqual(bevelEdgesSchema.required);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.beveled_mesh',
+          resultMeshName: 'OperatingLine.Body.BeveledMesh',
+          width: 0.0001,
+          segments: 16,
+          profile: 1,
+        },
+        bevelEdgesSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          resultMeshId: 'model.body.beveled_mesh',
+          resultMeshName: 'OperatingLine.Body.BeveledMesh',
+          width: 0,
+          segments: 17,
+          profile: -0.1,
+        },
+        bevelEdgesSchema,
+      ),
+    ).toEqual([
+      'width must be at least 0.0001',
+      'segments must be at most 16',
+      'profile must be at least 0',
+    ]);
     const solidifySchema = schemaFor('blender.modifier.add_solidify');
     expect(solidifySchema.additionalProperties).toBe(false);
     expect(solidifySchema.required).toEqual([

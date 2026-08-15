@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { blenderActionCatalog, blenderActionCatalogs } from '@operatingline/blender-action-catalog';
@@ -7,7 +11,10 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.13.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.14.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.13.0' }).catalogVersion,
+    ).toBe('1.13.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.12.0' }).catalogVersion,
     ).toBe('1.12.0');
@@ -55,7 +62,9 @@ describe('action catalog registry', () => {
     );
 
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.13.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.planningNotes = frozen.planningNotes;
     active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
@@ -78,6 +87,30 @@ describe('action catalog registry', () => {
     ).toEqual(readFileSync(resolve('adapters/blender/catalog/v1/action-catalog.json')));
   });
 
+  it('freezes ActionCatalog 1.13.0 and changes only Bevel Edges coverage in 1.14.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.13.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'b1ac2f7fee2ea2ea5b71d2bd42ee0911cc28c5e609d70cd499055c4dcd54fb3d',
+    );
+
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
+      (actionName) => actionName !== 'blender.mesh.edit_bevel_edges',
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'geometry.edit_bevel_edges',
+    );
+    active.actions = active.actions.filter(
+      (action) => action.name !== 'blender.mesh.edit_bevel_edges',
+    );
+    expect(active).toEqual(frozen);
+  });
+
   it('fails closed for duplicate, missing, and unavailable catalog versions', () => {
     expect(() => createActionCatalogRegistry([blenderActionCatalog, blenderActionCatalog])).toThrow(
       'Duplicate action catalog',
@@ -92,6 +125,3 @@ describe('action catalog registry', () => {
     );
   });
 });
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';

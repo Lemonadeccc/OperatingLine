@@ -359,6 +359,57 @@ function subdivisionSurfaceAuthoringCandidateFixture(
   return tree;
 }
 
+function editBevelAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Edit Mode Bevel candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_bevel_edges',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.beveled.mesh',
+      resultMeshName: 'OperatingLine.Cube.Beveled',
+      width: 0.2,
+      segments: 3,
+      profile: 0.6,
+    },
+  };
+  leaf['title'] = 'Bevel every edge of the accepted Cube in Edit Mode';
+  leaf['intent'] = 'Bevel every Cube edge with exact width, segments, and profile.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'bevel_mesh_edges',
+    description: 'Bevel every edge of the accepted Cube.',
+    parameters: { width: 0.2, segments: 3, profile: 0.6 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Beveled' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.bevel' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'mesh_edges_beveled',
+    parameters: { resourceId: 'tutorial.cube.beveled.mesh' },
+  };
+  return tree;
+}
+
 function cubeAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1015,7 +1066,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.23.0' },
+        catalogBinding: { interactionCatalogVersion: '1.24.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2339,7 +2390,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.23.0' },
+        catalogBinding: { interactionCatalogVersion: '1.24.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2412,24 +2463,36 @@ describe('procedure compilation runtime', () => {
   });
 
   it('materializes and structurally compiles the InteractionCatalog 1.23 Subdivision Surface candidate', async () => {
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.13.0',
+    );
+    const historicalInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.23.0',
+    );
+    if (historicalActionCatalog === undefined || historicalInteractionCatalog === undefined) {
+      throw new Error('Expected immutable AC1.13 and IC1.23 catalogs');
+    }
+    expect(historicalInteractionCatalog.actionCatalogVersion).toBe(
+      historicalActionCatalog.catalogVersion,
+    );
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
-      actionCatalogs: [blenderActionCatalog],
-      interactionCatalogs: [blenderInteractionCatalog],
+      actionCatalogs: [historicalActionCatalog],
+      interactionCatalogs: [historicalInteractionCatalog],
     });
     try {
       const packet = buildProcedureAuthoringPromptPacket(
         {
           targetAdapterId: 'blender',
-          actionCatalogVersion: blenderActionCatalog.catalogVersion,
-          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
+          interactionCatalogVersion: historicalInteractionCatalog.catalogVersion,
           goal: 'Add a managed Subdivision Surface modifier with viewport level three.',
           treeId: 'snowman.eye.left.procedure',
           revision: 1,
         },
-        blenderActionCatalog,
-        blenderInteractionCatalog,
+        historicalActionCatalog,
+        historicalInteractionCatalog,
       );
       const materializedMcp = await callMcpTool(
         runtime,
@@ -2523,6 +2586,178 @@ describe('procedure compilation runtime', () => {
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
         actionCatalogVersion: '1.13.0',
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes and structurally compiles the active Edit Mode Bevel F9 candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Bevel every Cube edge with width 0.2, three segments, and profile 0.6.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: editBevelAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Edit Mode Bevel materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Edit Mode Bevel leaf');
+      }
+
+      expect(materialization).toMatchObject({
+        formatVersion: '1.3.0',
+        catalogBinding: {
+          actionCatalogVersion: '1.14.0',
+          interactionCatalogVersion: '1.24.0',
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.mesh.edit_bevel_edges.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.beveled.mesh',
+        resultMeshName: 'OperatingLine.Cube.Beveled',
+        width: 0.2,
+        segments: 3,
+        profile: 0.6,
+      });
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected one materialized Edit Mode Bevel shortcut');
+      }
+      expect(shortcut.operations.map((operation) => operation.id)).toEqual([
+        'shortcut.enter_edit_mode',
+        'shortcut.select_edge_mode',
+        'shortcut.select_all_edges',
+        'shortcut.bevel_edges',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_bevel_width',
+        'shortcut.set_bevel_segments',
+        'shortcut.set_bevel_profile',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ]);
+      expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        {},
+        {
+          offset_type: 'OFFSET',
+          offset: 0,
+          profile_type: 'SUPERELLIPSE',
+          segments: 1,
+          profile: 0.5,
+          affect: 'EDGES',
+          clamp_overlap: false,
+          loop_slide: true,
+          mark_seam: false,
+          mark_sharp: false,
+          material: -1,
+          harden_normals: false,
+          face_strength_mode: 'NONE',
+          miter_outer: 'SHARP',
+          miter_inner: 'SHARP',
+          spread: 0.1,
+          vmesh_method: 'ADJ',
+          release_confirm: false,
+          confirm: 'ENTER',
+        },
+        {},
+        { value: 0.2 },
+        { value: 3 },
+        { value: 0.6 },
+        {},
+        {},
+      ]);
+      expect(shortcut.operations[3]).toMatchObject({
+        keyMode: 'chord',
+        keys: ['CTRL', 'B'],
+      });
+      expect(shortcut.operations[4]).toMatchObject({
+        keys: ['F9'],
+        opensSurface: {
+          kind: 'adjust_last_operation',
+          hostId: 'screen.redo_last',
+          sourceOperationId: 'shortcut.bevel_edges',
+          expectedOperatorId: 'mesh.bevel',
+        },
+      });
+      expect(shortcut.operations[5]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.bevel.offset' },
+        path: ['Adjust Last Operation', 'Width'],
+      });
+      expect(shortcut.operations[6]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.bevel.segments' },
+        path: ['Adjust Last Operation', 'Segments'],
+      });
+      expect(shortcut.operations[7]).toMatchObject({
+        target: { kind: 'control', hostId: 'mesh.bevel.profile' },
+        path: ['Adjust Last Operation', 'Profile Shape'],
+      });
+      expect(shortcut.operations[8]).toMatchObject({
+        keys: ['ENTER'],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      });
+      expect(shortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+      const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+        Object.keys(operation.parameters),
+      );
+      for (const managedArgument of ['targetId', 'resultMeshId', 'resultMeshName']) {
+        expect(shortcutParameterNames).not.toContain(managedArgument);
+      }
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: '1.14.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3143,7 +3378,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.13.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.14.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

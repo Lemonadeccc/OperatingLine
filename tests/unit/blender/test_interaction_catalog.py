@@ -33,6 +33,14 @@ FROZEN_ACTION_CATALOG_112_PATH = (
     / "v1"
     / "action-catalog-1.12.0.json"
 )
+FROZEN_ACTION_CATALOG_113_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "action-catalog-1.13.0.json"
+)
 load_interaction_catalog = catalog_module.load_interaction_catalog
 
 
@@ -267,13 +275,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.23.0")
-        self.assertEqual(catalog.action_catalog_version, "1.13.0")
+        self.assertEqual(catalog.catalog_version, "1.24.0")
+        self.assertEqual(catalog.action_catalog_version, "1.14.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
         )
-        self.assertEqual(len(catalog.recipes), 23)
+        self.assertEqual(len(catalog.recipes), 24)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -303,7 +311,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 recipe.guidance.kind is InteractionPathKind.SEMANTIC
                 for recipe in catalog.recipes
             ),
-            16,
+            17,
         )
         subdivision_surface = next(
             recipe
@@ -1483,8 +1491,178 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_cylinder",
                     "blender.mesh.create_torus",
                     "blender.mesh.edit_subdivide",
+                    "blender.mesh.edit_bevel_edges",
                     "blender.modifier.add_subdivision_surface",
                 }
+            )
+        )
+
+    def test_exposes_candidate_only_bevel_edges_shortcut_with_exact_modal_source(self) -> None:
+        recipe = next(
+            recipe
+            for recipe in BUNDLED_INTERACTION_CATALOG.recipes
+            if recipe.action_name == "blender.mesh.edit_bevel_edges"
+        )
+        self.assertEqual(
+            tuple(
+                (step.intent, step.target_kind, step.target_id)
+                for step in recipe.guidance.steps
+            ),
+            (
+                ("navigate", "workspace", "Layout"),
+                ("configure", "semantic", "operatingline.blender.owned_mesh"),
+                ("navigate", "mode", "EDIT_MESH"),
+                ("navigate", "menu", "VIEW3D_MT_edit_mesh_edges"),
+                ("execute", "operator", "mesh.bevel"),
+                (
+                    "configure",
+                    "semantic",
+                    "operatingline.blender.managed_bevel_edges",
+                ),
+            ),
+        )
+        self.assertEqual(
+            sum(
+                step.intent == "execute" and step.target_kind == "operator"
+                for step in recipe.guidance.steps
+            ),
+            1,
+        )
+        assert recipe.procedure_materialization is not None
+        materialization = recipe.procedure_materialization
+        self.assertEqual(materialization.menu.availability, "unavailable")
+        self.assertEqual(materialization.mcp.availability, "unavailable")
+        shortcut = materialization.shortcut
+        self.assertEqual(
+            (
+                shortcut.availability,
+                shortcut.source,
+                shortcut.semantic_binding,
+                shortcut.parameter_binding,
+                shortcut.projection,
+            ),
+            (
+                "available",
+                "catalog.ordered_shortcut_operations",
+                "all_leaf_operations",
+                "ordered_parameter_operations",
+                "candidate_only",
+            ),
+        )
+        assert shortcut.preconditions is not None
+        self.assertEqual(len(shortcut.preconditions), 10)
+        assert shortcut.shortcut_operations is not None
+        operations = shortcut.shortcut_operations
+        self.assertEqual(
+            tuple(operation.id for operation in operations),
+            (
+                "shortcut.enter_edit_mode",
+                "shortcut.select_edge_mode",
+                "shortcut.select_all_edges",
+                "shortcut.bevel_edges",
+                "shortcut.open_adjust_last_operation",
+                "shortcut.set_bevel_width",
+                "shortcut.set_bevel_segments",
+                "shortcut.set_bevel_profile",
+                "shortcut.close_adjust_last_operation",
+                "shortcut.return_to_object_mode",
+            ),
+        )
+        source = operations[3]
+        self.assertEqual((source.key_mode, source.keys), ("chord", ("CTRL", "B")))
+        self.assertEqual(
+            tuple((parameter.name, parameter.source.value) for parameter in source.parameters),
+            (
+                ("offset_type", "OFFSET"),
+                ("offset", 0),
+                ("profile_type", "SUPERELLIPSE"),
+                ("segments", 1),
+                ("profile", 0.5),
+                ("affect", "EDGES"),
+                ("clamp_overlap", False),
+                ("loop_slide", True),
+                ("mark_seam", False),
+                ("mark_sharp", False),
+                ("material", -1),
+                ("harden_normals", False),
+                ("face_strength_mode", "NONE"),
+                ("miter_outer", "SHARP"),
+                ("miter_inner", "SHARP"),
+                ("spread", 0.1),
+                ("vmesh_method", "ADJ"),
+                ("release_confirm", False),
+                ("confirm", "ENTER"),
+            ),
+        )
+        opener = operations[4]
+        assert opener.opens_surface is not None
+        self.assertEqual(
+            (
+                opener.keys,
+                opener.opens_surface.source_operation_id,
+                opener.opens_surface.expected_operator_id,
+            ),
+            (("F9",), "shortcut.bevel_edges", "mesh.bevel"),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.target_id,
+                    operation.path,
+                    operation.parameters[0].source.argument_name,
+                )
+                for operation in operations[5:8]
+            ),
+            (
+                ("mesh.bevel.offset", ("Adjust Last Operation", "Width"), "width"),
+                (
+                    "mesh.bevel.segments",
+                    ("Adjust Last Operation", "Segments"),
+                    "segments",
+                ),
+                (
+                    "mesh.bevel.profile",
+                    ("Adjust Last Operation", "Profile Shape"),
+                    "profile",
+                ),
+            ),
+        )
+        self.assertEqual(
+            operations[8].closes_surface_operation_id,
+            "shortcut.open_adjust_last_operation",
+        )
+        self.assertEqual(operations[9].keys, ("TAB",))
+        assert shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(item.argument_name for item in shortcut.omitted_action_arguments),
+            ("targetId", "resultMeshId", "resultMeshName"),
+        )
+
+    def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.23.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_113_PATH
+        )
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "6f875d895fc0ea7c8aab9c01c612e9eaf20f3958f7804231e061b2076696b8d5",
+        )
+        self.assertEqual(frozen.catalog_version, "1.23.0")
+        self.assertEqual(frozen.action_catalog_version, "1.13.0")
+        self.assertFalse(
+            any(
+                recipe.action_name == "blender.mesh.edit_bevel_edges"
+                for recipe in frozen.recipes
             )
         )
 

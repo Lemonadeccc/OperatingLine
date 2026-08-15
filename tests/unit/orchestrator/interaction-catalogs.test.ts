@@ -253,7 +253,22 @@ describe('interaction catalog registry', () => {
         (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
       ),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.23.0');
+    const frozenSubdivisionSurface = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: '1.13.0',
+      interactionCatalogVersion: '1.23.0',
+    });
+    expect(
+      frozenSubdivisionSurface.recipes.find(
+        (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenSubdivisionSurface.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
+      ),
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.24.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -339,6 +354,39 @@ describe('interaction catalog registry', () => {
       'targetId',
       'modifierId',
       'modifierName',
+    ]);
+    const bevelEdges = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_bevel_edges',
+    );
+    expect(bevelEdges?.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: { availability: 'available', projection: 'candidate_only' },
+      mcp: { availability: 'unavailable' },
+    });
+    const bevelShortcut = bevelEdges?.procedureMaterialization?.shortcut;
+    if (bevelShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Bevel Edges shortcut recipe to be available');
+    }
+    expect(bevelShortcut.operations).toHaveLength(10);
+    expect(bevelShortcut.operations[3]).toMatchObject({
+      id: 'shortcut.bevel_edges',
+      keys: ['CTRL', 'B'],
+      parameters: expect.arrayContaining([
+        { name: 'offset_type', source: { kind: 'literal', value: 'OFFSET' } },
+        { name: 'confirm', source: { kind: 'literal', value: 'ENTER' } },
+      ]),
+    });
+    expect(bevelShortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.bevel_edges',
+        expectedOperatorId: 'mesh.bevel',
+      },
+    });
+    expect(bevelShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
     ]);
     if (latestShortcut?.availability !== 'available') {
       throw new Error('Expected the latest Cube shortcut recipe to be available');
@@ -1165,12 +1213,32 @@ describe('interaction catalog registry', () => {
     const frozen = JSON.parse(
       readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.22.0.json'), 'utf8'),
     ) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.23.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.actionCatalogVersion = frozen.actionCatalogVersion;
     active.description = frozen.description;
     active.recipes = active.recipes.filter(
       (recipe) => recipe.actionName !== 'blender.modifier.add_subdivision_surface',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.23.0 and changes only the binding and Bevel Edges recipe', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.23.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '6f875d895fc0ea7c8aab9c01c612e9eaf20f3958f7804231e061b2076696b8d5',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== 'blender.mesh.edit_bevel_edges',
     );
     expect(active).toEqual(frozen);
   });

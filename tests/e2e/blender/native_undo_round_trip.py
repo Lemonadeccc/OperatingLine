@@ -142,8 +142,25 @@ PLAN = {
             depends_on=["native.triangulate"],
         ),
         _step(
-            "native.bevel",
+            "native.edit_bevel_edges",
             5,
+            {
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_bevel_edges",
+                "arguments": {
+                    "targetId": "native.cube",
+                    "resultMeshId": "native.cube.beveled_mesh",
+                    "resultMeshName": "OperatingLine.NativeUndo.BeveledMesh",
+                    "width": 0.1,
+                    "segments": 1,
+                    "profile": 0.5,
+                },
+            },
+            depends_on=["native.extrude_region"],
+        ),
+        _step(
+            "native.bevel",
+            6,
             {
                 "adapterId": "blender",
                 "name": "blender.modifier.add_bevel",
@@ -152,15 +169,15 @@ PLAN = {
                     "modifierId": "native.cube.bevel",
                     "modifierName": BEVEL_NAME,
                     "width": 0.1,
-                    "segments": 3,
-                    "angleLimit": 0.5235987755982988,
+                    "segments": 1,
+                    "angleLimit": 1.5707963267948966,
                 },
             },
-            depends_on=["native.extrude_region"],
+            depends_on=["native.edit_bevel_edges"],
         ),
         _step(
             "native.solidify",
-            6,
+            7,
             {
                 "adapterId": "blender",
                 "name": "blender.modifier.add_solidify",
@@ -176,7 +193,7 @@ PLAN = {
         ),
         _step(
             "native.subdivision_surface",
-            7,
+            8,
             {
                 "adapterId": "blender",
                 "name": "blender.modifier.add_subdivision_surface",
@@ -191,7 +208,7 @@ PLAN = {
         ),
         _step(
             "native.geometry_nodes",
-            8,
+            9,
             {
                 "adapterId": "blender",
                 "name": "blender.geometry_nodes.create_transform",
@@ -210,7 +227,7 @@ PLAN = {
         ),
         _step(
             "native.material_blue",
-            9,
+            10,
             {
                 "adapterId": "blender",
                 "name": "blender.material.create_and_assign",
@@ -270,6 +287,19 @@ def _modifier_state(session: DemoSession, step_id: str) -> ModifierState:
         for mutation in receipt.mutations
         if isinstance(mutation.after, ModifierState)
     )
+
+
+def _evaluated_topology(target: bpy.types.Object) -> tuple[int, int, int]:
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    mesh = evaluated.to_mesh()
+    try:
+        return (
+            len(mesh.vertices),
+            len(mesh.edges),
+            len(mesh.polygons),
+        )
+    finally:
+        evaluated.to_mesh_clear()
 
 
 def _artifact(
@@ -449,24 +479,80 @@ def run() -> None:
     ) == (29, 78, 51)
 
     assert bpy.ops.operating_line.next() == {"FINISHED"}
-    _push("OperatingLine native Undo after Bevel")
+    _push("OperatingLine native Undo after Edit Bevel")
     assert session.active_index == 4
+    cube = bpy.data.objects[OBJECT_NAME]
+    beveled_identity = next(
+        identity
+        for identity in session.receipts["native.edit_bevel_edges"].created
+        if identity.logical_id == "native.cube.beveled_mesh"
+    )
+    beveled_mesh = cube.data
+    beveled_topology = (
+        len(beveled_mesh.vertices),
+        len(beveled_mesh.edges),
+        len(beveled_mesh.polygons),
+    )
+    assert resolve_resource(beveled_identity) is beveled_mesh
+    assert all(
+        result_count > source_count
+        for result_count, source_count in zip(beveled_topology, (29, 78, 51))
+    )
+
+    _undo()
+    assert native_history_error() == ""
+    assert session.active_index == 3
+    assert "native.edit_bevel_edges" not in session.receipts
+    cube = bpy.data.objects[OBJECT_NAME]
+    assert (
+        len(cube.data.vertices),
+        len(cube.data.edges),
+        len(cube.data.polygons),
+    ) == (29, 78, 51)
+    assert bpy.data.meshes.get("OperatingLine.NativeUndo.BeveledMesh") is None
+
+    _redo()
+    assert native_history_error() == ""
+    assert session.active_index == 4
+    cube = bpy.data.objects[OBJECT_NAME]
+    beveled_identity = next(
+        identity
+        for identity in session.receipts["native.edit_bevel_edges"].created
+        if identity.logical_id == "native.cube.beveled_mesh"
+    )
+    assert resolve_resource(beveled_identity) is cube.data
+    assert beveled_identity.pointer == cube.data.as_pointer()
+    assert (
+        len(cube.data.vertices),
+        len(cube.data.edges),
+        len(cube.data.polygons),
+    ) == beveled_topology
+
+    assert bpy.ops.operating_line.next() == {"FINISHED"}
+    _push("OperatingLine native Undo after Bevel")
+    assert session.active_index == 5
     cube = bpy.data.objects[OBJECT_NAME]
     cube_uid = cube.session_uid
     cube_pointer = cube.as_pointer()
     bevel = cube.modifiers[BEVEL_NAME]
     bevel_uidless_pointer = bevel.as_pointer()
+    assert all(
+        evaluated_count > source_count
+        for evaluated_count, source_count in zip(
+            _evaluated_topology(cube), beveled_topology
+        )
+    )
 
     _undo()
     assert native_history_error() == ""
-    assert session.active_index == 3
+    assert session.active_index == 4
     assert "native.bevel" not in session.receipts
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(BEVEL_NAME) is None
     assert extension.get_companion().last_report["transition"] == "step_rolled_back"
 
     _redo()
     assert native_history_error() == ""
-    assert session.active_index == 4
+    assert session.active_index == 5
     cube = bpy.data.objects[OBJECT_NAME]
     bevel = cube.modifiers[BEVEL_NAME]
     assert cube.session_uid == cube_uid
@@ -483,24 +569,24 @@ def run() -> None:
     _undo()
     assert bpy.data.objects.get(USER_OBJECT_NAME) is None
     assert bpy.context.scene[NATIVE_HISTORY_MARKER_KEY] == marker
-    assert session.active_index == 4
+    assert session.active_index == 5
     assert extension.get_companion().last_report["sequence"] == report_sequence
     _redo()
     assert bpy.data.objects.get(USER_OBJECT_NAME) is not None
-    assert session.active_index == 4
+    assert session.active_index == 5
     assert extension.get_companion().last_report["sequence"] == report_sequence
 
     assert bpy.ops.operating_line.next() == {"FINISHED"}
     _push("OperatingLine native Undo after Solidify")
-    assert session.active_index == 5
+    assert session.active_index == 6
     cube = bpy.data.objects[OBJECT_NAME]
     solidify = cube.modifiers[SOLIDIFY_NAME]
     solidify_pointer = solidify.as_pointer()
     _undo()
-    assert session.active_index == 4
+    assert session.active_index == 5
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(SOLIDIFY_NAME) is None
     _redo()
-    assert session.active_index == 5
+    assert session.active_index == 6
     cube = bpy.data.objects[OBJECT_NAME]
     solidify = cube.modifiers[SOLIDIFY_NAME]
     assert _modifier_state(session, "native.solidify").pointer == solidify.as_pointer()
@@ -511,7 +597,7 @@ def run() -> None:
 
     assert bpy.ops.operating_line.next() == {"FINISHED"}
     _push("OperatingLine native Undo after Subdivision Surface")
-    assert session.active_index == 6
+    assert session.active_index == 7
     cube = bpy.data.objects[OBJECT_NAME]
     subdivision_surface = cube.modifiers[SUBDIVISION_SURFACE_NAME]
     subdivision_surface_pointer = subdivision_surface.as_pointer()
@@ -519,12 +605,12 @@ def run() -> None:
     assert subdivision_surface.levels == 1
     assert subdivision_surface.render_levels == 2
     _undo()
-    assert session.active_index == 5
+    assert session.active_index == 6
     assert (
         bpy.data.objects[OBJECT_NAME].modifiers.get(SUBDIVISION_SURFACE_NAME) is None
     )
     _redo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     cube = bpy.data.objects[OBJECT_NAME]
     subdivision_surface = cube.modifiers[SUBDIVISION_SURFACE_NAME]
     assert _modifier_state(
@@ -540,15 +626,15 @@ def run() -> None:
 
     assert bpy.ops.operating_line.next() == {"FINISHED"}
     _push("OperatingLine native Undo after Geometry Nodes")
-    assert session.active_index == 7
+    assert session.active_index == 8
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     geometry_nodes_pointer = geometry_nodes.as_pointer()
     _undo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is None
     _redo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     assert _modifier_state(session, "native.geometry_nodes").pointer == (
@@ -561,13 +647,13 @@ def run() -> None:
 
     assert bpy.ops.operating_line.back() == {"FINISHED"}
     _push("OperatingLine native Undo after Back")
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert cube.modifiers.get(GEOMETRY_NODES_NAME) is None
     _undo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is not None
     _redo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is None
     assert native_history_error() == ""
 
@@ -581,10 +667,10 @@ def run() -> None:
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
 
     _undo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     _redo()
-    assert session.active_index == 8
+    assert session.active_index == 9
     blue_receipt = session.receipts["native.material_blue"]
     before_material = blue_receipt.mutations[0].before[0]
     assert isinstance(before_material, DataBlockReference)
@@ -593,13 +679,13 @@ def run() -> None:
 
     assert bpy.ops.operating_line.back() == {"FINISHED"}
     _push("OperatingLine native Undo after material Back")
-    assert session.active_index == 7
+    assert session.active_index == 8
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     _undo()
-    assert session.active_index == 8
+    assert session.active_index == 9
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
     _redo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     assert native_history_error() == ""
 

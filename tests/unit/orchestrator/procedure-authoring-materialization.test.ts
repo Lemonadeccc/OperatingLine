@@ -164,8 +164,11 @@ function subdivideCandidate(
   return tree;
 }
 
-function subdivisionSurfaceCandidate(): ProcedureAuthoringCandidateTree {
-  const tree = candidate();
+function subdivisionSurfaceCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+  actionCatalog: ActionCatalog = blenderActionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog, actionCatalog);
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
   if (leaf?.kind !== 'leaf') throw new Error('expected Subdivision Surface candidate leaf');
   leaf.action = {
@@ -210,6 +213,51 @@ function subdivisionSurfaceCandidate(): ProcedureAuthoringCandidateTree {
   leaf.expectedObservations[0] = {
     kind: 'modifier_ready',
     parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
+  };
+  return tree;
+}
+
+function editBevelCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Edit Mode Bevel candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_bevel_edges',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.beveled.mesh',
+      resultMeshName: 'OperatingLine.Cube.Beveled',
+      width: 0.2,
+      segments: 3,
+      profile: 0.6,
+    },
+  };
+  leaf.title = 'Bevel every edge of the accepted Cube in Edit Mode';
+  leaf.intent = 'Bevel every Cube edge with exact width, segments, and profile.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'bevel_mesh_edges',
+    description: 'Bevel every edge of the accepted Cube.',
+    parameters: { width: 0.2, segments: 3, profile: 0.6 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Beveled' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.bevel' },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'mesh_edges_beveled',
+    parameters: { resourceId: 'tutorial.cube.beveled.mesh' },
   };
   return tree;
 }
@@ -1089,13 +1137,28 @@ describe('procedure authoring materialization', () => {
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
   });
 
-  it('materializes the exact Subdivision Surface candidate shortcut without projecting managed IDs', () => {
-    const input = subdivisionSurfaceCandidate();
+  it('materializes the exact frozen IC1.23 Subdivision Surface shortcut against AC1.13', () => {
+    const historicalInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.23.0',
+    );
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.13.0',
+    );
+    if (historicalInteractionCatalog === undefined || historicalActionCatalog === undefined) {
+      throw new Error('expected immutable IC1.23 and AC1.13 catalogs');
+    }
+    expect(historicalInteractionCatalog.actionCatalogVersion).toBe(
+      historicalActionCatalog.catalogVersion,
+    );
+    const input = subdivisionSurfaceCandidate(
+      historicalInteractionCatalog,
+      historicalActionCatalog,
+    );
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
       input,
-      blenderActionCatalog,
-      blenderInteractionCatalog,
+      historicalActionCatalog,
+      historicalInteractionCatalog,
     );
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     if (leaf?.kind !== 'leaf' || leaf.action === null) {
@@ -1198,6 +1261,179 @@ describe('procedure authoring materialization', () => {
       Object.keys(operation.parameters),
     );
     for (const managedArgument of ['targetId', 'modifierId', 'modifierName']) {
+      expect(shortcutParameterNames).not.toContain(managedArgument);
+    }
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Edit Mode Bevel F9 shortcut without projecting managed IDs', () => {
+    const input = editBevelCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Edit Mode Bevel leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_bevel_edges.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.beveled.mesh',
+      resultMeshName: 'OperatingLine.Cube.Beveled',
+      width: 0.2,
+      segments: 3,
+      profile: 0.6,
+    });
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'menu',
+      reason:
+        "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track.",
+    });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'mcp',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    const shortcut = leaf.shortcutTracks[0];
+    if (shortcut?.availability !== 'available') {
+      throw new Error('expected available Edit Mode Bevel shortcut track');
+    }
+    expect(shortcut).toMatchObject({
+      id: 'blender.mesh.edit_bevel_edges.semantic.shortcut',
+      modality: 'shortcut',
+    });
+    expect(shortcut.preconditions).toHaveLength(10);
+    expect(
+      shortcut.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      { kind: 'key_input', id: 'shortcut.enter_edit_mode', order: 1, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_edge_mode', order: 2, parameters: {} },
+      { kind: 'key_input', id: 'shortcut.select_all_edges', order: 3, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.bevel_edges',
+        order: 4,
+        parameters: {
+          offset_type: 'OFFSET',
+          offset: 0,
+          profile_type: 'SUPERELLIPSE',
+          segments: 1,
+          profile: 0.5,
+          affect: 'EDGES',
+          clamp_overlap: false,
+          loop_slide: true,
+          mark_seam: false,
+          mark_sharp: false,
+          material: -1,
+          harden_normals: false,
+          face_strength_mode: 'NONE',
+          miter_outer: 'SHARP',
+          miter_inner: 'SHARP',
+          spread: 0.1,
+          vmesh_method: 'ADJ',
+          release_confirm: false,
+          confirm: 'ENTER',
+        },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 5,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_bevel_width',
+        order: 6,
+        parameters: { value: 0.2 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_bevel_segments',
+        order: 7,
+        parameters: { value: 3 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_bevel_profile',
+        order: 8,
+        parameters: { value: 0.6 },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 9,
+        parameters: {},
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.return_to_object_mode',
+        order: 10,
+        parameters: {},
+      },
+    ]);
+    expect(shortcut.operations[0]).toMatchObject({ keys: ['TAB'] });
+    expect(shortcut.operations[1]).toMatchObject({ keys: ['2'] });
+    expect(shortcut.operations[2]).toMatchObject({ keys: ['A'] });
+    expect(shortcut.operations[3]).toMatchObject({
+      keyMode: 'chord',
+      keys: ['CTRL', 'B'],
+    });
+    expect(shortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.bevel_edges',
+        expectedOperatorId: 'mesh.bevel',
+      },
+    });
+    expect(shortcut.operations[5]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.bevel.offset' },
+      path: ['Adjust Last Operation', 'Width'],
+    });
+    expect(shortcut.operations[6]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.bevel.segments' },
+      path: ['Adjust Last Operation', 'Segments'],
+    });
+    expect(shortcut.operations[7]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.bevel.profile' },
+      path: ['Adjust Last Operation', 'Profile Shape'],
+    });
+    expect(shortcut.operations[8]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(shortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+    const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+      Object.keys(operation.parameters),
+    );
+    for (const managedArgument of ['targetId', 'resultMeshId', 'resultMeshName']) {
       expect(shortcutParameterNames).not.toContain(managedArgument);
     }
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });

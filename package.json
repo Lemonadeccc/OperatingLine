@@ -52,6 +52,7 @@
     "test:blender:f9": "node tools/blender/run-icosphere-f9.mjs",
     "test:blender:subdivide": "node tools/blender/run-subdivide-f9.mjs",
     "test:blender:subdivision-surface": "node tools/blender/run-subdivision-surface-f9.mjs",
+    "test:blender:edit-bevel": "node tools/blender/run-edit-bevel-f9.mjs",
     "test:blender:undo": "node tools/blender/run-native-undo.mjs",
     "test:blender:visual": "node tools/blender/capture-overlay.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm release:check && pnpm format:check",

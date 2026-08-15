@@ -104,11 +104,14 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.comm
     ensure_receipts_intact,
 )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.editing import (  # noqa: E402
+    _ensure_edit_bevel_topology_is_bounded,
     _ensure_extrude_topology_is_bounded,
     _ensure_triangulate_topology_is_bounded,
     _extrude_region_geometry,
     _normalized_squared_vector_length,
+    _validate_edit_bevel_source,
     validate_bevel,
+    validate_edit_bevel_edges,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
@@ -1911,6 +1914,337 @@ def assert_extrude_region_observation_success_gate() -> None:
     assert failing_session.back() is not None
 
 
+def edit_bevel_edges_steps(
+    *,
+    object_name: str = "OperatingLine.EditBevelCube",
+    result_mesh_id: str = "edit_bevel.cube.result_mesh",
+    result_mesh_name: str = "OperatingLine.EditBevelCube.ResultMesh",
+    width: float = 0.2,
+    segments: int = 3,
+    profile: float = 0.6,
+) -> list[dict]:
+    return [
+        step("root", None, 0),
+        step(
+            "edit_bevel.cube",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_cube",
+                "arguments": {
+                    "resourceId": "edit_bevel.cube",
+                    "objectName": object_name,
+                    "size": 2.0,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "edit_bevel.edges",
+            "root",
+            2,
+            depends_on=["edit_bevel.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_bevel_edges",
+                "arguments": {
+                    "targetId": "edit_bevel.cube",
+                    "resultMeshId": result_mesh_id,
+                    "resultMeshName": result_mesh_name,
+                    "width": width,
+                    "segments": segments,
+                    "profile": profile,
+                },
+            },
+        ),
+    ]
+
+
+def assert_edit_bevel_edges_round_trip_and_guards() -> None:
+    object_name = "OperatingLine.EditBevelCube"
+    result_mesh_name = "OperatingLine.EditBevelCube.ResultMesh"
+    root = load_temporary_plan(edit_bevel_edges_steps())
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    target = bpy.data.objects[object_name]
+    source_mesh = target.data
+    source_signature = tuple(tuple(vertex.co) for vertex in source_mesh.vertices)
+    assert session.next() is not None
+    result_mesh = target.data
+    assert result_mesh is not source_mesh
+    assert result_mesh.name == result_mesh_name
+    assert (
+        len(result_mesh.vertices),
+        len(result_mesh.edges),
+        len(result_mesh.polygons),
+    ) == (96, 192, 98)
+    assert tuple(tuple(vertex.co) for vertex in source_mesh.vertices) == source_signature
+    receipt = session.receipts["edit_bevel.edges"]
+    assert receipt.action_name == "blender.mesh.edit_bevel_edges"
+    assert tuple(mutation.attribute for mutation in receipt.mutations) == (
+        "data",
+        "mesh_content",
+    )
+
+    parameters = {
+        "targetId": "edit_bevel.cube",
+        "resultMeshId": "edit_bevel.cube.result_mesh",
+    }
+    observations = observation_module.evaluate_observations(
+        (
+            {"kind": "mesh_edges_beveled", "parameters": parameters},
+            {
+                "kind": "mesh_edges_beveled",
+                "parameters": {**parameters, "unexpected": True},
+            },
+            {
+                "kind": "mesh_edges_beveled",
+                "parameters": {**parameters, "resultMeshId": "wrong.mesh"},
+            },
+        ),
+        session.receipts,
+    )
+    assert tuple(item["satisfied"] for item in observations) == (True, False, False)
+
+    original_vertex = result_mesh.vertices[0].co.copy()
+    result_mesh.vertices[0].co.x += 0.25
+    assert (
+        observation_module.evaluate_observations(
+            ({"kind": "mesh_edges_beveled", "parameters": parameters},),
+            session.receipts,
+        )[0]["satisfied"]
+        is False
+    )
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Edited bevel result meshes must block rollback")
+    result_mesh.vertices[0].co = original_vertex
+    assert session.back() is not None
+    assert target.data is source_mesh
+    assert bpy.data.meshes.get(result_mesh_name) is None
+    assert session.back() is not None
+
+    for label, mutate, cleanup in (
+        (
+            "modifier",
+            lambda item: item.modifiers.new("External", "BEVEL"),
+            lambda item: item.modifiers.clear(),
+        ),
+        (
+            "shape_key",
+            lambda item: item.shape_key_add(name="Basis"),
+            lambda item: item.shape_key_clear(),
+        ),
+    ):
+        guarded_name = f"OperatingLine.EditBevelGuard.{label}"
+        guarded_root = load_temporary_plan(
+            edit_bevel_edges_steps(
+                object_name=guarded_name,
+                result_mesh_name=f"{guarded_name}.ResultMesh",
+            )
+        )
+        guarded_session = DemoSession(
+            guarded_root, action_registry(guarded_root)
+        )
+        guarded_session.start()
+        assert guarded_session.next() is not None
+        guarded_target = bpy.data.objects[guarded_name]
+        mutate(guarded_target)
+        try:
+            guarded_session.next()
+        except RuntimeError as error:
+            assert "modified" in str(error) or "must not have" in str(error)
+        else:
+            raise AssertionError(f"Edit Bevel must reject a {label} target")
+        cleanup(guarded_target)
+        assert guarded_session.back() is not None
+
+    mode_name = "OperatingLine.EditBevelGuard.EditMode"
+    mode_root = load_temporary_plan(
+        edit_bevel_edges_steps(
+            object_name=mode_name,
+            result_mesh_name=f"{mode_name}.ResultMesh",
+        )
+    )
+    mode_session = DemoSession(mode_root, action_registry(mode_root))
+    mode_session.start()
+    assert mode_session.next() is not None
+    mode_target = bpy.data.objects[mode_name]
+    bpy.context.view_layer.objects.active = mode_target
+    mode_target.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        mode_session.next()
+    except RuntimeError as error:
+        assert "modified" in str(error) or "Object Mode" in str(error)
+    else:
+        raise AssertionError("Edit Bevel must reject Edit Mode targets")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    assert mode_session.back() is not None
+
+    empty_mesh = bpy.data.meshes.new("OperatingLine.EditBevel.Empty")
+    open_mesh = bpy.data.meshes.new("OperatingLine.EditBevel.Open")
+    open_mesh.from_pydata(
+        [(-1.0, -1.0, 0.0), (1.0, -1.0, 0.0), (1.0, 1.0, 0.0)],
+        [],
+        [(0, 1, 2)],
+    )
+    try:
+        for mesh, expected in (
+            (empty_mesh, "nonempty"),
+            (open_mesh, "exactly two adjacent faces"),
+        ):
+            try:
+                _validate_edit_bevel_source(mesh)
+            except ValueError as error:
+                assert expected in str(error)
+            else:
+                raise AssertionError("Edit Bevel must reject unsupported topology")
+    finally:
+        bpy.data.meshes.remove(empty_mesh)
+        bpy.data.meshes.remove(open_mesh)
+
+    _ensure_edit_bevel_topology_is_bounded((8192, 16384, 8192), "boundary")
+    for topology in ((8193, 0, 0), (0, 16385, 0), (0, 0, 8193)):
+        try:
+            _ensure_edit_bevel_topology_is_bounded(topology, "result")
+        except ValueError as error:
+            assert "supported topology limits" in str(error)
+        else:
+            raise AssertionError("Edit Bevel must reject out-of-bounds topology")
+
+    overflow_name = "OperatingLine.EditBevelOverflow"
+    overflow_result_name = f"{overflow_name}.ResultMesh"
+    overflow_steps = edit_bevel_edges_steps(
+        object_name=overflow_name,
+        result_mesh_name=overflow_result_name,
+        segments=16,
+    )
+    overflow_steps[2]["order"] = 3
+    overflow_steps[2]["dependsOn"] = ["edit_bevel.subdivide"]
+    overflow_steps.insert(
+        2,
+        step(
+            "edit_bevel.subdivide",
+            "root",
+            2,
+            depends_on=["edit_bevel.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_subdivide",
+                "arguments": {
+                    "targetId": "edit_bevel.cube",
+                    "resultMeshId": "edit_bevel.cube.subdivided_mesh",
+                    "resultMeshName": f"{overflow_name}.SubdividedMesh",
+                    "cuts": 8,
+                    "smooth": 0.0,
+                },
+            },
+        ),
+    )
+    overflow_root = load_temporary_plan(overflow_steps)
+    overflow_session = DemoSession(
+        overflow_root, action_registry(overflow_root)
+    )
+    overflow_session.start()
+    assert overflow_session.next() is not None
+    assert overflow_session.next() is not None
+    overflow_target = bpy.data.objects[overflow_name]
+    overflow_source = overflow_target.data
+    try:
+        overflow_session.next()
+    except ValueError as error:
+        assert "result exceeds the supported topology limits" in str(error)
+    else:
+        raise AssertionError("Edit Bevel must reject oversized BMesh results")
+    assert overflow_target.data is overflow_source
+    assert bpy.data.meshes.get(overflow_result_name) is None
+    assert "edit_bevel.edges" not in overflow_session.receipts
+    assert overflow_session.back() is not None
+    assert overflow_session.back() is not None
+
+    conflict_steps = edit_bevel_edges_steps(
+        result_mesh_id="edit_bevel.cube.mesh"
+    )
+    conflict_root = load_temporary_plan(conflict_steps)
+    try:
+        action_registry(conflict_root)
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Edit Bevel result IDs must be reserved")
+
+    def gated_steps(result_mesh_id: str) -> list[dict]:
+        result = edit_bevel_edges_steps(
+            object_name="OperatingLine.EditBevelGateCube",
+            result_mesh_name="OperatingLine.EditBevelGateCube.ResultMesh",
+        )
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "mesh_edges_beveled",
+                "parameters": {
+                    "targetId": "edit_bevel.cube",
+                    "resultMeshId": result_mesh_id,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    passing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps("edit_bevel.cube.result_mesh"),
+        }
+    )
+    passing_session = DemoSession(
+        passing_root,
+        action_registry(passing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    passing_session.start()
+    assert passing_session.next() is not None
+    assert passing_session.next() is not None
+    assert passing_session.back() is not None
+    assert passing_session.back() is not None
+
+    failing_root = load_task_tree_data(
+        {
+            "protocolVersion": "1.2.0",
+            "rootStepId": "root",
+            "steps": gated_steps("edit_bevel.cube.wrong_mesh"),
+        }
+    )
+    failing_session = DemoSession(
+        failing_root,
+        action_registry(failing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    failing_session.start()
+    assert failing_session.next() is not None
+    source_mesh = bpy.data.objects["OperatingLine.EditBevelGateCube"].data
+    try:
+        failing_session.next()
+    except RuntimeError as error:
+        assert "Observation gate failed" in str(error)
+    else:
+        raise AssertionError("Wrong beveled mesh IDs must fail the success gate")
+    assert failing_session.active_index == 0
+    assert "edit_bevel.edges" not in failing_session.receipts
+    assert bpy.data.objects["OperatingLine.EditBevelGateCube"].data is source_mesh
+    assert bpy.data.meshes.get("OperatingLine.EditBevelGateCube.ResultMesh") is None
+    assert failing_session.back() is not None
+
+
 def assert_editing_argument_boundaries() -> None:
     assert _normalized_squared_vector_length((1e308, 1e308), 1.1e308) > 1.0
     assert _normalized_squared_vector_length((5e-201, 0.0), 1e-200) < 1.0
@@ -1933,6 +2267,19 @@ def assert_editing_argument_boundaries() -> None:
     )
     assert extrude.polygon_indices == (0, 5)
     assert extrude.translation == (0.0, 0.0, 0.0001)
+    edit_bevel = validate_edit_bevel_edges(
+        {
+            "targetId": "edit.target",
+            "resultMeshId": "edit.beveled.mesh",
+            "resultMeshName": "OperatingLine.BeveledMesh",
+            "width": 0.0001,
+            "segments": 16.0,
+            "profile": 1.0,
+        }
+    )
+    assert edit_bevel.width == 0.0001
+    assert edit_bevel.segments == 16
+    assert edit_bevel.profile == 1.0
     rejected_boundary_translation = [491.34180453259, 870.9668369798349, 0.0]
     try:
         validate_extrude_region(
@@ -2015,6 +2362,55 @@ def assert_editing_argument_boundaries() -> None:
     assert geometry_nodes.scale == (0.0001, 1000.0, 1.0)
 
     invalid_cases = (
+        (
+            validate_edit_bevel_edges,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.beveled.mesh",
+                "resultMeshName": "OperatingLine.BeveledMesh",
+                "width": True,
+                "segments": 3,
+                "profile": 0.5,
+            },
+            "arguments.width",
+        ),
+        (
+            validate_edit_bevel_edges,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.beveled.mesh",
+                "resultMeshName": "OperatingLine.BeveledMesh",
+                "width": 0.2,
+                "segments": True,
+                "profile": 0.5,
+            },
+            "arguments.segments",
+        ),
+        (
+            validate_edit_bevel_edges,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.beveled.mesh",
+                "resultMeshName": "OperatingLine.BeveledMesh",
+                "width": 0.2,
+                "segments": 3,
+                "profile": False,
+            },
+            "arguments.profile",
+        ),
+        (
+            validate_edit_bevel_edges,
+            {
+                "targetId": "edit.target",
+                "resultMeshId": "edit.beveled.mesh",
+                "resultMeshName": "OperatingLine.BeveledMesh",
+                "width": 0.2,
+                "segments": 3,
+                "profile": 0.5,
+                "unexpected": True,
+            },
+            "unsupported fields",
+        ),
         (
             validate_extrude_region,
             {
@@ -6492,6 +6888,7 @@ def main() -> None:
     assert_extrude_region_rejects_modified_source()
     assert_extrude_region_chained_indices()
     assert_extrude_region_observation_success_gate()
+    assert_edit_bevel_edges_round_trip_and_guards()
     assert_triangulate_round_trip_and_guards()
     assert_triangulate_ngon_conflicts_and_boundaries()
     assert_triangulate_observation_success_gate()

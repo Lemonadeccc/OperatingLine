@@ -49,6 +49,9 @@ MAX_EXTRUDE_POLYGONS = 8192
 MAX_EXTRUDE_SELECTED_POLYGONS = 256
 MIN_EXTRUDE_TRANSLATION = 0.0001
 MAX_EXTRUDE_TRANSLATION = 1000.0
+MAX_EDIT_BEVEL_VERTICES = 8192
+MAX_EDIT_BEVEL_EDGES = 16384
+MAX_EDIT_BEVEL_POLYGONS = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +77,16 @@ class ExtrudeRegionDefinition:
     result_mesh_name: str
     polygon_indices: tuple[int, ...]
     translation: tuple[float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class EditBevelEdgesDefinition:
+    target_id: str
+    result_mesh_id: str
+    result_mesh_name: str
+    width: float
+    segments: int
+    profile: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +237,49 @@ def validate_extrude_region(arguments: Mapping[str, Any]) -> ExtrudeRegionDefini
         ),
         polygon_indices=tuple(sorted(polygon_indices)),
         translation=translation,
+    )
+
+
+def validate_edit_bevel_edges(
+    arguments: Mapping[str, Any],
+) -> EditBevelEdgesDefinition:
+    fields = {
+        "targetId",
+        "resultMeshId",
+        "resultMeshName",
+        "width",
+        "segments",
+        "profile",
+    }
+    require_keys(arguments, fields, fields, "arguments")
+    return EditBevelEdgesDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        result_mesh_id=logical_id(
+            arguments["resultMeshId"], "arguments.resultMeshId"
+        ),
+        result_mesh_name=text(
+            arguments["resultMeshName"],
+            "arguments.resultMeshName",
+            prefix="OperatingLine.",
+        ),
+        width=number(
+            arguments["width"],
+            "arguments.width",
+            minimum=0.0001,
+            maximum=100.0,
+        ),
+        segments=integer(
+            arguments["segments"],
+            "arguments.segments",
+            minimum=1,
+            maximum=16,
+        ),
+        profile=number(
+            arguments["profile"],
+            "arguments.profile",
+            minimum=0.0,
+            maximum=1.0,
+        ),
     )
 
 
@@ -639,6 +695,161 @@ def _ensure_extrude_topology_is_bounded(
             f"edges <= {MAX_EXTRUDE_EDGES}, "
             f"polygons <= {MAX_EXTRUDE_POLYGONS}"
         )
+
+
+def _ensure_edit_bevel_topology_is_bounded(
+    topology: tuple[int, int, int], label: str
+) -> None:
+    limits = (
+        MAX_EDIT_BEVEL_VERTICES,
+        MAX_EDIT_BEVEL_EDGES,
+        MAX_EDIT_BEVEL_POLYGONS,
+    )
+    if any(actual > limit for actual, limit in zip(topology, limits)):
+        raise ValueError(
+            f"Edit Bevel {label} exceeds the supported topology limits: "
+            f"vertices <= {MAX_EDIT_BEVEL_VERTICES}, "
+            f"edges <= {MAX_EDIT_BEVEL_EDGES}, "
+            f"polygons <= {MAX_EDIT_BEVEL_POLYGONS}"
+        )
+
+
+def execute_edit_bevel_edges(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: EditBevelEdgesDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, source_mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    if target.mode != "OBJECT":
+        raise RuntimeError("Edit Bevel target must be in Object Mode")
+    if target.modifiers:
+        raise RuntimeError("Edit Bevel target must not have modifiers")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Edit Bevel target must not have shape keys")
+    source_topology = _validate_edit_bevel_source(target.data)
+    ensure_logical_ids_available(registry, (definition.result_mesh_id,))
+    ensure_name_available(bpy.data.meshes, definition.result_mesh_name, "mesh")
+
+    receipt_id = new_receipt_id()
+    created: list[ResourceIdentity] = []
+    mutations: list[MutationRecord] = []
+    try:
+        result_mesh = target.data.copy()
+        result_mesh.name = definition.result_mesh_name
+        result_identity = tag_resource(
+            result_mesh,
+            definition.result_mesh_id,
+            receipt_id,
+            step_id,
+            action.name,
+        )
+        created.append(result_identity)
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(result_mesh)
+            if any(len(edge.link_faces) != 2 for edge in bm.edges):
+                raise ValueError(
+                    "Edit Bevel target must have exactly two adjacent faces per edge"
+                )
+            bmesh.ops.bevel(
+                bm,
+                geom=tuple(bm.edges),
+                offset_type="OFFSET",
+                offset=definition.width,
+                segments=definition.segments,
+                profile=definition.profile,
+                affect="EDGES",
+                clamp_overlap=False,
+                loop_slide=True,
+                mark_seam=False,
+                mark_sharp=False,
+                material=-1,
+                harden_normals=False,
+                face_strength_mode="NONE",
+                miter_outer="SHARP",
+                miter_inner="SHARP",
+                spread=0.1,
+                vmesh_method="ADJ",
+            )
+            bm.normal_update()
+            predicted_topology = (len(bm.verts), len(bm.edges), len(bm.faces))
+            _ensure_edit_bevel_topology_is_bounded(predicted_topology, "result")
+            if not all(
+                result_count > source_count
+                for result_count, source_count in zip(
+                    predicted_topology, source_topology
+                )
+            ):
+                raise RuntimeError("Edit Bevel did not grow the mesh topology")
+            bm.to_mesh(result_mesh)
+        finally:
+            bm.free()
+        result_mesh.update()
+        actual_topology = (
+            len(result_mesh.vertices),
+            len(result_mesh.edges),
+            len(result_mesh.polygons),
+        )
+        _ensure_edit_bevel_topology_is_bounded(actual_topology, "actual result")
+        if actual_topology != predicted_topology:
+            raise RuntimeError("Edit Bevel topology changed during mesh conversion")
+        target.data = result_mesh
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                source_mesh_identity,
+                result_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                result_identity,
+                "mesh_content",
+                None,
+                mesh_content_signature(result_mesh),
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            created,
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        rollback_partial(receipt_id, step_id, action.name, created, mutations, [])
+        raise
+
+
+def _mesh_has_two_faces_per_edge(mesh: bpy.types.Mesh) -> bool:
+    bm = bmesh.new()
+    try:
+        bm.from_mesh(mesh)
+        return all(len(edge.link_faces) == 2 for edge in bm.edges)
+    finally:
+        bm.free()
+
+
+def _validate_edit_bevel_source(
+    mesh: bpy.types.Mesh,
+) -> tuple[int, int, int]:
+    topology = (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
+    _ensure_edit_bevel_topology_is_bounded(topology, "source")
+    if not all(topology):
+        raise ValueError("Edit Bevel target topology must be nonempty")
+    if not _mesh_has_two_faces_per_edge(mesh):
+        raise ValueError(
+            "Edit Bevel target must have exactly two adjacent faces per edge"
+        )
+    return topology
 
 
 def _extrude_region_geometry(

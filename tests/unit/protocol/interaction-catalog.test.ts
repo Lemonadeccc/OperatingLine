@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.23.0');
+    expect(catalog.catalogVersion).toBe('1.24.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -244,7 +244,7 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(16);
+    ).toHaveLength(17);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -272,6 +272,7 @@ describe('interaction catalog protocol', () => {
       '1.21.0',
       '1.22.0',
       '1.23.0',
+      '1.24.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1317,6 +1318,143 @@ describe('interaction catalog protocol', () => {
       'modifierId',
       'modifierName',
     ]);
+    const bevelEdges = recipeFor(catalog, 'blender.mesh.edit_bevel_edges');
+    expect(bevelEdges.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    if (bevelEdges.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic Bevel Edges guidance');
+    }
+    expect(
+      bevelEdges.guidance.steps.map((step) => [step.intent, step.target.kind, step.target.hostId]),
+    ).toEqual([
+      ['navigate', 'workspace', 'Layout'],
+      ['configure', 'semantic', 'operatingline.blender.owned_mesh'],
+      ['navigate', 'mode', 'EDIT_MESH'],
+      ['navigate', 'menu', 'VIEW3D_MT_edit_mesh_edges'],
+      ['execute', 'operator', 'mesh.bevel'],
+      ['configure', 'semantic', 'operatingline.blender.managed_bevel_edges'],
+    ]);
+    expect(
+      bevelEdges.guidance.steps.filter(
+        (step) => step.intent === 'execute' && step.target.kind === 'operator',
+      ),
+    ).toHaveLength(1);
+    const bevelShortcut = bevelEdges.procedureMaterialization?.shortcut;
+    if (bevelShortcut?.availability !== 'available') {
+      throw new Error('Expected Bevel Edges shortcut materialization');
+    }
+    expect(bevelShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      {
+        kind: 'selection',
+        label: 'Active Target',
+        value: 'Exactly one accepted target Mesh object is active and selected',
+      },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'modal_state', label: 'Modal UI', value: 'None' },
+      { kind: 'scene_state', label: 'Modifiers', value: 'None' },
+      { kind: 'scene_state', label: 'Shape Keys', value: 'None' },
+      {
+        kind: 'scene_state',
+        label: 'Closed Manifold',
+        value: 'Every target mesh edge belongs to exactly two faces',
+      },
+      {
+        kind: 'scene_state',
+        label: 'Topology Bounds',
+        value:
+          'Source and projected result topology are within 8192 vertices, 16384 edges, and 8192 polygons',
+      },
+    ]);
+    expect(bevelShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_edge_mode',
+      'shortcut.select_all_edges',
+      'shortcut.bevel_edges',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_bevel_width',
+      'shortcut.set_bevel_segments',
+      'shortcut.set_bevel_profile',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    const bevelSource = bevelShortcut.operations[3];
+    expect(bevelSource).toMatchObject({ kind: 'key_input', keyMode: 'chord', keys: ['CTRL', 'B'] });
+    expect(bevelSource?.parameters.map((parameter) => [parameter.name, parameter.source])).toEqual([
+      ['offset_type', { kind: 'literal', value: 'OFFSET' }],
+      ['offset', { kind: 'literal', value: 0 }],
+      ['profile_type', { kind: 'literal', value: 'SUPERELLIPSE' }],
+      ['segments', { kind: 'literal', value: 1 }],
+      ['profile', { kind: 'literal', value: 0.5 }],
+      ['affect', { kind: 'literal', value: 'EDGES' }],
+      ['clamp_overlap', { kind: 'literal', value: false }],
+      ['loop_slide', { kind: 'literal', value: true }],
+      ['mark_seam', { kind: 'literal', value: false }],
+      ['mark_sharp', { kind: 'literal', value: false }],
+      ['material', { kind: 'literal', value: -1 }],
+      ['harden_normals', { kind: 'literal', value: false }],
+      ['face_strength_mode', { kind: 'literal', value: 'NONE' }],
+      ['miter_outer', { kind: 'literal', value: 'SHARP' }],
+      ['miter_inner', { kind: 'literal', value: 'SHARP' }],
+      ['spread', { kind: 'literal', value: 0.1 }],
+      ['vmesh_method', { kind: 'literal', value: 'ADJ' }],
+      ['release_confirm', { kind: 'literal', value: false }],
+      ['confirm', { kind: 'literal', value: 'ENTER' }],
+    ]);
+    expect(bevelShortcut.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.bevel_edges',
+        expectedOperatorId: 'mesh.bevel',
+      },
+    });
+    expect(
+      bevelShortcut.operations.slice(5, 8).map((operation) => ({
+        target: operation.target,
+        path: operation.path,
+        argumentName:
+          operation.parameters[0]?.source.kind === 'action_argument'
+            ? operation.parameters[0].source.argumentName
+            : undefined,
+      })),
+    ).toEqual([
+      {
+        target: { kind: 'control', hostId: 'mesh.bevel.offset' },
+        path: ['Adjust Last Operation', 'Width'],
+        argumentName: 'width',
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.bevel.segments' },
+        path: ['Adjust Last Operation', 'Segments'],
+        argumentName: 'segments',
+      },
+      {
+        target: { kind: 'control', hostId: 'mesh.bevel.profile' },
+        path: ['Adjust Last Operation', 'Profile Shape'],
+        argumentName: 'profile',
+      },
+    ]);
+    expect(bevelShortcut.operations[8]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(bevelShortcut.operations[9]).toMatchObject({ keys: ['TAB'] });
+    expect(bevelShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1326,6 +1464,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
+      'blender.mesh.edit_bevel_edges',
       'blender.modifier.add_subdivision_surface',
     ]);
     expect(

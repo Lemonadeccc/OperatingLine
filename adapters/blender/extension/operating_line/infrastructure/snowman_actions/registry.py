@@ -8,6 +8,7 @@ from ...domain import ActionSpec, TaskNode, executable_steps
 from .common import COLLECTION_LOGICAL_ID, rollback_receipt, validate_adapter
 from .editing import (
     execute_bevel,
+    execute_edit_bevel_edges,
     execute_extrude_region,
     execute_geometry_nodes_transform,
     execute_solidify,
@@ -15,6 +16,7 @@ from .editing import (
     execute_subdivide,
     execute_triangulate,
     validate_bevel,
+    validate_edit_bevel_edges,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
@@ -151,6 +153,12 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             reserve(step.id, (definition.result_mesh_id,))
             execute = _bind_action(
                 execute_extrude_region, step.id, action, definition
+            )
+        elif action.name == "blender.mesh.edit_bevel_edges":
+            definition = validate_edit_bevel_edges(arguments)
+            reserve(step.id, (definition.result_mesh_id,))
+            execute = _bind_action(
+                execute_edit_bevel_edges, step.id, action, definition
             )
         elif action.name == "blender.modifier.add_bevel":
             definition = validate_bevel(arguments)

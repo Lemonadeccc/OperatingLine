@@ -34,8 +34,8 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.23.0` 与 ActionCatalog `1.13.0` 一一绑定 23 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.22.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.24.0` 与 ActionCatalog `1.14.0` 一一绑定 24 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.23.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -74,7 +74,12 @@ Subdivide 保留 managed copy/swap `semantic_path`，并增加 candidate-only �
 `Ctrl+1` 以 literal `level=1`、`relative=false`、`ensure_modifier=true` 创建默认 modifier，`F9` 打开
 `object.subdivision_set` 的 Adjust Last Operation，Level 绑定 accepted `viewportLevel`，再以 `ENTER`
 结束 surface。`targetId`、`modifierId`、`modifierName` 显式省略；目标版本的 `F3` 搜索路径实测不可用，
-因此未收录。Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
+因此未收录。Edit Mode Bevel 保留 managed replacement Mesh `semantic_path`，并增加 candidate-only
+十步 shortcut：`TAB → 2 → A → Ctrl+B → F9 → Width → Segments → Profile → ENTER → TAB`。
+`Ctrl+B` 固定完整来源 operator 默认值并以内嵌 `ENTER` 确认；三个 F9 控件按序绑定 accepted
+`width`、`segments`、`profile`。`targetId`、`resultMeshId`、`resultMeshName` 显式省略；menu/MCP
+unavailable。原生 operator 就地修改当前 Mesh，不创建 managed replacement identity。
+Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
 `resourceId`；Torus、Cone、Cylinder shortcut unavailable，所有 MCP track 也因没有真实 action-level tool
 而 unavailable。
 Icosphere shortcut 使用 ProcedureTree `1.1.0` / Result `1.3.0`，Cube 与 Plane shortcut 使用 Result
@@ -86,7 +91,10 @@ UI operation replay。Subdivide 的九步真实事件回放在相同版本中验
 mutation 与 managed copy/swap 不等价的证据。Subdivision Surface 的四步轨迹在两个版本分别验证
 level 1/2/3，得到 `26/48/24`、`98/192/96`、`386/768/384` vertices/edges/polygons；render level
 始终为 2，源 Mesh pointer 与 datablock 数量不变。该 UI 默认 modifier 不等价于 managed identity、
-receipt、Observation 与补偿事务。Cube 与
+receipt、Observation 与补偿事务。Edit Mode Bevel 的十步轨迹在两个版本均验证 `width=0.2`、
+`segments=3`、`profile=0.6`，得到 96 vertices、192 edges、98 polygons，且源 Mesh pointer/datablock
+数量不变；harness 只证明已经发送 popup 关闭事件。该原生 in-place mutation 不等价于 managed
+copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件或完整 UI replay；它们保留默认
 未 bake mesh 与 `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`。冻结的
 `1.19.0` 保持 Plane shortcut unavailable。Cone/Cylinder 的 Blender
@@ -100,19 +108,20 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
 [ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。Extension 的严格目录 loader 能解析并
 验证 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；对于
-`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.23.0` 只据双版本
-前台证据启用 Subdivision Surface 的 candidate materialization，不把它升级为 verified execution。
+`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.24.0` 只据双版本
+前台证据启用 Edit Mode Bevel 的 candidate materialization，不把它升级为 verified execution。
 见 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
 [ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md) 与
 [ADR 0059](../adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md) 与
-[ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md)。
+[ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
+[ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md)。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
-材质、骨骼、显式蒙皮权重、动画和渲染等十六条
+材质、骨骼、显式蒙皮权重、动画和渲染等十七条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
-菜单项；Subdivide 与 Subdivision Surface 仅额外提供 candidate shortcut，其菜单仍 unavailable。未来只有新的版本专用 recipe
+菜单项；Subdivide、Edit Mode Bevel 与 Subdivision Surface 仅额外提供 candidate shortcut，其菜单仍 unavailable。未来只有新的版本专用 recipe
 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
 [ADR 0026](../adr/0026-native-cube-action-slice.md) 与
@@ -159,7 +168,7 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异�
 与 Dialogue Run 状态，再把 JSON 放入队列。Provider 的对话 SSE 只在 Runtime 内消费；助手增量先写入
 durable append-only revision，Blender 始终只读取短 JSON 状态。
 网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
-ActionCatalog `1.13.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+ActionCatalog `1.14.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
 Connected。Guide 与状态请求绑定服务端签发的 lease，线程按协商周期发送严格递增心跳；失联、过期、
 Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界
 见 [ADR 0040](../adr/0040-companion-session-leases.md)。这里的 Connected/presence 只表示后台 transport
@@ -184,7 +193,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.13.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.14.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -295,8 +304,8 @@ Request-linked Proposal
 ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
 稳定资源名 `resources/snowman.plan.json`。
 
-当前动作目录 `1.13.0` 允许以下 23 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.12.0` 供精确回放：
+当前动作目录 `1.14.0` 允许以下 24 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.13.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_cube`
@@ -309,6 +318,7 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` �
 - `blender.mesh.edit_subdivide`
 - `blender.mesh.edit_triangulate`
 - `blender.mesh.edit_extrude_region`
+- `blender.mesh.edit_bevel_edges`
 - `blender.modifier.add_bevel`
 - `blender.modifier.add_solidify`
 - `blender.modifier.add_subdivision_surface`
@@ -322,8 +332,9 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` �
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.13.0` 提供十五项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
-subdivide、whole-mesh triangulate、connected face-region extrusion、Bevel Modifier、Solidify Modifier、Subdivision Surface Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
+`1.14.0` 提供十六项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
+subdivide、whole-mesh triangulate、connected face-region extrusion、whole-mesh Edit Mode edge bevel、
+Bevel Modifier、Solidify Modifier、Subdivision Surface Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
 explicit deform skin weights、pose transform keyframes、render scene setup 和 PNG preview output。
 Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
 再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
@@ -351,7 +362,7 @@ Blender datablock、mutation 和渲染产物；资源解析同时核对 `session
 不会从可复制 Scene 标签接管旧执行。Back 仍执行 compare-and-restore 补偿，只是该补偿操作本身也
 可以 Ctrl-Z/Redo。见 [ADR 0031](../adr/0031-blender-native-undo-history.md)。
 
-Edit/Modifier/Geometry Nodes 当前开放七个有界动作：Subdivide 复制源 Mesh、对整网格执行
+Edit/Modifier/Geometry Nodes 当前开放八个有界动作：Subdivide 复制源 Mesh、对整网格执行
 `1..8` cuts 后把对象换链到新 Mesh，源数据保留至回退；Triangulate 以固定 `FIXED` / `EAR_CLIP`
 方法把复制 Mesh 转换为三角面；Bevel 创建一个不应用的 modifier；Solidify
 只接受 `thickness` (`0.0001..100`) 与 `offset` (`-1..1`)，只允许 receipt-tracked 前置 Modifier，且源 Mesh 与
@@ -362,15 +373,18 @@ Edit/Modifier/Geometry Nodes 当前开放七个有界动作：Subdivide 复制�
 Extrude 在 Blender 4.5/5.1 间稳定引用结果 polygon；Subdivision Surface 只接受
 `targetId`、`modifierId`、`modifierName` 与 `viewportLevel: 1..3`，拒绝未跟踪前置 Modifier 和已有
 `SUBSURF`，固定 Catmull-Clark、render level 2、quality 3 与完整可观察属性，并对源、求值输入和最高
-实际 level 的投影输出应用 8192/16384/8192 topology 上限；Geometry
-Nodes 创建固定的 Group Input → Transform Geometry → Group Output 图并通过一个 NODES modifier
+实际 level 的投影输出应用 8192/16384/8192 topology 上限；Edit Mode Bevel 只接受 `width`
+(`0.0001..100`)、`segments` (`1..16`) 与 `profile` (`0..1`)，要求 Object Mode、无 Modifier/Shape Key、
+每条边恰好连接两个面的非空 closed manifold Mesh；它固定其余 BMesh Bevel 属性，对全部边生成受
+8192/16384/8192 上限约束的 replacement Mesh，并要求三项 topology 严格增长；Geometry Nodes 创建固定的 Group Input → Transform Geometry → Group Output 图并通过一个 NODES modifier
 挂载。动作创建的 Mesh 内容、初始 Object→Mesh link、蒙皮后的后继 Mesh 签名、modifier 精确属性和 node graph/interface 签名都参与 compare-and-restore，外部修改
 会保留 receipt 并阻止旧状态覆盖。任意 vertex/edge 选择、互不连通的 face region、任意 Edit Mode operator、其他 modifier 类型和任意
 node graph 仍不在允许列表。见 [ADR 0029](../adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
 [ADR 0037](../adr/0037-bounded-solidify-modifier.md)、
 [ADR 0038](../adr/0038-bounded-edit-triangulate.md) 与
 [ADR 0041](../adr/0041-bounded-edit-extrude-region.md) 与
-[ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md)。
+[ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
+[ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md)。
 
 回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera/Armature data 存在额外
 用户、Material 或 Action 被计划外对象使用、Object 被链接到计划外 Collection，或自有
