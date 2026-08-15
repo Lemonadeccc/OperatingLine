@@ -293,7 +293,7 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `operatingline.plan_and_propose` MCP Prompt、调用 `operatingline.planning.prompt.get` Tool，或直接调用
 `operatingline.planning.context`，取得目标宿主的精确版本化目录、Companion 状态、revision 提示、
 计划约束和目录声明的有序阶段。客户端根据自然语言目标选择 `requiredPhaseIds` 并生成完整
-GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.16.0` 目录提供十八项适配器自有
+GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.17.0` 目录提供十九项适配器自有
 `semanticCapabilities`；capability-aware 规划必须在 `planning.capabilityCoverage` 中声明
 `requirement -> capability -> executable leaf` 链。quality baseline `1.1.0` 除既有阶段树、阶段顺序、
 资源创建与依赖、语义锚点和预期观察外，还确定性检查能力/步骤存在、步骤可执行且 action 属于相应能力。
@@ -326,7 +326,7 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.26.0` 精确绑定 ActionCatalog `1.16.0`，冻结 `1.25.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.27.0` 精确绑定 ActionCatalog `1.17.0`，冻结 `1.26.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
 `subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；九步 candidate shortcut 依次为
@@ -414,13 +414,19 @@ replacement Mesh、receipt、Observation、补偿或原生 Undo。Poke Faces 的
 版本均验证 `offset=0.2`，Cube 从 8/12/6 变为 14/36/24，24 个结果面全部为 selected triangle，
 坐标边界为 ±1.2，Mesh data pointer 与 datablock 数量保持不变。UI RNA 的
 `MEDIAN_WEIGHTED` 与 managed BMesh 路径的 `MEAN_WEIGHTED` 是不同接口的字面量；原生 in-place
-mutation 仍不等价于 managed transaction。Cube 与
+mutation 仍不等价于 managed transaction。Mirror 的七步语义路径记录真实
+`PROPERTIES_MODIFIER → OBJECT_MT_modifier_add → OBJECT_MT_modifier_add_generate →
+object.modifier_add(type=MIRROR)`。Blender 4.5.3/5.1.1 的 Properties/Shift+A 前台回放都创建
+`OBJECT_OT_modifier_add(type=MIRROR, use_selected_objects=false)`，Cube 求值拓扑从 8/12/6 变为
+16/24/12，源 Mesh pointer 与 datablock 数量不变。该上下文别名无法携带 IDs、受管名称、固定 RNA、
+拓扑门、Observation 或回退，menu/shortcut/MCP materialization 因此全部 unavailable。Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
 不是实际键盘事件或完整 UI replay，并保留默认未 bake mesh 与 `scale = size / 2`，不等价于 managed
 executor 的 baked mesh/`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、
 receipt、幂等或补偿语义；
 Cone/Cylinder 的 Blender 4.5/5.1 operator 双版本探针也不是六步 UI replay。历史
-`1.9.0` 至已冻结的 `1.25.0` 继续精确回放；`1.25.0` 中 Poke Faces action 尚不存在。结果格式依实际
+`1.9.0` 至已冻结的 `1.26.0` 继续精确回放；`1.25.0` 中 Poke Faces action 尚不存在，`1.26.0` 中
+Mirror action 尚不存在。结果格式依实际
 使用能力为 `1.0.0`/`1.1.0`/`1.2.0`/`1.3.0`，其中 Icosphere shortcut 结果为 `1.3.0`，Plane、Cube 与
 UV Sphere shortcut 结果为 `1.2.0`，Subdivide shortcut 结果为 `1.3.0`，Torus/Cone/Cylinder menu-only
 结果为 `1.1.0`。该入口
@@ -443,7 +449,8 @@ grounding attestation。完整决策见
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
-[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数
@@ -465,7 +472,8 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
-[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。更多 action 的封闭声明、verified
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
@@ -479,7 +487,7 @@ Orchestrator 不内置模型，也不通过关键词假装理解目标；目标�
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。目录约束 coverage 决策见
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
-节点局部重规划对当前 Blender `1.16.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
+节点局部重规划对当前 Blender `1.17.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
 `1.0.0`。MCP
 `operatingline.replan.prompt.get` 与 HTTP `POST /api/v1/replan/prompt` 从一个仍 pending 的线性 thread
 head 构建相同 packet；其中绑定完整 immutable base Plan、引用节点、精确 ActionCatalog、发起实例最新

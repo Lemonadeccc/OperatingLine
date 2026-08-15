@@ -13,6 +13,7 @@ from .editing import (
     execute_edit_poke_faces,
     execute_extrude_region,
     execute_geometry_nodes_transform,
+    execute_mirror,
     execute_solidify,
     execute_subdivision_surface,
     execute_subdivide,
@@ -23,6 +24,7 @@ from .editing import (
     validate_edit_poke_faces,
     validate_extrude_region,
     validate_geometry_nodes_transform,
+    validate_mirror,
     validate_solidify,
     validate_subdivision_surface,
     validate_subdivide,
@@ -180,6 +182,10 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definition = validate_bevel(arguments)
             reserve(step.id, (definition.modifier_id,))
             execute = _bind_action(execute_bevel, step.id, action, definition)
+        elif action.name == "blender.modifier.add_mirror":
+            definition = validate_mirror(arguments)
+            reserve(step.id, (definition.modifier_id,))
+            execute = _bind_action(execute_mirror, step.id, action, definition)
         elif action.name == "blender.modifier.add_solidify":
             definition = validate_solidify(arguments)
             reserve(step.id, (definition.modifier_id,))

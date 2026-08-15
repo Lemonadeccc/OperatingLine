@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.26.0');
+    expect(catalog.catalogVersion).toBe('1.27.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -244,7 +244,7 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(19);
+    ).toHaveLength(20);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -275,6 +275,7 @@ describe('interaction catalog protocol', () => {
       '1.24.0',
       '1.25.0',
       '1.26.0',
+      '1.27.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1624,6 +1625,46 @@ describe('interaction catalog protocol', () => {
       'resultMeshId',
       'resultMeshName',
     ]);
+    const mirror = recipeFor(catalog, 'blender.modifier.add_mirror');
+    if (mirror.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic Mirror guidance');
+    }
+    expect(mirror.guidance.steps.map((step) => step.label)).toEqual([
+      'Layout',
+      'Owned Mesh',
+      'Modifiers',
+      'Add Modifier',
+      'Generate',
+      'Mirror',
+      'Managed Mirror Contract',
+    ]);
+    expect(mirror.guidance.steps.map((step) => [step.target.kind, step.target.hostId])).toEqual([
+      ['workspace', 'Layout'],
+      ['semantic', 'operatingline.blender.owned_mesh'],
+      ['panel', 'PROPERTIES_MODIFIER'],
+      ['menu', 'OBJECT_MT_modifier_add'],
+      ['menu', 'OBJECT_MT_modifier_add_generate'],
+      ['operator', 'object.modifier_add'],
+      ['semantic', 'operatingline.blender.mirror_modifier'],
+    ]);
+    expect(mirror.guidance.reason).toContain('type=MIRROR');
+    expect(mirror.guidance.manualReference).toBe(
+      'https://docs.blender.org/manual/en/4.5/modeling/modifiers/generate/mirror.html',
+    );
+    expect(mirror.procedureMaterialization).toEqual({
+      menu: {
+        availability: 'unavailable',
+        reason: expect.stringContaining('managed modifier identity'),
+      },
+      shortcut: {
+        availability: 'unavailable',
+        reason: expect.stringContaining('Shift+A'),
+      },
+      mcp: {
+        availability: 'unavailable',
+        reason: 'No approved action-level MCP tool is available.',
+      },
+    });
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1637,6 +1678,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.edit_inset_faces',
       'blender.mesh.edit_poke_faces',
       'blender.modifier.add_subdivision_surface',
+      'blender.modifier.add_mirror',
     ]);
     expect(
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),

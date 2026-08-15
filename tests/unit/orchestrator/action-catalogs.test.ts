@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.16.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.17.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.14.0' }).catalogVersion,
     ).toBe('1.14.0');
@@ -151,7 +151,9 @@ describe('action catalog registry', () => {
     );
 
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.16.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.planningNotes = frozen.planningNotes;
     active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
@@ -162,6 +164,30 @@ describe('action catalog registry', () => {
     );
     active.actions = active.actions.filter(
       (action) => action.name !== 'blender.mesh.edit_poke_faces',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.16.0 and changes only Mirror modifier coverage in 1.17.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.16.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '59e6ff9c6df157fdef8a78f1655b309b87c70fe69751fff4d813ce37f8251a2b',
+    );
+
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.planningNotes = frozen.planningNotes;
+    active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
+      (actionName) => actionName !== 'blender.modifier.add_mirror',
+    );
+    active.semanticCapabilities = active.semanticCapabilities?.filter(
+      (capability) => capability.id !== 'geometry.mirror_modifier',
+    );
+    active.actions = active.actions.filter(
+      (action) => action.name !== 'blender.modifier.add_mirror',
     );
     expect(active).toEqual(frozen);
   });

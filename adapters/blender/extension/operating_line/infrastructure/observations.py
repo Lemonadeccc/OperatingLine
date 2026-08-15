@@ -1173,6 +1173,7 @@ def _modifier_ready(
         "showRender",
         "showInEditMode",
         "showOnCage",
+        "axis",
     }
     target_id = parameters.get("targetId")
     modifier_id = parameters.get("modifierId")
@@ -1185,7 +1186,42 @@ def _modifier_ready(
         if isinstance(modifier_id, str)
         else None
     )
+    owned_modifier_intact = found is not None
     owner, modifier = found if found is not None else (None, None)
+    if found is None and isinstance(modifier_id, str):
+        modifier_mutation = next(
+            (
+                mutation
+                for receipt in receipts.values()
+                for mutation in receipt.mutations
+                if mutation.attribute == f"modifier:{modifier_id}"
+            ),
+            None,
+        )
+        raw_owner = (
+            resolve_resource(modifier_mutation.resource)
+            if modifier_mutation is not None
+            else None
+        )
+        pointer = getattr(
+            modifier_mutation.after if modifier_mutation is not None else None,
+            "pointer",
+            None,
+        )
+        raw_modifier = (
+            next(
+                (
+                    candidate
+                    for candidate in raw_owner.modifiers
+                    if candidate.as_pointer() == pointer
+                ),
+                None,
+            )
+            if isinstance(raw_owner, bpy.types.Object)
+            else None
+        )
+        if raw_modifier is not None:
+            owner, modifier = raw_owner, raw_modifier
     properties_match = not bool(set(parameters).difference(allowed_parameters))
     solidify_parameters = {
         "thickness",
@@ -1220,6 +1256,15 @@ def _modifier_ready(
             properties_match
             and subdivision_surface_parameters.issubset(parameters)
         )
+    if modifier_type == "MIRROR":
+        properties_match = properties_match and set(parameters) == {
+            "targetId",
+            "modifierId",
+            "modifierType",
+            "axis",
+        }
+    elif "axis" in parameters:
+        properties_match = False
     if modifier is not None:
         numeric_properties = {
             "width": "width",
@@ -1313,10 +1358,143 @@ def _modifier_ready(
                 and hasattr(modifier, property_name)
                 and str(getattr(modifier, property_name)) == expected
             )
+    expected_mirror_axis = parameters.get("axis")
+    actual_mirror_axis = None
+    mirror_fixed_state_matches = False
+    mirror_object_absent = False
+    source_content_intact = False
+    evaluated_topology = (0, 0, 0)
+    evaluated_finite = False
+    evaluated_within_limits = False
+    if modifier_type == "MIRROR" and modifier is not None:
+        expected_axis = {
+            "X": (True, False, False),
+            "Y": (False, True, False),
+            "Z": (False, False, True),
+        }.get(expected_mirror_axis)
+        actual_axis_values = tuple(bool(value) for value in modifier.use_axis)
+        actual_mirror_axis = {
+            (True, False, False): "X",
+            (False, True, False): "Y",
+            (False, False, True): "Z",
+        }.get(actual_axis_values)
+        mirror_object_absent = modifier.mirror_object is None
+        mirror_fixed_state_matches = bool(
+            expected_axis is not None
+            and actual_axis_values == expected_axis
+            and tuple(bool(value) for value in modifier.use_bisect_axis)
+            == (False, False, False)
+            and tuple(bool(value) for value in modifier.use_bisect_flip_axis)
+            == (False, False, False)
+            and modifier.use_clip is False
+            and modifier.use_mirror_merge is True
+            and math.isclose(float(modifier.merge_threshold), 0.001, abs_tol=1e-9)
+            and math.isclose(float(modifier.bisect_threshold), 0.001, abs_tol=1e-9)
+            and mirror_object_absent
+            and modifier.use_mirror_vertex_groups is True
+            and modifier.use_mirror_u is False
+            and modifier.use_mirror_v is False
+            and modifier.use_mirror_udim is False
+            and math.isclose(float(modifier.offset_u), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.offset_v), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.mirror_offset_u), 0.0, abs_tol=1e-9)
+            and math.isclose(float(modifier.mirror_offset_v), 0.0, abs_tol=1e-9)
+            and modifier.show_viewport is True
+            and modifier.show_render is True
+            and modifier.show_in_editmode is True
+            and modifier.show_on_cage is False
+            and (
+                not hasattr(modifier, "use_apply_on_spline")
+                or modifier.use_apply_on_spline is False
+            )
+        )
+        owning_receipt = next(
+            (
+                receipt
+                for receipt in receipts.values()
+                if any(
+                    mutation.attribute == f"modifier:{modifier_id}"
+                    and getattr(mutation.after, "pointer", None)
+                    == modifier.as_pointer()
+                    for mutation in receipt.mutations
+                )
+            ),
+            None,
+        )
+        if owning_receipt is not None:
+            data_guard = next(
+                (
+                    mutation
+                    for mutation in owning_receipt.mutations
+                    if mutation.attribute == "data"
+                    and mutation.before == mutation.after
+                ),
+                None,
+            )
+            source_guard = next(
+                (
+                    mutation
+                    for mutation in owning_receipt.mutations
+                    if mutation.attribute == "mesh_content"
+                    and mutation.before == mutation.after
+                ),
+                None,
+            )
+            source_mesh = (
+                resolve_resource(source_guard.resource)
+                if source_guard is not None
+                else None
+            )
+            source_content_intact = bool(
+                isinstance(source_mesh, bpy.types.Mesh)
+                and data_guard is not None
+                and resolve_resource(data_guard.after) is source_mesh
+                and isinstance(target, bpy.types.Object)
+                and target.data is source_mesh
+                and mesh_content_signature(source_mesh) == source_guard.after
+            )
+        if isinstance(target, bpy.types.Object):
+            try:
+                evaluated = target.evaluated_get(
+                    bpy.context.evaluated_depsgraph_get()
+                )
+                evaluated_mesh = evaluated.to_mesh()
+                try:
+                    evaluated_topology = (
+                        len(evaluated_mesh.vertices),
+                        len(evaluated_mesh.edges),
+                        len(evaluated_mesh.polygons),
+                    )
+                    evaluated_finite = bool(
+                        all(evaluated_topology)
+                        and all(
+                            math.isfinite(component)
+                            for vertex in evaluated_mesh.vertices
+                            for component in vertex.co
+                        )
+                    )
+                    evaluated_within_limits = all(
+                        actual <= limit
+                        for actual, limit in zip(
+                            evaluated_topology, (8192, 16384, 8192)
+                        )
+                    )
+                finally:
+                    evaluated.to_mesh_clear()
+            except RuntimeError:
+                pass
+        properties_match = bool(
+            properties_match
+            and mirror_fixed_state_matches
+            and source_content_intact
+            and evaluated_finite
+            and evaluated_within_limits
+        )
     satisfied = bool(
         isinstance(target, bpy.types.Object)
         and owner is target
         and modifier is not None
+        and owned_modifier_intact
         and isinstance(modifier_type, str)
         and modifier.type == modifier_type
         and properties_match
@@ -1326,6 +1504,18 @@ def _modifier_ready(
         "modifierId": modifier_id if isinstance(modifier_id, str) else None,
         "modifierType": modifier.type if modifier is not None else None,
         "propertiesMatch": properties_match,
+        "axis": actual_mirror_axis,
+        "expectedAxis": (
+            expected_mirror_axis if isinstance(expected_mirror_axis, str) else None
+        ),
+        "mirrorFixedStateMatches": mirror_fixed_state_matches,
+        "mirrorObjectAbsent": mirror_object_absent,
+        "sourceContentIntact": source_content_intact,
+        "evaluatedVertexCount": evaluated_topology[0],
+        "evaluatedEdgeCount": evaluated_topology[1],
+        "evaluatedFaceCount": evaluated_topology[2],
+        "evaluatedFinite": evaluated_finite,
+        "evaluatedWithinLimits": evaluated_within_limits,
     }
 
 

@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.16.0');
+    expect(catalog.catalogVersion).toBe('1.17.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -39,6 +39,7 @@ describe('action catalog protocol', () => {
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
       'blender.modifier.add_subdivision_surface',
+      'blender.modifier.add_mirror',
       'blender.geometry_nodes.create_transform',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
@@ -71,6 +72,7 @@ describe('action catalog protocol', () => {
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
       'geometry.subdivision_surface_modifier',
+      'geometry.mirror_modifier',
       'geometry_nodes.transform',
       'appearance.principled_palette',
       'animation.rigid_armature',
@@ -99,6 +101,7 @@ describe('action catalog protocol', () => {
       '1.14.0',
       '1.15.0',
       '1.16.0',
+      '1.17.0',
     ]);
   });
 
@@ -735,6 +738,50 @@ describe('action catalog protocol', () => {
         subdivisionSurfaceSchema,
       ),
     ).toEqual(['viewportLevel must be at most 3']);
+    const mirrorSchema = schemaFor('blender.modifier.add_mirror');
+    const mirrorAction = blenderActionCatalog.actions.find(
+      (action) => action.name === 'blender.modifier.add_mirror',
+    );
+    expect(mirrorAction).toMatchObject({
+      resourceEffects: [
+        { access: 'mutate', resourceType: 'OBJECT', argumentPath: 'targetId' },
+        { access: 'create', resourceType: 'MODIFIER', argumentPath: 'modifierId' },
+      ],
+      supportedAnchorKinds: ['object', 'owned_control', 'unavailable'],
+      supportedObservationKinds: ['modifier_ready'],
+      rollbackModes: ['compensating_action'],
+    });
+    expect(mirrorAction?.description).toContain('use_mirror_vertex_groups=true');
+    expect(mirrorAction?.description).toContain('use_mirror_udim=false');
+    expect(mirrorAction?.description).toContain('mirror_object=null');
+    expect(mirrorAction?.description).toContain('show_in_editmode=true');
+    expect(mirrorSchema.additionalProperties).toBe(false);
+    expect(mirrorSchema.required).toEqual(['targetId', 'modifierId', 'modifierName', 'axis']);
+    expect(Object.keys(mirrorSchema.properties)).toEqual(mirrorSchema.required);
+    for (const axis of ['X', 'Y', 'Z']) {
+      expect(
+        validateActionArguments(
+          {
+            targetId: 'model.body',
+            modifierId: 'model.body.mirror',
+            modifierName: 'OperatingLine.Body.Mirror',
+            axis,
+          },
+          mirrorSchema,
+        ),
+      ).toEqual([]);
+    }
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.mirror',
+          modifierName: 'OperatingLine.Body.Mirror',
+          axis: 'XY',
+        },
+        mirrorSchema,
+      ),
+    ).toEqual(['axis must be one of the allowed values']);
     expect(
       validateActionArguments(
         {

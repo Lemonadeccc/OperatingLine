@@ -359,6 +359,67 @@ function subdivisionSurfaceAuthoringCandidateFixture(
   return tree;
 }
 
+function mirrorAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Mirror authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_mirror',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.mirror',
+      modifierName: 'OperatingLine.Cube.Mirror',
+      axis: 'Y',
+    },
+  };
+  leaf['title'] = 'Add a bounded Mirror modifier';
+  leaf['intent'] = 'Add a managed Mirror modifier on the local Y axis.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'add_mirror_modifier',
+    description: 'Add one Mirror modifier to the accepted Cube.',
+    parameters: { axis: 'Y' },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Track the managed Mirror modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.mirror',
+      modifierName: 'OperatingLine.Cube.Mirror',
+    },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.mirror',
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'modifier_ready',
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.mirror',
+      modifierType: 'MIRROR',
+      axis: 'Y',
+    },
+  };
+  return tree;
+}
+
 function editBevelAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1171,7 +1232,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.26.0' },
+        catalogBinding: { interactionCatalogVersion: '1.27.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2495,7 +2556,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.26.0' },
+        catalogBinding: { interactionCatalogVersion: '1.27.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2553,6 +2614,104 @@ describe('procedure compilation runtime', () => {
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
         actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('keeps the active Mirror procedure structural-only and non-executing', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Mirror the accepted Cube on its local Y axis.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: mirrorAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Mirror materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Mirror leaf');
+      }
+      expect(materialization).toMatchObject({
+        formatVersion: '1.0.0',
+        catalogBinding: {
+          actionCatalogVersion: '1.17.0',
+          interactionCatalogVersion: '1.27.0',
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.modifier.add_mirror.semantic',
+            menu: 'unavailable',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.mirror',
+        modifierName: 'OperatingLine.Cube.Mirror',
+        axis: 'Y',
+      });
+      expect(leaf.expectedObservations).toEqual([
+        {
+          kind: 'modifier_ready',
+          parameters: {
+            targetId: 'tutorial.cube',
+            modifierId: 'tutorial.cube.mirror',
+            modifierType: 'MIRROR',
+            axis: 'Y',
+          },
+        },
+      ]);
+      expect(leaf.menuTracks).toEqual([expect.objectContaining({ availability: 'unavailable' })]);
+      expect(leaf.shortcutTracks).toEqual([
+        expect.objectContaining({ availability: 'unavailable' }),
+      ]);
+      expect(leaf.mcpTracks).toEqual([expect.objectContaining({ availability: 'unavailable' })]);
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: '1.17.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2747,8 +2906,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.16.0',
-          interactionCatalogVersion: '1.26.0',
+          actionCatalogVersion: '1.17.0',
+          interactionCatalogVersion: '1.27.0',
         },
         coverage: [
           {
@@ -2862,7 +3021,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.16.0',
+        actionCatalogVersion: '1.17.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2919,8 +3078,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.16.0',
-          interactionCatalogVersion: '1.26.0',
+          actionCatalogVersion: '1.17.0',
+          interactionCatalogVersion: '1.27.0',
         },
         coverage: [
           {
@@ -3035,7 +3194,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.16.0',
+        actionCatalogVersion: '1.17.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3090,8 +3249,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.16.0',
-          interactionCatalogVersion: '1.26.0',
+          actionCatalogVersion: '1.17.0',
+          interactionCatalogVersion: '1.27.0',
         },
         coverage: [
           {
@@ -3178,7 +3337,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.16.0',
+        actionCatalogVersion: '1.17.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3799,7 +3958,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.16.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.17.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

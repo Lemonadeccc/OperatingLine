@@ -57,6 +57,14 @@ FROZEN_ACTION_CATALOG_115_PATH = (
     / "v1"
     / "action-catalog-1.15.0.json"
 )
+FROZEN_ACTION_CATALOG_116_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "action-catalog-1.16.0.json"
+)
 load_interaction_catalog = catalog_module.load_interaction_catalog
 
 
@@ -291,13 +299,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.26.0")
-        self.assertEqual(catalog.action_catalog_version, "1.16.0")
+        self.assertEqual(catalog.catalog_version, "1.27.0")
+        self.assertEqual(catalog.action_catalog_version, "1.17.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
         )
-        self.assertEqual(len(catalog.recipes), 26)
+        self.assertEqual(len(catalog.recipes), 27)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -327,7 +335,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 recipe.guidance.kind is InteractionPathKind.SEMANTIC
                 for recipe in catalog.recipes
             ),
-            19,
+            20,
         )
         subdivision_surface = next(
             recipe
@@ -485,6 +493,56 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             subdivision_materialization.mcp.availability, "unavailable"
+        )
+        mirror = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.modifier.add_mirror"
+        )
+        self.assertEqual(
+            tuple(step.label for step in mirror.guidance.steps),
+            (
+                "Layout",
+                "Owned Mesh",
+                "Modifiers",
+                "Add Modifier",
+                "Generate",
+                "Mirror",
+                "Managed Mirror Contract",
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                (step.target_kind, step.target_id)
+                for step in mirror.guidance.steps
+            ),
+            (
+                ("workspace", "Layout"),
+                ("semantic", "operatingline.blender.owned_mesh"),
+                ("panel", "PROPERTIES_MODIFIER"),
+                ("menu", "OBJECT_MT_modifier_add"),
+                ("menu", "OBJECT_MT_modifier_add_generate"),
+                ("operator", "object.modifier_add"),
+                ("semantic", "operatingline.blender.mirror_modifier"),
+            ),
+        )
+        self.assertIn("type=MIRROR", mirror.guidance.reason)
+        self.assertEqual(
+            mirror.guidance.manual_reference,
+            "https://docs.blender.org/manual/en/4.5/modeling/modifiers/generate/mirror.html",
+        )
+        self.assertIsNotNone(mirror.procedure_materialization)
+        assert mirror.procedure_materialization is not None
+        self.assertEqual(
+            (
+                mirror.procedure_materialization.menu.availability,
+                mirror.procedure_materialization.shortcut.availability,
+                mirror.procedure_materialization.mcp.availability,
+            ),
+            ("unavailable", "unavailable", "unavailable"),
+        )
+        self.assertIn(
+            "Shift+A", mirror.procedure_materialization.shortcut.reason
         )
         sphere = next(
             recipe
@@ -1511,6 +1569,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.edit_inset_faces",
                     "blender.mesh.edit_poke_faces",
                     "blender.modifier.add_subdivision_surface",
+                    "blender.modifier.add_mirror",
                 }
             )
         )
@@ -1941,6 +2000,38 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertFalse(
             any(
                 recipe.action_name == "blender.mesh.edit_poke_faces"
+                for recipe in frozen.recipes
+            )
+        )
+
+    def test_loads_byte_frozen_poke_catalog_without_mirror_modifier(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.26.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_116_PATH
+        )
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "8ea27f1162b32d9d542c8b417a26f14cfb9ed7b8c7fa624af65b143e16c481fc",
+        )
+        self.assertEqual(frozen.catalog_version, "1.26.0")
+        self.assertEqual(frozen.action_catalog_version, "1.16.0")
+        self.assertTrue(
+            any(
+                recipe.action_name == "blender.mesh.edit_poke_faces"
+                for recipe in frozen.recipes
+            )
+        )
+        self.assertFalse(
+            any(
+                recipe.action_name == "blender.modifier.add_mirror"
                 for recipe in frozen.recipes
             )
         )

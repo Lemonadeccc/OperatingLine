@@ -384,7 +384,7 @@ describe('OperatingLine runtime', () => {
         planningPhases?: Array<{ id?: string }>;
       };
       expect(catalog).toMatchObject({ catalogVersion });
-      expect(catalog.actions).toHaveLength(26);
+      expect(catalog.actions).toHaveLength(27);
       expect(catalog.actions?.map((action) => action.name)).toEqual(
         blenderActionCatalog.actions.map((action) => action.name),
       );

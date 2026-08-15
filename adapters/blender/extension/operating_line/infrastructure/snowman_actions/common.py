@@ -151,6 +151,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.edit_inset_faces",
         "blender.mesh.edit_poke_faces",
         "blender.modifier.add_bevel",
+        "blender.modifier.add_mirror",
         "blender.modifier.add_solidify",
         "blender.modifier.add_subdivision_surface",
         "blender.geometry_nodes.create_transform",

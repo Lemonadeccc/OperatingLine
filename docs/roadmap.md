@@ -24,8 +24,8 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.26.0` 与 ActionCatalog `1.16.0` 一一覆盖 26 个动作，历史 `1.9.0` 至已冻结的 `1.25.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
-      4.5/5.1 验证的 `native_path`，其他十九个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      `1.27.0` 与 ActionCatalog `1.17.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.26.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -38,7 +38,8 @@
       [ADR 0060](adr/0060-bounded-subdivision-surface-modifier.md) 与
       [ADR 0061](adr/0061-bounded-edit-mode-bevel-edges.md) 与
       [ADR 0062](adr/0062-bounded-individual-inset-faces.md) 与
-      [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+      [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md) 与
+      [ADR 0064](adr/0064-bounded-mirror-modifier.md)。
 - [x] 雪人教学粒度：revision 5 把眼睛、鼻子、五个嘴点、三个纽扣和两条手臂拆成一部件一叶节点；
       ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
       Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
@@ -131,6 +132,17 @@
       `TAB → 3 → A → F3(query="poke faces") → ENTER → F9 → Offset → ENTER → TAB` 九步 candidate
       shortcut；menu/MCP unavailable，且原生 in-place mutation 不等价于 managed replacement
       transaction。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+- [x] Blender 有界单轴 Mirror Modifier：ActionCatalog `1.17.0` 冻结 `1.16.0`，新增
+      `blender.modifier.add_mirror` 与 `geometry.mirror_modifier`。动作只接受 `targetId`、`modifierId`、
+      受管名称和单一 `X/Y/Z` 本地轴；要求 Object Mode、无 Shape Key、全部前置 Modifier 均 receipt-tracked、
+      不存在既有 MIRROR，并限制源、evaluated input、两倍投影和真实 evaluated output 为
+      8192/16384/8192。merge 固定为 true 且 threshold 0.001，bisect/flip/clip/UV/UDIM 关闭，offsets 归零，
+      Mirror Object 为空、vertex-group mirroring 开启。receipt 同时保护完整 ModifierState、Object→Mesh
+      绑定与源 Mesh 内容；严格 `modifier_ready` Observation、fail-closed Back 和原生 Undo/Redo 已在
+      Blender 4.5.3/5.1.1 验证。InteractionCatalog `1.27.0` 冻结 `1.26.0`，保存
+      `Layout → Owned Mesh → Modifiers → Add Modifier → Generate → Mirror → Managed Mirror Contract`
+      七步语义路径；真实 Properties/Shift+A 前台回放只证明原生菜单别名，menu/shortcut/MCP materialization
+      均 unavailable。见 [ADR 0064](adr/0064-bounded-mirror-modifier.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -148,7 +160,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.16.0` 提供十八项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.17.0` 提供十九项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -437,6 +449,14 @@
           `Alt+P` 不进入默认轨迹。menu/MCP unavailable，三个 managed identity 参数显式省略；轨迹仍为
           candidate/structural-only，不声称与 managed replacement Mesh、Observation、补偿或原生 Undo
           等价。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+    - [x] Mirror Modifier 原生菜单别名证据：InteractionCatalog `1.27.0` 绑定 ActionCatalog `1.17.0`，
+          冻结 `1.26.0`，并保存 Properties Modifier context 下
+          `Add Modifier → Generate → Mirror` 的真实 Host 菜单与 operator 标识。Blender 4.5.3/5.1.1
+          的前台 event replay 都通过 `Shift+A` 打开 Add Modifier、筛选并选择 Mirror，验证
+          `OBJECT_OT_modifier_add(type=MIRROR, use_selected_objects=false)`、完整默认 RNA、Cube
+          `8/12/6 → 16/24/12`，以及源 Mesh pointer/datablock 数量不变。该上下文别名无法携带 IDs、
+          受管名称、安全门、Observation 或回退合同，故 menu/shortcut/MCP 仍全部 unavailable，不生成
+          candidate operation 数组。见 [ADR 0064](adr/0064-bounded-mirror-modifier.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

@@ -110,6 +110,7 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.edit
     _ensure_edit_inset_topology_is_bounded,
     _ensure_edit_poke_topology_is_bounded,
     _ensure_extrude_topology_is_bounded,
+    _ensure_mirror_input_is_bounded,
     _ensure_triangulate_topology_is_bounded,
     _extrude_region_geometry,
     _normalized_squared_vector_length,
@@ -120,6 +121,7 @@ from operating_line_extension.operating_line.infrastructure.snowman_actions.edit
     validate_edit_bevel_edges,
     validate_edit_inset_faces,
     validate_edit_poke_faces,
+    validate_mirror,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
@@ -1007,6 +1009,7 @@ def assert_solidify_round_trip_and_conflicts() -> None:
         ("useEvenOffset", 1),
         ("useRim", "true"),
         ("useRimOnly", 0),
+        ("axis", "X"),
         ("unexpected", True),
     ):
         malformed = observation_module.evaluate_observations(
@@ -7592,6 +7595,581 @@ def assert_dialogue_proposal_first_failure_promotes_review() -> None:
     controller._transport = None
 
 
+def assert_mirror_round_trip_and_guards() -> None:
+    base_arguments = {
+        "targetId": "mirror.cube",
+        "modifierId": "mirror.cube.modifier",
+        "modifierName": "OperatingLine.MirrorCube.Mirror",
+        "axis": "X",
+    }
+    assert validate_mirror(base_arguments).axis == "X"
+    for malformed in (
+        {key: value for key, value in base_arguments.items() if key != "axis"},
+        {**base_arguments, "axis": "XY"},
+        {**base_arguments, "axis": 0},
+        {**base_arguments, "extra": True},
+        {**base_arguments, "modifierName": "Unmanaged.Mirror"},
+    ):
+        try:
+            validate_mirror(malformed)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Malformed Mirror args accepted: {malformed}")
+
+    guard_mesh = bpy.data.meshes.new("OperatingLine.MirrorDirectGuard.Mesh")
+    guard_mesh.from_pydata(
+        [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        [],
+        [(0, 1, 2)],
+    )
+    guard_mesh.update()
+    direct_guard = bpy.data.objects.new(
+        "OperatingLine.MirrorDirectGuard", guard_mesh
+    )
+    bpy.context.scene.collection.objects.link(direct_guard)
+    try:
+        direct_guard.shape_key_add(name="Basis")
+        try:
+            _ensure_mirror_input_is_bounded({}, direct_guard)
+        except RuntimeError as error:
+            assert "shape keys" in str(error)
+        else:
+            raise AssertionError("Mirror must reject shape keys")
+        direct_guard.shape_key_clear()
+        bpy.context.view_layer.objects.active = direct_guard
+        direct_guard.select_set(True)
+        bpy.ops.object.mode_set(mode="EDIT")
+        try:
+            _ensure_mirror_input_is_bounded({}, direct_guard)
+        except RuntimeError as error:
+            assert "Object Mode" in str(error)
+        else:
+            raise AssertionError("Mirror must reject Edit Mode targets")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        direct_guard.data.vertices[0].co.x = float("nan")
+        direct_guard.data.update()
+        try:
+            _ensure_mirror_input_is_bounded({}, direct_guard)
+        except ValueError as error:
+            assert "finite" in str(error)
+        else:
+            raise AssertionError("Mirror must reject non-finite source geometry")
+        direct_guard.data.vertices[0].co.x = 0.0
+        direct_guard.data.update()
+        direct_guard.data.clear_geometry()
+        direct_guard.data.update()
+        try:
+            _ensure_mirror_input_is_bounded({}, direct_guard)
+        except ValueError as error:
+            assert "nonempty" in str(error)
+        else:
+            raise AssertionError("Mirror must reject empty source geometry")
+    finally:
+        if direct_guard.mode != "OBJECT":
+            bpy.context.view_layer.objects.active = direct_guard
+            bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.data.objects.remove(direct_guard, do_unlink=True)
+        if guard_mesh.users == 0:
+            bpy.data.meshes.remove(guard_mesh)
+
+    def plan_steps(
+        *,
+        axis: str = "X",
+        object_name: str = "OperatingLine.MirrorCube",
+        arguments: dict | None = None,
+    ) -> list[dict]:
+        mirror_arguments = {
+            **base_arguments,
+            "axis": axis,
+            "modifierName": f"{object_name}.Mirror",
+        }
+        return [
+            step("root", None, 0),
+            step(
+                "mirror.cube",
+                "root",
+                1,
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.mesh.create_cube",
+                    "arguments": {
+                        "resourceId": "mirror.cube",
+                        "objectName": object_name,
+                        "size": 2.0,
+                        "location": [0.0, 0.0, 0.0],
+                    },
+                },
+            ),
+            step(
+                "mirror.modifier",
+                "root",
+                2,
+                depends_on=["mirror.cube"],
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.modifier.add_mirror",
+                    "arguments": arguments or mirror_arguments,
+                },
+            ),
+        ]
+
+    for axis_index, axis in enumerate(("X", "Y", "Z")):
+        object_name = f"OperatingLine.Mirror{axis}Cube"
+        root = load_temporary_plan(plan_steps(axis=axis, object_name=object_name))
+        session = DemoSession(root, action_registry(root))
+        session.start()
+        assert session.next() is not None
+        target = bpy.data.objects[object_name]
+        source_mesh = target.data
+        mesh_count = len(bpy.data.meshes)
+        source_signature = mesh_content_signature(source_mesh)
+        assert session.next() is not None
+        modifier = target.modifiers[f"{object_name}.Mirror"]
+        assert modifier.type == "MIRROR"
+        assert tuple(modifier.use_axis) == tuple(
+            index == axis_index for index in range(3)
+        )
+        assert tuple(modifier.use_bisect_axis) == (False, False, False)
+        assert tuple(modifier.use_bisect_flip_axis) == (False, False, False)
+        assert modifier.use_clip is False
+        assert modifier.use_mirror_merge is True
+        assert math.isclose(modifier.merge_threshold, 0.001, abs_tol=1e-9)
+        assert math.isclose(modifier.bisect_threshold, 0.001, abs_tol=1e-9)
+        assert modifier.mirror_object is None
+        assert modifier.use_mirror_vertex_groups is True
+        assert modifier.use_mirror_u is False
+        assert modifier.use_mirror_v is False
+        assert modifier.use_mirror_udim is False
+        assert math.isclose(modifier.offset_u, 0.0, abs_tol=1e-9)
+        assert math.isclose(modifier.offset_v, 0.0, abs_tol=1e-9)
+        assert math.isclose(modifier.mirror_offset_u, 0.0, abs_tol=1e-9)
+        assert math.isclose(modifier.mirror_offset_v, 0.0, abs_tol=1e-9)
+        assert modifier.show_viewport is True
+        assert modifier.show_render is True
+        assert modifier.show_in_editmode is True
+        assert modifier.show_on_cage is False
+        if hasattr(modifier, "use_apply_on_spline"):
+            assert modifier.use_apply_on_spline is False
+        assert target.data is source_mesh
+        assert mesh_content_signature(source_mesh) == source_signature
+        assert len(bpy.data.meshes) == mesh_count
+        evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        evaluated_mesh = evaluated.to_mesh()
+        try:
+            assert (
+                len(evaluated_mesh.vertices),
+                len(evaluated_mesh.edges),
+                len(evaluated_mesh.polygons),
+            ) == (16, 24, 12)
+        finally:
+            evaluated.to_mesh_clear()
+        observation_parameters = {
+            "targetId": "mirror.cube",
+            "modifierId": "mirror.cube.modifier",
+            "modifierType": "MIRROR",
+            "axis": axis,
+        }
+        observation = observation_module.evaluate_observations(
+            ({"kind": "modifier_ready", "parameters": observation_parameters},),
+            session.receipts,
+        )[0]
+        assert observation["satisfied"] is True
+        details = observation["details"]
+        assert details["axis"] == axis
+        assert details["expectedAxis"] == axis
+        assert details["mirrorFixedStateMatches"] is True
+        assert details["mirrorObjectAbsent"] is True
+        assert details["sourceContentIntact"] is True
+        assert details["evaluatedWithinLimits"] is True
+        assert (
+            details["evaluatedVertexCount"],
+            details["evaluatedEdgeCount"],
+            details["evaluatedFaceCount"],
+        ) == (16, 24, 12)
+        for field, wrong_value in (("axis", "Q"), ("unexpected", True)):
+            malformed = observation_module.evaluate_observations(
+                (
+                    {
+                        "kind": "modifier_ready",
+                        "parameters": {
+                            **observation_parameters,
+                            field: wrong_value,
+                        },
+                    },
+                ),
+                session.receipts,
+            )[0]
+            assert malformed["satisfied"] is False, field
+
+        if axis == "X":
+            fixed_state_tampering = (
+                ("use_axis", (True, True, False)),
+                ("use_mirror_merge", False),
+                ("merge_threshold", 0.002),
+                ("bisect_threshold", 0.002),
+                ("show_viewport", False),
+                ("use_mirror_udim", True),
+                ("offset_u", 0.25),
+                ("offset_v", -0.25),
+            )
+            for property_name, tampered_value in fixed_state_tampering:
+                original_value = getattr(modifier, property_name)
+                if property_name == "use_axis":
+                    original_value = tuple(original_value)
+                setattr(modifier, property_name, tampered_value)
+                tampered_observation = observation_module.evaluate_observations(
+                    (
+                        {
+                            "kind": "modifier_ready",
+                            "parameters": observation_parameters,
+                        },
+                    ),
+                    session.receipts,
+                )[0]
+                assert tampered_observation["satisfied"] is False, property_name
+                if property_name == "use_axis":
+                    assert tampered_observation["details"]["axis"] is None
+                setattr(modifier, property_name, original_value)
+
+            mirror_reference_mesh = bpy.data.meshes.new(
+                "OperatingLine.MirrorReference.Mesh"
+            )
+            mirror_reference = bpy.data.objects.new(
+                "OperatingLine.MirrorReference", mirror_reference_mesh
+            )
+            bpy.context.scene.collection.objects.link(mirror_reference)
+            modifier.mirror_object = mirror_reference
+            mirror_object_observation = observation_module.evaluate_observations(
+                ({"kind": "modifier_ready", "parameters": observation_parameters},),
+                session.receipts,
+            )[0]
+            assert mirror_object_observation["satisfied"] is False
+            assert mirror_object_observation["details"]["mirrorObjectAbsent"] is False
+            modifier.mirror_object = None
+            bpy.data.objects.remove(mirror_reference, do_unlink=True)
+            if mirror_reference_mesh.users == 0:
+                bpy.data.meshes.remove(mirror_reference_mesh)
+
+            modifier.use_clip = True
+            assert observation_module.evaluate_observations(
+                ({"kind": "modifier_ready", "parameters": observation_parameters},),
+                session.receipts,
+            )[0]["satisfied"] is False
+            try:
+                session.back()
+            except RuntimeError as error:
+                assert "Cannot rollback modified resource" in str(error)
+            else:
+                raise AssertionError("Tampered Mirror modifier must block Back")
+            modifier.use_clip = False
+
+            relinked_mesh = source_mesh.copy()
+            relinked_mesh.name = "OperatingLine.MirrorRelinked.Mesh"
+            target.data = relinked_mesh
+            relinked_observation = observation_module.evaluate_observations(
+                ({"kind": "modifier_ready", "parameters": observation_parameters},),
+                session.receipts,
+            )[0]
+            assert relinked_observation["satisfied"] is False
+            assert relinked_observation["details"]["sourceContentIntact"] is False
+            try:
+                session.back()
+            except RuntimeError as error:
+                assert "Cannot rollback modified resource" in str(error)
+            else:
+                raise AssertionError("Relinked Mirror source must block Back")
+            target.data = source_mesh
+            if relinked_mesh.users == 0:
+                bpy.data.meshes.remove(relinked_mesh)
+
+            original_coordinate = source_mesh.vertices[0].co.copy()
+            source_mesh.vertices[0].co.x += 0.125
+            source_mesh.update()
+            assert observation_module.evaluate_observations(
+                ({"kind": "modifier_ready", "parameters": observation_parameters},),
+                session.receipts,
+            )[0]["satisfied"] is False
+            try:
+                session.back()
+            except RuntimeError as error:
+                assert "Cannot rollback modified resource" in str(error)
+            else:
+                raise AssertionError("Tampered Mirror source must block Back")
+            source_mesh.vertices[0].co = original_coordinate
+            source_mesh.update()
+        assert session.back() is not None
+        assert target.modifiers.get(f"{object_name}.Mirror") is None
+        assert session.back() is not None
+        assert bpy.data.objects.get(object_name) is None
+
+    tracked_name = "OperatingLine.MirrorTrackedCube"
+    tracked_steps = plan_steps(axis="Y", object_name=tracked_name)
+    tracked_steps.insert(
+        2,
+        step(
+            "mirror.bevel",
+            "root",
+            2,
+            depends_on=["mirror.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "mirror.cube",
+                    "modifierId": "mirror.cube.bevel",
+                    "modifierName": f"{tracked_name}.Bevel",
+                    "width": 0.05,
+                    "segments": 1,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    tracked_steps[3]["order"] = 3
+    tracked_steps[3]["dependsOn"] = ["mirror.bevel"]
+    tracked_root = load_temporary_plan(tracked_steps)
+    tracked_session = DemoSession(tracked_root, action_registry(tracked_root))
+    tracked_session.start()
+    assert tracked_session.next() is not None
+    assert tracked_session.next() is not None
+    assert tracked_session.next() is not None
+    tracked_target = bpy.data.objects[tracked_name]
+    assert tuple(item.type for item in tracked_target.modifiers) == ("BEVEL", "MIRROR")
+    assert tracked_session.back() is not None
+    assert tracked_session.back() is not None
+    assert tracked_session.back() is not None
+
+    duplicate_id_steps = plan_steps()
+    duplicate_id_steps.insert(
+        2,
+        step(
+            "mirror.bevel",
+            "root",
+            2,
+            depends_on=["mirror.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "mirror.cube",
+                    "modifierId": "mirror.cube.modifier",
+                    "modifierName": "OperatingLine.MirrorCube.Bevel",
+                    "width": 0.05,
+                    "segments": 1,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    duplicate_id_steps[3]["order"] = 3
+    duplicate_id_steps[3]["dependsOn"] = ["mirror.bevel"]
+    try:
+        action_registry(load_temporary_plan(duplicate_id_steps))
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Duplicate Mirror modifier IDs must be rejected")
+
+    duplicate_name_steps = plan_steps()
+    duplicate_name_steps.insert(
+        2,
+        step(
+            "mirror.same_name_bevel",
+            "root",
+            2,
+            depends_on=["mirror.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "mirror.cube",
+                    "modifierId": "mirror.cube.bevel",
+                    "modifierName": "OperatingLine.MirrorCube.Mirror",
+                    "width": 0.05,
+                    "segments": 1,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    duplicate_name_steps[3]["order"] = 3
+    duplicate_name_steps[3]["dependsOn"] = ["mirror.same_name_bevel"]
+    duplicate_name_root = load_temporary_plan(duplicate_name_steps)
+    duplicate_name_session = DemoSession(
+        duplicate_name_root, action_registry(duplicate_name_root)
+    )
+    duplicate_name_session.start()
+    assert duplicate_name_session.next() is not None
+    assert duplicate_name_session.next() is not None
+    try:
+        duplicate_name_session.next()
+    except RuntimeError as error:
+        assert "Cannot replace existing modifier" in str(error)
+    else:
+        raise AssertionError("Duplicate Mirror modifier names must be rejected")
+    assert duplicate_name_session.back() is not None
+    assert duplicate_name_session.back() is not None
+
+    existing_mirror_steps = plan_steps()
+    existing_mirror_steps.append(
+        step(
+            "mirror.second",
+            "root",
+            3,
+            depends_on=["mirror.modifier"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_mirror",
+                "arguments": {
+                    **base_arguments,
+                    "modifierId": "mirror.cube.second_modifier",
+                    "modifierName": "OperatingLine.MirrorCube.SecondMirror",
+                    "axis": "Z",
+                },
+            },
+        )
+    )
+    existing_mirror_root = load_temporary_plan(existing_mirror_steps)
+    existing_mirror_session = DemoSession(
+        existing_mirror_root, action_registry(existing_mirror_root)
+    )
+    existing_mirror_session.start()
+    assert existing_mirror_session.next() is not None
+    assert existing_mirror_session.next() is not None
+    try:
+        existing_mirror_session.next()
+    except RuntimeError as error:
+        assert "already has a MIRROR" in str(error)
+    else:
+        raise AssertionError("A second tracked MIRROR must be rejected")
+    assert existing_mirror_session.back() is not None
+    assert existing_mirror_session.back() is not None
+
+    overflow_name = "OperatingLine.MirrorOverflowTorus"
+    overflow_steps = [
+        step("root", None, 0),
+        step(
+            "mirror.overflow",
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.create_torus",
+                "arguments": {
+                    "resourceId": "mirror.overflow",
+                    "objectName": overflow_name,
+                    "majorSegments": 128,
+                    "minorSegments": 64,
+                    "majorRadius": 2.0,
+                    "minorRadius": 0.5,
+                    "location": [0.0, 0.0, 0.0],
+                },
+            },
+        ),
+        step(
+            "mirror.overflow.modifier",
+            "root",
+            2,
+            depends_on=["mirror.overflow"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_mirror",
+                "arguments": {
+                    "targetId": "mirror.overflow",
+                    "modifierId": "mirror.overflow.modifier",
+                    "modifierName": f"{overflow_name}.Mirror",
+                    "axis": "Z",
+                },
+            },
+        ),
+    ]
+    overflow_root = load_temporary_plan(overflow_steps)
+    overflow_session = DemoSession(overflow_root, action_registry(overflow_root))
+    overflow_session.start()
+    assert overflow_session.next() is not None
+    try:
+        overflow_session.next()
+    except ValueError as error:
+        assert "projected output" in str(error)
+    else:
+        raise AssertionError("Mirror projected topology overflow must be rejected")
+    assert bpy.data.objects[overflow_name].modifiers.get(
+        f"{overflow_name}.Mirror"
+    ) is None
+    assert overflow_session.back() is not None
+
+    guard_root = load_temporary_plan(plan_steps())
+    guard_session = DemoSession(guard_root, action_registry(guard_root))
+    guard_session.start()
+    assert guard_session.next() is not None
+    guard_target = bpy.data.objects["OperatingLine.MirrorCube"]
+    external = guard_target.modifiers.new("OperatingLine.External", "BEVEL")
+    try:
+        guard_session.next()
+    except RuntimeError as error:
+        assert "untracked existing modifiers" in str(error)
+    else:
+        raise AssertionError("Mirror must reject untracked predecessor modifiers")
+    guard_target.modifiers.remove(external)
+    assert guard_session.back() is not None
+
+    def gated_steps(axis: str) -> list[dict]:
+        result = plan_steps()
+        result[2]["expectedObservations"] = [
+            {
+                "kind": "modifier_ready",
+                "parameters": {
+                    "targetId": "mirror.cube",
+                    "modifierId": "mirror.cube.modifier",
+                    "modifierType": "MIRROR",
+                    "axis": axis,
+                },
+            }
+        ]
+        result[2]["observationPolicy"] = {
+            "mode": "success_gate",
+            "failureStrategy": "rollback_step",
+        }
+        return result
+
+    passing_root = load_task_tree_data(
+        {"protocolVersion": "1.2.0", "rootStepId": "root", "steps": gated_steps("X")}
+    )
+    passing_session = DemoSession(
+        passing_root,
+        action_registry(passing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    passing_session.start()
+    assert passing_session.next() is not None
+    assert passing_session.next() is not None
+    assert passing_session.back() is not None
+    assert passing_session.back() is not None
+
+    failing_root = load_task_tree_data(
+        {"protocolVersion": "1.2.0", "rootStepId": "root", "steps": gated_steps("Y")}
+    )
+    failing_session = DemoSession(
+        failing_root,
+        action_registry(failing_root),
+        observation_evaluator=observation_module.evaluate_observations,
+    )
+    failing_session.start()
+    assert failing_session.next() is not None
+    source_mesh = bpy.data.objects["OperatingLine.MirrorCube"].data
+    try:
+        failing_session.next()
+    except RuntimeError as error:
+        assert "Observation gate failed" in str(error)
+    else:
+        raise AssertionError("Wrong Mirror axis must fail the success gate")
+    assert failing_session.active_index == 0
+    assert bpy.data.objects["OperatingLine.MirrorCube"].data is source_mesh
+    assert len(bpy.data.objects["OperatingLine.MirrorCube"].modifiers) == 0
+    assert failing_session.back() is not None
+
+
 def assert_subdivision_surface_round_trip_and_guards() -> None:
     object_name = "OperatingLine.SubdivisionSurfaceCube"
     modifier_name = f"{object_name}.SubdivisionSurface"
@@ -8065,6 +8643,7 @@ def main() -> None:
     assert_solidify_round_trip_and_conflicts()
     assert_solidify_evaluated_topology_and_untracked_modifier_guards()
     assert_solidify_observation_success_gate()
+    assert_mirror_round_trip_and_guards()
     assert_subdivision_surface_round_trip_and_guards()
 
     session_before_registration = operating_line.get_session()

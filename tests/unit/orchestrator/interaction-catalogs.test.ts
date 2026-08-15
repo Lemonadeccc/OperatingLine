@@ -298,7 +298,19 @@ describe('interaction catalog registry', () => {
         (recipe) => recipe.actionName === 'blender.mesh.edit_poke_faces',
       ),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.26.0');
+    const frozenPokeFaces = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: '1.16.0',
+      interactionCatalogVersion: '1.26.0',
+    });
+    expect(
+      frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.mesh.edit_poke_faces')
+        ?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.27.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -1348,12 +1360,32 @@ describe('interaction catalog registry', () => {
       'e24008348de4ac90585eb32a4aa5d484bd6cde2aa9cb1d0dbec3fae11d54af88',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.26.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.actionCatalogVersion = frozen.actionCatalogVersion;
     active.description = frozen.description;
     active.recipes = active.recipes.filter(
       (recipe) => recipe.actionName !== 'blender.mesh.edit_poke_faces',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.26.0 and changes only the binding and Mirror recipe', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.26.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '8ea27f1162b32d9d542c8b417a26f14cfb9ed7b8c7fa624af65b143e16c481fc',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== 'blender.modifier.add_mirror',
     );
     expect(active).toEqual(frozen);
   });

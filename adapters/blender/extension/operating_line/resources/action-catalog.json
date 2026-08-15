@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.16.0",
+  "catalogVersion": "1.17.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide, Triangulate, Bevel Edges, Individual Inset Faces, and Poke Faces edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, and Subdivision Surface modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate, Extrude Region, Bevel Edges, Individual Inset Faces, and Poke Faces require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Bevel Edges processes every edge of one closed manifold mesh, with width 0.0001..100, segments 1..16, and profile 0..1. Individual Inset Faces processes every face of one closed, nondegenerate manifold mesh with thickness 0.0001..100 and depth -100..100; for source topology V/E/F its result must be exactly V+2E vertices, 5E edges, and F+2E polygons. Poke Faces processes every face of one closed, nondegenerate manifold mesh with offset -100..100 and fixed use_relative_offset=false and center_mode=MEAN_WEIGHTED; for source topology V/E/F with L face loops its result must be exactly V+F vertices, E+L edges, and L triangle polygons. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide, Triangulate, Bevel Edges, Individual Inset Faces, and Poke Faces edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, Subdivision Surface, and Mirror modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate, Extrude Region, Bevel Edges, Individual Inset Faces, and Poke Faces require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Bevel Edges processes every edge of one closed manifold mesh, with width 0.0001..100, segments 1..16, and profile 0..1. Individual Inset Faces processes every face of one closed, nondegenerate manifold mesh with thickness 0.0001..100 and depth -100..100; for source topology V/E/F its result must be exactly V+2E vertices, 5E edges, and F+2E polygons. Poke Faces processes every face of one closed, nondegenerate manifold mesh with offset -100..100 and fixed use_relative_offset=false and center_mode=MEAN_WEIGHTED; for source topology V/E/F with L face loops its result must be exactly V+F vertices, E+L edges, and L triangle polygons. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Mirror requires Object Mode, no shape keys, a receipt-tracked modifier stack with no existing MIRROR modifier, and bounded source, evaluated input, projected, and actual evaluated topology; it enables exactly one requested local axis and fixes use_bisect_axis and use_bisect_flip_axis false on every axis, use_clip=false, use_mirror_merge=true, merge_threshold=0.001, bisect_threshold=0.001, mirror_object=null, use_mirror_vertex_groups=true, use_mirror_udim=false, use_mirror_u=false, use_mirror_v=false, offset_u=0, offset_v=0, mirror_offset_u=0, mirror_offset_v=0, show_viewport=true, show_render=true, show_in_editmode=true, show_on_cage=false, and use_apply_on_spline=false where the host exposes it. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -40,6 +40,7 @@
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
         "blender.modifier.add_subdivision_surface",
+        "blender.modifier.add_mirror",
         "blender.geometry_nodes.create_transform"
       ]
     },
@@ -168,6 +169,13 @@
       "description": "Add one owned, bounded Subdivision Surface modifier to an earlier mesh object.",
       "selectionGuidance": "Select when the requested form needs nondestructive Catmull-Clark smoothing with an explicit viewport level and fixed render level 2.",
       "actionNames": ["blender.modifier.add_subdivision_surface"]
+    },
+    {
+      "id": "geometry.mirror_modifier",
+      "title": "Mirror modifier",
+      "description": "Add one owned, bounded Mirror modifier to an earlier mesh object.",
+      "selectionGuidance": "Select when the requested form needs nondestructive symmetry across exactly one local object axis.",
+      "actionNames": ["blender.modifier.add_mirror"]
     },
     {
       "id": "geometry_nodes.transform",
@@ -1384,6 +1392,61 @@
           "argumentPath": "modifierId",
           "derivedResourceTypes": [],
           "description": "Creates one receipt-owned Subdivision Surface modifier with CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3."
+        }
+      ],
+      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
+      "supportedObservationKinds": ["modifier_ready"],
+      "rollbackModes": ["compensating_action"],
+      "safety": {
+        "sideEffect": "scene_write",
+        "requiresPlanApproval": true,
+        "networkAccess": false,
+        "fileAccess": "none"
+      }
+    },
+    {
+      "name": "blender.modifier.add_mirror",
+      "title": "Add one Mirror modifier",
+      "description": "Adds one owned, bounded Mirror modifier to an earlier owned mesh object without applying it. The target must be in Object Mode with no shape keys; every existing modifier must be receipt-tracked, the stack must not already contain a MIRROR modifier, and source, evaluated input, projected, and actual evaluated topology must remain within 8192 vertices, 16384 edges, and 8192 polygons. Exactly the requested local axis is enabled. Fixed implementation behavior is use_bisect_axis and use_bisect_flip_axis false on every axis, use_clip=false, use_mirror_merge=true, merge_threshold=0.001, bisect_threshold=0.001, mirror_object=null, use_mirror_vertex_groups=true, use_mirror_udim=false, use_mirror_u=false, use_mirror_v=false, offset_u=0, offset_v=0, mirror_offset_u=0, mirror_offset_v=0, show_viewport=true, show_render=true, show_in_editmode=true, show_on_cage=false, and use_apply_on_spline=false where exposed.",
+      "argumentsSchema": {
+        "type": "object",
+        "required": ["targetId", "modifierId", "modifierName", "axis"],
+        "properties": {
+          "targetId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+          },
+          "modifierName": {
+            "type": "string",
+            "pattern": "^OperatingLine\\.",
+            "maxLength": 180
+          },
+          "axis": {
+            "type": "string",
+            "enum": ["X", "Y", "Z"],
+            "description": "The single local object axis mirrored by the fixed modifier contract."
+          }
+        },
+        "additionalProperties": false
+      },
+      "resourceEffects": [
+        {
+          "access": "mutate",
+          "resourceType": "OBJECT",
+          "argumentPath": "targetId",
+          "derivedResourceTypes": [],
+          "description": "Adds a non-applied Mirror modifier after receipt-tracked modifiers only; requires Object Mode and no shape keys, rejects an existing MIRROR modifier, and bounds source, evaluated input, projected, and actual evaluated topology."
+        },
+        {
+          "access": "create",
+          "resourceType": "MODIFIER",
+          "argumentPath": "modifierId",
+          "derivedResourceTypes": [],
+          "description": "Creates one receipt-owned Mirror modifier with exactly one requested local axis; use_bisect_axis and use_bisect_flip_axis false on every axis; use_clip=false; use_mirror_merge=true; merge_threshold=0.001; bisect_threshold=0.001; mirror_object=null; use_mirror_vertex_groups=true; use_mirror_udim=false; use_mirror_u=false; use_mirror_v=false; offset_u=0; offset_v=0; mirror_offset_u=0; mirror_offset_v=0; show_viewport=true; show_render=true; show_in_editmode=true; show_on_cage=false; and use_apply_on_spline=false where exposed."
         }
       ],
       "supportedAnchorKinds": ["object", "owned_control", "unavailable"],

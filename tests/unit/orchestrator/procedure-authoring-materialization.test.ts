@@ -217,6 +217,61 @@ function subdivisionSurfaceCandidate(
   return tree;
 }
 
+function mirrorCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Mirror candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_mirror',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.mirror',
+      modifierName: 'OperatingLine.Cube.Mirror',
+      axis: 'Y',
+    },
+  };
+  leaf.title = 'Add a bounded Mirror modifier';
+  leaf.intent = 'Add a managed Mirror modifier on the local Y axis.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'add_mirror_modifier',
+    description: 'Add one Mirror modifier to the accepted Cube.',
+    parameters: { axis: 'Y' },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Object Mode modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Track the managed Mirror modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.mirror',
+      modifierName: 'OperatingLine.Cube.Mirror',
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.mirror',
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'modifier_ready',
+    parameters: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.mirror',
+      modifierType: 'MIRROR',
+      axis: 'Y',
+    },
+  };
+  return tree;
+}
+
 function editBevelCandidate(): ProcedureAuthoringCandidateTree {
   const tree = candidate();
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
@@ -1182,6 +1237,54 @@ describe('procedure authoring materialization', () => {
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);
+  });
+
+  it('preserves the exact Mirror observation while keeping every host track unavailable', () => {
+    const input = mirrorCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected materialized Mirror leaf');
+
+    expect(result.formatVersion).toBe('1.0.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.modifier.add_mirror.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.expectedObservations).toEqual([
+      {
+        kind: 'modifier_ready',
+        parameters: {
+          targetId: 'tutorial.cube',
+          modifierId: 'tutorial.cube.mirror',
+          modifierType: 'MIRROR',
+          axis: 'Y',
+        },
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('managed modifier identity'),
+    });
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: expect.stringContaining('Shift+A'),
+    });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
   });
 
   it('preserves the InteractionCatalog 1.21 Subdivide fallback with no invented executable track', () => {

@@ -58,6 +58,9 @@ MAX_EDIT_INSET_POLYGONS = 8192
 MAX_EDIT_POKE_VERTICES = 8192
 MAX_EDIT_POKE_EDGES = 16384
 MAX_EDIT_POKE_POLYGONS = 8192
+MAX_MIRROR_VERTICES = 8192
+MAX_MIRROR_EDGES = 16384
+MAX_MIRROR_POLYGONS = 8192
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +123,14 @@ class BevelModifierDefinition:
     width: float
     segments: int
     angle_limit: float
+
+
+@dataclass(frozen=True, slots=True)
+class MirrorModifierDefinition:
+    target_id: str
+    modifier_id: str
+    modifier_name: str
+    axis: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +416,24 @@ def validate_bevel(arguments: Mapping[str, Any]) -> BevelModifierDefinition:
     )
 
 
+def validate_mirror(arguments: Mapping[str, Any]) -> MirrorModifierDefinition:
+    fields = {"targetId", "modifierId", "modifierName", "axis"}
+    require_keys(arguments, fields, fields, "arguments")
+    axis = arguments["axis"]
+    if not isinstance(axis, str) or axis not in {"X", "Y", "Z"}:
+        raise ValueError("arguments.axis must be one of X, Y, or Z")
+    return MirrorModifierDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        modifier_id=logical_id(arguments["modifierId"], "arguments.modifierId"),
+        modifier_name=text(
+            arguments["modifierName"],
+            "arguments.modifierName",
+            prefix="OperatingLine.",
+        ),
+        axis=axis,
+    )
+
+
 def validate_solidify(arguments: Mapping[str, Any]) -> SolidifyModifierDefinition:
     fields = {
         "targetId",
@@ -672,6 +701,104 @@ def _ensure_subdivision_surface_input_is_bounded(
             f"projected level {projected_level} output",
         )
         loop_count = polygons * 4
+
+
+def _ensure_mirror_input_is_bounded(
+    receipts: Mapping[str, ActionReceipt], target: bpy.types.Object
+) -> tuple[int, int, int]:
+    if target.mode != "OBJECT":
+        raise RuntimeError("Mirror target must be in Object Mode")
+    if target.data.shape_keys is not None:
+        raise RuntimeError("Mirror target must not have shape keys")
+
+    tracked_pointers = _tracked_modifier_pointers(receipts, target)
+    untracked = tuple(
+        modifier.name
+        for modifier in target.modifiers
+        if modifier.as_pointer() not in tracked_pointers
+    )
+    if untracked:
+        raise RuntimeError(
+            "Mirror target has untracked existing modifiers: " + ", ".join(untracked)
+        )
+    existing_mirror = tuple(
+        modifier.name for modifier in target.modifiers if modifier.type == "MIRROR"
+    )
+    if existing_mirror:
+        raise RuntimeError(
+            "Mirror target already has a MIRROR modifier: "
+            + ", ".join(existing_mirror)
+        )
+
+    limits = (MAX_MIRROR_VERTICES, MAX_MIRROR_EDGES, MAX_MIRROR_POLYGONS)
+
+    def ensure_geometry(mesh: bpy.types.Mesh, label: str) -> tuple[int, int, int]:
+        topology = (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
+        if not all(topology):
+            raise ValueError(f"Mirror {label} topology must be nonempty")
+        if any(
+            not isfinite(component)
+            for vertex in mesh.vertices
+            for component in vertex.co
+        ):
+            raise ValueError(f"Mirror {label} vertices must be finite")
+        if any(actual > limit for actual, limit in zip(topology, limits)):
+            raise ValueError(
+                f"Mirror {label} exceeds the supported topology limits: "
+                f"vertices <= {MAX_MIRROR_VERTICES}, "
+                f"edges <= {MAX_MIRROR_EDGES}, "
+                f"polygons <= {MAX_MIRROR_POLYGONS}"
+            )
+        return topology
+
+    ensure_geometry(target.data, "target")
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        evaluated_topology = ensure_geometry(evaluated_mesh, "evaluated input")
+    finally:
+        evaluated.to_mesh_clear()
+    projected = tuple(value * 2 for value in evaluated_topology)
+    if any(actual > limit for actual, limit in zip(projected, limits)):
+        raise ValueError(
+            "Mirror projected output exceeds the supported topology limits: "
+            f"vertices <= {MAX_MIRROR_VERTICES}, "
+            f"edges <= {MAX_MIRROR_EDGES}, "
+            f"polygons <= {MAX_MIRROR_POLYGONS}"
+        )
+    return projected
+
+
+def _ensure_mirror_evaluated_output_is_bounded(
+    target: bpy.types.Object,
+    projected_topology: tuple[int, int, int],
+) -> None:
+    limits = (MAX_MIRROR_VERTICES, MAX_MIRROR_EDGES, MAX_MIRROR_POLYGONS)
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        topology = (
+            len(evaluated_mesh.vertices),
+            len(evaluated_mesh.edges),
+            len(evaluated_mesh.polygons),
+        )
+        if not all(topology):
+            raise RuntimeError("Mirror evaluated output topology must be nonempty")
+        if any(
+            not isfinite(component)
+            for vertex in evaluated_mesh.vertices
+            for component in vertex.co
+        ):
+            raise RuntimeError("Mirror evaluated output vertices must be finite")
+        if any(actual > limit for actual, limit in zip(topology, limits)):
+            raise RuntimeError("Mirror evaluated output exceeds topology limits")
+        if any(
+            actual > projected
+            for actual, projected in zip(topology, projected_topology)
+        ):
+            raise RuntimeError("Mirror evaluated output exceeds its projection")
+    finally:
+        evaluated.to_mesh_clear()
 
 
 def execute_subdivide(
@@ -1684,6 +1811,102 @@ def execute_bevel(
                 state,
             )
         )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            [],
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        if modifier is not None and not mutations:
+            target.modifiers.remove(modifier)
+        rollback_partial(receipt_id, step_id, action.name, [], mutations, [])
+        raise
+
+
+def execute_mirror(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: MirrorModifierDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    projected_topology = _ensure_mirror_input_is_bounded(receipts, target)
+    ensure_modifier_id_available(receipts, definition.modifier_id)
+    if target.modifiers.get(definition.modifier_name) is not None:
+        raise RuntimeError(
+            f"Cannot replace existing modifier: {definition.modifier_name}"
+        )
+    source_mesh_content = mesh_content_signature(target.data)
+    receipt_id = new_receipt_id()
+    mutations: list[MutationRecord] = []
+    modifier = None
+    try:
+        modifier = target.modifiers.new(definition.modifier_name, "MIRROR")
+        axis_index = {"X": 0, "Y": 1, "Z": 2}[definition.axis]
+        modifier.use_axis = tuple(index == axis_index for index in range(3))
+        modifier.use_bisect_axis = (False, False, False)
+        modifier.use_bisect_flip_axis = (False, False, False)
+        modifier.use_clip = False
+        modifier.use_mirror_merge = True
+        modifier.merge_threshold = 0.001
+        modifier.bisect_threshold = 0.001
+        modifier.mirror_object = None
+        modifier.use_mirror_vertex_groups = True
+        modifier.use_mirror_u = False
+        modifier.use_mirror_v = False
+        modifier.use_mirror_udim = False
+        modifier.offset_u = 0.0
+        modifier.offset_v = 0.0
+        modifier.mirror_offset_u = 0.0
+        modifier.mirror_offset_v = 0.0
+        modifier.show_viewport = True
+        modifier.show_render = True
+        modifier.show_in_editmode = True
+        modifier.show_on_cage = False
+        if hasattr(modifier, "use_apply_on_spline"):
+            modifier.use_apply_on_spline = False
+        state = snapshot_modifier(
+            target,
+            modifier,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+            {"mirror_object": None},
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"modifier:{definition.modifier_id}",
+                None,
+                state,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                "data",
+                mesh_identity,
+                mesh_identity,
+            )
+        )
+        mutations.append(
+            MutationRecord(
+                mesh_identity,
+                "mesh_content",
+                source_mesh_content,
+                source_mesh_content,
+            )
+        )
+        _ensure_mirror_evaluated_output_is_bounded(target, projected_topology)
         return make_receipt(
             receipt_id,
             step_id,

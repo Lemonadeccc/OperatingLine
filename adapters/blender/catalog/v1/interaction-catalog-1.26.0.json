@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.27.0",
+  "catalogVersion": "1.26.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.17.0",
+  "actionCatalogVersion": "1.16.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.17.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.16.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
@@ -3321,81 +3321,6 @@
               "reason": "The native shortcut creates Blender's default modifier name rather than the accepted managed name."
             }
           ]
-        },
-        "mcp": {
-          "availability": "unavailable",
-          "reason": "No approved action-level MCP tool is available."
-        }
-      }
-    },
-    {
-      "id": "blender.modifier.add_mirror.semantic",
-      "actionName": "blender.modifier.add_mirror",
-      "title": "Add a bounded Mirror modifier",
-      "guidance": {
-        "kind": "semantic_path",
-        "steps": [
-          {
-            "id": "workspace.layout",
-            "order": 1,
-            "label": "Layout",
-            "intent": "navigate",
-            "target": { "kind": "workspace", "hostId": "Layout" }
-          },
-          {
-            "id": "semantic.select_owned_mesh",
-            "order": 2,
-            "label": "Owned Mesh",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
-          },
-          {
-            "id": "panel.modifier_properties",
-            "order": 3,
-            "label": "Modifiers",
-            "intent": "navigate",
-            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
-          },
-          {
-            "id": "control.add_modifier",
-            "order": 4,
-            "label": "Add Modifier",
-            "intent": "execute",
-            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add" }
-          },
-          {
-            "id": "category.generate",
-            "order": 5,
-            "label": "Generate",
-            "intent": "navigate",
-            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add_generate" }
-          },
-          {
-            "id": "modifier.mirror",
-            "order": 6,
-            "label": "Mirror",
-            "intent": "execute",
-            "target": { "kind": "operator", "hostId": "object.modifier_add" }
-          },
-          {
-            "id": "semantic.mirror_contract",
-            "order": 7,
-            "label": "Managed Mirror Contract",
-            "intent": "configure",
-            "target": { "kind": "semantic", "hostId": "operatingline.blender.mirror_modifier" }
-          }
-        ],
-        "reason": "The native operator must be invoked with type=MIRROR, but the accepted action also binds the owned target and modifier identities, exact axis, complete fixed Mirror properties, bounded source, evaluated input, projected and actual evaluated topology, observation, and compensating rollback contract atomically.",
-        "manualReference": "https://docs.blender.org/manual/en/4.5/modeling/modifiers/generate/mirror.html"
-      },
-      "procedureMaterialization": {
-        "menu": {
-          "availability": "unavailable",
-          "reason": "The native menu path does not encode the managed modifier identity and name, exact fixed properties, bounded topology checks, observation, or compensating rollback contract."
-        },
-        "shortcut": {
-          "availability": "unavailable",
-          "reason": "Shift+A is only a Properties Modifier-context alias for opening Add Modifier and cannot express the axis parameters or managed contract; no F3 or F9 projection is declared."
         },
         "mcp": {
           "availability": "unavailable",

@@ -55,6 +55,7 @@
     "test:blender:edit-bevel": "node tools/blender/run-edit-bevel-f9.mjs",
     "test:blender:edit-inset": "node tools/blender/run-edit-inset-f9.mjs",
     "test:blender:edit-poke": "node tools/blender/run-edit-poke-f9.mjs",
+    "test:blender:mirror": "node tools/blender/run-mirror-ui.mjs",
     "test:blender:undo": "node tools/blender/run-native-undo.mjs",
     "test:blender:visual": "node tools/blender/capture-overlay.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm schema:check && pnpm release:check && pnpm format:check",

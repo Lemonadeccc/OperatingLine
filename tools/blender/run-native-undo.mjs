@@ -8,6 +8,7 @@ const testFiles = [
   resolve('tests/e2e/blender/native_undo_round_trip.py'),
   resolve('tests/e2e/blender/native_undo_inset_round_trip.py'),
   resolve('tests/e2e/blender/native_undo_poke_round_trip.py'),
+  resolve('tests/e2e/blender/native_undo_mirror_round_trip.py'),
 ];
 syncBlenderExtensionResources();
 

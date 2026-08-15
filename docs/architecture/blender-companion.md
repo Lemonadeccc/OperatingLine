@@ -34,8 +34,8 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.26.0` 与 ActionCatalog `1.16.0` 一一绑定 26 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.25.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.27.0` 与 ActionCatalog `1.17.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.26.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -92,6 +92,11 @@ shortcut：`TAB → 3 → A → F3(query="poke faces") → ENTER → F9 → Offs
 `targetId`、`resultMeshId`、`resultMeshName` 显式省略，menu/MCP unavailable；现代默认 keymap 没有
 Poke Faces 直达键，legacy `Alt+P` 不进入默认轨迹。原生 operator 就地修改当前 Mesh，不创建 managed
 replacement identity。
+Mirror Modifier 保留七步 `semantic_path`：`Layout → Owned Mesh → Modifiers → Add Modifier → Generate →
+Mirror → Managed Mirror Contract`。其中 Add Modifier、Generate 和 Mirror 分别记录真实 Host 标识
+`OBJECT_MT_modifier_add`、`OBJECT_MT_modifier_add_generate` 与 `object.modifier_add(type=MIRROR)`。
+Properties Modifier context 的 `Shift+A` 只是一条打开 Add Modifier 的上下文别名，不能携带 IDs、
+受管名称、完整固定 RNA、安全门、Observation 或回退；menu/shortcut/MCP materialization 均 unavailable。
 Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
 `resourceId`；Torus、Cone、Cylinder shortcut unavailable，所有 MCP track 也因没有真实 action-level tool
 而 unavailable。
@@ -114,7 +119,11 @@ Harness 同样只证明已发送 popup 关闭事件；该原生 in-place mutatio
 copy/tag/swap、receipt、Observation、补偿或原生 Undo transaction。Poke Faces 的九步轨迹在两个版本
 均验证 `offset=0.2`，Cube 从 8/12/6 变为 14/36/24，24 个结果面全部为 selected triangle，坐标边界为
 ±1.2，且源 Mesh pointer/datablock 数量不变。UI RNA 的 `MEDIAN_WEIGHTED` 与 managed BMesh 路径的
-`MEAN_WEIGHTED` 是不同接口的字面量；该 UI in-place mutation 同样不等价于 managed transaction。Cube 与
+`MEAN_WEIGHTED` 是不同接口的字面量；该 UI in-place mutation 同样不等价于 managed transaction。
+Mirror 的 Properties/Shift+A 前台轨迹在两版均创建 `OBJECT_OT_modifier_add(type=MIRROR,
+use_selected_objects=false)`，Cube 求值拓扑从 8/12/6 变为 16/24/12，源 Mesh pointer 与 datablock
+数量不变；这只证明原生别名存在，不升级为 candidate 或 managed execution。
+Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件或完整 UI replay；它们保留默认
 未 bake mesh 与 `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`。冻结的
 `1.19.0` 保持 Plane shortcut unavailable。Cone/Cylinder 的 Blender
@@ -128,8 +137,8 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
 [ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。Extension 的严格目录 loader 能解析并
 验证 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；对于
-`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.26.0` 只据双版本
-前台证据启用 Edit Mode Bevel、Individual Inset Faces 与 Poke Faces 的 candidate materialization，
+`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.27.0` 保留双版本
+前台证据启用的 Edit Mode Bevel、Individual Inset Faces 与 Poke Faces candidate materialization，
 不把它们升级为 verified execution。
 见 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
 [ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md) 与
@@ -137,12 +146,13 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
-[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
-材质、骨骼、显式蒙皮权重、动画和渲染等十九条
+材质、骨骼、显式蒙皮权重、动画和渲染等二十条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
 菜单项；Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 仅额外提供 candidate shortcut，其菜单仍 unavailable。未来只有新的版本专用 recipe
 通过真实宿主测试后，才能升级为 `native_path`。见
@@ -191,7 +201,7 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异�
 与 Dialogue Run 状态，再把 JSON 放入队列。Provider 的对话 SSE 只在 Runtime 内消费；助手增量先写入
 durable append-only revision，Blender 始终只读取短 JSON 状态。
 网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
-ActionCatalog `1.16.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+ActionCatalog `1.17.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
 Connected。Guide 与状态请求绑定服务端签发的 lease，线程按协商周期发送严格递增心跳；失联、过期、
 Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界
 见 [ADR 0040](../adr/0040-companion-session-leases.md)。这里的 Connected/presence 只表示后台 transport
@@ -216,7 +226,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.16.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.17.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -327,8 +337,8 @@ Request-linked Proposal
 ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
 稳定资源名 `resources/snowman.plan.json`。
 
-当前动作目录 `1.16.0` 允许以下 26 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.15.0` 供精确回放：
+当前动作目录 `1.17.0` 允许以下 27 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.16.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_cube`
@@ -347,6 +357,7 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` �
 - `blender.modifier.add_bevel`
 - `blender.modifier.add_solidify`
 - `blender.modifier.add_subdivision_surface`
+- `blender.modifier.add_mirror`
 - `blender.geometry_nodes.create_transform`
 - `blender.material.create_and_assign`
 - `blender.material.create_palette_and_assign`
@@ -357,10 +368,10 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` �
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.16.0` 提供十八项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
+`1.17.0` 提供十九项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
 subdivide、whole-mesh triangulate、connected face-region extrusion、whole-mesh Edit Mode edge bevel、
 whole-mesh individual face inset、whole-mesh face poke、
-Bevel Modifier、Solidify Modifier、Subdivision Surface Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
+Bevel Modifier、Solidify Modifier、Subdivision Surface Modifier、Mirror Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、
 explicit deform skin weights、pose transform keyframes、render scene setup 和 PNG preview output。
 Capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 把每条具体需求映射到这些稳定能力，
 再映射到 action 属于该能力的可执行叶子；局部重规划只能引用规范化引用子树内的叶子。缺失、未知、
@@ -388,7 +399,7 @@ Blender datablock、mutation 和渲染产物；资源解析同时核对 `session
 不会从可复制 Scene 标签接管旧执行。Back 仍执行 compare-and-restore 补偿，只是该补偿操作本身也
 可以 Ctrl-Z/Redo。见 [ADR 0031](../adr/0031-blender-native-undo-history.md)。
 
-Edit/Modifier/Geometry Nodes 当前开放十个有界动作：Subdivide 复制源 Mesh、对整网格执行
+Edit/Modifier/Geometry Nodes 当前开放十一个有界动作：Subdivide 复制源 Mesh、对整网格执行
 `1..8` cuts 后把对象换链到新 Mesh，源数据保留至回退；Triangulate 以固定 `FIXED` / `EAR_CLIP`
 方法把复制 Mesh 转换为三角面；Bevel 创建一个不应用的 modifier；Solidify
 只接受 `thickness` (`0.0001..100`) 与 `offset` (`-1..1`)，只允许 receipt-tracked 前置 Modifier，且源 Mesh 与
@@ -412,7 +423,13 @@ Extrude 在 Blender 4.5/5.1 间稳定引用结果 polygon；Subdivision Surface 
 `center_mode=MEAN_WEIGHTED`、`use_relative_offset=false`。它把全部源面转换为三角扇；若面环总数为
 `L`，结果精确为 `V+F / E+L / L`，closed manifold 下等价于 `V+F / 3E / 2E`。两种动作的结果都受相同
 8192/16384/8192 上限约束。Poke 使用专用 `mesh_faces_poked` Observation、source/result
-`mesh_content` guard 和独立 Blender 原生 Undo/Redo 回归；Geometry Nodes 创建固定的 Group Input → Transform Geometry → Group Output 图并通过一个 NODES modifier
+`mesh_content` guard 和独立 Blender 原生 Undo/Redo 回归。Mirror 只接受 `targetId`、`modifierId`、
+受管名称和单一 `X/Y/Z` 轴；要求 Object Mode、无 Shape Key、全部前置 Modifier 均 receipt-tracked 且
+不存在 MIRROR。输入、两倍保守投影和真实 evaluated output 均受 8192/16384/8192 上限约束；merge 固定
+开启且阈值为 0.001，bisect/flip/clip/UV/UDIM 固定关闭，offsets 归零，Mirror Object 为空，
+vertex-group mirroring 和 viewport/render/edit 可见性开启。receipt 用完整 ModifierState、Object data
+同值 guard 与源 `mesh_content` guard 同时保护 RNA、绑定和内容；严格 `modifier_ready` Observation 与
+原生 Undo/Redo 都在 Blender 4.5.3/5.1.1 验证。Geometry Nodes 创建固定的 Group Input → Transform Geometry → Group Output 图并通过一个 NODES modifier
 挂载。动作创建的 Mesh 内容、初始 Object→Mesh link、蒙皮后的后继 Mesh 签名、modifier 精确属性和 node graph/interface 签名都参与 compare-and-restore，外部修改
 会保留 receipt 并阻止旧状态覆盖。任意 vertex/edge 选择、互不连通的 face region、任意 Edit Mode operator、其他 modifier 类型和任意
 node graph 仍不在允许列表。见 [ADR 0029](../adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
@@ -422,7 +439,8 @@ node graph 仍不在允许列表。见 [ADR 0029](../adr/0029-bounded-edit-modif
 [ADR 0060](../adr/0060-bounded-subdivision-surface-modifier.md) 与
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
-[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md)。
+[ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。
 
 回退前会一次性检查当前 receipt 的全部资源。自有 Mesh/Light/Camera/Armature data 存在额外
 用户、Material 或 Action 被计划外对象使用、Object 被链接到计划外 Collection，或自有
