@@ -222,7 +222,22 @@ describe('interaction catalog registry', () => {
       availability: 'unavailable',
       reason: 'No verified shortcut procedure is available.',
     });
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.21.0');
+    const frozenIcosphereShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.21.0',
+    });
+    expect(
+      frozenIcosphereShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenIcosphereShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+      )?.procedureMaterialization,
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.22.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -541,6 +556,113 @@ describe('interaction catalog registry', () => {
         argumentName: 'resourceId',
         reason: 'The logical resource identifier has no user-facing Blender shortcut input.',
       },
+    ]);
+    const subdivideMaterialization = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+    )?.procedureMaterialization;
+    expect(subdivideMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    const subdivideShortcut = subdivideMaterialization?.shortcut;
+    if (subdivideShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Subdivide shortcut recipe to be available');
+    }
+    expect(subdivideShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      {
+        kind: 'selection',
+        label: 'Active Target',
+        value: 'Exactly one accepted target Mesh object is active and selected',
+      },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'modal_state', label: 'Modal UI', value: 'None' },
+      {
+        kind: 'scene_state',
+        label: 'Mesh Elements',
+        value: 'All target mesh elements are visible',
+      },
+      { kind: 'scene_state', label: 'Mesh Data Users', value: '1' },
+      { kind: 'scene_state', label: 'UI Language', value: 'English' },
+    ]);
+    expect(subdivideShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_all_mesh_elements',
+      'shortcut.search_subdivide',
+      'shortcut.execute_subdivide',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_number_of_cuts',
+      'shortcut.set_smoothness',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    expect(subdivideShortcut.operations[2]).toMatchObject({
+      kind: 'key_input',
+      keys: ['F3'],
+      selectionPath: ['Subdivide'],
+      parameters: [{ name: 'query', source: { kind: 'literal', value: 'subdivide' } }],
+    });
+    expect(subdivideShortcut.operations[4]).toMatchObject({
+      kind: 'key_input',
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.execute_subdivide',
+        expectedOperatorId: 'mesh.subdivide',
+      },
+    });
+    expect(subdivideShortcut.operations.slice(5, 7)).toEqual([
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_number_of_cuts',
+        label: 'Set Number of Cuts',
+        surfaceOperationId: 'shortcut.open_adjust_last_operation',
+        target: { kind: 'control', hostId: 'mesh.subdivide.number_cuts' },
+        path: ['Adjust Last Operation', 'Number of Cuts'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'cuts',
+              transform: 'identity',
+            },
+          },
+        ],
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_smoothness',
+        label: 'Set Smoothness',
+        surfaceOperationId: 'shortcut.open_adjust_last_operation',
+        target: { kind: 'control', hostId: 'mesh.subdivide.smoothness' },
+        path: ['Adjust Last Operation', 'Smoothness'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'smooth',
+              transform: 'identity',
+            },
+          },
+        ],
+      },
+    ]);
+    expect(subdivideShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
     ]);
     expect(
       blenderInteractionCatalog.recipes.find(
@@ -876,18 +998,31 @@ describe('interaction catalog registry', () => {
     );
   });
 
+  it('keeps the InteractionCatalog 1.21.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.21.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'f1a47b2903f6d15f0a9fef76f9f30e4e399d4bca98c9f9473c3e920c9df6583c',
+    );
+  });
+
   it('changes only the version and Icosphere shortcut after InteractionCatalog 1.20.0', () => {
     const frozen = JSON.parse(
       readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.20.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const next = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.21.0.json'), 'utf8'),
     ) as typeof blenderInteractionCatalog;
     const frozenIcosphereShortcut = frozen.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
     )?.procedureMaterialization?.shortcut;
 
     expect({
-      ...blenderInteractionCatalog,
+      ...next,
       catalogVersion: frozen.catalogVersion,
-      recipes: blenderInteractionCatalog.recipes.map((recipe) =>
+      recipes: next.recipes.map((recipe) =>
         recipe.actionName === 'blender.mesh.create_icosphere'
           ? {
               ...recipe,
@@ -898,6 +1033,25 @@ describe('interaction catalog registry', () => {
             }
           : recipe,
       ),
+    }).toEqual(frozen);
+  });
+
+  it('changes only the version and Subdivide shortcut after InteractionCatalog 1.21.0', () => {
+    const frozen = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.21.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+
+    expect({
+      ...blenderInteractionCatalog,
+      catalogVersion: frozen.catalogVersion,
+      recipes: blenderInteractionCatalog.recipes.map((recipe) => {
+        if (recipe.actionName !== 'blender.mesh.edit_subdivide') return recipe;
+        const { procedureMaterialization: currentMaterialization, ...historicalRecipe } = recipe;
+        if (currentMaterialization === undefined) {
+          throw new Error('Expected active Subdivide materialization');
+        }
+        return historicalRecipe;
+      }),
     }).toEqual(frozen);
   });
 

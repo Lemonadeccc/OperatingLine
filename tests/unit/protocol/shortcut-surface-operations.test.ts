@@ -277,6 +277,71 @@ describe('shortcut-led operator property protocol', () => {
     ).not.toThrow();
   });
 
+  it('binds a candidate F9 surface to one explicit semantic execute operator', () => {
+    const semantic = extendedCatalog();
+    const recipe = semantic.recipes.find(
+      (candidate) => candidate.actionName === 'blender.mesh.create_icosphere',
+    );
+    if (recipe?.procedureMaterialization === undefined) {
+      throw new Error('Expected Icosphere recipe');
+    }
+    recipe.guidance = {
+      kind: 'semantic_path',
+      steps: [
+        {
+          id: 'semantic.select_target',
+          order: 1,
+          label: 'Selected Target',
+          intent: 'configure',
+          target: { kind: 'semantic', hostId: 'operatingline.blender.selected_target' },
+        },
+        {
+          id: 'operator.icosphere',
+          order: 2,
+          label: 'Ico Sphere',
+          intent: 'execute',
+          target: { kind: 'operator', hostId: 'mesh.primitive_ico_sphere_add' },
+        },
+      ],
+      reason: 'The candidate UI operation is not the managed action executor.',
+    };
+    recipe.procedureMaterialization.menu = {
+      availability: 'unavailable',
+      reason: 'Semantic guidance cannot materialize an executable menu track.',
+    };
+    expect(() => validateInteractionCatalog(semantic, blenderActionCatalog)).not.toThrow();
+
+    const ambiguous = structuredClone(semantic);
+    const ambiguousRecipe = ambiguous.recipes.find(
+      (candidate) => candidate.actionName === 'blender.mesh.create_icosphere',
+    );
+    if (ambiguousRecipe?.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic guidance');
+    }
+    ambiguousRecipe.guidance.steps.push({
+      id: 'operator.second_execute',
+      order: 3,
+      label: 'Second Execute Operator',
+      intent: 'execute',
+      target: { kind: 'operator', hostId: 'mesh.primitive_uv_sphere_add' },
+    });
+    expect(() => validateInteractionCatalog(ambiguous, blenderActionCatalog)).toThrow(
+      'must bind the guidance execution operator',
+    );
+
+    const nonExecuting = structuredClone(semantic);
+    const nonExecutingRecipe = nonExecuting.recipes.find(
+      (candidate) => candidate.actionName === 'blender.mesh.create_icosphere',
+    );
+    if (nonExecutingRecipe?.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic guidance');
+    }
+    nonExecutingRecipe.guidance.steps[1]!.intent = 'configure';
+    expect(() => validateInteractionCatalog(nonExecuting, blenderActionCatalog)).toThrow(
+      'must bind the guidance execution operator',
+    );
+  });
+
   it('fails closed for broken surface references, lifecycle, and duplicate bindings', () => {
     const missingClose = extendedCatalog();
     const missingCloseShortcut = installExtendedIcosphereShortcut(missingClose);

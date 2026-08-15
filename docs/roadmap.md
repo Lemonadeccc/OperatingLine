@@ -24,15 +24,17 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.21.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.20.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.22.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.21.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
-      活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
+      其中 Subdivide 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
+      硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
       [ADR 0026](adr/0026-native-cube-action-slice.md)、
       [ADR 0027](adr/0027-native-icosphere-action-slice.md)、
-      [ADR 0028](adr/0028-native-torus-action-slice.md) 与
-      [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md)。
+      [ADR 0028](adr/0028-native-torus-action-slice.md)、
+      [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
+      [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md)。
 - [x] 雪人教学粒度：revision 5 把眼睛、鼻子、五个嘴点、三个纽扣和两条手臂拆成一部件一叶节点；
       ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
       Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
@@ -348,6 +350,15 @@
           轨迹仍为 candidate/structural-only，MCP unavailable；后续移动/重命名的完整 UI replay、产品级
           Observation 成功门、恢复策略、原生 Undo 与 managed action 等价仍未完成。见
           [ADR 0058](adr/0058-icosphere-f9-shortcut-materialization.md)。
+    - [x] Edit Mode Subdivide F9 候选快捷键物化：InteractionCatalog `1.22.0` 继续绑定 ActionCatalog
+          `1.12.0`，冻结 `1.21.0`，并为既有 managed copy/swap `semantic_path` 声明九步 shortcut：
+          `TAB`、`A`、`F3`（literal query `subdivide`）、`ENTER`、`F9`、Number of Cuts、Smoothness、
+          `ENTER`、`TAB`。
+          `cuts = 2`、`smooth = 0.25` 的真实前台 event replay 在 Blender 4.5.3/5.1.1 中均得到
+          56 vertices、108 edges、54 polygons，并证明 Mesh pointer 与 datablock 数量不变。menu/MCP
+          unavailable，`targetId`、`resultMeshId`、`resultMeshName` 显式省略；轨迹仍为
+          candidate/structural-only，不提供产品级 Observation、恢复、原生 Undo 或 managed action 等价。
+          见 [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

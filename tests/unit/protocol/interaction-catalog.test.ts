@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.21.0');
+    expect(catalog.catalogVersion).toBe('1.22.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -270,6 +270,7 @@ describe('interaction catalog protocol', () => {
       '1.19.0',
       '1.20.0',
       '1.21.0',
+      '1.22.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1109,6 +1110,77 @@ describe('interaction catalog protocol', () => {
         reason: 'No approved action-level MCP tool is available.',
       },
     });
+    const subdivide = recipeFor(catalog, 'blender.mesh.edit_subdivide');
+    expect(subdivide.guidance.kind).toBe('semantic_path');
+    expect(subdivide.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    const subdivideShortcut = subdivide.procedureMaterialization?.shortcut;
+    if (subdivideShortcut?.availability !== 'available') {
+      throw new Error('Expected Subdivide shortcut materialization');
+    }
+    expect(subdivideShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.enter_edit_mode',
+      'shortcut.select_all_mesh_elements',
+      'shortcut.search_subdivide',
+      'shortcut.execute_subdivide',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_number_of_cuts',
+      'shortcut.set_smoothness',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.return_to_object_mode',
+    ]);
+    expect(subdivideShortcut.operations[2]).toMatchObject({
+      kind: 'key_input',
+      keys: ['F3'],
+      selectionPath: ['Subdivide'],
+      parameters: [{ name: 'query', source: { kind: 'literal', value: 'subdivide' } }],
+    });
+    expect(subdivideShortcut.operations[4]).toMatchObject({
+      kind: 'key_input',
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.execute_subdivide',
+        expectedOperatorId: 'mesh.subdivide',
+      },
+    });
+    expect(subdivideShortcut.operations.slice(5, 7)).toMatchObject([
+      {
+        kind: 'operator_property_update',
+        target: { kind: 'control', hostId: 'mesh.subdivide.number_cuts' },
+        parameters: [
+          {
+            name: 'value',
+            source: { kind: 'action_argument', argumentName: 'cuts', transform: 'identity' },
+          },
+        ],
+      },
+      {
+        kind: 'operator_property_update',
+        target: { kind: 'control', hostId: 'mesh.subdivide.smoothness' },
+        parameters: [
+          {
+            name: 'value',
+            source: { kind: 'action_argument', argumentName: 'smooth', transform: 'identity' },
+          },
+        ],
+      },
+    ]);
+    expect(subdivideShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'resultMeshId',
+      'resultMeshName',
+    ]);
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1117,6 +1189,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.mesh.edit_subdivide',
     ]);
     expect(
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),

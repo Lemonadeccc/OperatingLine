@@ -114,6 +114,52 @@ function icosphereCandidate(
   return tree;
 }
 
+function subdivideCandidate(
+  interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+): ProcedureAuthoringCandidateTree {
+  const tree = candidate(interactionCatalog);
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Subdivide candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_subdivide',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.subdivided.mesh',
+      resultMeshName: 'OperatingLine.Cube.Subdivided',
+      cuts: 2,
+      smooth: 0.25,
+    },
+  };
+  leaf.title = 'Subdivide the accepted Cube in Edit Mode';
+  leaf.intent = 'Subdivide every visible edge with two cuts and 0.25 smoothing.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'subdivide_mesh',
+    description: 'Subdivide every visible edge of the accepted Cube.',
+    parameters: { cuts: 2, smooth: 0.25 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Subdivided' },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.subdivide' },
+  ];
+  leaf.expectedObservations[0] = {
+    ...leaf.expectedObservations[0]!,
+    parameters: { resourceId: 'tutorial.cube.subdivided.mesh' },
+  };
+  return tree;
+}
+
 function cubeCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
 ): ProcedureAuthoringCandidateTree {
@@ -783,6 +829,204 @@ describe('procedure authoring materialization', () => {
     ]);
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes the exact Edit Mode Subdivide candidate shortcut and preserves managed IDs only on the action', () => {
+    const input = subdivideCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Subdivide leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_subdivide.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.subdivided.mesh',
+      resultMeshName: 'OperatingLine.Cube.Subdivided',
+      cuts: 2,
+      smooth: 0.25,
+    });
+    expect(leaf.menuTracks).toEqual([
+      expect.objectContaining({
+        id: 'blender.mesh.edit_subdivide.semantic.menu',
+        availability: 'unavailable',
+        modality: 'menu',
+        reason:
+          "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent executable menu track.",
+      }),
+    ]);
+    const shortcutTrack = leaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available Subdivide shortcut track');
+    }
+    expect(shortcutTrack).toMatchObject({
+      id: 'blender.mesh.edit_subdivide.semantic.shortcut',
+      modality: 'shortcut',
+    });
+    expect(shortcutTrack.preconditions).toHaveLength(9);
+    expect(shortcutTrack.preconditions).toContainEqual({
+      kind: 'mode',
+      label: 'Mode',
+      value: 'OBJECT',
+    });
+    expect(shortcutTrack.preconditions).toContainEqual({
+      kind: 'selection',
+      label: 'Active Target',
+      value: 'Exactly one accepted target Mesh object is active and selected',
+    });
+    expect(
+      shortcutTrack.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      { kind: 'key_input', id: 'shortcut.enter_edit_mode', order: 1, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.select_all_mesh_elements',
+        order: 2,
+        parameters: {},
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.search_subdivide',
+        order: 3,
+        parameters: { query: 'subdivide' },
+      },
+      { kind: 'key_input', id: 'shortcut.execute_subdivide', order: 4, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 5,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_number_of_cuts',
+        order: 6,
+        parameters: { value: 2 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_smoothness',
+        order: 7,
+        parameters: { value: 0.25 },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 8,
+        parameters: {},
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.return_to_object_mode',
+        order: 9,
+        parameters: {},
+      },
+    ]);
+    expect(shortcutTrack.operations[0]).toMatchObject({ keys: ['TAB'] });
+    expect(shortcutTrack.operations[1]).toMatchObject({ keys: ['A'] });
+    expect(shortcutTrack.operations[2]).toMatchObject({
+      keys: ['F3'],
+      selectionPath: ['Subdivide'],
+    });
+    expect(shortcutTrack.operations[3]).toMatchObject({ keys: ['ENTER'] });
+    expect(shortcutTrack.operations[4]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.execute_subdivide',
+        expectedOperatorId: 'mesh.subdivide',
+      },
+    });
+    expect(shortcutTrack.operations[5]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.subdivide.number_cuts' },
+      path: ['Adjust Last Operation', 'Number of Cuts'],
+    });
+    expect(shortcutTrack.operations[6]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.subdivide.smoothness' },
+      path: ['Adjust Last Operation', 'Smoothness'],
+    });
+    expect(shortcutTrack.operations[7]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(shortcutTrack.operations[8]).toMatchObject({ keys: ['TAB'] });
+    expect(
+      shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toEqual(expect.arrayContaining(['targetId', 'resultMeshId', 'resultMeshName']));
+    expect(leaf.mcpTracks).toEqual([
+      expect.objectContaining({
+        availability: 'unavailable',
+        modality: 'mcp',
+        reason: 'No approved action-level MCP tool is available.',
+      }),
+    ]);
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
+  });
+
+  it('preserves the InteractionCatalog 1.21 Subdivide fallback with no invented executable track', () => {
+    const historicalCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.21.0',
+    );
+    if (historicalCatalog === undefined) {
+      throw new Error('expected immutable InteractionCatalog 1.21.0');
+    }
+
+    const result = materializeProcedureAuthoringCandidate(
+      subdivideCandidate(historicalCatalog),
+      blenderActionCatalog,
+      historicalCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected historical Subdivide leaf');
+
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.mesh.edit_subdivide.semantic',
+        menu: 'unavailable',
+        shortcut: 'unavailable',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'The InteractionCatalog recipe does not declare menu materialization.',
+    });
+    expect(leaf.shortcutTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'The InteractionCatalog recipe does not declare shortcut materialization.',
+    });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      reason: 'The InteractionCatalog recipe does not declare MCP materialization.',
+    });
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
   });
 
   it('materializes the exact Cube ordered menu and candidate shortcut without inventing MCP support', () => {

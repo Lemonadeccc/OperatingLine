@@ -806,6 +806,19 @@ def _parse_shortcut_operations(
     active_surface_operation_id: str | None = None
     active_surface_expected_operator_id: str | None = None
     active_property_target_ids: set[str] = set()
+    if guidance.operator_id is not None:
+        shortcut_surface_operator_id = guidance.operator_id
+    else:
+        execute_operator_steps = tuple(
+            step
+            for step in guidance.steps
+            if step.intent == "execute" and step.target_kind == "operator"
+        )
+        shortcut_surface_operator_id = (
+            execute_operator_steps[0].target_id
+            if len(execute_operator_steps) == 1
+            else None
+        )
     for operation_index, raw_value in enumerate(value):
         raw = _expect_object(raw_value, f"{label} operation")
         operation_kind = raw.get("kind")
@@ -1023,7 +1036,7 @@ def _parse_shortcut_operations(
                     raw_surface["expectedOperatorId"],
                     f"{label} operation opensSurface expectedOperatorId",
                 )
-                if expected_operator_id != guidance.operator_id:
+                if expected_operator_id != shortcut_surface_operator_id:
                     raise ValueError(
                         f"{label} opened surface expectedOperatorId must match "
                         "guidance execution operator"

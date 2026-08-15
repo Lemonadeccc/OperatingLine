@@ -34,8 +34,8 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.21.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.20.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.22.0` 与 ActionCatalog `1.12.0` 一一绑定 22 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.21.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -67,13 +67,19 @@ Cylinder 也使用四步 guidance 加中点 Location、Object Name 的六步 men
 canonical zero-roll XYZ Euler 将本地 `+Z` 对齐 `end-start`，本地 `-Z` 端对应
 `start`，本地 `+Z` 端对应 `end`，两端使用同一 `radius`，且不声称与 managed
 executor quaternion/roll 精确等价。
-Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部 `resourceId`；Torus、Cone、Cylinder
-shortcut unavailable，所有 MCP track 也因没有真实 action-level tool 而 unavailable。
+Subdivide 保留 managed copy/swap `semantic_path`，并增加 candidate-only 九步 shortcut：`TAB`、`A`、
+`F3`（literal query `subdivide`）、`ENTER`、`F9`、Number of Cuts、Smoothness、`ENTER`、`TAB`。它将 `cuts` 与
+`smooth` 逐控件绑定，并显式省略 `targetId`、`resultMeshId` 和 `resultMeshName`；原生路径直接修改当前 Mesh，
+不等价于 managed replacement Mesh。Icosphere、Cube、Plane、Torus、Cone 和 Cylinder 都省略内部
+`resourceId`；Torus、Cone、Cylinder shortcut unavailable，所有 MCP track 也因没有真实 action-level tool
+而 unavailable。
 Icosphere shortcut 使用 ProcedureTree `1.1.0` / Result `1.3.0`，Cube 与 Plane shortcut 使用 Result
-`1.2.0`，其余这些 menu-only 结果使用 Result `1.1.0`；轨迹仍是
+`1.2.0`，Subdivide shortcut 使用 Result `1.3.0`，其余这些 menu-only 结果使用 Result `1.1.0`；轨迹仍是
 `candidate`/`structural_only` 教学投影。Icosphere 的创建与 F9 参数前缀已在 Blender 4.5.3/5.1.1
 完成真实事件回放并验证 3/2.5、162 顶点和半径，但后续移动/重命名及 managed action 语义仍不是完整
-UI operation replay。Cube 与
+UI operation replay。Subdivide 的九步真实事件回放在相同版本中验证 `cuts = 2`、`smooth = 0.25`、
+56 vertices、108 edges、54 polygons，并证明 Mesh pointer 与 datablock 数量不变；这正是原生 in-place
+mutation 与 managed copy/swap 不等价的证据。Cube 与
 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件或完整 UI replay；它们保留默认
 未 bake mesh 与 `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`。冻结的
 `1.19.0` 保持 Plane shortcut unavailable。Cone/Cylinder 的 Blender
@@ -86,17 +92,20 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0054](../adr/0054-cylinder-segment-frame-menu-materialization.md) 与
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
 [ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。Extension 的严格目录 loader 能解析并
-验证 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；
-`1.21.0` 只据双版本前台证据启用 Icosphere 的 candidate materialization，不把它升级为 verified execution。
+验证 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；对于
+`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.22.0` 只据双版本
+前台证据启用 Subdivide 的 candidate materialization，不把它升级为 verified execution。
 见 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
-[ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md)。
+[ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md) 与
+[ADR 0059](../adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md)。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
 材质、骨骼、显式蒙皮权重、动画和渲染等十五条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
-菜单项。未来只有新的版本专用 recipe 通过真实宿主测试后，才能升级为 `native_path`。见
+菜单项；Subdivide 仅额外提供 candidate shortcut，其菜单仍 unavailable。未来只有新的版本专用 recipe
+通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
 [ADR 0026](../adr/0026-native-cube-action-slice.md) 与
 [ADR 0027](../adr/0027-native-icosphere-action-slice.md) 与

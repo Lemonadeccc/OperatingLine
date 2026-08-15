@@ -248,6 +248,56 @@ function icosphereAuthoringCandidateFixture(
   return tree;
 }
 
+function subdivideAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Subdivide authoring candidate leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.edit_subdivide',
+    arguments: {
+      targetId: 'tutorial.cube',
+      resultMeshId: 'tutorial.cube.subdivided.mesh',
+      resultMeshName: 'OperatingLine.Cube.Subdivided',
+      cuts: 2,
+      smooth: 0.25,
+    },
+  };
+  leaf['title'] = 'Subdivide the accepted Cube in Edit Mode';
+  leaf['intent'] = 'Subdivide every visible edge with two cuts and 0.25 smoothing.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'subdivide_mesh',
+    description: 'Subdivide every visible edge of the accepted Cube.',
+    parameters: { cuts: 2, smooth: 0.25 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active Edit Mode target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Name the managed replacement mesh.',
+    parameters: { resultMeshName: 'OperatingLine.Cube.Subdivided' },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'operator', operatorId: 'mesh.subdivide' },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    ...observations[0],
+    parameters: { resourceId: 'tutorial.cube.subdivided.mesh' },
+  };
+  return tree;
+}
+
 function cubeAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -898,7 +948,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.21.0' },
+        catalogBinding: { interactionCatalogVersion: '1.22.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2168,6 +2218,119 @@ describe('procedure compilation runtime', () => {
       await runtime.stop();
     }
   }, 25_000);
+
+  it('materializes and structurally compiles the InteractionCatalog 1.22 Subdivide candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Subdivide the accepted Cube with two cuts and 0.25 smoothing.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: subdivideAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Subdivide materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Subdivide leaf');
+      }
+
+      expect(materialization).toMatchObject({
+        formatVersion: '1.3.0',
+        catalogBinding: { interactionCatalogVersion: '1.22.0' },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.mesh.edit_subdivide.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        resultMeshId: 'tutorial.cube.subdivided.mesh',
+        resultMeshName: 'OperatingLine.Cube.Subdivided',
+        cuts: 2,
+        smooth: 0.25,
+      });
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected one materialized Subdivide shortcut');
+      }
+      expect(shortcut.operations.map((operation) => operation.id)).toEqual([
+        'shortcut.enter_edit_mode',
+        'shortcut.select_all_mesh_elements',
+        'shortcut.search_subdivide',
+        'shortcut.execute_subdivide',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_number_of_cuts',
+        'shortcut.set_smoothness',
+        'shortcut.close_adjust_last_operation',
+        'shortcut.return_to_object_mode',
+      ]);
+      expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+        {},
+        {},
+        { query: 'subdivide' },
+        {},
+        {},
+        { value: 2 },
+        { value: 0.25 },
+        {},
+        {},
+      ]);
+      expect(
+        shortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toEqual(expect.arrayContaining(['targetId', 'resultMeshId', 'resultMeshName']));
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
 
   it('rejects tampered, resealed, identity-drifted, and non-candidate authoring input', async () => {
     const runtime = await startRuntime({

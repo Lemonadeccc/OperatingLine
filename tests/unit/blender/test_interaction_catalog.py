@@ -259,7 +259,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.21.0")
+        self.assertEqual(catalog.catalog_version, "1.22.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -538,6 +538,115 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             icosphere.procedure_materialization.mcp.availability,
+            "unavailable",
+        )
+        subdivide = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name == "blender.mesh.edit_subdivide"
+        )
+        self.assertEqual(subdivide.guidance.kind, InteractionPathKind.SEMANTIC)
+        self.assertIsNotNone(subdivide.procedure_materialization)
+        assert subdivide.procedure_materialization is not None
+        self.assertEqual(
+            subdivide.procedure_materialization.menu.availability,
+            "unavailable",
+        )
+        subdivide_shortcut = subdivide.procedure_materialization.shortcut
+        self.assertEqual(
+            (
+                subdivide_shortcut.availability,
+                subdivide_shortcut.source,
+                subdivide_shortcut.semantic_binding,
+                subdivide_shortcut.parameter_binding,
+                subdivide_shortcut.projection,
+            ),
+            (
+                "available",
+                "catalog.ordered_shortcut_operations",
+                "all_leaf_operations",
+                "ordered_parameter_operations",
+                "candidate_only",
+            ),
+        )
+        assert subdivide_shortcut.preconditions is not None
+        self.assertEqual(
+            tuple(item.kind for item in subdivide_shortcut.preconditions),
+            (
+                "workspace",
+                "editor",
+                "mode",
+                "selection",
+                "keymap",
+                "modal_state",
+                "scene_state",
+                "scene_state",
+                "scene_state",
+            ),
+        )
+        assert subdivide_shortcut.shortcut_operations is not None
+        self.assertEqual(
+            tuple(item.id for item in subdivide_shortcut.shortcut_operations),
+            (
+                "shortcut.enter_edit_mode",
+                "shortcut.select_all_mesh_elements",
+                "shortcut.search_subdivide",
+                "shortcut.execute_subdivide",
+                "shortcut.open_adjust_last_operation",
+                "shortcut.set_number_of_cuts",
+                "shortcut.set_smoothness",
+                "shortcut.close_adjust_last_operation",
+                "shortcut.return_to_object_mode",
+            ),
+        )
+        self.assertEqual(
+            tuple(item.keys for item in subdivide_shortcut.shortcut_operations[:5]),
+            (("TAB",), ("A",), ("F3",), ("ENTER",), ("F9",)),
+        )
+        self.assertEqual(
+            subdivide_shortcut.shortcut_operations[2].selection_path,
+            ("Subdivide",),
+        )
+        self.assertEqual(
+            (
+                subdivide_shortcut.shortcut_operations[2].parameters[0].name,
+                subdivide_shortcut.shortcut_operations[2].parameters[0].source.kind,
+                subdivide_shortcut.shortcut_operations[2].parameters[0].source.value,
+            ),
+            ("query", "literal", "subdivide"),
+        )
+        subdivide_opener = subdivide_shortcut.shortcut_operations[4]
+        assert subdivide_opener.opens_surface is not None
+        self.assertEqual(
+            (
+                subdivide_opener.opens_surface.source_operation_id,
+                subdivide_opener.opens_surface.expected_operator_id,
+            ),
+            ("shortcut.execute_subdivide", "mesh.subdivide"),
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.target_id,
+                    operation.parameters[0].source.argument_name,
+                )
+                for operation in subdivide_shortcut.shortcut_operations[5:7]
+            ),
+            (
+                ("mesh.subdivide.number_cuts", "cuts"),
+                ("mesh.subdivide.smoothness", "smooth"),
+            ),
+        )
+        assert subdivide_shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                item.argument_name
+                for item in subdivide_shortcut.omitted_action_arguments
+            ),
+            ("targetId", "resultMeshId", "resultMeshName"),
+        )
+        self.assertEqual(
+            subdivide.procedure_materialization.mcp.availability,
             "unavailable",
         )
         plane = next(
@@ -1208,6 +1317,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_cone",
                     "blender.mesh.create_cylinder",
                     "blender.mesh.create_torus",
+                    "blender.mesh.edit_subdivide",
                 }
             )
         )
@@ -1548,6 +1658,32 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertIsNone(
             icosphere.procedure_materialization.shortcut.shortcut_operations
         )
+
+    def test_loads_byte_frozen_icosphere_shortcut_catalog_without_subdivide_shortcut(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.21.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "f1a47b2903f6d15f0a9fef76f9f30e4e399d4bca98c9f9473c3e920c9df6583c",
+        )
+        self.assertEqual(frozen.catalog_version, "1.21.0")
+        subdivide = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.edit_subdivide"
+        )
+        self.assertIsNone(subdivide.procedure_materialization)
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())
@@ -2059,6 +2195,78 @@ class InteractionCatalogTests(unittest.TestCase):
             closer.closes_surface_operation_id,
             "shortcut.open_adjust_last_operation",
         )
+
+    def test_binds_operator_property_surface_to_semantic_execute_operator(self) -> None:
+        raw = self._operator_property_shortcut_catalog()
+        recipe = next(
+            item
+            for item in raw["recipes"]
+            if item["actionName"] == "blender.mesh.create_icosphere"
+        )
+        recipe["guidance"] = {
+            "kind": "semantic_path",
+            "steps": [
+                {
+                    "id": "semantic.select_target",
+                    "order": 1,
+                    "label": "Selected Target",
+                    "intent": "configure",
+                    "target": {
+                        "kind": "semantic",
+                        "hostId": "operatingline.blender.selected_target",
+                    },
+                },
+                {
+                    "id": "operator.icosphere",
+                    "order": 2,
+                    "label": "Ico Sphere",
+                    "intent": "execute",
+                    "target": {
+                        "kind": "operator",
+                        "hostId": "mesh.primitive_ico_sphere_add",
+                    },
+                },
+            ],
+            "reason": "The candidate UI operation is not the managed action executor.",
+        }
+        recipe["procedureMaterialization"]["menu"] = {
+            "availability": "unavailable",
+            "reason": "Semantic guidance cannot materialize an executable menu track.",
+        }
+
+        loaded = self._load_raw(raw)
+        loaded_recipe = next(
+            item
+            for item in loaded.recipes
+            if item.action_name == "blender.mesh.create_icosphere"
+        )
+        self.assertEqual(loaded_recipe.guidance.kind, InteractionPathKind.SEMANTIC)
+
+        recipe["guidance"]["steps"].append(
+            {
+                "id": "operator.second_execute",
+                "order": 3,
+                "label": "Second Execute Operator",
+                "intent": "execute",
+                "target": {
+                    "kind": "operator",
+                    "hostId": "mesh.primitive_uv_sphere_add",
+                },
+            }
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "expectedOperatorId must match guidance execution operator",
+        ):
+            self._load_raw(raw)
+        recipe["guidance"]["steps"].pop()
+
+        recipe["guidance"]["steps"][1]["intent"] = "configure"
+        with self.assertRaisesRegex(
+            ValueError,
+            "expectedOperatorId must match guidance execution operator",
+        ):
+            self._load_raw(raw)
 
     def test_rejects_invalid_operator_property_shortcut_state(self) -> None:
         def operations(raw: dict) -> list[dict]:

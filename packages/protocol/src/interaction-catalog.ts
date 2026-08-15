@@ -601,6 +601,17 @@ function validateRecipe(recipe: InteractionRecipe): void {
 
   const shortcut = recipe.procedureMaterialization?.shortcut;
   if (shortcut?.availability === 'available') {
+    const shortcutSurfaceOperatorId =
+      recipe.guidance.kind === 'native_path'
+        ? recipe.guidance.execution.operatorId
+        : (() => {
+            const executeOperatorSteps = recipe.guidance.steps.filter(
+              (step) => step.intent === 'execute' && step.target.kind === 'operator',
+            );
+            return executeOperatorSteps.length === 1
+              ? executeOperatorSteps[0]!.target.hostId
+              : undefined;
+          })();
     const singletonPreconditionKinds = new Set(['workspace', 'editor', 'mode', 'keymap']);
     const singletonPreconditionCounts = new Map<string, number>();
     const preconditionKeys = new Set<string>();
@@ -715,10 +726,7 @@ function validateRecipe(recipe: InteractionRecipe): void {
             `Interaction recipe ${recipe.id} shortcut surface opener ${operation.id} must immediately follow its source operation`,
           );
         }
-        if (
-          recipe.guidance.kind !== 'native_path' ||
-          operation.opensSurface.expectedOperatorId !== recipe.guidance.execution.operatorId
-        ) {
+        if (operation.opensSurface.expectedOperatorId !== shortcutSurfaceOperatorId) {
           throw new Error(
             `Interaction recipe ${recipe.id} shortcut surface opener ${operation.id} must bind the guidance execution operator`,
           );
