@@ -11,12 +11,14 @@ from .editing import (
     execute_extrude_region,
     execute_geometry_nodes_transform,
     execute_solidify,
+    execute_subdivision_surface,
     execute_subdivide,
     execute_triangulate,
     validate_bevel,
     validate_extrude_region,
     validate_geometry_nodes_transform,
     validate_solidify,
+    validate_subdivision_surface,
     validate_subdivide,
     validate_triangulate,
 )
@@ -158,6 +160,12 @@ def build_action_registry(root: TaskNode) -> dict[str, tuple[Execute, Rollback]]
             definition = validate_solidify(arguments)
             reserve(step.id, (definition.modifier_id,))
             execute = _bind_action(execute_solidify, step.id, action, definition)
+        elif action.name == "blender.modifier.add_subdivision_surface":
+            definition = validate_subdivision_surface(arguments)
+            reserve(step.id, (definition.modifier_id,))
+            execute = _bind_action(
+                execute_subdivision_surface, step.id, action, definition
+            )
         elif action.name == "blender.geometry_nodes.create_transform":
             definition = validate_geometry_nodes_transform(arguments)
             reserve(

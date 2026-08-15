@@ -19,6 +19,7 @@ import catalog180Json from '../v1/action-catalog-1.8.0.json' with { type: 'json'
 import catalog190Json from '../v1/action-catalog-1.9.0.json' with { type: 'json' };
 import catalog1100Json from '../v1/action-catalog-1.10.0.json' with { type: 'json' };
 import catalog1110Json from '../v1/action-catalog-1.11.0.json' with { type: 'json' };
+import catalog1120Json from '../v1/action-catalog-1.12.0.json' with { type: 'json' };
 import catalogJson from '../v1/action-catalog.json' with { type: 'json' };
 import interactionCatalog100Json from '../v1/interaction-catalog-1.0.0.json' with { type: 'json' };
 import interactionCatalog110Json from '../v1/interaction-catalog-1.1.0.json' with { type: 'json' };
@@ -42,6 +43,7 @@ import interactionCatalog1180Json from '../v1/interaction-catalog-1.18.0.json' w
 import interactionCatalog1190Json from '../v1/interaction-catalog-1.19.0.json' with { type: 'json' };
 import interactionCatalog1200Json from '../v1/interaction-catalog-1.20.0.json' with { type: 'json' };
 import interactionCatalog1210Json from '../v1/interaction-catalog-1.21.0.json' with { type: 'json' };
+import interactionCatalog1220Json from '../v1/interaction-catalog-1.22.0.json' with { type: 'json' };
 import interactionCatalogJson from '../v1/interaction-catalog.json' with { type: 'json' };
 
 export const blenderActionCatalog: ActionCatalog = actionCatalogSchema.parse(catalogJson);
@@ -58,6 +60,7 @@ export const blenderActionCatalogs: readonly ActionCatalog[] = Object.freeze([
   actionCatalogSchema.parse(catalog190Json),
   actionCatalogSchema.parse(catalog1100Json),
   actionCatalogSchema.parse(catalog1110Json),
+  actionCatalogSchema.parse(catalog1120Json),
   blenderActionCatalog,
 ]);
 
@@ -121,6 +124,9 @@ const blenderInteractionCatalog1200: InteractionCatalog = interactionCatalogSche
 const blenderInteractionCatalog1210: InteractionCatalog = interactionCatalogSchema.parse(
   interactionCatalog1210Json,
 );
+const blenderInteractionCatalog1220: InteractionCatalog = interactionCatalogSchema.parse(
+  interactionCatalog1220Json,
+);
 export const blenderInteractionCatalog: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalogJson);
 export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.freeze([
@@ -146,6 +152,7 @@ export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.
   blenderInteractionCatalog1190,
   blenderInteractionCatalog1200,
   blenderInteractionCatalog1210,
+  blenderInteractionCatalog1220,
   blenderInteractionCatalog,
 ]);
 
@@ -158,17 +165,18 @@ validateInteractionCatalog(blenderInteractionCatalog150, blenderActionCatalogs[8
 validateInteractionCatalog(blenderInteractionCatalog160, blenderActionCatalogs[9]!);
 validateInteractionCatalog(blenderInteractionCatalog170, blenderActionCatalogs[10]!);
 validateInteractionCatalog(blenderInteractionCatalog180, blenderActionCatalogs[11]!);
-validateInteractionCatalog(blenderInteractionCatalog190, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1100, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1110, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1120, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1130, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1140, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1150, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1160, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1170, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1180, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1190, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1200, blenderActionCatalog);
-validateInteractionCatalog(blenderInteractionCatalog1210, blenderActionCatalog);
+validateInteractionCatalog(blenderInteractionCatalog190, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1100, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1110, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1120, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1130, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1140, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1150, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1160, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1170, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1180, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1190, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1200, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1210, blenderActionCatalogs[12]!);
+validateInteractionCatalog(blenderInteractionCatalog1220, blenderActionCatalogs[12]!);
 validateInteractionCatalog(blenderInteractionCatalog, blenderActionCatalog);

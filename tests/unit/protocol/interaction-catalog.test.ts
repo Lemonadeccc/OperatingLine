@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.22.0');
+    expect(catalog.catalogVersion).toBe('1.23.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -244,7 +244,7 @@ describe('interaction catalog protocol', () => {
     ]);
     expect(
       catalog.recipes.filter((recipe) => recipe.guidance.kind === 'semantic_path'),
-    ).toHaveLength(15);
+    ).toHaveLength(16);
     expect(
       blenderInteractionCatalogs.map((versionedCatalog) => versionedCatalog.catalogVersion),
     ).toEqual([
@@ -271,6 +271,7 @@ describe('interaction catalog protocol', () => {
       '1.20.0',
       '1.21.0',
       '1.22.0',
+      '1.23.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -1181,6 +1182,141 @@ describe('interaction catalog protocol', () => {
       'resultMeshId',
       'resultMeshName',
     ]);
+    const subdivisionSurface = recipeFor(catalog, 'blender.modifier.add_subdivision_surface');
+    expect(subdivisionSurface.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    expect(subdivisionSurface.guidance).toMatchObject({
+      kind: 'semantic_path',
+      steps: [
+        { order: 1, intent: 'navigate', target: { kind: 'workspace', hostId: 'Layout' } },
+        {
+          order: 2,
+          intent: 'configure',
+          target: { kind: 'semantic', hostId: 'operatingline.blender.owned_mesh' },
+        },
+        {
+          order: 3,
+          intent: 'execute',
+          target: { kind: 'operator', hostId: 'object.subdivision_set' },
+        },
+        {
+          order: 4,
+          intent: 'configure',
+          target: {
+            kind: 'semantic',
+            hostId: 'operatingline.blender.subdivision_surface_modifier',
+          },
+        },
+      ],
+    });
+    if (subdivisionSurface.guidance.kind !== 'semantic_path') {
+      throw new Error('Expected semantic Subdivision Surface guidance');
+    }
+    expect(
+      subdivisionSurface.guidance.steps.filter(
+        (step) => step.intent === 'execute' && step.target.kind === 'operator',
+      ),
+    ).toHaveLength(1);
+    const subdivisionShortcut = subdivisionSurface.procedureMaterialization?.shortcut;
+    if (subdivisionShortcut?.availability !== 'available') {
+      throw new Error('Expected Subdivision Surface shortcut materialization');
+    }
+    expect(subdivisionShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      {
+        kind: 'selection',
+        label: 'Active Target',
+        value: 'Exactly one accepted target Mesh object is active and selected',
+      },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'modal_state', label: 'Modal UI', value: 'None' },
+      {
+        kind: 'scene_state',
+        label: 'Modifier Type',
+        value: 'No existing SUBSURF modifier',
+      },
+      {
+        kind: 'scene_state',
+        label: 'Modifier Stack',
+        value: 'Existing modifier stack matches accepted tracked state',
+      },
+      {
+        kind: 'scene_state',
+        label: 'Topology Bounds',
+        value: 'Evaluated and projected topology are within managed bounds',
+      },
+    ]);
+    expect(subdivisionShortcut.operations).toEqual([
+      {
+        kind: 'key_input',
+        id: 'shortcut.add_subdivision_surface_level_one',
+        label: 'Add Subdivision Surface Level One',
+        keyMode: 'chord',
+        keys: ['CTRL', '1'],
+        parameters: [
+          { name: 'level', source: { kind: 'literal', value: 1 } },
+          { name: 'relative', source: { kind: 'literal', value: false } },
+          { name: 'ensure_modifier', source: { kind: 'literal', value: true } },
+        ],
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        label: 'Open Adjust Last Operation',
+        keyMode: 'sequence',
+        keys: ['F9'],
+        parameters: [],
+        opensSurface: {
+          kind: 'adjust_last_operation',
+          hostId: 'screen.redo_last',
+          sourceOperationId: 'shortcut.add_subdivision_surface_level_one',
+          expectedOperatorId: 'object.subdivision_set',
+        },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_viewport_level',
+        label: 'Set Viewport Level',
+        surfaceOperationId: 'shortcut.open_adjust_last_operation',
+        target: { kind: 'control', hostId: 'object.subdivision_set.level' },
+        path: ['Adjust Last Operation', 'Level'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'viewportLevel',
+              transform: 'identity',
+            },
+          },
+        ],
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        label: 'Confirm Adjust Last Operation',
+        keyMode: 'sequence',
+        keys: ['ENTER'],
+        parameters: [],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      },
+    ]);
+    expect(subdivisionShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+    ]);
     const materializedActionNames = new Set([
       'blender.mesh.create_uv_sphere',
       'blender.mesh.create_icosphere',
@@ -1190,6 +1326,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
       'blender.mesh.edit_subdivide',
+      'blender.modifier.add_subdivision_surface',
     ]);
     expect(
       catalog.recipes.filter((recipe) => !materializedActionNames.has(recipe.actionName)),

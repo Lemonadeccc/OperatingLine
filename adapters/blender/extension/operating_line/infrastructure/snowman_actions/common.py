@@ -149,6 +149,7 @@ ALLOWED_ACTIONS = frozenset(
         "blender.mesh.edit_extrude_region",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
+        "blender.modifier.add_subdivision_surface",
         "blender.geometry_nodes.create_transform",
         "blender.material.create_and_assign",
         "blender.material.create_palette_and_assign",

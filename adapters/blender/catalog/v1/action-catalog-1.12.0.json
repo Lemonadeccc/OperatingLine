@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.13.0",
+  "catalogVersion": "1.12.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -11,7 +11,7 @@
     "Create resources before actions that read or mutate them, and encode those relationships with dependsOn.",
     "Every objectName, materialName, sceneName, worldName, and dataName must start with OperatingLine. so the adapter never overwrites user-named resources.",
     "The adapter keeps the legacy internal logical collection id snowman.collection for catalog replay compatibility, but presents it as a generic OperatingLine-generated collection for every goal.",
-    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide and Triangulate edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel, Solidify, and Subdivision Surface modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate and Extrude Region require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Subdivision Surface also requires a receipt-tracked stack, rejects an existing SUBSURF modifier, bounds projected evaluated topology, and fixes subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
+    "The catalog can construct scenes from individual planes, cubes, UV spheres, Icospheres, cones, cylinders, and tori or bounded primitive batches; make bounded whole-mesh Subdivide and Triangulate edits; extrude one explicit edge-connected face region by a fixed local-space translation; add owned Bevel and Solidify modifiers; create an owned Transform Geometry node group; assign Principled materials; create and bind a rigid armature; bind explicit normalized deform weights through an Armature modifier; author pose transform keyframes with bounded interpolation; create an isolated scene; add Area lights and a camera; and render a managed PNG preview at a selected frame. Triangulate and Extrude Region require Object Mode, no modifiers or shape keys, and source and result topology within 8192 vertices, 16384 edges, and 8192 polygons. Triangulate additionally requires at least one non-triangle polygon and fixes quad_method=FIXED and ngon_method=EAR_CLIP. Extrude Region accepts 1..256 unique polygon indices that must form one edge-connected region with a boundary edge and applies one nonzero local-space translation with length in 0.0001..1000. Solidify requires every existing target modifier to be receipt-tracked and limits both source and evaluated input to the same topology bounds; solidify_mode=EXTRUDE, use_even_offset=true, use_rim=true, and use_rim_only=false are fixed implementation behavior rather than action parameters. Prefer one meaningful operation per leaf. Sculpting, arbitrary vertex or edge selection, disjoint face regions, automatic weights, arbitrary modifiers, and arbitrary node graphs remain explicit actionless/manual nodes.",
     "Use semantic anchors and supported observations to explain and verify every executable leaf. Do not invent a pixel location for a Blender menu item.",
     "Organize executable leaves under ordered root-level phase groups and call operatingline.planning.evaluate before proposing the complete plan."
   ],
@@ -36,7 +36,6 @@
         "blender.mesh.edit_extrude_region",
         "blender.modifier.add_bevel",
         "blender.modifier.add_solidify",
-        "blender.modifier.add_subdivision_surface",
         "blender.geometry_nodes.create_transform"
       ]
     },
@@ -137,13 +136,6 @@
       "description": "Add one owned, parameterized Solidify modifier to an earlier mesh object within the bounded topology limit.",
       "selectionGuidance": "Select when the requested form needs nondestructive wall thickness from an existing surface.",
       "actionNames": ["blender.modifier.add_solidify"]
-    },
-    {
-      "id": "geometry.subdivision_surface_modifier",
-      "title": "Subdivision Surface modifier",
-      "description": "Add one owned, bounded Subdivision Surface modifier to an earlier mesh object.",
-      "selectionGuidance": "Select when the requested form needs nondestructive Catmull-Clark smoothing with an explicit viewport level and fixed render level 2.",
-      "actionNames": ["blender.modifier.add_subdivision_surface"]
     },
     {
       "id": "geometry_nodes.transform",
@@ -1112,62 +1104,6 @@
           "argumentPath": "modifierId",
           "derivedResourceTypes": [],
           "description": "Creates one receipt-owned Solidify modifier."
-        }
-      ],
-      "supportedAnchorKinds": ["object", "owned_control", "unavailable"],
-      "supportedObservationKinds": ["modifier_ready"],
-      "rollbackModes": ["compensating_action"],
-      "safety": {
-        "sideEffect": "scene_write",
-        "requiresPlanApproval": true,
-        "networkAccess": false,
-        "fileAccess": "none"
-      }
-    },
-    {
-      "name": "blender.modifier.add_subdivision_surface",
-      "title": "Add one Subdivision Surface modifier",
-      "description": "Adds one owned, bounded Subdivision Surface modifier to an earlier owned mesh object without applying it. Every existing modifier must be receipt-tracked, the stack must not already contain a SUBSURF modifier, and projected evaluated topology must remain within 8192 vertices, 16384 edges, and 8192 polygons. subdivision_type=CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3 are fixed implementation behavior.",
-      "argumentsSchema": {
-        "type": "object",
-        "required": ["targetId", "modifierId", "modifierName", "viewportLevel"],
-        "properties": {
-          "targetId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierId": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-          },
-          "modifierName": {
-            "type": "string",
-            "pattern": "^OperatingLine\\.",
-            "maxLength": 180
-          },
-          "viewportLevel": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 3,
-            "description": "Viewport subdivision level; render level is fixed to 2."
-          }
-        },
-        "additionalProperties": false
-      },
-      "resourceEffects": [
-        {
-          "access": "mutate",
-          "resourceType": "OBJECT",
-          "argumentPath": "targetId",
-          "derivedResourceTypes": [],
-          "description": "Adds a non-applied Subdivision Surface modifier after receipt-tracked modifiers only, rejects an existing SUBSURF modifier, and bounds projected evaluated topology to 8192 vertices, 16384 edges, and 8192 polygons."
-        },
-        {
-          "access": "create",
-          "resourceType": "MODIFIER",
-          "argumentPath": "modifierId",
-          "derivedResourceTypes": [],
-          "description": "Creates one receipt-owned Subdivision Surface modifier with CATMULL_CLARK, levels=viewportLevel, render_levels=2, and quality=3."
         }
       ],
       "supportedAnchorKinds": ["object", "owned_control", "unavailable"],

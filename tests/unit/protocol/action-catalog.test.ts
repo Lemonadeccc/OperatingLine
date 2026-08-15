@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.12.0');
+    expect(catalog.catalogVersion).toBe('1.13.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -35,6 +35,7 @@ describe('action catalog protocol', () => {
       'blender.mesh.edit_extrude_region',
       'blender.modifier.add_bevel',
       'blender.modifier.add_solidify',
+      'blender.modifier.add_subdivision_surface',
       'blender.geometry_nodes.create_transform',
       'blender.material.create_and_assign',
       'blender.material.create_palette_and_assign',
@@ -63,6 +64,7 @@ describe('action catalog protocol', () => {
       'geometry.edit_extrude_region',
       'geometry.bevel_modifier',
       'geometry.solidify_modifier',
+      'geometry.subdivision_surface_modifier',
       'geometry_nodes.transform',
       'appearance.principled_palette',
       'animation.rigid_armature',
@@ -87,6 +89,7 @@ describe('action catalog protocol', () => {
       '1.10.0',
       '1.11.0',
       '1.12.0',
+      '1.13.0',
     ]);
   });
 
@@ -517,6 +520,64 @@ describe('action catalog protocol', () => {
         solidifySchema,
       ),
     ).toEqual([]);
+    const subdivisionSurfaceSchema = schemaFor('blender.modifier.add_subdivision_surface');
+    expect(subdivisionSurfaceSchema.additionalProperties).toBe(false);
+    expect(subdivisionSurfaceSchema.required).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'viewportLevel',
+    ]);
+    expect(Object.keys(subdivisionSurfaceSchema.properties)).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+      'viewportLevel',
+    ]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.subdivision',
+          modifierName: 'OperatingLine.Body.Subdivision',
+          viewportLevel: 1,
+        },
+        subdivisionSurfaceSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.subdivision',
+          modifierName: 'OperatingLine.Body.Subdivision',
+          viewportLevel: 3,
+        },
+        subdivisionSurfaceSchema,
+      ),
+    ).toEqual([]);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.subdivision',
+          modifierName: 'OperatingLine.Body.Subdivision',
+          viewportLevel: 0,
+        },
+        subdivisionSurfaceSchema,
+      ),
+    ).toEqual(['viewportLevel must be at least 1']);
+    expect(
+      validateActionArguments(
+        {
+          targetId: 'model.body',
+          modifierId: 'model.body.subdivision',
+          modifierName: 'OperatingLine.Body.Subdivision',
+          viewportLevel: 4,
+        },
+        subdivisionSurfaceSchema,
+      ),
+    ).toEqual(['viewportLevel must be at most 3']);
     expect(
       validateActionArguments(
         {

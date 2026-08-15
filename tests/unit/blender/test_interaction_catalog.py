@@ -25,6 +25,14 @@ BUNDLED_INTERACTION_CATALOG = catalog_module.BUNDLED_INTERACTION_CATALOG
 InteractionPathKind = catalog_module.InteractionPathKind
 RESOURCE_PATH = catalog_module.RESOURCE_PATH
 ACTION_CATALOG_PATH = catalog_module.ACTION_CATALOG_PATH
+FROZEN_ACTION_CATALOG_112_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "catalog"
+    / "v1"
+    / "action-catalog-1.12.0.json"
+)
 load_interaction_catalog = catalog_module.load_interaction_catalog
 
 
@@ -259,13 +267,13 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.22.0")
-        self.assertEqual(catalog.action_catalog_version, "1.12.0")
+        self.assertEqual(catalog.catalog_version, "1.23.0")
+        self.assertEqual(catalog.action_catalog_version, "1.13.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
         )
-        self.assertEqual(len(catalog.recipes), 22)
+        self.assertEqual(len(catalog.recipes), 23)
         native = tuple(
             recipe.action_name
             for recipe in catalog.recipes
@@ -295,7 +303,164 @@ class InteractionCatalogTests(unittest.TestCase):
                 recipe.guidance.kind is InteractionPathKind.SEMANTIC
                 for recipe in catalog.recipes
             ),
-            15,
+            16,
+        )
+        subdivision_surface = next(
+            recipe
+            for recipe in catalog.recipes
+            if recipe.action_name
+            == "blender.modifier.add_subdivision_surface"
+        )
+        self.assertIsNotNone(subdivision_surface.procedure_materialization)
+        assert subdivision_surface.procedure_materialization is not None
+        self.assertEqual(
+            tuple(
+                (
+                    step.intent,
+                    step.target_kind,
+                    step.target_id,
+                )
+                for step in subdivision_surface.guidance.steps
+            ),
+            (
+                ("navigate", "workspace", "Layout"),
+                (
+                    "configure",
+                    "semantic",
+                    "operatingline.blender.owned_mesh",
+                ),
+                ("execute", "operator", "object.subdivision_set"),
+                (
+                    "configure",
+                    "semantic",
+                    "operatingline.blender.subdivision_surface_modifier",
+                ),
+            ),
+        )
+        subdivision_materialization = (
+            subdivision_surface.procedure_materialization
+        )
+        self.assertEqual(
+            subdivision_materialization.menu.availability, "unavailable"
+        )
+        subdivision_shortcut = subdivision_materialization.shortcut
+        self.assertEqual(
+            (
+                subdivision_shortcut.availability,
+                subdivision_shortcut.source,
+                subdivision_shortcut.semantic_binding,
+                subdivision_shortcut.parameter_binding,
+                subdivision_shortcut.projection,
+            ),
+            (
+                "available",
+                "catalog.ordered_shortcut_operations",
+                "all_leaf_operations",
+                "ordered_parameter_operations",
+                "candidate_only",
+            ),
+        )
+        assert subdivision_shortcut.preconditions is not None
+        self.assertEqual(
+            tuple(
+                (item.kind, item.label, item.value)
+                for item in subdivision_shortcut.preconditions
+            ),
+            (
+                ("workspace", "Workspace", "Layout"),
+                ("editor", "Editor", "VIEW_3D"),
+                ("mode", "Mode", "OBJECT"),
+                (
+                    "selection",
+                    "Active Target",
+                    "Exactly one accepted target Mesh object is active and selected",
+                ),
+                ("keymap", "Keymap", "Blender"),
+                ("modal_state", "Modal UI", "None"),
+                (
+                    "scene_state",
+                    "Modifier Type",
+                    "No existing SUBSURF modifier",
+                ),
+                (
+                    "scene_state",
+                    "Modifier Stack",
+                    "Existing modifier stack matches accepted tracked state",
+                ),
+                (
+                    "scene_state",
+                    "Topology Bounds",
+                    "Evaluated and projected topology are within managed bounds",
+                ),
+            ),
+        )
+        assert subdivision_shortcut.shortcut_operations is not None
+        subdivision_operations = subdivision_shortcut.shortcut_operations
+        self.assertEqual(
+            tuple(operation.id for operation in subdivision_operations),
+            (
+                "shortcut.add_subdivision_surface_level_one",
+                "shortcut.open_adjust_last_operation",
+                "shortcut.set_viewport_level",
+                "shortcut.close_adjust_last_operation",
+            ),
+        )
+        add_level_one = subdivision_operations[0]
+        self.assertEqual((add_level_one.kind, add_level_one.keys), ("key_input", ("CTRL", "1")))
+        self.assertEqual(
+            tuple(
+                (parameter.name, parameter.source.kind, parameter.source.value)
+                for parameter in add_level_one.parameters
+            ),
+            (
+                ("level", "literal", 1),
+                ("relative", "literal", False),
+                ("ensure_modifier", "literal", True),
+            ),
+        )
+        opener = subdivision_operations[1]
+        assert opener.opens_surface is not None
+        self.assertEqual(
+            (
+                opener.keys,
+                opener.opens_surface.source_operation_id,
+                opener.opens_surface.expected_operator_id,
+            ),
+            (
+                ("F9",),
+                "shortcut.add_subdivision_surface_level_one",
+                "object.subdivision_set",
+            ),
+        )
+        viewport_level = subdivision_operations[2]
+        self.assertEqual(
+            (
+                viewport_level.kind,
+                viewport_level.target_id,
+                viewport_level.path,
+                viewport_level.parameters[0].source.argument_name,
+            ),
+            (
+                "operator_property_update",
+                "object.subdivision_set.level",
+                ("Adjust Last Operation", "Level"),
+                "viewportLevel",
+            ),
+        )
+        self.assertEqual(
+            subdivision_operations[3].closes_surface_operation_id,
+            "shortcut.open_adjust_last_operation",
+        )
+        assert subdivision_shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(
+                item.argument_name
+                for item in subdivision_shortcut.omitted_action_arguments
+            ),
+            ("targetId", "modifierId", "modifierName"),
+        )
+        self.assertEqual(
+            subdivision_materialization.mcp.availability, "unavailable"
         )
         sphere = next(
             recipe
@@ -1318,6 +1483,7 @@ class InteractionCatalogTests(unittest.TestCase):
                     "blender.mesh.create_cylinder",
                     "blender.mesh.create_torus",
                     "blender.mesh.edit_subdivide",
+                    "blender.modifier.add_subdivision_surface",
                 }
             )
         )
@@ -1331,7 +1497,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "v1"
             / "interaction-catalog-1.9.0.json"
         )
-        legacy = load_interaction_catalog(legacy_path, ACTION_CATALOG_PATH)
+        legacy = load_interaction_catalog(
+            legacy_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(legacy.catalog_version, "1.9.0")
         self.assertTrue(
@@ -1347,7 +1515,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "v1"
             / "interaction-catalog-1.10.0.json"
         )
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
         materialization = frozen.recipes[0].procedure_materialization
         assert materialization is not None
         menu = materialization.menu
@@ -1366,7 +1536,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "v1"
             / "interaction-catalog-1.11.0.json"
         )
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
         materialization = frozen.recipes[0].procedure_materialization
         assert materialization is not None
 
@@ -1388,7 +1560,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "v1"
             / "interaction-catalog-1.12.0.json"
         )
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(frozen.catalog_version, "1.12.0")
         sphere_materialization = frozen.recipes[0].procedure_materialization
@@ -1408,7 +1582,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.13.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1440,7 +1616,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.14.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1472,7 +1650,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.15.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1504,7 +1684,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.16.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1536,7 +1718,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.17.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1566,7 +1750,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.18.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1599,7 +1785,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.19.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1635,7 +1823,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.20.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1671,7 +1861,9 @@ class InteractionCatalogTests(unittest.TestCase):
             / "interaction-catalog-1.21.0.json"
         )
         frozen_bytes = frozen_path.read_bytes()
-        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
 
         self.assertEqual(
             hashlib.sha256(frozen_bytes).hexdigest(),
@@ -1684,6 +1876,36 @@ class InteractionCatalogTests(unittest.TestCase):
             if recipe.action_name == "blender.mesh.edit_subdivide"
         )
         self.assertIsNone(subdivide.procedure_materialization)
+
+    def test_loads_byte_frozen_subdivide_catalog_without_subdivision_surface(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.22.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(
+            frozen_path, FROZEN_ACTION_CATALOG_112_PATH
+        )
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "ec46a98ffea8230cb9d6133355b98e02763c4a58878c22631c5b3e08bea6b99e",
+        )
+        self.assertEqual(frozen.catalog_version, "1.22.0")
+        self.assertEqual(frozen.action_catalog_version, "1.12.0")
+        self.assertFalse(
+            any(
+                recipe.action_name
+                == "blender.modifier.add_subdivision_surface"
+                for recipe in frozen.recipes
+            )
+        )
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:
         catalog = self._load_raw(self._ordered_parameter_catalog())

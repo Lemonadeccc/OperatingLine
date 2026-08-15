@@ -6029,6 +6029,334 @@ def assert_dialogue_proposal_first_failure_promotes_review() -> None:
     controller._transport = None
 
 
+def assert_subdivision_surface_round_trip_and_guards() -> None:
+    object_name = "OperatingLine.SubdivisionSurfaceCube"
+    modifier_name = f"{object_name}.SubdivisionSurface"
+    arguments = {
+        "targetId": "subsurf.cube",
+        "modifierId": "subsurf.cube.modifier",
+        "modifierName": modifier_name,
+        "viewportLevel": 2,
+    }
+
+    def plan_steps(action_arguments: dict | None = None) -> list[dict]:
+        return [
+            step("root", None, 0),
+            step(
+                "subsurf.cube",
+                "root",
+                1,
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.mesh.create_cube",
+                    "arguments": {
+                        "resourceId": "subsurf.cube",
+                        "objectName": object_name,
+                        "size": 2.0,
+                        "location": [0.0, 0.0, 0.0],
+                    },
+                },
+            ),
+            step(
+                "subsurf.modifier",
+                "root",
+                2,
+                depends_on=["subsurf.cube"],
+                step_action={
+                    "adapterId": "blender",
+                    "name": "blender.modifier.add_subdivision_surface",
+                    "arguments": action_arguments or arguments,
+                },
+            ),
+        ]
+
+    for malformed in (
+        {key: value for key, value in arguments.items() if key != "viewportLevel"},
+        {**arguments, "viewportLevel": True},
+        {**arguments, "viewportLevel": 0},
+        {**arguments, "viewportLevel": 4},
+        {**arguments, "extra": 1},
+        {**arguments, "modifierName": "Unmanaged.SubdivisionSurface"},
+    ):
+        malformed_root = load_temporary_plan(plan_steps(malformed))
+        try:
+            action_registry(malformed_root)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Malformed Subdivision Surface args accepted: {malformed}")
+
+    duplicate_id_steps = plan_steps()
+    duplicate_id_steps.insert(
+        2,
+        step(
+            "subsurf.bevel",
+            "root",
+            2,
+            depends_on=["subsurf.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "subsurf.cube",
+                    "modifierId": "subsurf.cube.modifier",
+                    "modifierName": f"{object_name}.Bevel",
+                    "width": 0.05,
+                    "segments": 1,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    duplicate_id_steps[3]["order"] = 3
+    duplicate_id_steps[3]["dependsOn"] = ["subsurf.bevel"]
+    try:
+        action_registry(load_temporary_plan(duplicate_id_steps))
+    except ValueError as error:
+        assert "Duplicate planned logical resource ID" in str(error)
+    else:
+        raise AssertionError("Duplicate planned SUBSURF logical IDs must be rejected")
+
+    root = load_temporary_plan(plan_steps())
+    session = DemoSession(root, action_registry(root))
+    session.start()
+    assert session.next() is not None
+    cube = bpy.data.objects[object_name]
+    source_mesh = cube.data
+    source_topology = (
+        len(source_mesh.vertices),
+        len(source_mesh.edges),
+        len(source_mesh.polygons),
+    )
+    assert source_topology == (8, 12, 6)
+    assert session.next() is not None
+    modifier = cube.modifiers[modifier_name]
+    assert modifier.type == "SUBSURF"
+    assert modifier.subdivision_type == "CATMULL_CLARK"
+    assert modifier.levels == modifier.render_levels == 2
+    assert modifier.quality == 3
+    assert modifier.show_only_control_edges is True
+    assert modifier.use_creases is True
+    assert modifier.use_limit_surface is True
+    assert modifier.boundary_smooth == "ALL"
+    assert modifier.uv_smooth == "PRESERVE_BOUNDARIES"
+    assert modifier.use_custom_normals is False
+    assert modifier.show_viewport is True
+    assert modifier.show_render is True
+    assert modifier.show_in_editmode is True
+    assert modifier.show_on_cage is False
+    assert cube.data is source_mesh
+    assert (
+        len(source_mesh.vertices),
+        len(source_mesh.edges),
+        len(source_mesh.polygons),
+    ) == source_topology
+    evaluated = cube.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        assert (
+            len(evaluated_mesh.vertices),
+            len(evaluated_mesh.edges),
+            len(evaluated_mesh.polygons),
+        ) == (98, 192, 96)
+    finally:
+        evaluated.to_mesh_clear()
+
+    observation_parameters = {
+        "targetId": "subsurf.cube",
+        "modifierId": "subsurf.cube.modifier",
+        "modifierType": "SUBSURF",
+        "levels": 2,
+        "renderLevels": 2,
+        "subdivisionType": "CATMULL_CLARK",
+        "quality": 3,
+        "showOnlyControlEdges": True,
+        "useCreases": True,
+        "useLimitSurface": True,
+        "boundarySmooth": "ALL",
+        "uvSmooth": "PRESERVE_BOUNDARIES",
+        "useCustomNormals": False,
+        "showViewport": True,
+        "showRender": True,
+        "showInEditMode": True,
+        "showOnCage": False,
+    }
+    observation = observation_module.evaluate_observations(
+        ({"kind": "modifier_ready", "parameters": observation_parameters},),
+        session.receipts,
+    )
+    assert observation[0]["satisfied"] is True
+    for field, wrong_value in (
+        ("levels", True),
+        ("renderLevels", 1),
+        ("subdivisionType", "SIMPLE"),
+        ("quality", 2),
+        ("showOnlyControlEdges", False),
+        ("useCreases", False),
+        ("useLimitSurface", False),
+        ("boundarySmooth", "PRESERVE_CORNERS"),
+        ("uvSmooth", "NONE"),
+        ("useCustomNormals", True),
+        ("showViewport", False),
+        ("showRender", False),
+        ("showInEditMode", False),
+        ("showOnCage", True),
+        ("unexpected", True),
+    ):
+        malformed_observation = observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "modifier_ready",
+                    "parameters": {**observation_parameters, field: wrong_value},
+                },
+            ),
+            session.receipts,
+        )
+        assert malformed_observation[0]["satisfied"] is False, field
+
+    modifier.levels = 1
+    try:
+        session.back()
+    except RuntimeError as error:
+        assert "Cannot rollback modified resource" in str(error)
+    else:
+        raise AssertionError("Externally edited SUBSURF modifiers must block rollback")
+    assert session.active_index == 1
+    modifier.levels = 2
+    assert session.back() is not None
+    assert cube.modifiers.get(modifier_name) is None
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+
+    duplicate_steps = plan_steps()
+    duplicate_steps.append(
+        step(
+            "subsurf.duplicate",
+            "root",
+            3,
+            depends_on=["subsurf.modifier"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_subdivision_surface",
+                "arguments": {
+                    **arguments,
+                    "modifierId": "subsurf.cube.duplicate",
+                    "modifierName": f"{object_name}.DuplicateSubdivisionSurface",
+                    "viewportLevel": 1,
+                },
+            },
+        )
+    )
+    duplicate_root = load_temporary_plan(duplicate_steps)
+    duplicate_session = DemoSession(duplicate_root, action_registry(duplicate_root))
+    duplicate_session.start()
+    assert duplicate_session.next() is not None
+    assert duplicate_session.next() is not None
+    try:
+        duplicate_session.next()
+    except RuntimeError as error:
+        assert "already has a SUBSURF" in str(error)
+    else:
+        raise AssertionError("A second tracked SUBSURF modifier must be rejected")
+    assert duplicate_session.back() is not None
+    assert duplicate_session.back() is not None
+
+    tracked_steps = plan_steps({**arguments, "viewportLevel": 1})
+    tracked_steps.insert(
+        2,
+        step(
+            "subsurf.tracked_bevel",
+            "root",
+            2,
+            depends_on=["subsurf.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.modifier.add_bevel",
+                "arguments": {
+                    "targetId": "subsurf.cube",
+                    "modifierId": "subsurf.cube.bevel",
+                    "modifierName": f"{object_name}.TrackedBevel",
+                    "width": 0.05,
+                    "segments": 1,
+                    "angleLimit": 0.5,
+                },
+            },
+        ),
+    )
+    tracked_steps[3]["order"] = 3
+    tracked_steps[3]["dependsOn"] = ["subsurf.tracked_bevel"]
+    tracked_root = load_temporary_plan(tracked_steps)
+    tracked_session = DemoSession(tracked_root, action_registry(tracked_root))
+    tracked_session.start()
+    assert tracked_session.next() is not None
+    assert tracked_session.next() is not None
+    assert tracked_session.next() is not None
+    tracked_cube = bpy.data.objects[object_name]
+    assert tuple(modifier.type for modifier in tracked_cube.modifiers) == (
+        "BEVEL",
+        "SUBSURF",
+    )
+    assert tracked_session.back() is not None
+    assert tracked_session.back() is not None
+    assert tracked_session.back() is not None
+
+    untracked_root = load_temporary_plan(plan_steps())
+    untracked_session = DemoSession(untracked_root, action_registry(untracked_root))
+    untracked_session.start()
+    assert untracked_session.next() is not None
+    untracked_cube = bpy.data.objects[object_name]
+    external = untracked_cube.modifiers.new(f"{object_name}.External", "BEVEL")
+    try:
+        untracked_session.next()
+    except RuntimeError as error:
+        assert "untracked existing modifiers" in str(error)
+    else:
+        raise AssertionError("Untracked modifier stacks must be rejected")
+    untracked_cube.modifiers.remove(external)
+    assert untracked_session.back() is not None
+
+    boundary_steps = plan_steps({**arguments, "viewportLevel": 3})
+    boundary_steps.insert(
+        2,
+        step(
+            "subsurf.dense",
+            "root",
+            2,
+            depends_on=["subsurf.cube"],
+            step_action={
+                "adapterId": "blender",
+                "name": "blender.mesh.edit_subdivide",
+                "arguments": {
+                    "targetId": "subsurf.cube",
+                    "resultMeshId": "subsurf.cube.dense_mesh",
+                    "resultMeshName": f"{object_name}.DenseMesh",
+                    "cuts": 8,
+                    "smooth": 0.0,
+                },
+            },
+        ),
+    )
+    boundary_steps[3]["order"] = 3
+    boundary_steps[3]["dependsOn"] = ["subsurf.dense"]
+    boundary_root = load_temporary_plan(boundary_steps)
+    boundary_session = DemoSession(boundary_root, action_registry(boundary_root))
+    boundary_session.start()
+    assert boundary_session.next() is not None
+    assert boundary_session.next() is not None
+    boundary_cube = bpy.data.objects[object_name]
+    assert len(boundary_cube.modifiers) == 0
+    try:
+        boundary_session.next()
+    except ValueError as error:
+        assert "projected level" in str(error)
+        assert "topology limits" in str(error)
+    else:
+        raise AssertionError("Excessive projected SUBSURF topology must be rejected")
+    assert len(boundary_cube.modifiers) == 0
+    assert boundary_session.back() is not None
+    assert boundary_session.back() is not None
+
+
 def main() -> None:
     original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
     original_add_draw = bpy.types.VIEW3D_MT_add.draw
@@ -6170,6 +6498,7 @@ def main() -> None:
     assert_solidify_round_trip_and_conflicts()
     assert_solidify_evaluated_topology_and_untracked_modifier_guards()
     assert_solidify_observation_success_gate()
+    assert_subdivision_surface_round_trip_and_guards()
 
     session_before_registration = operating_line.get_session()
     assert _undo_post not in bpy.app.handlers.undo_post

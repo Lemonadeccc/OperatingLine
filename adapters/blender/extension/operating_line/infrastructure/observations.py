@@ -784,6 +784,20 @@ def _modifier_ready(
         "useRim",
         "useRimOnly",
         "solidifyMode",
+        "levels",
+        "renderLevels",
+        "subdivisionType",
+        "quality",
+        "showOnlyControlEdges",
+        "useCreases",
+        "useLimitSurface",
+        "boundarySmooth",
+        "uvSmooth",
+        "useCustomNormals",
+        "showViewport",
+        "showRender",
+        "showInEditMode",
+        "showOnCage",
     }
     target_id = parameters.get("targetId")
     modifier_id = parameters.get("modifierId")
@@ -809,6 +823,27 @@ def _modifier_ready(
     if modifier_type == "SOLIDIFY":
         properties_match = properties_match and solidify_parameters.issubset(
             parameters
+        )
+    subdivision_surface_parameters = {
+        "levels",
+        "renderLevels",
+        "subdivisionType",
+        "quality",
+        "showOnlyControlEdges",
+        "useCreases",
+        "useLimitSurface",
+        "boundarySmooth",
+        "uvSmooth",
+        "useCustomNormals",
+        "showViewport",
+        "showRender",
+        "showInEditMode",
+        "showOnCage",
+    }
+    if modifier_type == "SUBSURF":
+        properties_match = (
+            properties_match
+            and subdivision_surface_parameters.issubset(parameters)
         )
     if modifier is not None:
         numeric_properties = {
@@ -839,10 +874,33 @@ def _modifier_ready(
                 and hasattr(modifier, "segments")
                 and int(modifier.segments) == expected_segments
             )
+        integer_properties = {
+            "levels": "levels",
+            "renderLevels": "render_levels",
+            "quality": "quality",
+        }
+        for parameter_name, property_name in integer_properties.items():
+            if parameter_name not in parameters:
+                continue
+            expected = parameters[parameter_name]
+            properties_match = properties_match and (
+                isinstance(expected, int)
+                and not isinstance(expected, bool)
+                and hasattr(modifier, property_name)
+                and int(getattr(modifier, property_name)) == expected
+            )
         boolean_properties = {
             "useEvenOffset": "use_even_offset",
             "useRim": "use_rim",
             "useRimOnly": "use_rim_only",
+            "showOnlyControlEdges": "show_only_control_edges",
+            "useCreases": "use_creases",
+            "useLimitSurface": "use_limit_surface",
+            "useCustomNormals": "use_custom_normals",
+            "showViewport": "show_viewport",
+            "showRender": "show_render",
+            "showInEditMode": "show_in_editmode",
+            "showOnCage": "show_on_cage",
         }
         for parameter_name, property_name in boolean_properties.items():
             if parameter_name not in parameters:
@@ -859,6 +917,26 @@ def _modifier_ready(
                 isinstance(expected_mode, str)
                 and hasattr(modifier, "solidify_mode")
                 and str(modifier.solidify_mode) == expected_mode
+            )
+        if "subdivisionType" in parameters:
+            expected_type = parameters["subdivisionType"]
+            properties_match = properties_match and (
+                isinstance(expected_type, str)
+                and hasattr(modifier, "subdivision_type")
+                and str(modifier.subdivision_type) == expected_type
+            )
+        enum_properties = {
+            "boundarySmooth": "boundary_smooth",
+            "uvSmooth": "uv_smooth",
+        }
+        for parameter_name, property_name in enum_properties.items():
+            if parameter_name not in parameters:
+                continue
+            expected = parameters[parameter_name]
+            properties_match = properties_match and (
+                isinstance(expected, str)
+                and hasattr(modifier, property_name)
+                and str(getattr(modifier, property_name)) == expected
             )
     satisfied = bool(
         isinstance(target, bpy.types.Object)

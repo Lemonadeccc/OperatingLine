@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   blenderActionCatalog,
+  blenderActionCatalogs,
   blenderInteractionCatalog,
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
@@ -66,9 +67,11 @@ async function callMcpTool(
 }
 
 function procedureFixture(): Record<string, unknown> {
-  return JSON.parse(
+  const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
   ) as Record<string, unknown>;
+  tree['actionCatalogVersion'] = blenderActionCatalog.catalogVersion;
+  return tree;
 }
 
 function extendedShortcutProcedureFixture(): Record<string, unknown> {
@@ -294,6 +297,64 @@ function subdivideAuthoringCandidateFixture(
   observations[0] = {
     ...observations[0],
     parameters: { resourceId: 'tutorial.cube.subdivided.mesh' },
+  };
+  return tree;
+}
+
+function subdivisionSurfaceAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) {
+    throw new Error('Expected one Subdivision Surface authoring candidate leaf');
+  }
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_subdivision_surface',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+      viewportLevel: 3,
+    },
+  };
+  leaf['title'] = 'Add a bounded Subdivision Surface modifier';
+  leaf['intent'] = 'Add a managed Subdivision Surface modifier with viewport level three.';
+  const semanticOperations = leaf['semanticOperations'] as Array<Record<string, unknown>>;
+  semanticOperations[0] = {
+    ...semanticOperations[0],
+    semanticAction: 'add_subdivision_surface_modifier',
+    description: 'Add one Subdivision Surface modifier to the accepted Cube.',
+    parameters: { viewportLevel: 3 },
+  };
+  semanticOperations[1] = {
+    ...semanticOperations[1],
+    description: 'Keep the accepted Cube as the active modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  semanticOperations[2] = {
+    ...semanticOperations[2],
+    description: 'Track the managed modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+    },
+  };
+  leaf['anchors'] = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.subdivision_surface',
+    },
+  ];
+  const observations = leaf['expectedObservations'] as Array<Record<string, unknown>>;
+  observations[0] = {
+    kind: 'modifier_ready',
+    parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
   };
   return tree;
 }
@@ -576,6 +637,9 @@ function cylinderAuthoringCandidateFixture(
 
 describe('procedure compilation runtime', () => {
   it('builds one provider-neutral candidate authoring packet without side effects', async () => {
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.12.0',
+    );
     const unavailableLegacyInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.9.0',
     );
@@ -615,6 +679,9 @@ describe('procedure compilation runtime', () => {
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
+    if (historicalActionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender ActionCatalog 1.12.0 snapshot');
+    }
     if (legacyMaterializingInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.10.0 snapshot');
     }
@@ -651,7 +718,7 @@ describe('procedure compilation runtime', () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
-      actionCatalogs: [blenderActionCatalog],
+      actionCatalogs: blenderActionCatalogs,
       interactionCatalogs: [
         unavailableLegacyInteractionCatalog,
         legacyMaterializingInteractionCatalog,
@@ -948,7 +1015,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.22.0' },
+        catalogBinding: { interactionCatalogVersion: '1.23.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -1112,6 +1179,7 @@ describe('procedure compilation runtime', () => {
 
       const cubePrompt = await callMcpTool(runtime, 14, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: cubeInteractionCatalog.catalogVersion,
       });
       const cubePacket = procedureAuthoringPromptPacketSchema.parse(
@@ -1217,6 +1285,7 @@ describe('procedure compilation runtime', () => {
 
       const planePrompt = await callMcpTool(runtime, 20, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: planeInteractionCatalog.catalogVersion,
       });
       const planePacket = procedureAuthoringPromptPacketSchema.parse(
@@ -1322,6 +1391,7 @@ describe('procedure compilation runtime', () => {
 
       const torusPrompt = await callMcpTool(runtime, 23, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: torusInteractionCatalog.catalogVersion,
       });
       const torusPacket = procedureAuthoringPromptPacketSchema.parse(
@@ -1436,6 +1506,7 @@ describe('procedure compilation runtime', () => {
 
       const conePrompt = await callMcpTool(runtime, 26, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: coneInteractionCatalog.catalogVersion,
       });
       const conePacket = procedureAuthoringPromptPacketSchema.parse(
@@ -1568,6 +1639,7 @@ describe('procedure compilation runtime', () => {
 
       const cylinderPrompt = await callMcpTool(runtime, 30, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: cylinderInteractionCatalog.catalogVersion,
       });
       const cylinderPacket = procedureAuthoringPromptPacketSchema.parse(
@@ -1682,6 +1754,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.prompt.get',
         {
           ...request,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
           interactionCatalogVersion: cubeShortcutInteractionCatalog.catalogVersion,
         },
       );
@@ -1852,6 +1925,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.prompt.get',
         {
           ...request,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
           interactionCatalogVersion: planeShortcutInteractionCatalog.catalogVersion,
         },
       );
@@ -2018,6 +2092,7 @@ describe('procedure compilation runtime', () => {
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: icosphereInteractionCatalog.catalogVersion,
       });
       const icospherePacket = procedureAuthoringPromptPacketSchema.parse(
@@ -2083,6 +2158,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.prompt.get',
         {
           ...request,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
           interactionCatalogVersion: orderedMenuInteractionCatalog.catalogVersion,
         },
       );
@@ -2110,6 +2186,7 @@ describe('procedure compilation runtime', () => {
 
       const shortcutPrompt = await callMcpTool(runtime, 12, 'operatingline.procedure.prompt.get', {
         ...request,
+        actionCatalogVersion: historicalActionCatalog.catalogVersion,
         interactionCatalogVersion: shortcutInteractionCatalog.catalogVersion,
       });
       const shortcutPacket = procedureAuthoringPromptPacketSchema.parse(
@@ -2143,6 +2220,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.prompt.get',
         {
           ...request,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
           interactionCatalogVersion: legacyMaterializingInteractionCatalog.catalogVersion,
         },
       );
@@ -2180,6 +2258,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.prompt.get',
         {
           ...request,
+          actionCatalogVersion: historicalActionCatalog.catalogVersion,
           interactionCatalogVersion: unavailableLegacyInteractionCatalog.catalogVersion,
         },
       );
@@ -2219,7 +2298,7 @@ describe('procedure compilation runtime', () => {
     }
   }, 25_000);
 
-  it('materializes and structurally compiles the InteractionCatalog 1.22 Subdivide candidate', async () => {
+  it('materializes and structurally compiles the active InteractionCatalog Subdivide candidate', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -2260,7 +2339,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.22.0' },
+        catalogBinding: { interactionCatalogVersion: '1.23.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2318,6 +2397,132 @@ describe('procedure compilation runtime', () => {
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
         actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('materializes and structurally compiles the InteractionCatalog 1.23 Subdivision Surface candidate', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const packet = buildProcedureAuthoringPromptPacket(
+        {
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Add a managed Subdivision Surface modifier with viewport level three.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+        },
+        blenderActionCatalog,
+        blenderInteractionCatalog,
+      );
+      const materializedMcp = await callMcpTool(
+        runtime,
+        1,
+        'operatingline.procedure.authoring.materialize',
+        { packet, tree: subdivisionSurfaceAuthoringCandidateFixture(packet) },
+      );
+      if (materializedMcp.result?.isError === true) {
+        throw new Error(
+          materializedMcp.result.content?.[0]?.text ?? 'Subdivision Surface materialization failed',
+        );
+      }
+      const materialization = procedureAuthoringMaterializationResultSchema.parse(
+        materializedMcp.result?.structuredContent,
+      );
+      const leaf = materialization.tree.nodes.find((node) => node.kind === 'leaf');
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        throw new Error('Expected one materialized Subdivision Surface leaf');
+      }
+
+      expect(materialization).toMatchObject({
+        formatVersion: '1.3.0',
+        catalogBinding: {
+          actionCatalogVersion: '1.13.0',
+          interactionCatalogVersion: '1.23.0',
+        },
+        coverage: [
+          {
+            leafId: leaf.id,
+            recipeId: 'blender.modifier.add_subdivision_surface.semantic',
+            menu: 'unavailable',
+            shortcut: 'materialized',
+            mcp: 'unavailable',
+          },
+        ],
+      });
+      expect(materialization.tree.formatVersion).toBe('1.1.0');
+      expect(leaf.action.arguments).toEqual({
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.subdivision_surface',
+        modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+        viewportLevel: 3,
+      });
+      expect(leaf.menuTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(leaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const shortcut = leaf.shortcutTracks[0];
+      if (shortcut?.availability !== 'available') {
+        throw new Error('Expected one materialized Subdivision Surface shortcut');
+      }
+      expect(shortcut.operations.map((operation) => operation.id)).toEqual([
+        'shortcut.add_subdivision_surface_level_one',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_viewport_level',
+        'shortcut.close_adjust_last_operation',
+      ]);
+      expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+        { level: 1, relative: false, ensure_modifier: true },
+        {},
+        { value: 3 },
+        {},
+      ]);
+      expect(shortcut.operations[0]).toMatchObject({ keys: ['CTRL', '1'] });
+      expect(shortcut.operations[1]).toMatchObject({
+        keys: ['F9'],
+        opensSurface: {
+          kind: 'adjust_last_operation',
+          hostId: 'screen.redo_last',
+          sourceOperationId: 'shortcut.add_subdivision_surface_level_one',
+          expectedOperatorId: 'object.subdivision_set',
+        },
+      });
+      expect(shortcut.operations[2]).toMatchObject({
+        target: { kind: 'control', hostId: 'object.subdivision_set.level' },
+        path: ['Adjust Last Operation', 'Level'],
+      });
+      expect(shortcut.operations[3]).toMatchObject({
+        keys: ['ENTER'],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      });
+      const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+        Object.keys(operation.parameters),
+      );
+      for (const managedArgument of ['targetId', 'modifierId', 'modifierName']) {
+        expect(shortcutParameterNames).not.toContain(managedArgument);
+      }
+      expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+
+      const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
+        tree: materialization.tree,
+      });
+      expect(compiledMcp.result?.isError).not.toBe(true);
+      expect(compiledMcp.result?.structuredContent).toMatchObject({
+        actionCatalogVersion: '1.13.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2938,7 +3143,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.12.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.13.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

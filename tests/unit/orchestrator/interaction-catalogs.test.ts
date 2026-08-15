@@ -52,9 +52,10 @@ describe('interaction catalog registry', () => {
         actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
       }).catalogVersion,
     ).toBe(blenderInteractionCatalog.catalogVersion);
+    const historicalActionCatalogVersion = '1.12.0';
     const historical = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.9.0',
     });
     expect(historical.catalogVersion).toBe('1.9.0');
@@ -64,7 +65,7 @@ describe('interaction catalog registry', () => {
 
     const frozenLegacy = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.10.0',
     });
     expect(frozenLegacy.recipes[0]!.procedureMaterialization?.menu).toMatchObject({
@@ -73,7 +74,7 @@ describe('interaction catalog registry', () => {
     });
     const frozenOrderedMenu = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.11.0',
     });
     expect(frozenOrderedMenu.recipes[0]!.procedureMaterialization?.menu).toMatchObject({
@@ -82,7 +83,7 @@ describe('interaction catalog registry', () => {
     });
     const frozenShortcut = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.12.0',
     });
     expect(frozenShortcut.recipes[0]!.procedureMaterialization?.shortcut).toMatchObject({
@@ -92,7 +93,7 @@ describe('interaction catalog registry', () => {
     expect(frozenShortcut.recipes[1]!.procedureMaterialization).toBeUndefined();
     const frozenIcosphere = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.13.0',
     });
     expect(
@@ -109,7 +110,7 @@ describe('interaction catalog registry', () => {
     ).toBeUndefined();
     const frozenCube = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.14.0',
     });
     expect(
@@ -125,7 +126,7 @@ describe('interaction catalog registry', () => {
     ).toBeUndefined();
     const frozenPlane = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.15.0',
     });
     expect(
@@ -141,7 +142,7 @@ describe('interaction catalog registry', () => {
     ).toBeUndefined();
     const frozenTorus = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.16.0',
     });
     expect(
@@ -157,7 +158,7 @@ describe('interaction catalog registry', () => {
     ).toBeUndefined();
     const frozenCone = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.17.0',
     });
     expect(
@@ -173,7 +174,7 @@ describe('interaction catalog registry', () => {
     ).toBeUndefined();
     const frozenUvShortcut = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.18.0',
     });
     expect(
@@ -190,7 +191,7 @@ describe('interaction catalog registry', () => {
     });
     const frozenCubeShortcut = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.19.0',
     });
     expect(
@@ -206,7 +207,7 @@ describe('interaction catalog registry', () => {
     });
     const frozenPlaneShortcut = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.20.0',
     });
     expect(
@@ -224,7 +225,7 @@ describe('interaction catalog registry', () => {
     });
     const frozenIcosphereShortcut = registry.get({
       targetAdapterId: 'blender',
-      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      actionCatalogVersion: historicalActionCatalogVersion,
       interactionCatalogVersion: '1.21.0',
     });
     expect(
@@ -237,7 +238,22 @@ describe('interaction catalog registry', () => {
         (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
       )?.procedureMaterialization,
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.22.0');
+    const frozenSubdivideShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: historicalActionCatalogVersion,
+      interactionCatalogVersion: '1.22.0',
+    });
+    expect(
+      frozenSubdivideShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.edit_subdivide',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenSubdivideShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+      ),
+    ).toBeUndefined();
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.23.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -248,6 +264,82 @@ describe('interaction catalog registry', () => {
       parameterBinding: 'ordered_parameter_operations',
       projection: 'candidate_only',
     });
+    const subdivisionSurface = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    expect(subdivisionSurface?.procedureMaterialization).toMatchObject({
+      menu: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
+      mcp: { availability: 'unavailable' },
+    });
+    expect(subdivisionSurface?.guidance).toMatchObject({
+      kind: 'semantic_path',
+      steps: [
+        expect.anything(),
+        expect.anything(),
+        {
+          id: 'operator.subdivision_set',
+          order: 3,
+          label: 'Set Subdivision Level',
+          intent: 'execute',
+          target: { kind: 'operator', hostId: 'object.subdivision_set' },
+        },
+        expect.anything(),
+      ],
+    });
+    const subdivisionShortcut = subdivisionSurface?.procedureMaterialization?.shortcut;
+    if (subdivisionShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Subdivision Surface shortcut recipe to be available');
+    }
+    expect(subdivisionShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.add_subdivision_surface_level_one',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_viewport_level',
+      'shortcut.close_adjust_last_operation',
+    ]);
+    expect(subdivisionShortcut.operations[0]).toMatchObject({
+      kind: 'key_input',
+      keyMode: 'chord',
+      keys: ['CTRL', '1'],
+      parameters: [
+        { name: 'level', source: { kind: 'literal', value: 1 } },
+        { name: 'relative', source: { kind: 'literal', value: false } },
+        { name: 'ensure_modifier', source: { kind: 'literal', value: true } },
+      ],
+    });
+    expect(subdivisionShortcut.operations[1]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        sourceOperationId: 'shortcut.add_subdivision_surface_level_one',
+        expectedOperatorId: 'object.subdivision_set',
+      },
+    });
+    expect(subdivisionShortcut.operations[2]).toMatchObject({
+      kind: 'operator_property_update',
+      target: { kind: 'control', hostId: 'object.subdivision_set.level' },
+      path: ['Adjust Last Operation', 'Level'],
+      parameters: [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'viewportLevel',
+            transform: 'identity',
+          },
+        },
+      ],
+    });
+    expect(subdivisionShortcut.omittedActionArguments.map((item) => item.argumentName)).toEqual([
+      'targetId',
+      'modifierId',
+      'modifierName',
+    ]);
     if (latestShortcut?.availability !== 'available') {
       throw new Error('Expected the latest Cube shortcut recipe to be available');
     }
@@ -1008,6 +1100,16 @@ describe('interaction catalog registry', () => {
     );
   });
 
+  it('keeps the InteractionCatalog 1.22.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.22.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'ec46a98ffea8230cb9d6133355b98e02763c4a58878c22631c5b3e08bea6b99e',
+    );
+  });
+
   it('changes only the version and Icosphere shortcut after InteractionCatalog 1.20.0', () => {
     const frozen = JSON.parse(
       readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.20.0.json'), 'utf8'),
@@ -1041,10 +1143,14 @@ describe('interaction catalog registry', () => {
       readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.21.0.json'), 'utf8'),
     ) as typeof blenderInteractionCatalog;
 
+    const next = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.22.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+
     expect({
-      ...blenderInteractionCatalog,
+      ...next,
       catalogVersion: frozen.catalogVersion,
-      recipes: blenderInteractionCatalog.recipes.map((recipe) => {
+      recipes: next.recipes.map((recipe) => {
         if (recipe.actionName !== 'blender.mesh.edit_subdivide') return recipe;
         const { procedureMaterialization: currentMaterialization, ...historicalRecipe } = recipe;
         if (currentMaterialization === undefined) {
@@ -1053,6 +1159,20 @@ describe('interaction catalog registry', () => {
         return historicalRecipe;
       }),
     }).toEqual(frozen);
+  });
+
+  it('changes only the catalog binding and Subdivision Surface recipe after 1.22.0', () => {
+    const frozen = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.22.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    active.recipes = active.recipes.filter(
+      (recipe) => recipe.actionName !== 'blender.modifier.add_subdivision_surface',
+    );
+    expect(active).toEqual(frozen);
   });
 
   it('keeps the latest TypeScript and Blender extension catalogs byte-identical', () => {

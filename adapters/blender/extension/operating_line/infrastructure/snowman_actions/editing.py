@@ -37,6 +37,9 @@ from .common import (
 MAX_SOLIDIFY_VERTICES = 8192
 MAX_SOLIDIFY_EDGES = 16384
 MAX_SOLIDIFY_POLYGONS = 8192
+MAX_SUBSURF_VERTICES = 8192
+MAX_SUBSURF_EDGES = 16384
+MAX_SUBSURF_POLYGONS = 8192
 MAX_TRIANGULATE_VERTICES = 8192
 MAX_TRIANGULATE_EDGES = 16384
 MAX_TRIANGULATE_POLYGONS = 8192
@@ -90,6 +93,14 @@ class SolidifyModifierDefinition:
     modifier_name: str
     thickness: float
     offset: float
+
+
+@dataclass(frozen=True, slots=True)
+class SubdivisionSurfaceModifierDefinition:
+    target_id: str
+    modifier_id: str
+    modifier_name: str
+    viewport_level: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +298,28 @@ def validate_solidify(arguments: Mapping[str, Any]) -> SolidifyModifierDefinitio
     )
 
 
+def validate_subdivision_surface(
+    arguments: Mapping[str, Any],
+) -> SubdivisionSurfaceModifierDefinition:
+    fields = {"targetId", "modifierId", "modifierName", "viewportLevel"}
+    require_keys(arguments, fields, fields, "arguments")
+    return SubdivisionSurfaceModifierDefinition(
+        target_id=logical_id(arguments["targetId"], "arguments.targetId"),
+        modifier_id=logical_id(arguments["modifierId"], "arguments.modifierId"),
+        modifier_name=text(
+            arguments["modifierName"],
+            "arguments.modifierName",
+            prefix="OperatingLine.",
+        ),
+        viewport_level=integer(
+            arguments["viewportLevel"],
+            "arguments.viewportLevel",
+            minimum=1,
+            maximum=3,
+        ),
+    )
+
+
 def validate_geometry_nodes_transform(
     arguments: Mapping[str, Any],
 ) -> GeometryNodesTransformDefinition:
@@ -426,6 +459,80 @@ def _ensure_solidify_input_is_bounded(
             f"edges <= {MAX_SOLIDIFY_EDGES}, "
             f"polygons <= {MAX_SOLIDIFY_POLYGONS}"
         )
+
+
+def _ensure_subdivision_surface_input_is_bounded(
+    receipts: Mapping[str, ActionReceipt],
+    target: bpy.types.Object,
+    level: int,
+) -> None:
+    tracked_pointers = _tracked_modifier_pointers(receipts, target)
+    untracked = tuple(
+        modifier.name
+        for modifier in target.modifiers
+        if modifier.as_pointer() not in tracked_pointers
+    )
+    if untracked:
+        raise RuntimeError(
+            "Subdivision Surface target has untracked existing modifiers: "
+            + ", ".join(untracked)
+        )
+    existing_subdivision = tuple(
+        modifier.name for modifier in target.modifiers if modifier.type == "SUBSURF"
+    )
+    if existing_subdivision:
+        raise RuntimeError(
+            "Subdivision Surface target already has a SUBSURF modifier: "
+            + ", ".join(existing_subdivision)
+        )
+
+    limits = (
+        MAX_SUBSURF_VERTICES,
+        MAX_SUBSURF_EDGES,
+        MAX_SUBSURF_POLYGONS,
+    )
+
+    def ensure_bounded(topology: tuple[int, int, int], label: str) -> None:
+        if any(actual > limit for actual, limit in zip(topology, limits)):
+            raise ValueError(
+                f"Subdivision Surface {label} exceeds the supported topology limits: "
+                f"vertices <= {MAX_SUBSURF_VERTICES}, "
+                f"edges <= {MAX_SUBSURF_EDGES}, "
+                f"polygons <= {MAX_SUBSURF_POLYGONS}"
+            )
+
+    source_topology = (
+        len(target.data.vertices),
+        len(target.data.edges),
+        len(target.data.polygons),
+    )
+    ensure_bounded(source_topology, "target")
+
+    evaluated = target.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    evaluated_mesh = evaluated.to_mesh()
+    try:
+        evaluated_topology = (
+            len(evaluated_mesh.vertices),
+            len(evaluated_mesh.edges),
+            len(evaluated_mesh.polygons),
+        )
+        ensure_bounded(evaluated_topology, "evaluated input")
+        loop_count = sum(len(polygon.vertices) for polygon in evaluated_mesh.polygons)
+    finally:
+        evaluated.to_mesh_clear()
+
+    vertices, edges, polygons = evaluated_topology
+    for projected_level in range(1, level + 1):
+        vertices, edges, polygons = (
+            vertices + edges + polygons,
+            edges * 2 + loop_count,
+            loop_count,
+        )
+        ensure_bounded(
+            (vertices, edges, polygons),
+            f"projected level {projected_level} output",
+        )
+        loop_count = polygons * 4
 
 
 def execute_subdivide(
@@ -992,6 +1099,77 @@ def execute_solidify(
         modifier.nonmanifold_boundary_mode = "NONE"
         modifier.nonmanifold_merge_threshold = 0.0001
         modifier.bevel_convex = 0.0
+        state = snapshot_modifier(
+            target,
+            modifier,
+            definition.modifier_id,
+            receipt_id,
+            step_id,
+            action.name,
+            {},
+        )
+        mutations.append(
+            MutationRecord(
+                target_identity,
+                f"modifier:{definition.modifier_id}",
+                None,
+                state,
+            )
+        )
+        return make_receipt(
+            receipt_id,
+            step_id,
+            action.name,
+            [],
+            mutations,
+            [],
+            target_identity,
+        )
+    except Exception:
+        if modifier is not None and not mutations:
+            target.modifiers.remove(modifier)
+        rollback_partial(receipt_id, step_id, action.name, [], mutations, [])
+        raise
+
+
+def execute_subdivision_surface(
+    step_id: str,
+    action: ActionSpec,
+    receipts: Mapping[str, ActionReceipt],
+    definition: SubdivisionSurfaceModifierDefinition,
+) -> ActionReceipt:
+    ensure_receipts_intact(receipts)
+    registry = build_resource_registry(receipts)
+    target_identity, target, _mesh_identity = _owned_mesh_target(
+        registry, definition.target_id
+    )
+    _ensure_subdivision_surface_input_is_bounded(
+        receipts, target, max(definition.viewport_level, 2)
+    )
+    ensure_modifier_id_available(receipts, definition.modifier_id)
+    if target.modifiers.get(definition.modifier_name) is not None:
+        raise RuntimeError(
+            f"Cannot replace existing modifier: {definition.modifier_name}"
+        )
+    receipt_id = new_receipt_id()
+    mutations: list[MutationRecord] = []
+    modifier = None
+    try:
+        modifier = target.modifiers.new(definition.modifier_name, "SUBSURF")
+        modifier.subdivision_type = "CATMULL_CLARK"
+        modifier.levels = definition.viewport_level
+        modifier.render_levels = 2
+        modifier.quality = 3
+        modifier.show_only_control_edges = True
+        modifier.use_creases = True
+        modifier.use_limit_surface = True
+        modifier.boundary_smooth = "ALL"
+        modifier.uv_smooth = "PRESERVE_BOUNDARIES"
+        modifier.use_custom_normals = False
+        modifier.show_viewport = True
+        modifier.show_render = True
+        modifier.show_in_editmode = True
+        modifier.show_on_cage = False
         state = snapshot_modifier(
             target,
             modifier,

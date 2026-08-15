@@ -24,17 +24,18 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.22.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.21.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
-      4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
-      其中 Subdivide 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
+      `1.23.0` 与 ActionCatalog `1.13.0` 一一覆盖 23 个动作，历史 `1.9.0` 至已冻结的 `1.22.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      4.5/5.1 验证的 `native_path`，其他十六个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
+      其中 Subdivide 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
       [ADR 0026](adr/0026-native-cube-action-slice.md)、
       [ADR 0027](adr/0027-native-icosphere-action-slice.md)、
       [ADR 0028](adr/0028-native-torus-action-slice.md)、
-      [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
-      [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md)。
+      [ADR 0029](adr/0029-bounded-edit-modifier-geometry-nodes.md)、
+      [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md) 与
+      [ADR 0060](adr/0060-bounded-subdivision-surface-modifier.md)。
 - [x] 雪人教学粒度：revision 5 把眼睛、鼻子、五个嘴点、三个纽扣和两条手臂拆成一部件一叶节点；
       ActionCatalog `1.4.0` 新增直接 Cone/Cylinder action，25 个叶节点均可独立观察与补偿。
       Batch 继续保留给机器人和明确需要原子成组创建的计划；历史 revision 4 与 catalog `1.3.0`
@@ -88,6 +89,14 @@
       InteractionCatalog `1.9.0` 提供独立 `semantic_path`，历史 ActionCatalog `1.11.0` 与
       InteractionCatalog `1.8.0` 保持逐字可回放。见
       [ADR 0041](adr/0041-bounded-edit-extrude-region.md)。
+- [x] Blender 有界 Subdivision Surface Modifier：ActionCatalog `1.13.0` 新增
+      `blender.modifier.add_subdivision_surface`，只开放 `viewportLevel: 1..3`，固定 Catmull-Clark、
+      render level 2、quality 3 和完整可观察属性；拒绝未跟踪前置 Modifier 与已有 `SUBSURF`，并对源、
+      求值输入和最高实际 level 的投影输出应用 8192/16384/8192 topology 上限。receipt 补偿、
+      `modifier_ready` Observation 与 Blender 原生 Undo/Redo 均在 4.5.3/5.1.1 验证。InteractionCatalog
+      `1.23.0` 冻结 `1.22.0`，声明 `Ctrl+1 → F9 → Level → ENTER` 的 candidate shortcut；menu/MCP
+      unavailable，`targetId`、`modifierId`、`modifierName` 显式省略，且不声称 UI 与 managed path
+      等价。见 [ADR 0060](adr/0060-bounded-subdivision-surface-modifier.md)。
 - [x] `operatingline.planning.context`：把目录、协议约束和宿主状态组合成供应商无关的规划上下文。
 - [x] 节点引用与异步修订请求：在活动树或待审树选择 `Ref`，绑定完整 base Plan、稳定节点 ID、
       显示编号和精确目录版本。
@@ -105,7 +114,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.12.0` 提供十四项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.13.0` 提供十五项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -359,6 +368,14 @@
           unavailable，`targetId`、`resultMeshId`、`resultMeshName` 显式省略；轨迹仍为
           candidate/structural-only，不提供产品级 Observation、恢复、原生 Undo 或 managed action 等价。
           见 [ADR 0059](adr/0059-edit-mode-subdivide-f9-shortcut-materialization.md)。
+    - [x] Subdivision Surface Modifier 候选快捷键物化：InteractionCatalog `1.23.0` 绑定新增该 action 的
+          ActionCatalog `1.13.0`，冻结 `1.22.0`，并声明 `Ctrl+1` 的 literal 来源参数、`F9` opener、
+          accepted `viewportLevel` 对 Level 控件的绑定和 `ENTER` closer。Blender 4.5.3/5.1.1 各自回放
+          level 1/2/3，验证 `26/48/24`、`98/192/96`、`386/768/384` vertices/edges/polygons、固定
+          render level 2，以及源 Mesh pointer/datablock 不变。`F3` 搜索路径实测不可用，因此未收录；
+          menu/MCP unavailable，`targetId`、`modifierId`、`modifierName` 显式省略。轨迹仍为
+          candidate/structural-only；managed action 的 Observation、补偿与原生 Undo 证据不使 UI 路径与
+          managed transaction 等价。见 [ADR 0060](adr/0060-bounded-subdivision-surface-modifier.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

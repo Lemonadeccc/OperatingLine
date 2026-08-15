@@ -6,12 +6,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   blenderActionCatalog,
+  blenderActionCatalogs,
   blenderInteractionCatalog,
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import {
   canonicalizeProtocolJsonValue,
   procedureAuthoringCandidateTreeSchema,
+  type ActionCatalog,
   type InteractionCatalog,
   type ProcedureAuthoringCandidateTree,
 } from '@operatingline/protocol';
@@ -23,11 +25,12 @@ import {
 
 function candidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+  actionCatalog: ActionCatalog = blenderActionCatalog,
 ): ProcedureAuthoringCandidateTree {
   const tree = JSON.parse(
     readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
   ) as Record<string, unknown>;
-  tree['actionCatalogVersion'] = blenderActionCatalog.catalogVersion;
+  tree['actionCatalogVersion'] = actionCatalog.catalogVersion;
   tree['interactionCatalogVersion'] = interactionCatalog.catalogVersion;
   tree['hostVersionRange'] = interactionCatalog.hostVersionRange;
   for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
@@ -116,8 +119,9 @@ function icosphereCandidate(
 
 function subdivideCandidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
+  actionCatalog: ActionCatalog = blenderActionCatalog,
 ): ProcedureAuthoringCandidateTree {
-  const tree = candidate(interactionCatalog);
+  const tree = candidate(interactionCatalog, actionCatalog);
   const leaf = tree.nodes.find((node) => node.kind === 'leaf');
   if (leaf?.kind !== 'leaf') throw new Error('expected Subdivide candidate leaf');
   leaf.action = {
@@ -156,6 +160,56 @@ function subdivideCandidate(
   leaf.expectedObservations[0] = {
     ...leaf.expectedObservations[0]!,
     parameters: { resourceId: 'tutorial.cube.subdivided.mesh' },
+  };
+  return tree;
+}
+
+function subdivisionSurfaceCandidate(): ProcedureAuthoringCandidateTree {
+  const tree = candidate();
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('expected Subdivision Surface candidate leaf');
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_subdivision_surface',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+      viewportLevel: 3,
+    },
+  };
+  leaf.title = 'Add a bounded Subdivision Surface modifier';
+  leaf.intent = 'Add a managed Subdivision Surface modifier with viewport level three.';
+  leaf.semanticOperations[0] = {
+    ...leaf.semanticOperations[0]!,
+    semanticAction: 'add_subdivision_surface_modifier',
+    description: 'Add one Subdivision Surface modifier to the accepted Cube.',
+    parameters: { viewportLevel: 3 },
+  };
+  leaf.semanticOperations[1] = {
+    ...leaf.semanticOperations[1]!,
+    description: 'Keep the accepted Cube as the active modifier target.',
+    parameters: { targetId: 'tutorial.cube' },
+  };
+  leaf.semanticOperations[2] = {
+    ...leaf.semanticOperations[2]!,
+    description: 'Track the managed modifier identity and name.',
+    parameters: {
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.subdivision_surface',
+    },
+  ];
+  leaf.expectedObservations[0] = {
+    kind: 'modifier_ready',
+    parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
   };
   return tree;
 }
@@ -996,10 +1050,16 @@ describe('procedure authoring materialization', () => {
     if (historicalCatalog === undefined) {
       throw new Error('expected immutable InteractionCatalog 1.21.0');
     }
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === historicalCatalog.actionCatalogVersion,
+    );
+    if (historicalActionCatalog === undefined) {
+      throw new Error('expected immutable ActionCatalog for InteractionCatalog 1.21.0');
+    }
 
     const result = materializeProcedureAuthoringCandidate(
-      subdivideCandidate(historicalCatalog),
-      blenderActionCatalog,
+      subdivideCandidate(historicalCatalog, historicalActionCatalog),
+      historicalActionCatalog,
       historicalCatalog,
     );
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
@@ -1027,6 +1087,122 @@ describe('procedure authoring materialization', () => {
       reason: 'The InteractionCatalog recipe does not declare MCP materialization.',
     });
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+  });
+
+  it('materializes the exact Subdivision Surface candidate shortcut without projecting managed IDs', () => {
+    const input = subdivisionSurfaceCandidate();
+    const inputSnapshot = structuredClone(input);
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.action === null) {
+      throw new Error('expected materialized Subdivision Surface leaf');
+    }
+
+    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.tree.formatVersion).toBe('1.1.0');
+    expect(result.coverage).toEqual([
+      {
+        leafId: leaf.id,
+        recipeId: 'blender.modifier.add_subdivision_surface.semantic',
+        menu: 'unavailable',
+        shortcut: 'materialized',
+        mcp: 'unavailable',
+      },
+    ]);
+    expect(leaf.action.arguments).toEqual({
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+      viewportLevel: 3,
+    });
+    expect(leaf.menuTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'menu',
+      reason:
+        'The native modifier UI does not encode the managed modifier identity and name, receipt-tracked stack contract, bounded projected topology, observation, or compensating rollback state.',
+    });
+    expect(leaf.mcpTracks[0]).toMatchObject({
+      availability: 'unavailable',
+      modality: 'mcp',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    const shortcut = leaf.shortcutTracks[0];
+    if (shortcut?.availability !== 'available') {
+      throw new Error('expected available Subdivision Surface shortcut track');
+    }
+    expect(shortcut).toMatchObject({
+      id: 'blender.modifier.add_subdivision_surface.semantic.shortcut',
+      modality: 'shortcut',
+    });
+    expect(shortcut.preconditions).toHaveLength(9);
+    expect(
+      shortcut.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      {
+        kind: 'key_input',
+        id: 'shortcut.add_subdivision_surface_level_one',
+        order: 1,
+        parameters: { level: 1, relative: false, ensure_modifier: true },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 2,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_viewport_level',
+        order: 3,
+        parameters: { value: 3 },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 4,
+        parameters: {},
+      },
+    ]);
+    expect(shortcut.operations[0]).toMatchObject({
+      keyMode: 'chord',
+      keys: ['CTRL', '1'],
+    });
+    expect(shortcut.operations[1]).toMatchObject({
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.add_subdivision_surface_level_one',
+        expectedOperatorId: 'object.subdivision_set',
+      },
+    });
+    expect(shortcut.operations[2]).toMatchObject({
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'object.subdivision_set.level' },
+      path: ['Adjust Last Operation', 'Level'],
+    });
+    expect(shortcut.operations[3]).toMatchObject({
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    const shortcutParameterNames = shortcut.operations.flatMap((operation) =>
+      Object.keys(operation.parameters),
+    );
+    for (const managedArgument of ['targetId', 'modifierId', 'modifierName']) {
+      expect(shortcutParameterNames).not.toContain(managedArgument);
+    }
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(input).toEqual(inputSnapshot);
+    expect(result.tree).not.toBe(input);
   });
 
   it('materializes the exact Cube ordered menu and candidate shortcut without inventing MCP support', () => {
@@ -1681,10 +1857,14 @@ describe('procedure authoring materialization', () => {
       (catalog) => catalog.catalogVersion === '1.10.0',
     );
     if (legacyCatalog === undefined) throw new Error('expected InteractionCatalog 1.10.0');
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === legacyCatalog.actionCatalogVersion,
+    );
+    if (historicalActionCatalog === undefined) throw new Error('expected historical ActionCatalog');
 
     const result = materializeProcedureAuthoringCandidate(
-      candidate(legacyCatalog),
-      blenderActionCatalog,
+      candidate(legacyCatalog, historicalActionCatalog),
+      historicalActionCatalog,
       legacyCatalog,
     );
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
@@ -1702,10 +1882,14 @@ describe('procedure authoring materialization', () => {
       (catalog) => catalog.catalogVersion === '1.11.0',
     );
     if (orderedMenuCatalog === undefined) throw new Error('expected InteractionCatalog 1.11.0');
+    const historicalActionCatalog = blenderActionCatalogs.find(
+      (catalog) => catalog.catalogVersion === orderedMenuCatalog.actionCatalogVersion,
+    );
+    if (historicalActionCatalog === undefined) throw new Error('expected historical ActionCatalog');
 
     const result = materializeProcedureAuthoringCandidate(
-      candidate(orderedMenuCatalog),
-      blenderActionCatalog,
+      candidate(orderedMenuCatalog, historicalActionCatalog),
+      historicalActionCatalog,
       orderedMenuCatalog,
     );
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');

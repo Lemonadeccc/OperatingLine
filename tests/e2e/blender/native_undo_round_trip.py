@@ -53,6 +53,7 @@ from operating_line_native_undo_e2e.operating_line.infrastructure.snowman_action
 OBJECT_NAME = "OperatingLine.NativeUndoCube"
 BEVEL_NAME = "OperatingLine.NativeUndo.Bevel"
 SOLIDIFY_NAME = "OperatingLine.NativeUndo.Solidify"
+SUBDIVISION_SURFACE_NAME = "OperatingLine.NativeUndo.SubdivisionSurface"
 GEOMETRY_NODES_NAME = "OperatingLine.NativeUndo.GeometryNodes"
 USER_OBJECT_NAME = "OperatingLine.NativeUndo.UserObject"
 BLUE_MATERIAL_NAME = "OperatingLine.NativeUndo.Blue"
@@ -174,8 +175,23 @@ PLAN = {
             depends_on=["native.bevel"],
         ),
         _step(
-            "native.geometry_nodes",
+            "native.subdivision_surface",
             7,
+            {
+                "adapterId": "blender",
+                "name": "blender.modifier.add_subdivision_surface",
+                "arguments": {
+                    "targetId": "native.cube",
+                    "modifierId": "native.cube.subdivision_surface",
+                    "modifierName": SUBDIVISION_SURFACE_NAME,
+                    "viewportLevel": 1,
+                },
+            },
+            depends_on=["native.solidify"],
+        ),
+        _step(
+            "native.geometry_nodes",
+            8,
             {
                 "adapterId": "blender",
                 "name": "blender.geometry_nodes.create_transform",
@@ -190,11 +206,11 @@ PLAN = {
                     "scale": [1.0, 1.5, 0.5],
                 },
             },
-            depends_on=["native.solidify"],
+            depends_on=["native.subdivision_surface"],
         ),
         _step(
             "native.material_blue",
-            8,
+            9,
             {
                 "adapterId": "blender",
                 "name": "blender.material.create_and_assign",
@@ -494,16 +510,45 @@ def run() -> None:
     )
 
     assert bpy.ops.operating_line.next() == {"FINISHED"}
-    _push("OperatingLine native Undo after Geometry Nodes")
+    _push("OperatingLine native Undo after Subdivision Surface")
     assert session.active_index == 6
+    cube = bpy.data.objects[OBJECT_NAME]
+    subdivision_surface = cube.modifiers[SUBDIVISION_SURFACE_NAME]
+    subdivision_surface_pointer = subdivision_surface.as_pointer()
+    assert subdivision_surface.type == "SUBSURF"
+    assert subdivision_surface.levels == 1
+    assert subdivision_surface.render_levels == 2
+    _undo()
+    assert session.active_index == 5
+    assert (
+        bpy.data.objects[OBJECT_NAME].modifiers.get(SUBDIVISION_SURFACE_NAME) is None
+    )
+    _redo()
+    assert session.active_index == 6
+    cube = bpy.data.objects[OBJECT_NAME]
+    subdivision_surface = cube.modifiers[SUBDIVISION_SURFACE_NAME]
+    assert _modifier_state(
+        session, "native.subdivision_surface"
+    ).pointer == subdivision_surface.as_pointer()
+    assert (
+        subdivision_surface.as_pointer() != subdivision_surface_pointer
+        or resolve_resource(
+            session.receipts["native.subdivision_surface"].anchor
+        )
+        is cube
+    )
+
+    assert bpy.ops.operating_line.next() == {"FINISHED"}
+    _push("OperatingLine native Undo after Geometry Nodes")
+    assert session.active_index == 7
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     geometry_nodes_pointer = geometry_nodes.as_pointer()
     _undo()
-    assert session.active_index == 5
+    assert session.active_index == 6
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is None
     _redo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     cube = bpy.data.objects[OBJECT_NAME]
     geometry_nodes = cube.modifiers[GEOMETRY_NODES_NAME]
     assert _modifier_state(session, "native.geometry_nodes").pointer == (
@@ -516,13 +561,13 @@ def run() -> None:
 
     assert bpy.ops.operating_line.back() == {"FINISHED"}
     _push("OperatingLine native Undo after Back")
-    assert session.active_index == 5
+    assert session.active_index == 6
     assert cube.modifiers.get(GEOMETRY_NODES_NAME) is None
     _undo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is not None
     _redo()
-    assert session.active_index == 5
+    assert session.active_index == 6
     assert bpy.data.objects[OBJECT_NAME].modifiers.get(GEOMETRY_NODES_NAME) is None
     assert native_history_error() == ""
 
@@ -536,10 +581,10 @@ def run() -> None:
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
 
     _undo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     _redo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     blue_receipt = session.receipts["native.material_blue"]
     before_material = blue_receipt.mutations[0].before[0]
     assert isinstance(before_material, DataBlockReference)
@@ -548,13 +593,13 @@ def run() -> None:
 
     assert bpy.ops.operating_line.back() == {"FINISHED"}
     _push("OperatingLine native Undo after material Back")
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     _undo()
-    assert session.active_index == 7
+    assert session.active_index == 8
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == BLUE_MATERIAL_NAME
     _redo()
-    assert session.active_index == 6
+    assert session.active_index == 7
     assert bpy.data.objects[OBJECT_NAME].data.materials[0].name == USER_MATERIAL_NAME
     assert native_history_error() == ""
 
