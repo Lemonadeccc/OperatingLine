@@ -606,7 +606,7 @@ describe('procedure authoring materialization', () => {
     });
   });
 
-  it('materializes the exact Icosphere ordered menu without inventing shortcut or MCP support', () => {
+  it('materializes the exact Icosphere ordered menu and F9 shortcut without inventing MCP support', () => {
     const input = icosphereCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -619,13 +619,13 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Icosphere leaf');
     }
 
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.3.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_icosphere.native',
         menu: 'materialized',
-        shortcut: 'unavailable',
+        shortcut: 'materialized',
         mcp: 'unavailable',
       },
     ]);
@@ -678,13 +678,102 @@ describe('procedure authoring materialization', () => {
       radius: 1.75,
       location: [-1.25, 2.5, 0.75],
     });
-    expect(leaf.shortcutTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'shortcut',
-        reason: 'No verified shortcut procedure is available.',
-      }),
+    const shortcutTrack = leaf.shortcutTracks[0];
+    if (shortcutTrack?.availability !== 'available') {
+      throw new Error('expected available Icosphere shortcut track');
+    }
+    expect(shortcutTrack).toMatchObject({
+      id: 'blender.mesh.create_icosphere.native.shortcut',
+      modality: 'shortcut',
+    });
+    expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
+    expect(shortcutTrack.preconditions).toContainEqual({
+      kind: 'scene_state',
+      label: 'Transform Orientation',
+      value: 'GLOBAL',
+    });
+    expect(
+      shortcutTrack.operations.map(({ kind, id, order, parameters }) => ({
+        kind,
+        id,
+        order,
+        parameters,
+      })),
+    ).toEqual([
+      { kind: 'key_input', id: 'shortcut.add_icosphere', order: 1, parameters: {} },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        order: 2,
+        parameters: {},
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_subdivisions',
+        order: 3,
+        parameters: { value: 3 },
+      },
+      {
+        kind: 'operator_property_update',
+        id: 'shortcut.set_radius',
+        order: 4,
+        parameters: { value: 1.75 },
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        order: 5,
+        parameters: {},
+      },
+      { kind: 'key_input', id: 'shortcut.move_x', order: 6, parameters: { value: -1.25 } },
+      { kind: 'key_input', id: 'shortcut.move_y', order: 7, parameters: { value: 2.5 } },
+      { kind: 'key_input', id: 'shortcut.move_z', order: 8, parameters: { value: 0.75 } },
+      {
+        kind: 'key_input',
+        id: 'shortcut.rename',
+        order: 9,
+        parameters: { value: 'OperatingLine.IcosphereDetail' },
+      },
     ]);
+    expect(shortcutTrack.operations[0]).toMatchObject({
+      kind: 'key_input',
+      keyMode: 'chord',
+      keys: ['SHIFT', 'A'],
+      selectionPath: ['Mesh', 'Ico Sphere'],
+    });
+    expect(shortcutTrack.operations[1]).toMatchObject({
+      kind: 'key_input',
+      keys: ['F9'],
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.add_icosphere',
+        expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+      },
+    });
+    expect(shortcutTrack.operations[2]).toMatchObject({
+      kind: 'operator_property_update',
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: {
+        kind: 'control',
+        hostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+      },
+      path: ['Adjust Last Operation', 'Subdivisions'],
+    });
+    expect(shortcutTrack.operations[3]).toMatchObject({
+      kind: 'operator_property_update',
+      surfaceOperationId: 'shortcut.open_adjust_last_operation',
+      target: { kind: 'control', hostId: 'mesh.primitive_ico_sphere_add.radius' },
+      path: ['Adjust Last Operation', 'Radius'],
+    });
+    expect(shortcutTrack.operations[4]).toMatchObject({
+      kind: 'key_input',
+      keys: ['ENTER'],
+      closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+    });
+    expect(
+      shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
+    ).not.toContain('resourceId');
     expect(leaf.mcpTracks).toEqual([
       expect.objectContaining({
         availability: 'unavailable',

@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.20.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.19.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.21.0` 与 ActionCatalog `1.12.0` 一一覆盖 22 个动作，历史 `1.9.0` 至已冻结的 `1.20.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他十五个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       活动叶节点不再依赖 Python 硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
@@ -338,10 +338,16 @@
     - [x] Operator 参数 surface 协议与检索基础：保留历史无 `kind` shortcut，新增严格的 `F9` opener、
           连续逐控件 `operator_property_update` 与 `ENTER` closer 状态机；实际使用时输出 ProcedureTree
           `1.1.0` / Result `1.3.0`。Blender Python loader 执行同构验证，Schema 14 可按 operation kind、
-          target/path、共享 surface 与 expected operator 精确检索完整链并恢复中断迁移。当前
-          InteractionCatalog `1.20.0` 不启用该能力，Icosphere shortcut 仍 unavailable，直到真实 Blender
-          4.5/5.1 前台参数回放、Observation 与恢复证据完成。见
+          target/path、共享 surface 与 expected operator 精确检索完整链并恢复中断迁移。冻结的
+          InteractionCatalog `1.20.0` 不启用该能力，Icosphere shortcut 保持 unavailable。见
           [ADR 0057](adr/0057-shortcut-operator-property-surfaces.md)。
+    - [x] Icosphere F9 候选快捷键物化：InteractionCatalog `1.21.0` 继续绑定 ActionCatalog `1.12.0`，
+          冻结 `1.20.0`，并声明 `Shift+A → Mesh → Ico Sphere`、`F9` opener、Subdivisions、Radius、
+          `ENTER` closer、`G X/Y/Z` 与 `F2` 的九步 ordered shortcut。真实前台 event replay 在 Blender
+          4.5.3/5.1.1 中均把参数改为 3/2.5，并验证 162 顶点与顶点半径；Result 使用 `1.3.0`。
+          轨迹仍为 candidate/structural-only，MCP unavailable；后续移动/重命名的完整 UI replay、产品级
+          Observation 成功门、恢复策略、原生 Undo 与 managed action 等价仍未完成。见
+          [ADR 0058](adr/0058-icosphere-f9-shortcut-materialization.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

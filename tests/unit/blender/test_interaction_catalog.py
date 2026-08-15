@@ -129,6 +129,11 @@ class InteractionCatalogTests(unittest.TestCase):
                     "label": "3D Cursor",
                     "value": "World origin",
                 },
+                {
+                    "kind": "scene_state",
+                    "label": "Transform Orientation",
+                    "value": "GLOBAL",
+                },
             ],
             "operations": [
                 {
@@ -254,7 +259,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.20.0")
+        self.assertEqual(catalog.catalog_version, "1.21.0")
         self.assertEqual(catalog.action_catalog_version, "1.12.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -434,9 +439,102 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("resourceId",),
         )
+        icosphere_shortcut = icosphere.procedure_materialization.shortcut
+        self.assertEqual(icosphere_shortcut.availability, "available")
         self.assertEqual(
-            icosphere.procedure_materialization.shortcut.availability,
-            "unavailable",
+            icosphere_shortcut.source, "catalog.ordered_shortcut_operations"
+        )
+        self.assertEqual(icosphere_shortcut.semantic_binding, "all_leaf_operations")
+        self.assertEqual(
+            icosphere_shortcut.parameter_binding, "ordered_parameter_operations"
+        )
+        self.assertEqual(icosphere_shortcut.projection, "candidate_only")
+        assert icosphere_shortcut.preconditions is not None
+        self.assertEqual(
+            tuple(item.kind for item in icosphere_shortcut.preconditions),
+            (
+                "workspace",
+                "editor",
+                "mode",
+                "keymap",
+                "scene_state",
+                "scene_state",
+            ),
+        )
+        assert icosphere_shortcut.shortcut_operations is not None
+        self.assertEqual(
+            tuple(item.id for item in icosphere_shortcut.shortcut_operations),
+            (
+                "shortcut.add_icosphere",
+                "shortcut.open_adjust_last_operation",
+                "shortcut.set_subdivisions",
+                "shortcut.set_radius",
+                "shortcut.close_adjust_last_operation",
+                "shortcut.move_x",
+                "shortcut.move_y",
+                "shortcut.move_z",
+                "shortcut.rename",
+            ),
+        )
+        opener = icosphere_shortcut.shortcut_operations[1]
+        self.assertEqual(opener.kind, "key_input")
+        self.assertEqual(opener.keys, ("F9",))
+        assert opener.opens_surface is not None
+        self.assertEqual(opener.opens_surface.host_id, "screen.redo_last")
+        self.assertEqual(
+            opener.opens_surface.source_operation_id, "shortcut.add_icosphere"
+        )
+        self.assertEqual(
+            opener.opens_surface.expected_operator_id,
+            "mesh.primitive_ico_sphere_add",
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    operation.kind,
+                    operation.surface_operation_id,
+                    operation.target_id,
+                    operation.path,
+                    operation.parameters[0].source.argument_name,
+                )
+                for operation in icosphere_shortcut.shortcut_operations[2:4]
+            ),
+            (
+                (
+                    "operator_property_update",
+                    "shortcut.open_adjust_last_operation",
+                    "mesh.primitive_ico_sphere_add.subdivisions",
+                    ("Adjust Last Operation", "Subdivisions"),
+                    "subdivisions",
+                ),
+                (
+                    "operator_property_update",
+                    "shortcut.open_adjust_last_operation",
+                    "mesh.primitive_ico_sphere_add.radius",
+                    ("Adjust Last Operation", "Radius"),
+                    "radius",
+                ),
+            ),
+        )
+        closer = icosphere_shortcut.shortcut_operations[4]
+        self.assertEqual(closer.keys, ("ENTER",))
+        self.assertEqual(
+            closer.closes_surface_operation_id,
+            "shortcut.open_adjust_last_operation",
+        )
+        self.assertEqual(
+            tuple(operation.keys for operation in icosphere_shortcut.shortcut_operations[5:]),
+            (
+                ("G", "X", "VALUE", "ENTER"),
+                ("G", "Y", "VALUE", "ENTER"),
+                ("G", "Z", "VALUE", "ENTER"),
+                ("F2", "VALUE", "ENTER"),
+            ),
+        )
+        assert icosphere_shortcut.omitted_action_arguments is not None
+        self.assertEqual(
+            tuple(item.argument_name for item in icosphere_shortcut.omitted_action_arguments),
+            ("resourceId",),
         )
         self.assertEqual(
             icosphere.procedure_materialization.mcp.availability,
@@ -1413,6 +1511,42 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNone(
             plane.procedure_materialization.shortcut.shortcut_operations
+        )
+
+    def test_loads_byte_frozen_plane_shortcut_catalog_without_icosphere_shortcut(
+        self,
+    ) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.20.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "71c16e634e28f2318652495aa0019350c55ed9a4a193c29102a94e995015134d",
+        )
+        self.assertEqual(frozen.catalog_version, "1.20.0")
+        icosphere = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_icosphere"
+        )
+        assert icosphere.procedure_materialization is not None
+        self.assertEqual(
+            (
+                icosphere.procedure_materialization.shortcut.availability,
+                icosphere.procedure_materialization.shortcut.reason,
+            ),
+            ("unavailable", "No verified shortcut procedure is available."),
+        )
+        self.assertIsNone(
+            icosphere.procedure_materialization.shortcut.shortcut_operations
         )
 
     def test_parses_ordered_operator_and_post_execution_control_operations(self) -> None:

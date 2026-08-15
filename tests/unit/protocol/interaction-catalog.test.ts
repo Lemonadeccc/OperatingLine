@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.20.0');
+    expect(catalog.catalogVersion).toBe('1.21.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -269,6 +269,7 @@ describe('interaction catalog protocol', () => {
       '1.18.0',
       '1.19.0',
       '1.20.0',
+      '1.21.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -470,10 +471,45 @@ describe('interaction catalog protocol', () => {
           },
         ],
       },
-      shortcut: {
-        availability: 'unavailable',
-        reason: 'No verified shortcut procedure is available.',
-      },
+      shortcut: expect.objectContaining({
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+        preconditions: expect.arrayContaining([
+          { kind: 'scene_state', label: 'Transform Orientation', value: 'GLOBAL' },
+        ]),
+        operations: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'key_input',
+            id: 'shortcut.open_adjust_last_operation',
+            keys: ['F9'],
+            opensSurface: {
+              kind: 'adjust_last_operation',
+              hostId: 'screen.redo_last',
+              sourceOperationId: 'shortcut.add_icosphere',
+              expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+            },
+          }),
+          expect.objectContaining({
+            kind: 'operator_property_update',
+            id: 'shortcut.set_subdivisions',
+            surfaceOperationId: 'shortcut.open_adjust_last_operation',
+          }),
+          expect.objectContaining({
+            kind: 'operator_property_update',
+            id: 'shortcut.set_radius',
+            surfaceOperationId: 'shortcut.open_adjust_last_operation',
+          }),
+          expect.objectContaining({
+            kind: 'key_input',
+            id: 'shortcut.close_adjust_last_operation',
+            closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+          }),
+        ]),
+        omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
+      }),
       mcp: {
         availability: 'unavailable',
         reason: 'No approved action-level MCP tool is available.',

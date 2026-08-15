@@ -559,6 +559,9 @@ describe('procedure compilation runtime', () => {
     const cubeShortcutInteractionCatalog = blenderInteractionCatalogs.find(
       (catalog) => catalog.catalogVersion === '1.19.0',
     );
+    const planeShortcutInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.20.0',
+    );
     if (unavailableLegacyInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.9.0 snapshot');
     }
@@ -592,6 +595,9 @@ describe('procedure compilation runtime', () => {
     if (cubeShortcutInteractionCatalog === undefined) {
       throw new Error('Expected the immutable Blender InteractionCatalog 1.19.0 snapshot');
     }
+    if (planeShortcutInteractionCatalog === undefined) {
+      throw new Error('Expected the immutable Blender InteractionCatalog 1.20.0 snapshot');
+    }
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -608,6 +614,7 @@ describe('procedure compilation runtime', () => {
         coneInteractionCatalog,
         cylinderInteractionCatalog,
         cubeShortcutInteractionCatalog,
+        planeShortcutInteractionCatalog,
         blenderInteractionCatalog,
       ],
     });
@@ -890,13 +897,14 @@ describe('procedure compilation runtime', () => {
         ).result?.structuredContent,
       );
       expect(icosphereMaterialization).toMatchObject({
-        formatVersion: '1.1.0',
+        formatVersion: '1.3.0',
+        catalogBinding: { interactionCatalogVersion: '1.21.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
             recipeId: 'blender.mesh.create_icosphere.native',
             menu: 'materialized',
-            shortcut: 'unavailable',
+            shortcut: 'materialized',
             mcp: 'unavailable',
           },
         ],
@@ -907,6 +915,7 @@ describe('procedure compilation runtime', () => {
       if (icosphereLeaf?.kind !== 'leaf' || icosphereLeaf.action === null) {
         throw new Error('Expected one materialized Icosphere leaf');
       }
+      expect(icosphereMaterialization.tree.formatVersion).toBe('1.1.0');
       const icosphereMenu = icosphereLeaf.menuTracks[0];
       if (icosphereMenu?.availability !== 'available') {
         throw new Error('Expected one catalog-grounded Icosphere menu track');
@@ -922,7 +931,120 @@ describe('procedure compilation runtime', () => {
       expect(
         icosphereMenu.operations.flatMap((operation) => Object.keys(operation.parameters)),
       ).not.toContain('resourceId');
-      expect(icosphereLeaf.shortcutTracks[0]).toMatchObject({ availability: 'unavailable' });
+      const icosphereShortcut = icosphereLeaf.shortcutTracks[0];
+      if (icosphereShortcut?.availability !== 'available') {
+        throw new Error('Expected one catalog-grounded Icosphere shortcut track');
+      }
+      expect(
+        icosphereShortcut.operations.map((operation) =>
+          operation.kind === 'operator_property_update'
+            ? {
+                kind: operation.kind,
+                id: operation.id,
+                order: operation.order,
+                surfaceOperationId: operation.surfaceOperationId,
+                target: operation.target,
+                path: operation.path,
+                parameters: operation.parameters,
+              }
+            : {
+                kind: operation.kind,
+                id: operation.id,
+                order: operation.order,
+                keyMode: operation.keyMode,
+                keys: operation.keys,
+                selectionPath: operation.selectionPath,
+                parameters: operation.parameters,
+                opensSurface: operation.opensSurface,
+                closesSurfaceOperationId: operation.closesSurfaceOperationId,
+              },
+        ),
+      ).toEqual([
+        {
+          kind: 'key_input',
+          id: 'shortcut.add_icosphere',
+          order: 1,
+          keyMode: 'chord',
+          keys: ['SHIFT', 'A'],
+          selectionPath: ['Mesh', 'Ico Sphere'],
+          parameters: {},
+          opensSurface: undefined,
+          closesSurfaceOperationId: undefined,
+        },
+        {
+          kind: 'key_input',
+          id: 'shortcut.open_adjust_last_operation',
+          order: 2,
+          keyMode: 'sequence',
+          keys: ['F9'],
+          selectionPath: undefined,
+          parameters: {},
+          opensSurface: {
+            kind: 'adjust_last_operation',
+            hostId: 'screen.redo_last',
+            sourceOperationId: 'shortcut.add_icosphere',
+            expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+          },
+          closesSurfaceOperationId: undefined,
+        },
+        {
+          kind: 'operator_property_update',
+          id: 'shortcut.set_subdivisions',
+          order: 3,
+          surfaceOperationId: 'shortcut.open_adjust_last_operation',
+          target: {
+            kind: 'control',
+            hostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+          },
+          path: ['Adjust Last Operation', 'Subdivisions'],
+          parameters: { value: 3 },
+        },
+        {
+          kind: 'operator_property_update',
+          id: 'shortcut.set_radius',
+          order: 4,
+          surfaceOperationId: 'shortcut.open_adjust_last_operation',
+          target: { kind: 'control', hostId: 'mesh.primitive_ico_sphere_add.radius' },
+          path: ['Adjust Last Operation', 'Radius'],
+          parameters: { value: 1.75 },
+        },
+        {
+          kind: 'key_input',
+          id: 'shortcut.close_adjust_last_operation',
+          order: 5,
+          keyMode: 'sequence',
+          keys: ['ENTER'],
+          selectionPath: undefined,
+          parameters: {},
+          opensSurface: undefined,
+          closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+        },
+        ...(['X', 'Y', 'Z'] as const).map((axis, index) => ({
+          kind: 'key_input' as const,
+          id: `shortcut.move_${axis.toLowerCase()}`,
+          order: index + 6,
+          keyMode: 'sequence' as const,
+          keys: ['G', axis, 'VALUE', 'ENTER'],
+          selectionPath: undefined,
+          parameters: { value: [-1.25, 2.5, 0.75][index] },
+          opensSurface: undefined,
+          closesSurfaceOperationId: undefined,
+        })),
+        {
+          kind: 'key_input',
+          id: 'shortcut.rename',
+          order: 9,
+          keyMode: 'sequence',
+          keys: ['F2', 'VALUE', 'ENTER'],
+          selectionPath: undefined,
+          parameters: { value: 'OperatingLine.IcosphereDetail' },
+          opensSurface: undefined,
+          closesSurfaceOperationId: undefined,
+        },
+      ]);
+      expect(
+        icosphereShortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
+      ).not.toContain('resourceId');
       expect(icosphereLeaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
       const icosphereHttpMaterialization = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
@@ -1674,11 +1796,26 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
-      const planeShortcutMcp = await callMcpTool(
+      const planeShortcutPrompt = await callMcpTool(
         runtime,
         35,
+        'operatingline.procedure.prompt.get',
+        {
+          ...request,
+          interactionCatalogVersion: planeShortcutInteractionCatalog.catalogVersion,
+        },
+      );
+      const planeShortcutPacket = procedureAuthoringPromptPacketSchema.parse(
+        planeShortcutPrompt.result?.structuredContent,
+      );
+      const planeShortcutMcp = await callMcpTool(
+        runtime,
+        36,
         'operatingline.procedure.authoring.materialize',
-        { packet, tree: planeAuthoringCandidateFixture(packet) },
+        {
+          packet: planeShortcutPacket,
+          tree: planeAuthoringCandidateFixture(planeShortcutPacket),
+        },
       );
       expect(planeShortcutMcp.result?.isError).not.toBe(true);
       const planeShortcutMaterialization = procedureAuthoringMaterializationResultSchema.parse(
@@ -1798,11 +1935,36 @@ describe('procedure compilation runtime', () => {
         {
           method: 'POST',
           headers,
-          body: JSON.stringify({ packet, tree: planeAuthoringCandidateFixture(packet) }),
+          body: JSON.stringify({
+            packet: planeShortcutPacket,
+            tree: planeAuthoringCandidateFixture(planeShortcutPacket),
+          }),
         },
       );
       expect(planeShortcutHttp.status).toBe(200);
       await expect(planeShortcutHttp.json()).resolves.toEqual(planeShortcutMaterialization);
+
+      const frozenIcosphereMaterialization = procedureAuthoringMaterializationResultSchema.parse(
+        (
+          await callMcpTool(runtime, 37, 'operatingline.procedure.authoring.materialize', {
+            packet: planeShortcutPacket,
+            tree: icosphereAuthoringCandidateFixture(planeShortcutPacket),
+          })
+        ).result?.structuredContent,
+      );
+      expect(frozenIcosphereMaterialization).toMatchObject({
+        formatVersion: '1.1.0',
+        catalogBinding: { interactionCatalogVersion: '1.20.0' },
+        coverage: [
+          {
+            leafId: 'snowman.head.eyes.left',
+            recipeId: 'blender.mesh.create_icosphere.native',
+            menu: 'materialized',
+            shortcut: 'unavailable',
+            mcp: 'unavailable',
+          },
+        ],
+      });
 
       const icospherePrompt = await callMcpTool(runtime, 15, 'operatingline.procedure.prompt.get', {
         ...request,

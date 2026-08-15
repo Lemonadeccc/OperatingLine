@@ -204,7 +204,25 @@ describe('interaction catalog registry', () => {
       availability: 'unavailable',
       reason: 'No verified shortcut procedure is available.',
     });
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.20.0');
+    const frozenPlaneShortcut = registry.get({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderInteractionCatalog.actionCatalogVersion,
+      interactionCatalogVersion: '1.20.0',
+    });
+    expect(
+      frozenPlaneShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_plane',
+      )?.procedureMaterialization?.shortcut,
+    ).toMatchObject({ availability: 'available', projection: 'candidate_only' });
+    expect(
+      frozenPlaneShortcut.recipes.find(
+        (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
+      )?.procedureMaterialization?.shortcut,
+    ).toEqual({
+      availability: 'unavailable',
+      reason: 'No verified shortcut procedure is available.',
+    });
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.21.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -377,11 +395,10 @@ describe('interaction catalog registry', () => {
     expect(latestShortcut.omittedActionArguments).toEqual([
       expect.objectContaining({ argumentName: 'resourceId' }),
     ]);
-    expect(
-      blenderInteractionCatalog.recipes.find(
-        (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
-      )?.procedureMaterialization,
-    ).toMatchObject({
+    const icosphereMaterialization = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
+    )?.procedureMaterialization;
+    expect(icosphereMaterialization).toMatchObject({
       menu: {
         availability: 'available',
         parameterBinding: 'ordered_parameter_operations',
@@ -398,9 +415,133 @@ describe('interaction catalog registry', () => {
         },
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
-      shortcut: { availability: 'unavailable' },
+      shortcut: {
+        availability: 'available',
+        source: 'catalog.ordered_shortcut_operations',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'ordered_parameter_operations',
+        projection: 'candidate_only',
+      },
       mcp: { availability: 'unavailable' },
     });
+    const icosphereShortcut = icosphereMaterialization?.shortcut;
+    if (icosphereShortcut?.availability !== 'available') {
+      throw new Error('Expected the latest Icosphere shortcut recipe to be available');
+    }
+    expect(icosphereShortcut.preconditions).toEqual([
+      { kind: 'workspace', label: 'Workspace', value: 'Layout' },
+      { kind: 'editor', label: 'Editor', value: 'VIEW_3D' },
+      { kind: 'mode', label: 'Mode', value: 'OBJECT' },
+      { kind: 'keymap', label: 'Keymap', value: 'Blender' },
+      { kind: 'scene_state', label: '3D Cursor', value: 'World origin' },
+      { kind: 'scene_state', label: 'Transform Orientation', value: 'GLOBAL' },
+    ]);
+    expect(icosphereShortcut.operations.map((operation) => operation.id)).toEqual([
+      'shortcut.add_icosphere',
+      'shortcut.open_adjust_last_operation',
+      'shortcut.set_subdivisions',
+      'shortcut.set_radius',
+      'shortcut.close_adjust_last_operation',
+      'shortcut.move_x',
+      'shortcut.move_y',
+      'shortcut.move_z',
+      'shortcut.rename',
+    ]);
+    expect(icosphereShortcut.operations).toEqual([
+      {
+        kind: 'key_input',
+        id: 'shortcut.add_icosphere',
+        label: 'Add Icosphere',
+        keyMode: 'chord',
+        keys: ['SHIFT', 'A'],
+        selectionPath: ['Mesh', 'Ico Sphere'],
+        parameters: [],
+      },
+      {
+        kind: 'key_input',
+        id: 'shortcut.open_adjust_last_operation',
+        label: 'Open Adjust Last Operation',
+        keyMode: 'sequence',
+        keys: ['F9'],
+        parameters: [],
+        opensSurface: {
+          kind: 'adjust_last_operation',
+          hostId: 'screen.redo_last',
+          sourceOperationId: 'shortcut.add_icosphere',
+          expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+        },
+      },
+      ...(['subdivisions', 'radius'] as const).map((property) => ({
+        kind: 'operator_property_update' as const,
+        id: `shortcut.set_${property}`,
+        label: `Set ${property === 'subdivisions' ? 'Subdivisions' : 'Radius'}`,
+        surfaceOperationId: 'shortcut.open_adjust_last_operation',
+        target: {
+          kind: 'control' as const,
+          hostId: `mesh.primitive_ico_sphere_add.${property}`,
+        },
+        path: ['Adjust Last Operation', property === 'subdivisions' ? 'Subdivisions' : 'Radius'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument' as const,
+              argumentName: property,
+              transform: 'identity',
+            },
+          },
+        ],
+      })),
+      {
+        kind: 'key_input',
+        id: 'shortcut.close_adjust_last_operation',
+        label: 'Confirm Adjust Last Operation',
+        keyMode: 'sequence',
+        keys: ['ENTER'],
+        parameters: [],
+        closesSurfaceOperationId: 'shortcut.open_adjust_last_operation',
+      },
+      ...(['X', 'Y', 'Z'] as const).map((axis) => ({
+        kind: 'key_input' as const,
+        id: `shortcut.move_${axis.toLowerCase()}`,
+        label: `Move ${axis}`,
+        keyMode: 'sequence' as const,
+        keys: ['G', axis, 'VALUE', 'ENTER'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument' as const,
+              argumentName: 'location',
+              transform: `vector3_${axis.toLowerCase()}`,
+            },
+          },
+        ],
+      })),
+      {
+        kind: 'key_input',
+        id: 'shortcut.rename',
+        label: 'Rename',
+        keyMode: 'sequence',
+        keys: ['F2', 'VALUE', 'ENTER'],
+        parameters: [
+          {
+            name: 'value',
+            source: {
+              kind: 'action_argument',
+              argumentName: 'objectName',
+              transform: 'identity',
+            },
+          },
+        ],
+      },
+    ]);
+    expect(icosphereShortcut.omittedActionArguments).toEqual([
+      {
+        argumentName: 'resourceId',
+        reason: 'The logical resource identifier has no user-facing Blender shortcut input.',
+      },
+    ]);
     expect(
       blenderInteractionCatalog.recipes.find(
         (recipe) => recipe.actionName === 'blender.mesh.create_plane',
@@ -725,24 +866,34 @@ describe('interaction catalog registry', () => {
     );
   });
 
-  it('changes only the version and Plane shortcut after InteractionCatalog 1.19.0', () => {
+  it('keeps the InteractionCatalog 1.20.0 compatibility snapshot byte-for-byte frozen', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.20.0.json'),
+    );
+
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '71c16e634e28f2318652495aa0019350c55ed9a4a193c29102a94e995015134d',
+    );
+  });
+
+  it('changes only the version and Icosphere shortcut after InteractionCatalog 1.20.0', () => {
     const frozen = JSON.parse(
-      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.19.0.json'), 'utf8'),
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.20.0.json'), 'utf8'),
     ) as typeof blenderInteractionCatalog;
-    const frozenPlaneShortcut = frozen.recipes.find(
-      (recipe) => recipe.actionName === 'blender.mesh.create_plane',
+    const frozenIcosphereShortcut = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_icosphere',
     )?.procedureMaterialization?.shortcut;
 
     expect({
       ...blenderInteractionCatalog,
       catalogVersion: frozen.catalogVersion,
       recipes: blenderInteractionCatalog.recipes.map((recipe) =>
-        recipe.actionName === 'blender.mesh.create_plane'
+        recipe.actionName === 'blender.mesh.create_icosphere'
           ? {
               ...recipe,
               procedureMaterialization: {
                 ...recipe.procedureMaterialization,
-                shortcut: frozenPlaneShortcut,
+                shortcut: frozenIcosphereShortcut,
               },
             }
           : recipe,

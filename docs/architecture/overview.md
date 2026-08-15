@@ -326,10 +326,12 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.20.0` 精确绑定 ActionCatalog `1.12.0`，冻结 `1.19.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.21.0` 精确绑定 ActionCatalog `1.12.0`，冻结 `1.20.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
-`subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；`resourceId` 不进入 UI operation。
+`subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；九步 candidate shortcut 依次为
+`Shift+A → Mesh → Ico Sphere`、`F9` opener、Subdivisions、Radius、`ENTER` closer、`G X/Y/Z` 与
+`F2`，其中两个属性 update 各自绑定一个 accepted action 参数；`resourceId` 不进入 UI operation。
 Cube 与 Plane 同样各自声明六步 ordered menu：四步 guidance 的 operator step 以 identity 投影绑定 accepted
 action 的 `size`，随后绑定 Location 与 Object Name，并省略 `resourceId`。`size` 表示完整边长，不是
 transform scale。Cube 与 Plane 还各自声明 candidate-only 六步 shortcut：六项前置条件固定为 `Layout`、`VIEW_3D`、
@@ -361,18 +363,19 @@ Cylinder 同样声明六步 ordered menu：四步 guidance operator 严格按序
 `end`，两端使用同一 `radius`，且不声称与 managed executor quaternion/roll 精确等价。
 `resourceId` 省略，shortcut/MCP unavailable。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
-hash 与逐 leaf coverage；Icosphere shortcut 因未声明而 unavailable。leaf 仍为 `candidate` 且
+hash 与逐 leaf coverage；Icosphere shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
 不是宿主状态等价证明。Cube/Plane 的 `size`、Torus 的四项 identity 投影与 Cone/Cylinder 的
-segment-frame 派生同样只证明参数来源；当前没有
-完整 UI operation 的真实 Blender replay。Cube 与 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
+segment-frame 派生同样只证明参数来源；Icosphere 的创建与 F9 参数链已在 Blender 4.5.3/5.1.1
+完成真实前台事件回放，验证 Subdivisions 3、Radius 2.5、162 顶点和顶点半径；后续移动/重命名及 managed
+action 等价仍没有完整 UI operation replay。Cube 与 Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针
 不是实际键盘事件或完整 UI replay，并保留默认未 bake mesh 与 `scale = size / 2`，不等价于 managed
 executor 的 baked mesh/`scale = 1`。原生菜单/operator 不复现 managed collection 归属、resource tag、
 receipt、幂等或补偿语义；
 Cone/Cylinder 的 Blender 4.5/5.1 operator 双版本探针也不是六步 UI replay。历史
-`1.9.0` 至已冻结的 `1.19.0` 继续精确回放；`1.19.0` 中 Plane shortcut 保持 unavailable。结果格式依实际
-使用能力为 `1.0.0`/`1.1.0`/`1.2.0`，其中 Plane、Cube 与 UV Sphere shortcut 结果为 `1.2.0`，
-Icosphere/Torus/Cone/Cylinder menu-only 结果为 `1.1.0`。该入口
+`1.9.0` 至已冻结的 `1.20.0` 继续精确回放；`1.20.0` 中 Icosphere shortcut 保持 unavailable。结果格式依实际
+使用能力为 `1.0.0`/`1.1.0`/`1.2.0`/`1.3.0`，其中 Icosphere shortcut 结果为 `1.3.0`，Plane、Cube 与
+UV Sphere shortcut 结果为 `1.2.0`，Torus/Cone/Cylinder menu-only 结果为 `1.1.0`。该入口
 不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender。目录证明只存在于完整 result 信封；
 单独抽出或交给通用 store 的 tree 只保留可重建引用，仍须视为 `structural_only`，不得作为训练、检索或执行
 grounding attestation。完整决策见
@@ -386,16 +389,19 @@ grounding attestation。完整决策见
 [ADR 0053](../adr/0053-cone-segment-frame-menu-materialization.md) 与
 [ADR 0054](../adr/0054-cylinder-segment-frame-menu-materialization.md) 与
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
-[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。
+[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md) 与
+[ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数
 `ENTER` 关闭同一 surface。使用该形状时所有 shortcut key operation 规范化为显式 `key_input`，输出
 ProcedureTree `1.1.0` / MaterializationResult `1.3.0`。Schema 14 将 operation kind、逻辑 target/path、
 共享 surface 与 expected operator 纳入精确索引；opener/property/closer 可以作为一条链检索，但仍从原始
-不可变树复核。当前 InteractionCatalog `1.20.0` 未声明这种 shortcut，故没有现有目录结果升级到新版本，
-Icosphere 仍等待真实 Blender 4.5/5.1 前台参数回放。见
-[ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md)。更多 action 的封闭声明、verified
+不可变树复核。InteractionCatalog `1.21.0` 首次用该形状声明 Icosphere shortcut；真实 Blender
+4.5.3/5.1.1 前台回放已证明创建、F9、两个字段和关闭事件，但结果仍是 candidate/structural-only，恢复、
+Undo 与 managed action 等价没有因此完成。见
+[ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
+[ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
