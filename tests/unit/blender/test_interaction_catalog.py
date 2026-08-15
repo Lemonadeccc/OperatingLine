@@ -105,6 +105,152 @@ class InteractionCatalogTests(unittest.TestCase):
     def _ordered_shortcut_catalog(self) -> dict:
         return json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
 
+    def _operator_property_shortcut_catalog(self) -> dict:
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        recipe = next(
+            item
+            for item in raw["recipes"]
+            if item["actionName"] == "blender.mesh.create_icosphere"
+        )
+        operator_id = recipe["guidance"]["execution"]["operatorId"]
+        recipe["procedureMaterialization"]["shortcut"] = {
+            "availability": "available",
+            "source": "catalog.ordered_shortcut_operations",
+            "semanticBinding": "all_leaf_operations",
+            "parameterBinding": "ordered_parameter_operations",
+            "projection": "candidate_only",
+            "preconditions": [
+                {"kind": "workspace", "label": "Workspace", "value": "Layout"},
+                {"kind": "editor", "label": "Editor", "value": "VIEW_3D"},
+                {"kind": "mode", "label": "Mode", "value": "OBJECT"},
+                {"kind": "keymap", "label": "Keymap", "value": "Blender"},
+                {
+                    "kind": "scene_state",
+                    "label": "3D Cursor",
+                    "value": "World origin",
+                },
+            ],
+            "operations": [
+                {
+                    "kind": "key_input",
+                    "id": "shortcut.add_icosphere",
+                    "label": "Add Icosphere",
+                    "keyMode": "chord",
+                    "keys": ["SHIFT", "A"],
+                    "selectionPath": ["Mesh", "Ico Sphere"],
+                    "parameters": [],
+                },
+                {
+                    "kind": "key_input",
+                    "id": "shortcut.open_adjust_last_operation",
+                    "label": "Open Adjust Last Operation",
+                    "keyMode": "sequence",
+                    "keys": ["F9"],
+                    "parameters": [],
+                    "opensSurface": {
+                        "kind": "adjust_last_operation",
+                        "hostId": "screen.redo_last",
+                        "sourceOperationId": "shortcut.add_icosphere",
+                        "expectedOperatorId": operator_id,
+                    },
+                },
+                {
+                    "kind": "operator_property_update",
+                    "id": "shortcut.set_subdivisions",
+                    "label": "Set Subdivisions",
+                    "surfaceOperationId": "shortcut.open_adjust_last_operation",
+                    "target": {
+                        "kind": "control",
+                        "hostId": "mesh.primitive_ico_sphere_add.subdivisions",
+                    },
+                    "path": ["Adjust Last Operation", "Subdivisions"],
+                    "parameters": [
+                        {
+                            "name": "value",
+                            "source": {
+                                "kind": "action_argument",
+                                "argumentName": "subdivisions",
+                                "transform": "identity",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "kind": "operator_property_update",
+                    "id": "shortcut.set_radius",
+                    "label": "Set Radius",
+                    "surfaceOperationId": "shortcut.open_adjust_last_operation",
+                    "target": {
+                        "kind": "control",
+                        "hostId": "mesh.primitive_ico_sphere_add.radius",
+                    },
+                    "path": ["Adjust Last Operation", "Radius"],
+                    "parameters": [
+                        {
+                            "name": "value",
+                            "source": {
+                                "kind": "action_argument",
+                                "argumentName": "radius",
+                                "transform": "identity",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "kind": "key_input",
+                    "id": "shortcut.close_adjust_last_operation",
+                    "label": "Confirm Adjust Last Operation",
+                    "keyMode": "sequence",
+                    "keys": ["ENTER"],
+                    "parameters": [],
+                    "closesSurfaceOperationId": (
+                        "shortcut.open_adjust_last_operation"
+                    ),
+                },
+                *[
+                    {
+                        "kind": "key_input",
+                        "id": f"shortcut.move_{axis}",
+                        "label": f"Move {axis.upper()}",
+                        "keyMode": "sequence",
+                        "keys": ["G", axis.upper(), "VALUE", "ENTER"],
+                        "parameters": [
+                            {
+                                "name": "value",
+                                "source": {
+                                    "kind": "action_argument",
+                                    "argumentName": "location",
+                                    "transform": f"vector3_{axis}",
+                                },
+                            }
+                        ],
+                    }
+                    for axis in ("x", "y", "z")
+                ],
+                {
+                    "kind": "key_input",
+                    "id": "shortcut.rename",
+                    "label": "Rename",
+                    "keyMode": "sequence",
+                    "keys": ["F2", "VALUE", "ENTER"],
+                    "parameters": [
+                        {
+                            "name": "value",
+                            "source": {
+                                "kind": "action_argument",
+                                "argumentName": "objectName",
+                                "transform": "identity",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "omittedActionArguments": [
+                {"argumentName": "resourceId", "reason": "No shortcut input."}
+            ],
+        }
+        return raw
+
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
@@ -204,6 +350,7 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
         )
         self.assertEqual(shortcut.shortcut_operations[0].key_mode, "chord")
+        self.assertFalse(hasattr(shortcut.shortcut_operations[0], "kind"))
         self.assertEqual(shortcut.shortcut_operations[0].keys, ("SHIFT", "A"))
         self.assertEqual(
             shortcut.shortcut_operations[0].selection_path,
@@ -1728,6 +1875,220 @@ class InteractionCatalogTests(unittest.TestCase):
             ValueError, "must have a fixed-length numeric vector3 action schema"
         ):
             self._load_raw(invalid_vector_source)
+
+    def test_loads_operator_property_shortcut_operations(self) -> None:
+        catalog = self._load_raw(self._operator_property_shortcut_catalog())
+        recipe = catalog.recipe_for("blender.mesh.create_icosphere")
+        self.assertIsNotNone(recipe)
+        assert recipe is not None
+        assert recipe.procedure_materialization is not None
+        operations = recipe.procedure_materialization.shortcut.shortcut_operations
+        assert operations is not None
+
+        opener = operations[1]
+        self.assertEqual(opener.kind, "key_input")
+        self.assertEqual(opener.keys, ("F9",))
+        self.assertEqual(opener.parameters, ())
+        self.assertIsNotNone(opener.opens_surface)
+        assert opener.opens_surface is not None
+        self.assertEqual(opener.opens_surface.kind, "adjust_last_operation")
+        self.assertEqual(opener.opens_surface.host_id, "screen.redo_last")
+        self.assertEqual(
+            opener.opens_surface.source_operation_id,
+            "shortcut.add_icosphere",
+        )
+        self.assertEqual(
+            opener.opens_surface.expected_operator_id,
+            "mesh.primitive_ico_sphere_add",
+        )
+
+        subdivisions = operations[2]
+        self.assertEqual(subdivisions.kind, "operator_property_update")
+        self.assertEqual(
+            subdivisions.surface_operation_id,
+            "shortcut.open_adjust_last_operation",
+        )
+        self.assertEqual(
+            subdivisions.target_id,
+            "mesh.primitive_ico_sphere_add.subdivisions",
+        )
+        self.assertEqual(
+            subdivisions.path,
+            ("Adjust Last Operation", "Subdivisions"),
+        )
+        self.assertEqual(len(subdivisions.parameters), 1)
+        self.assertEqual(subdivisions.parameters[0].name, "value")
+
+        closer = operations[4]
+        self.assertEqual(closer.keys, ("ENTER",))
+        self.assertEqual(
+            closer.closes_surface_operation_id,
+            "shortcut.open_adjust_last_operation",
+        )
+
+    def test_rejects_invalid_operator_property_shortcut_state(self) -> None:
+        def operations(raw: dict) -> list[dict]:
+            recipe = next(
+                item
+                for item in raw["recipes"]
+                if item["actionName"] == "blender.mesh.create_icosphere"
+            )
+            return recipe["procedureMaterialization"]["shortcut"]["operations"]
+
+        cases: list[tuple[str, Callable[[list[dict]], None], str]] = [
+            (
+                "wrong opener host",
+                lambda items: items[1]["opensSurface"].__setitem__(
+                    "hostId", "wm.call_menu"
+                ),
+                "hostId must be screen.redo_last",
+            ),
+            (
+                "wrong expected operator",
+                lambda items: items[1]["opensSurface"].__setitem__(
+                    "expectedOperatorId", "mesh.primitive_uv_sphere_add"
+                ),
+                "expectedOperatorId must match guidance execution operator",
+            ),
+            (
+                "non-adjacent source",
+                lambda items: items[1]["opensSurface"].__setitem__(
+                    "sourceOperationId", "shortcut.rename"
+                ),
+                "F9 opener must immediately follow its source operation",
+            ),
+            (
+                "wrong opener key",
+                lambda items: items[1].__setitem__("keys", ["F8"]),
+                "opener must be parameterless sequence F9",
+            ),
+            (
+                "opener action parameter",
+                lambda items: items[1]["parameters"].append(
+                    {
+                        "name": "value",
+                        "source": {"kind": "literal", "value": 1},
+                    }
+                ),
+                "opener must be parameterless sequence F9",
+            ),
+            (
+                "property before opener",
+                lambda items: items.__setitem__(slice(1, 3), [items[2], items[1]]),
+                "references no open surface",
+            ),
+            (
+                "wrong surface reference",
+                lambda items: items[2].__setitem__(
+                    "surfaceOperationId", "shortcut.missing_surface"
+                ),
+                "references the wrong open surface",
+            ),
+            (
+                "empty control target",
+                lambda items: items[2]["target"].__setitem__("hostId", ""),
+                "target hostId must be a non-empty string",
+            ),
+            (
+                "wrong control target kind",
+                lambda items: items[2]["target"].__setitem__("kind", "operator"),
+                "target kind must be control",
+            ),
+            (
+                "wrong property operator target",
+                lambda items: items[2]["target"].__setitem__(
+                    "hostId", "mesh.primitive_uv_sphere_add.subdivisions"
+                ),
+                "target must belong to operator mesh.primitive_ico_sphere_add",
+            ),
+            (
+                "empty property target suffix",
+                lambda items: items[2]["target"].__setitem__(
+                    "hostId", "mesh.primitive_ico_sphere_add."
+                ),
+                "target must belong to operator mesh.primitive_ico_sphere_add",
+            ),
+            (
+                "empty property path",
+                lambda items: items[2].__setitem__("path", []),
+                "path must be a non-empty array",
+            ),
+            (
+                "wrong assignment name",
+                lambda items: items[2]["parameters"][0].__setitem__(
+                    "name", "subdivisions"
+                ),
+                "must assign exactly one value parameter",
+            ),
+            (
+                "multiple assignments",
+                lambda items: items[2]["parameters"].append(
+                    {"name": "other", "source": {"kind": "literal", "value": 1}}
+                ),
+                "must assign exactly one value parameter",
+            ),
+            (
+                "duplicate property target",
+                lambda items: items[3]["target"].__setitem__(
+                    "hostId", items[2]["target"]["hostId"]
+                ),
+                "operator property update repeats target",
+            ),
+            (
+                "duplicate property action argument",
+                lambda items: items[3]["parameters"][0]["source"].__setitem__(
+                    "argumentName", "subdivisions"
+                ),
+                "shortcut ordered parameter action coverage mismatch; missing: radius",
+            ),
+            (
+                "mismatched close",
+                lambda items: items[4].__setitem__(
+                    "closesSurfaceOperationId", "shortcut.missing_surface"
+                ),
+                "closes no matching surface",
+            ),
+            (
+                "wrong close key",
+                lambda items: items[4].__setitem__("keys", ["ESC"]),
+                "surface closer must be parameterless sequence ENTER",
+            ),
+            (
+                "property chain interruption",
+                lambda items: items.insert(
+                    3,
+                    {
+                        "kind": "key_input",
+                        "id": "shortcut.interrupt",
+                        "label": "Interrupt",
+                        "keyMode": "sequence",
+                        "keys": ["TAB"],
+                        "parameters": [],
+                    },
+                ),
+                "open surface must be followed only by property updates",
+            ),
+            (
+                "opener also closes",
+                lambda items: items[1].__setitem__(
+                    "closesSurfaceOperationId",
+                    "shortcut.open_adjust_last_operation",
+                ),
+                "cannot both open and close a surface",
+            ),
+        ]
+
+        for name, mutate, message in cases:
+            with self.subTest(name=name):
+                raw = self._operator_property_shortcut_catalog()
+                mutate(operations(raw))
+                with self.assertRaisesRegex(ValueError, message):
+                    self._load_raw(raw)
+
+        unclosed = self._operator_property_shortcut_catalog()
+        del operations(unclosed)[4:]
+        with self.assertRaisesRegex(ValueError, "leaves an opened surface unclosed"):
+            self._load_raw(unclosed)
 
     def test_rejects_non_finite_numbers_in_nested_literal_values(self) -> None:
         for value in (float("nan"), float("inf"), float("-inf")):

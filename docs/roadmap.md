@@ -335,6 +335,13 @@
           `scale = size / 2`，不等价于 managed executor 的 baked mesh/`scale = 1`，也不提供
           collection/tag/receipt/idempotency/compensation 等价。见
           [ADR 0056](adr/0056-plane-candidate-shortcut-materialization.md)。
+    - [x] Operator 参数 surface 协议与检索基础：保留历史无 `kind` shortcut，新增严格的 `F9` opener、
+          连续逐控件 `operator_property_update` 与 `ENTER` closer 状态机；实际使用时输出 ProcedureTree
+          `1.1.0` / Result `1.3.0`。Blender Python loader 执行同构验证，Schema 14 可按 operation kind、
+          target/path、共享 surface 与 expected operator 精确检索完整链并恢复中断迁移。当前
+          InteractionCatalog `1.20.0` 不启用该能力，Icosphere shortcut 仍 unavailable，直到真实 Blender
+          4.5/5.1 前台参数回放、Observation 与恢复证据完成。见
+          [ADR 0057](adr/0057-shortcut-operator-property-surfaces.md)。
     - [ ] 下一个确定性交互覆盖切片：从更多 action 的封闭声明、经真实版本验证的
           shortcut/MCP recipe，或完整 UI replay 中选择；未选定且验证前不声称已实现。
   - [ ] 真实 Blender 逐叶回放：把物化轨迹继续接入安全审批、Observation、恢复策略和 Blender 原生

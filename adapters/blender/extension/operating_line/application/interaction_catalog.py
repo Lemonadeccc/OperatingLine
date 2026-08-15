@@ -113,7 +113,15 @@ class ProcedureMaterializationChannel:
     ) = None
     projection: str | None = None
     preconditions: tuple["ShortcutPreconditionDefinition", ...] | None = None
-    shortcut_operations: tuple["ShortcutOperationDefinition", ...] | None = None
+    shortcut_operations: (
+        tuple[
+            "ShortcutOperationDefinition"
+            " | ShortcutKeyInputOperationDefinition"
+            " | ShortcutOperatorPropertyUpdateDefinition",
+            ...,
+        ]
+        | None
+    ) = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +192,44 @@ class ShortcutOperationDefinition:
     keys: tuple[str, ...]
     parameters: tuple[ParameterAssignmentDefinition, ...]
     selection_path: tuple[str, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutOpenedSurfaceDefinition:
+    """One shortcut-opened Blender operator-properties surface."""
+
+    kind: str
+    host_id: str
+    source_operation_id: str
+    expected_operator_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutKeyInputOperationDefinition:
+    """One explicitly typed keyboard input in an extended shortcut recipe."""
+
+    id: str
+    label: str
+    key_mode: str
+    keys: tuple[str, ...]
+    parameters: tuple[ParameterAssignmentDefinition, ...]
+    selection_path: tuple[str, ...] | None = None
+    opens_surface: ShortcutOpenedSurfaceDefinition | None = None
+    closes_surface_operation_id: str | None = None
+    kind: str = "key_input"
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutOperatorPropertyUpdateDefinition:
+    """One exact property update on an opened operator-properties surface."""
+
+    id: str
+    label: str
+    surface_operation_id: str
+    target_id: str
+    path: tuple[str, ...]
+    parameters: tuple[ParameterAssignmentDefinition, ...]
+    kind: str = "operator_property_update"
 
 
 @dataclass(frozen=True, slots=True)
@@ -740,19 +786,146 @@ def _parse_shortcut_preconditions(
 def _parse_shortcut_operations(
     value: Any,
     recipe_id: str,
-) -> tuple[ShortcutOperationDefinition, ...]:
+    guidance: InteractionPathDefinition,
+) -> tuple[
+    ShortcutOperationDefinition
+    | ShortcutKeyInputOperationDefinition
+    | ShortcutOperatorPropertyUpdateDefinition,
+    ...,
+]:
     label = f"Interaction recipe {recipe_id} shortcut operations"
     if not isinstance(value, list) or not value:
         raise ValueError(f"{label} must be a non-empty array")
-    operations: list[ShortcutOperationDefinition] = []
+    operations: list[
+        ShortcutOperationDefinition
+        | ShortcutKeyInputOperationDefinition
+        | ShortcutOperatorPropertyUpdateDefinition
+    ] = []
     ids: set[str] = set()
     labels: set[str] = set()
-    for raw_value in value:
+    active_surface_operation_id: str | None = None
+    active_surface_expected_operator_id: str | None = None
+    active_property_target_ids: set[str] = set()
+    for operation_index, raw_value in enumerate(value):
         raw = _expect_object(raw_value, f"{label} operation")
+        operation_kind = raw.get("kind")
+        if operation_kind == "operator_property_update":
+            _expect_exact_keys(
+                raw,
+                required={
+                    "kind",
+                    "id",
+                    "label",
+                    "surfaceOperationId",
+                    "target",
+                    "path",
+                    "parameters",
+                },
+                label=f"{label} operation",
+            )
+            operation_id = _expect_string(raw["id"], f"{label} operation id")
+            if STEP_ID_PATTERN.fullmatch(operation_id) is None:
+                raise ValueError(f"{label} has invalid operation id")
+            operation_label = _expect_string(
+                raw["label"], f"{label} operation label"
+            )
+            if operation_id in ids:
+                raise ValueError(
+                    f"{label} contains duplicate operation id {operation_id}"
+                )
+            if operation_label in labels:
+                raise ValueError(
+                    f"{label} contains duplicate operation label {operation_label}"
+                )
+            surface_operation_id = _expect_string(
+                raw["surfaceOperationId"],
+                f"{label} operation surfaceOperationId",
+            )
+            if active_surface_operation_id is None:
+                raise ValueError(
+                    f"{label} operator property update references no open surface"
+                )
+            if surface_operation_id != active_surface_operation_id:
+                raise ValueError(
+                    f"{label} operator property update references the wrong open "
+                    "surface"
+                )
+            target = _expect_object(raw["target"], f"{label} operation target")
+            _expect_exact_keys(
+                target,
+                required={"kind", "hostId"},
+                label=f"{label} operation target",
+            )
+            if target["kind"] != "control":
+                raise ValueError(
+                    f"{label} operator property update target kind must be control"
+                )
+            target_id = _expect_string(
+                target["hostId"], f"{label} operation target hostId"
+            )
+            assert active_surface_expected_operator_id is not None
+            expected_target_prefix = f"{active_surface_expected_operator_id}."
+            if (
+                not target_id.startswith(expected_target_prefix)
+                or len(target_id) == len(expected_target_prefix)
+            ):
+                raise ValueError(
+                    f"{label} operator property update target must belong to "
+                    f"operator {active_surface_expected_operator_id}"
+                )
+            if target_id in active_property_target_ids:
+                raise ValueError(
+                    f"{label} operator property update repeats target {target_id}"
+                )
+            raw_path = raw["path"]
+            if not isinstance(raw_path, list) or not raw_path:
+                raise ValueError(
+                    f"{label} operator property update path must be a non-empty array"
+                )
+            path = tuple(
+                _expect_string(item, f"{label} operation path item")
+                for item in raw_path
+            )
+            parameters = _parse_parameters(
+                raw["parameters"],
+                f"{label} operation {operation_id}",
+                require_nonempty=True,
+            )
+            if len(parameters) != 1 or parameters[0].name != "value":
+                raise ValueError(
+                    f"{label} operator property update must assign exactly one "
+                    "value parameter"
+                )
+            ids.add(operation_id)
+            labels.add(operation_label)
+            active_property_target_ids.add(target_id)
+            operations.append(
+                ShortcutOperatorPropertyUpdateDefinition(
+                    id=operation_id,
+                    label=operation_label,
+                    surface_operation_id=surface_operation_id,
+                    target_id=target_id,
+                    path=path,
+                    parameters=parameters,
+                )
+            )
+            continue
+
+        is_typed_key_input = operation_kind == "key_input"
+        if operation_kind is not None and not is_typed_key_input:
+            raise ValueError(f"{label} operation has unknown kind")
         _expect_exact_keys(
             raw,
-            required={"id", "label", "keyMode", "keys", "parameters"},
-            optional={"selectionPath"},
+            required=(
+                {"kind", "id", "label", "keyMode", "keys", "parameters"}
+                if is_typed_key_input
+                else {"id", "label", "keyMode", "keys", "parameters"}
+            ),
+            optional=(
+                {"selectionPath", "opensSurface", "closesSurfaceOperationId"}
+                if is_typed_key_input
+                else {"selectionPath"}
+            ),
             label=f"{label} operation",
         )
         operation_id = _expect_string(raw["id"], f"{label} operation id")
@@ -785,28 +958,141 @@ def _parse_shortcut_operations(
                 _expect_string(item, f"{label} operation selectionPath item")
                 for item in raw_selection_path
             )
-        ids.add(operation_id)
-        labels.add(operation_label)
-        operations.append(
-            ShortcutOperationDefinition(
+        parameters = _parse_parameters(
+            raw["parameters"],
+            f"{label} operation {operation_id}",
+            require_nonempty=not is_typed_key_input,
+        )
+        if not is_typed_key_input:
+            if active_surface_operation_id is not None:
+                raise ValueError(
+                    f"{label} open surface must be followed only by property "
+                    "updates and an explicit close"
+                )
+            parsed_operation = ShortcutOperationDefinition(
                 id=operation_id,
                 label=operation_label,
                 key_mode=key_mode,
                 keys=keys,
                 selection_path=selection_path,
-                parameters=_parse_parameters(
-                    raw["parameters"],
-                    f"{label} operation {operation_id}",
-                    require_nonempty=True,
-                ),
+                parameters=parameters,
             )
-        )
+        else:
+            opens_surface = None
+            closes_surface_operation_id = None
+            if "opensSurface" in raw and "closesSurfaceOperationId" in raw:
+                raise ValueError(
+                    f"{label} key input cannot both open and close a surface"
+                )
+            if "opensSurface" in raw:
+                if active_surface_operation_id is not None:
+                    raise ValueError(f"{label} cannot open a second surface")
+                raw_surface = _expect_object(
+                    raw["opensSurface"], f"{label} operation opensSurface"
+                )
+                _expect_exact_keys(
+                    raw_surface,
+                    required={
+                        "kind",
+                        "hostId",
+                        "sourceOperationId",
+                        "expectedOperatorId",
+                    },
+                    label=f"{label} operation opensSurface",
+                )
+                if raw_surface["kind"] != "adjust_last_operation":
+                    raise ValueError(f"{label} has unsupported opened surface kind")
+                host_id = _expect_string(
+                    raw_surface["hostId"],
+                    f"{label} operation opensSurface hostId",
+                )
+                if host_id != "screen.redo_last":
+                    raise ValueError(
+                        f"{label} adjust-last-operation hostId must be screen.redo_last"
+                    )
+                source_operation_id = _expect_string(
+                    raw_surface["sourceOperationId"],
+                    f"{label} operation opensSurface sourceOperationId",
+                )
+                if operation_index == 0 or operations[-1].id != source_operation_id:
+                    raise ValueError(
+                        f"{label} F9 opener must immediately follow its source "
+                        "operation"
+                    )
+                expected_operator_id = _expect_string(
+                    raw_surface["expectedOperatorId"],
+                    f"{label} operation opensSurface expectedOperatorId",
+                )
+                if expected_operator_id != guidance.operator_id:
+                    raise ValueError(
+                        f"{label} opened surface expectedOperatorId must match "
+                        "guidance execution operator"
+                    )
+                if key_mode != "sequence" or keys != ("F9",) or parameters:
+                    raise ValueError(
+                        f"{label} adjust-last-operation opener must be parameterless "
+                        "sequence F9"
+                    )
+                opens_surface = ShortcutOpenedSurfaceDefinition(
+                    kind="adjust_last_operation",
+                    host_id=host_id,
+                    source_operation_id=source_operation_id,
+                    expected_operator_id=expected_operator_id,
+                )
+                active_surface_operation_id = operation_id
+                active_surface_expected_operator_id = expected_operator_id
+                active_property_target_ids.clear()
+            elif "closesSurfaceOperationId" in raw:
+                closes_surface_operation_id = _expect_string(
+                    raw["closesSurfaceOperationId"],
+                    f"{label} operation closesSurfaceOperationId",
+                )
+                if (
+                    active_surface_operation_id is None
+                    or closes_surface_operation_id != active_surface_operation_id
+                ):
+                    raise ValueError(f"{label} key input closes no matching surface")
+                if key_mode != "sequence" or keys != ("ENTER",) or parameters:
+                    raise ValueError(
+                        f"{label} surface closer must be parameterless sequence ENTER"
+                    )
+                if not operations or not isinstance(
+                    operations[-1], ShortcutOperatorPropertyUpdateDefinition
+                ):
+                    raise ValueError(
+                        f"{label} surface closer must immediately follow property "
+                        "updates"
+                    )
+                active_surface_operation_id = None
+                active_surface_expected_operator_id = None
+                active_property_target_ids.clear()
+            elif active_surface_operation_id is not None:
+                raise ValueError(
+                    f"{label} open surface must be followed only by property "
+                    "updates and an explicit close"
+                )
+            parsed_operation = ShortcutKeyInputOperationDefinition(
+                id=operation_id,
+                label=operation_label,
+                key_mode=key_mode,
+                keys=keys,
+                selection_path=selection_path,
+                parameters=parameters,
+                opens_surface=opens_surface,
+                closes_surface_operation_id=closes_surface_operation_id,
+            )
+        ids.add(operation_id)
+        labels.add(operation_label)
+        operations.append(parsed_operation)
+    if active_surface_operation_id is not None:
+        raise ValueError(f"{label} leaves an opened surface unclosed")
     return tuple(operations)
 
 
 def _parse_shortcut_materialization(
     value: Any,
     recipe_id: str,
+    guidance: InteractionPathDefinition,
 ) -> ProcedureMaterializationChannel:
     label = f"Interaction recipe {recipe_id} procedureMaterialization shortcut"
     raw = _expect_object(value, label)
@@ -844,7 +1130,9 @@ def _parse_shortcut_materialization(
         parameter_binding="ordered_parameter_operations",
         projection="candidate_only",
         preconditions=_parse_shortcut_preconditions(raw["preconditions"], recipe_id),
-        shortcut_operations=_parse_shortcut_operations(raw["operations"], recipe_id),
+        shortcut_operations=_parse_shortcut_operations(
+            raw["operations"], recipe_id, guidance
+        ),
         omitted_action_arguments=_parse_omitted_action_arguments(
             raw["omittedActionArguments"], recipe_id
         ),
@@ -965,7 +1253,9 @@ def _parse_procedure_materialization(
 
     return ProcedureMaterializationDefinition(
         menu=menu,
-        shortcut=_parse_shortcut_materialization(raw["shortcut"], recipe_id),
+        shortcut=_parse_shortcut_materialization(
+            raw["shortcut"], recipe_id, guidance
+        ),
         mcp=_parse_unavailable_materialization(raw["mcp"], f"{label} mcp"),
     )
 
@@ -1328,7 +1618,10 @@ __all__ = (
     "ProcedureMaterializationChannel",
     "ProcedureMaterializationDefinition",
     "RESOURCE_PATH",
+    "ShortcutKeyInputOperationDefinition",
+    "ShortcutOpenedSurfaceDefinition",
     "ShortcutOperationDefinition",
+    "ShortcutOperatorPropertyUpdateDefinition",
     "ShortcutPreconditionDefinition",
     "load_interaction_catalog",
 )

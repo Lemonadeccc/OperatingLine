@@ -163,6 +163,13 @@ export type RecordProcedureTreeResult =
 
 export type ProcedureOperationIndexModality = 'semantic' | 'menu' | 'shortcut' | 'mcp';
 
+export type ProcedureOperationIndexKind =
+  | 'semantic_action'
+  | 'menu_interaction'
+  | 'shortcut_key_input'
+  | 'operator_property_update'
+  | 'mcp_call';
+
 export interface ProcedureOperationSearchInput {
   afterSequence: number;
   limit: number;
@@ -172,12 +179,17 @@ export interface ProcedureOperationSearchInput {
   leafId?: string;
   operationId?: string;
   modality?: ProcedureOperationIndexModality;
+  operationKind?: ProcedureOperationIndexKind;
   validationStatus?: 'candidate' | 'verified' | 'rejected';
   actionName?: string;
   semanticAction?: string;
   menuTargetHostId?: string;
   menuPath?: readonly string[];
   shortcutKeys?: readonly string[];
+  targetHostId?: string;
+  interactionPath?: readonly string[];
+  surfaceOperationId?: string;
+  expectedOperatorId?: string;
   mcpServerName?: string;
   mcpToolName?: string;
 }
@@ -192,12 +204,17 @@ export interface StoredProcedureOperationIndex {
   validationStatus: 'candidate' | 'verified' | 'rejected';
   actionName: string | null;
   modality: ProcedureOperationIndexModality;
+  operationKind: ProcedureOperationIndexKind;
   trackId: string | null;
   operationId: string;
   semanticActions: string[];
   menuTargetHostId: string | null;
   menuPath: string[] | null;
   shortcutKeys: string[] | null;
+  targetHostId: string | null;
+  interactionPath: string[] | null;
+  surfaceOperationId: string | null;
+  expectedOperatorId: string | null;
   mcpServerName: string | null;
   mcpToolName: string | null;
 }
@@ -217,6 +234,192 @@ function canonicalJson(value: unknown): string {
     return candidate;
   };
   return JSON.stringify(normalize(value));
+}
+
+function validateShortcutSurfaceLifecycle(tree: unknown): void {
+  if (tree === null || typeof tree !== 'object') return;
+  const candidateTree = tree as { formatVersion?: unknown; nodes?: unknown };
+  const formatVersion = candidateTree.formatVersion;
+  const fail = (reason: string): never => {
+    throw new Error(`context-inconsistent procedure operation index row: ${reason}`);
+  };
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  const isNonemptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0;
+  const isParameterless = (value: unknown): boolean =>
+    isRecord(value) && Object.keys(value).length === 0;
+  const isJsonValue = (value: unknown): boolean => {
+    if (
+      value === null ||
+      typeof value === 'string' ||
+      typeof value === 'boolean' ||
+      (typeof value === 'number' && Number.isFinite(value))
+    ) {
+      return true;
+    }
+    if (Array.isArray(value)) return value.every(isJsonValue);
+    return isRecord(value) && Object.values(value).every(isJsonValue);
+  };
+  const nodes = candidateTree.nodes;
+  if (!Array.isArray(nodes)) {
+    if (formatVersion === '1.1.0') fail('format 1.1.0 requires an operator property update');
+    return;
+  }
+  let propertyOperationCount = 0;
+
+  for (const node of nodes) {
+    if (!isRecord(node) || node['kind'] !== 'leaf' || !Array.isArray(node['shortcutTracks'])) {
+      continue;
+    }
+    for (const track of node['shortcutTracks']) {
+      if (!isRecord(track) || track['availability'] !== 'available') continue;
+      if (!Array.isArray(track['operations'])) {
+        if (formatVersion === '1.1.0') fail('format 1.1.0 requires normalized operations');
+        continue;
+      }
+      let openSurfaceOperationId: string | undefined;
+      let expectedOperatorId: string | undefined;
+      let propertyCount = 0;
+      let propertyHostIds = new Set<string>();
+      const operations = track['operations'];
+
+      for (const [operationIndex, value] of operations.entries()) {
+        if (!isRecord(value)) {
+          if (formatVersion === '1.1.0') fail('format 1.1.0 requires normalized operations');
+          if (openSurfaceOperationId !== undefined) fail('surface operation must be an object');
+          continue;
+        }
+        if (formatVersion === '1.0.0' && Object.hasOwn(value, 'kind')) {
+          fail('format 1.0.0 cannot contain extended shortcut operations');
+        }
+        if (
+          formatVersion === '1.1.0' &&
+          value['kind'] !== 'key_input' &&
+          value['kind'] !== 'operator_property_update'
+        ) {
+          fail('format 1.1.0 requires normalized operations');
+        }
+        const opensSurface = value['opensSurface'];
+        const closesSurfaceOperationId = value['closesSurfaceOperationId'];
+        const isPropertyUpdate = value['kind'] === 'operator_property_update';
+        const hasSurfaceAssociation =
+          isPropertyUpdate ||
+          value['surfaceOperationId'] !== undefined ||
+          opensSurface !== undefined ||
+          closesSurfaceOperationId !== undefined;
+
+        if (!hasSurfaceAssociation) {
+          if (openSurfaceOperationId !== undefined) {
+            fail('surface property updates must be contiguous and explicitly closed');
+          }
+          continue;
+        }
+        if (!isNonemptyString(value['id'])) fail('surface operation id must be nonempty');
+
+        if (isPropertyUpdate) {
+          propertyOperationCount += 1;
+          if (
+            opensSurface !== undefined ||
+            closesSurfaceOperationId !== undefined ||
+            !isNonemptyString(value['surfaceOperationId']) ||
+            value['surfaceOperationId'] !== openSurfaceOperationId
+          ) {
+            fail('property update references a surface that is not currently open');
+          }
+          const target = value['target'];
+          const targetHostId = isRecord(target) ? target['hostId'] : undefined;
+          const path = value['path'];
+          const parameters = value['parameters'];
+          if (
+            !isRecord(target) ||
+            target['kind'] !== 'control' ||
+            !Array.isArray(path) ||
+            path.length === 0 ||
+            path.some((part) => !isNonemptyString(part)) ||
+            !isRecord(parameters) ||
+            Object.keys(parameters).length !== 1 ||
+            !Object.hasOwn(parameters, 'value') ||
+            !isJsonValue(parameters['value'])
+          ) {
+            fail('property update requires a control target, path, and single value');
+          }
+          const expectedPrefix = `${expectedOperatorId ?? ''}.`;
+          if (
+            !isNonemptyString(targetHostId) ||
+            expectedOperatorId === undefined ||
+            !targetHostId.startsWith(expectedPrefix) ||
+            targetHostId.length === expectedPrefix.length
+          ) {
+            fail('property update target is outside the open surface operator');
+          }
+          const propertyTargetHostId = targetHostId as string;
+          if (propertyHostIds.has(propertyTargetHostId)) fail('surface repeats a property target');
+          propertyHostIds.add(propertyTargetHostId);
+          propertyCount += 1;
+          continue;
+        }
+
+        if (opensSurface !== undefined) {
+          if (
+            openSurfaceOperationId !== undefined ||
+            closesSurfaceOperationId !== undefined ||
+            !isRecord(opensSurface) ||
+            opensSurface['kind'] !== 'adjust_last_operation' ||
+            opensSurface['hostId'] !== 'screen.redo_last' ||
+            !isNonemptyString(opensSurface['sourceOperationId']) ||
+            !isNonemptyString(opensSurface['expectedOperatorId']) ||
+            value['kind'] !== 'key_input' ||
+            value['keyMode'] !== 'sequence' ||
+            !Array.isArray(value['keys']) ||
+            value['keys'].length !== 1 ||
+            value['keys'][0] !== 'F9' ||
+            !isParameterless(value['parameters'])
+          ) {
+            fail('invalid shortcut surface opener');
+          }
+          const surface = opensSurface as Record<string, unknown>;
+          const previous = operations[operationIndex - 1];
+          if (
+            !isRecord(previous) ||
+            previous['id'] !== surface['sourceOperationId'] ||
+            !Number.isSafeInteger(previous['order']) ||
+            !Number.isSafeInteger(value['order']) ||
+            (value['order'] as number) !== (previous['order'] as number) + 1
+          ) {
+            fail('surface opener must immediately follow its source operation in order');
+          }
+          openSurfaceOperationId = value['id'] as string;
+          expectedOperatorId = surface['expectedOperatorId'] as string;
+          propertyCount = 0;
+          propertyHostIds = new Set<string>();
+          continue;
+        }
+
+        if (
+          closesSurfaceOperationId !== openSurfaceOperationId ||
+          openSurfaceOperationId === undefined ||
+          propertyCount === 0 ||
+          value['kind'] !== 'key_input' ||
+          value['keyMode'] !== 'sequence' ||
+          !Array.isArray(value['keys']) ||
+          value['keys'].length !== 1 ||
+          value['keys'][0] !== 'ENTER' ||
+          !isParameterless(value['parameters'])
+        ) {
+          fail('surface closer does not close an updated open surface');
+        }
+        openSurfaceOperationId = undefined;
+        expectedOperatorId = undefined;
+        propertyCount = 0;
+        propertyHostIds = new Set<string>();
+      }
+      if (openSurfaceOperationId !== undefined) fail('surface is not explicitly closed');
+    }
+  }
+  if (formatVersion === '1.1.0' && propertyOperationCount === 0) {
+    fail('format 1.1.0 requires an operator property update');
+  }
 }
 
 const companionDialogueMutablePayloadFields = new Set([
@@ -707,6 +910,141 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     VALUES (13, datetime('now'));
   `);
 
+  const procedureOperationColumns = new Set(
+    sqlite
+      .prepare("PRAGMA table_info('procedure_operations')")
+      .all()
+      .map((row) => (row as { name: string }).name),
+  );
+  const procedureOperationMigrationApplied =
+    sqlite.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 14').get() !==
+    undefined;
+  const procedureOperationIndexColumns = [
+    [
+      'operation_kind',
+      "TEXT CHECK (operation_kind IS NULL OR operation_kind IN ('semantic_action', 'menu_interaction', 'shortcut_key_input', 'operator_property_update', 'mcp_call'))",
+    ],
+    ['target_host_id', 'TEXT'],
+    ['interaction_path', 'TEXT CHECK (interaction_path IS NULL OR json_valid(interaction_path))'],
+    ['surface_operation_id', 'TEXT'],
+    ['expected_operator_id', 'TEXT'],
+  ] as const;
+  const needsProcedureOperationIndexRebuild =
+    !procedureOperationMigrationApplied ||
+    procedureOperationIndexColumns.some(([name]) => !procedureOperationColumns.has(name));
+  for (const [name, declaration] of procedureOperationIndexColumns) {
+    if (!procedureOperationColumns.has(name)) {
+      sqlite.exec(`ALTER TABLE procedure_operations ADD COLUMN ${name} ${declaration};`);
+    }
+  }
+  if (needsProcedureOperationIndexRebuild) {
+    sqlite.exec('DELETE FROM procedure_operations;');
+  }
+  sqlite.exec(`
+    DROP TRIGGER IF EXISTS procedure_operations_context_insert;
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_kind
+    ON procedure_operations (operation_kind, sequence);
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_target
+    ON procedure_operations (target_host_id, interaction_path, sequence)
+    WHERE target_host_id IS NOT NULL OR interaction_path IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS procedure_operations_surface
+    ON procedure_operations (surface_operation_id, expected_operator_id, sequence)
+    WHERE surface_operation_id IS NOT NULL OR expected_operator_id IS NOT NULL;
+
+    CREATE TRIGGER IF NOT EXISTS procedure_operations_context_insert
+    BEFORE INSERT ON procedure_operations
+    WHEN NOT COALESCE((
+      (NEW.modality = 'semantic'
+        AND NEW.operation_kind = 'semantic_action'
+        AND NEW.track_id = ''
+        AND NEW.menu_target_host_id IS NULL
+        AND NEW.menu_path IS NULL
+        AND NEW.shortcut_keys IS NULL
+        AND NEW.target_host_id IS NULL
+        AND NEW.interaction_path IS NULL
+        AND NEW.surface_operation_id IS NULL
+        AND NEW.expected_operator_id IS NULL
+        AND NEW.mcp_server_name IS NULL
+        AND NEW.mcp_tool_name IS NULL)
+      OR (NEW.modality = 'menu'
+        AND NEW.operation_kind = 'menu_interaction'
+        AND NEW.track_id <> ''
+        AND NEW.menu_target_host_id IS NOT NULL
+        AND length(NEW.menu_target_host_id) > 0
+        AND NEW.menu_path IS NOT NULL
+        AND json_array_length(NEW.menu_path) > 0
+        AND NEW.shortcut_keys IS NULL
+        AND NEW.target_host_id = NEW.menu_target_host_id
+        AND NEW.interaction_path = NEW.menu_path
+        AND NEW.surface_operation_id IS NULL
+        AND NEW.expected_operator_id IS NULL
+        AND NEW.mcp_server_name IS NULL
+        AND NEW.mcp_tool_name IS NULL)
+      OR (NEW.modality = 'shortcut'
+        AND NEW.operation_kind = 'shortcut_key_input'
+        AND NEW.track_id <> ''
+        AND NEW.menu_target_host_id IS NULL
+        AND NEW.menu_path IS NULL
+        AND NEW.shortcut_keys IS NOT NULL
+        AND json_array_length(NEW.shortcut_keys) > 0
+        AND NEW.mcp_server_name IS NULL
+        AND NEW.mcp_tool_name IS NULL
+        AND (
+          (NEW.target_host_id IS NULL
+            AND NEW.surface_operation_id IS NULL
+            AND NEW.expected_operator_id IS NULL)
+          OR (NEW.target_host_id IS NULL
+            AND NEW.surface_operation_id IS NOT NULL
+            AND length(NEW.surface_operation_id) > 0
+            AND NEW.expected_operator_id IS NOT NULL
+            AND length(NEW.expected_operator_id) > 0)
+          OR (NEW.target_host_id IS NOT NULL
+            AND length(NEW.target_host_id) > 0
+            AND NEW.surface_operation_id IS NOT NULL
+            AND length(NEW.surface_operation_id) > 0
+            AND NEW.expected_operator_id IS NOT NULL
+            AND length(NEW.expected_operator_id) > 0)
+        ))
+      OR (NEW.modality = 'shortcut'
+        AND NEW.operation_kind = 'operator_property_update'
+        AND NEW.track_id <> ''
+        AND NEW.menu_target_host_id IS NULL
+        AND NEW.menu_path IS NULL
+        AND NEW.shortcut_keys IS NULL
+        AND NEW.target_host_id IS NOT NULL
+        AND length(NEW.target_host_id) > 0
+        AND NEW.interaction_path IS NOT NULL
+        AND json_array_length(NEW.interaction_path) > 0
+        AND NEW.surface_operation_id IS NOT NULL
+        AND length(NEW.surface_operation_id) > 0
+        AND NEW.expected_operator_id IS NOT NULL
+        AND length(NEW.expected_operator_id) > 0
+        AND NEW.mcp_server_name IS NULL
+        AND NEW.mcp_tool_name IS NULL)
+      OR (NEW.modality = 'mcp'
+        AND NEW.operation_kind = 'mcp_call'
+        AND NEW.track_id <> ''
+        AND NEW.menu_target_host_id IS NULL
+        AND NEW.menu_path IS NULL
+        AND NEW.shortcut_keys IS NULL
+        AND NEW.target_host_id IS NULL
+        AND NEW.interaction_path IS NULL
+        AND NEW.surface_operation_id IS NULL
+        AND NEW.expected_operator_id IS NULL
+        AND NEW.mcp_server_name IS NOT NULL
+        AND NEW.mcp_tool_name IS NOT NULL)
+    ), 0)
+    BEGIN
+      SELECT RAISE(ABORT, 'context-inconsistent procedure operation index row');
+    END;
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (14, datetime('now'));
+  `);
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
@@ -822,6 +1160,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       menu_target_host_id,
       menu_path,
       shortcut_keys,
+      operation_kind,
+      target_host_id,
+      interaction_path,
+      surface_operation_id,
+      expected_operator_id,
       mcp_server_name,
       mcp_tool_name
     )
@@ -837,6 +1180,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       '',
       json_extract(operation.value, '$.id'),
       json_array(json_extract(operation.value, '$.semanticAction')),
+      NULL,
+      NULL,
+      NULL,
+      'semantic_action',
+      NULL,
       NULL,
       NULL,
       NULL,
@@ -867,6 +1215,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       menu_target_host_id,
       menu_path,
       shortcut_keys,
+      operation_kind,
+      target_host_id,
+      interaction_path,
+      surface_operation_id,
+      expected_operator_id,
       mcp_server_name,
       mcp_tool_name
     )
@@ -893,6 +1246,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       ),
       json_extract(operation.value, '$.target.hostId'),
       json_extract(operation.value, '$.path'),
+      NULL,
+      'menu_interaction',
+      json_extract(operation.value, '$.target.hostId'),
+      json_extract(operation.value, '$.path'),
+      NULL,
       NULL,
       NULL,
       NULL
@@ -927,6 +1285,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       menu_target_host_id,
       menu_path,
       shortcut_keys,
+      operation_kind,
+      target_host_id,
+      interaction_path,
+      surface_operation_id,
+      expected_operator_id,
       mcp_server_name,
       mcp_tool_name
     )
@@ -953,7 +1316,48 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       ),
       NULL,
       NULL,
-      json_extract(operation.value, '$.keys'),
+      CASE
+        WHEN json_extract(operation.value, '$.kind') = 'operator_property_update' THEN NULL
+        ELSE json_extract(operation.value, '$.keys')
+      END,
+      CASE
+        WHEN json_extract(operation.value, '$.kind') = 'operator_property_update'
+          THEN 'operator_property_update'
+        WHEN json_extract(operation.value, '$.kind') = 'key_input'
+          OR json_extract(operation.value, '$.kind') IS NULL
+          THEN 'shortcut_key_input'
+        ELSE json_extract(operation.value, '$.kind')
+      END,
+      CASE
+        WHEN json_extract(operation.value, '$.kind') = 'operator_property_update'
+          THEN json_extract(operation.value, '$.target.hostId')
+        ELSE json_extract(operation.value, '$.opensSurface.hostId')
+      END,
+      CASE
+        WHEN json_extract(operation.value, '$.kind') = 'operator_property_update'
+          THEN json_extract(operation.value, '$.path')
+        ELSE json_extract(operation.value, '$.selectionPath')
+      END,
+      CASE
+        WHEN json_extract(operation.value, '$.kind') = 'operator_property_update'
+          THEN json_extract(operation.value, '$.surfaceOperationId')
+        WHEN json_extract(operation.value, '$.opensSurface') IS NOT NULL
+          THEN json_extract(operation.value, '$.id')
+        ELSE json_extract(operation.value, '$.closesSurfaceOperationId')
+      END,
+      CASE
+        WHEN json_extract(operation.value, '$.opensSurface.expectedOperatorId') IS NOT NULL
+          THEN json_extract(operation.value, '$.opensSurface.expectedOperatorId')
+        ELSE (
+          SELECT json_extract(surface.value, '$.opensSurface.expectedOperatorId')
+          FROM json_each(track.value, '$.operations') AS surface
+          WHERE json_extract(surface.value, '$.id') = COALESCE(
+            json_extract(operation.value, '$.surfaceOperationId'),
+            json_extract(operation.value, '$.closesSurfaceOperationId')
+          )
+          LIMIT 1
+        )
+      END,
       NULL,
       NULL
     FROM procedure_trees AS tree,
@@ -987,6 +1391,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       menu_target_host_id,
       menu_path,
       shortcut_keys,
+      operation_kind,
+      target_host_id,
+      interaction_path,
+      surface_operation_id,
+      expected_operator_id,
       mcp_server_name,
       mcp_tool_name
     )
@@ -1011,6 +1420,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           ORDER BY CAST(reference.key AS INTEGER)
         ) AS aligned
       ),
+      NULL,
+      NULL,
+      NULL,
+      'mcp_call',
+      NULL,
       NULL,
       NULL,
       NULL,
@@ -1056,6 +1470,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       menu_target_host_id,
       menu_path,
       shortcut_keys,
+      operation_kind,
+      target_host_id,
+      interaction_path,
+      surface_operation_id,
+      expected_operator_id,
       mcp_server_name,
       mcp_tool_name
     FROM procedure_operations AS indexed
@@ -1066,6 +1485,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       AND (? IS NULL OR indexed.leaf_id = ?)
       AND (? IS NULL OR indexed.operation_id = ?)
       AND (? IS NULL OR indexed.modality = ?)
+      AND (? IS NULL OR indexed.operation_kind = ?)
       AND (? IS NULL OR indexed.leaf_validation_status = ?)
       AND (? IS NULL OR indexed.leaf_action_name = ?)
       AND (
@@ -1078,6 +1498,10 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       AND (? IS NULL OR indexed.menu_target_host_id = ?)
       AND (? IS NULL OR indexed.menu_path = ?)
       AND (? IS NULL OR indexed.shortcut_keys = ?)
+      AND (? IS NULL OR indexed.target_host_id = ?)
+      AND (? IS NULL OR indexed.interaction_path = ?)
+      AND (? IS NULL OR indexed.surface_operation_id = ?)
+      AND (? IS NULL OR indexed.expected_operator_id = ?)
       AND (? IS NULL OR indexed.mcp_server_name = ?)
       AND (? IS NULL OR indexed.mcp_tool_name = ?)
     ORDER BY indexed.sequence
@@ -1571,12 +1995,17 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       leaf_validation_status?: unknown;
       leaf_action_name?: unknown;
       modality?: unknown;
+      operation_kind?: unknown;
       track_id?: unknown;
       operation_id?: unknown;
       semantic_actions?: unknown;
       menu_target_host_id?: unknown;
       menu_path?: unknown;
       shortcut_keys?: unknown;
+      target_host_id?: unknown;
+      interaction_path?: unknown;
+      surface_operation_id?: unknown;
+      expected_operator_id?: unknown;
       mcp_server_name?: unknown;
       mcp_tool_name?: unknown;
     };
@@ -1596,10 +2025,22 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       !['candidate', 'verified', 'rejected'].includes(String(candidate.leaf_validation_status)) ||
       (candidate.leaf_action_name !== null && typeof candidate.leaf_action_name !== 'string') ||
       !['semantic', 'menu', 'shortcut', 'mcp'].includes(String(candidate.modality)) ||
+      ![
+        'semantic_action',
+        'menu_interaction',
+        'shortcut_key_input',
+        'operator_property_update',
+        'mcp_call',
+      ].includes(String(candidate.operation_kind)) ||
       typeof candidate.track_id !== 'string' ||
       typeof candidate.operation_id !== 'string' ||
       (candidate.menu_target_host_id !== null &&
         typeof candidate.menu_target_host_id !== 'string') ||
+      (candidate.target_host_id !== null && typeof candidate.target_host_id !== 'string') ||
+      (candidate.surface_operation_id !== null &&
+        typeof candidate.surface_operation_id !== 'string') ||
+      (candidate.expected_operator_id !== null &&
+        typeof candidate.expected_operator_id !== 'string') ||
       (candidate.mcp_server_name !== null && typeof candidate.mcp_server_name !== 'string') ||
       (candidate.mcp_tool_name !== null && typeof candidate.mcp_tool_name !== 'string')
     ) {
@@ -1609,35 +2050,89 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     const semanticActions = parseIndexedStringArray(candidate.semantic_actions, 'semantic actions');
     const menuPath = parseNullableIndexedStringArray(candidate.menu_path, 'menu path');
     const shortcutKeys = parseNullableIndexedStringArray(candidate.shortcut_keys, 'shortcut keys');
+    const interactionPath = parseNullableIndexedStringArray(
+      candidate.interaction_path,
+      'interaction path',
+    );
     const trackId = candidate.track_id.length === 0 ? null : candidate.track_id;
+    const operationKind = candidate.operation_kind as ProcedureOperationIndexKind;
     const contextIsValid =
       semanticActions.length > 0 &&
       ((modality === 'semantic' &&
+        operationKind === 'semantic_action' &&
         trackId === null &&
         candidate.menu_target_host_id === null &&
         menuPath === null &&
         shortcutKeys === null &&
+        candidate.target_host_id === null &&
+        interactionPath === null &&
+        candidate.surface_operation_id === null &&
+        candidate.expected_operator_id === null &&
         candidate.mcp_server_name === null &&
         candidate.mcp_tool_name === null) ||
         (modality === 'menu' &&
+          operationKind === 'menu_interaction' &&
           trackId !== null &&
           candidate.menu_target_host_id !== null &&
+          candidate.menu_target_host_id.length > 0 &&
           menuPath !== null &&
+          menuPath.length > 0 &&
           shortcutKeys === null &&
+          candidate.target_host_id === candidate.menu_target_host_id &&
+          JSON.stringify(interactionPath) === JSON.stringify(menuPath) &&
+          candidate.surface_operation_id === null &&
+          candidate.expected_operator_id === null &&
           candidate.mcp_server_name === null &&
           candidate.mcp_tool_name === null) ||
         (modality === 'shortcut' &&
+          operationKind === 'shortcut_key_input' &&
           trackId !== null &&
           candidate.menu_target_host_id === null &&
           menuPath === null &&
           shortcutKeys !== null &&
+          shortcutKeys.length > 0 &&
+          ((candidate.target_host_id === null &&
+            candidate.surface_operation_id === null &&
+            candidate.expected_operator_id === null) ||
+            (candidate.target_host_id === null &&
+              candidate.surface_operation_id !== null &&
+              candidate.surface_operation_id.length > 0 &&
+              candidate.expected_operator_id !== null &&
+              candidate.expected_operator_id.length > 0) ||
+            (candidate.target_host_id !== null &&
+              candidate.target_host_id.length > 0 &&
+              candidate.surface_operation_id !== null &&
+              candidate.surface_operation_id.length > 0 &&
+              candidate.expected_operator_id !== null &&
+              candidate.expected_operator_id.length > 0)) &&
           candidate.mcp_server_name === null &&
           candidate.mcp_tool_name === null) ||
-        (modality === 'mcp' &&
+        (modality === 'shortcut' &&
+          operationKind === 'operator_property_update' &&
           trackId !== null &&
           candidate.menu_target_host_id === null &&
           menuPath === null &&
           shortcutKeys === null &&
+          candidate.target_host_id !== null &&
+          candidate.target_host_id.length > 0 &&
+          interactionPath !== null &&
+          interactionPath.length > 0 &&
+          candidate.surface_operation_id !== null &&
+          candidate.surface_operation_id.length > 0 &&
+          candidate.expected_operator_id !== null &&
+          candidate.expected_operator_id.length > 0 &&
+          candidate.mcp_server_name === null &&
+          candidate.mcp_tool_name === null) ||
+        (modality === 'mcp' &&
+          operationKind === 'mcp_call' &&
+          trackId !== null &&
+          candidate.menu_target_host_id === null &&
+          menuPath === null &&
+          shortcutKeys === null &&
+          candidate.target_host_id === null &&
+          interactionPath === null &&
+          candidate.surface_operation_id === null &&
+          candidate.expected_operator_id === null &&
           candidate.mcp_server_name !== null &&
           candidate.mcp_tool_name !== null));
     if (!contextIsValid) {
@@ -1653,12 +2148,17 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       validationStatus: candidate.leaf_validation_status as 'candidate' | 'verified' | 'rejected',
       actionName: candidate.leaf_action_name,
       modality,
+      operationKind,
       trackId,
       operationId: candidate.operation_id,
       semanticActions,
       menuTargetHostId: candidate.menu_target_host_id,
       menuPath,
       shortcutKeys,
+      targetHostId: candidate.target_host_id,
+      interactionPath,
+      surfaceOperationId: candidate.surface_operation_id,
+      expectedOperatorId: candidate.expected_operator_id,
       mcpServerName: candidate.mcp_server_name,
       mcpToolName: candidate.mcp_tool_name,
     };
@@ -1734,6 +2234,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       if (!/^[a-f0-9]{64}$/.test(input.contentSha256)) {
         throw new Error('Procedure tree content SHA-256 must be lowercase hexadecimal');
       }
+      validateShortcutSurfaceLifecycle(input.tree);
       const payload = canonicalJson(input.tree);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
@@ -1859,6 +2360,9 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         input.actionName,
         input.semanticAction,
         input.menuTargetHostId,
+        input.targetHostId,
+        input.surfaceOperationId,
+        input.expectedOperatorId,
         input.mcpServerName,
         input.mcpToolName,
       ];
@@ -1868,11 +2372,16 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       const menuPath = input.menuPath === undefined ? null : canonicalJson(input.menuPath);
       const shortcutKeys =
         input.shortcutKeys === undefined ? null : canonicalJson(input.shortcutKeys);
+      const interactionPath =
+        input.interactionPath === undefined ? null : canonicalJson(input.interactionPath);
       if (input.menuPath !== undefined && input.menuPath.length === 0) {
         throw new Error('Procedure operation menu path must be nonempty');
       }
       if (input.shortcutKeys !== undefined && input.shortcutKeys.length === 0) {
         throw new Error('Procedure operation shortcut keys must be nonempty');
+      }
+      if (input.interactionPath !== undefined && input.interactionPath.length === 0) {
+        throw new Error('Procedure operation interaction path must be nonempty');
       }
       const nullable = <T>(value: T | undefined): T | null => value ?? null;
       return searchProcedureOperationRows
@@ -1890,6 +2399,8 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           nullable(input.operationId),
           nullable(input.modality),
           nullable(input.modality),
+          nullable(input.operationKind),
+          nullable(input.operationKind),
           nullable(input.validationStatus),
           nullable(input.validationStatus),
           nullable(input.actionName),
@@ -1902,6 +2413,14 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           menuPath,
           shortcutKeys,
           shortcutKeys,
+          nullable(input.targetHostId),
+          nullable(input.targetHostId),
+          interactionPath,
+          interactionPath,
+          nullable(input.surfaceOperationId),
+          nullable(input.surfaceOperationId),
+          nullable(input.expectedOperatorId),
+          nullable(input.expectedOperatorId),
           nullable(input.mcpServerName),
           nullable(input.mcpServerName),
           nullable(input.mcpToolName),

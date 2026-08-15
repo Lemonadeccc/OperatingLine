@@ -180,6 +180,65 @@ export const orderedShortcutOperationSchema = z.strictObject({
 });
 export type OrderedShortcutOperation = z.infer<typeof orderedShortcutOperationSchema>;
 
+const shortcutSurfaceSchema = z.strictObject({
+  kind: z.literal('adjust_last_operation'),
+  hostId: z.literal('screen.redo_last'),
+  sourceOperationId: guideStepIdSchema,
+  expectedOperatorId: z.string().min(1),
+});
+
+export const shortcutKeyInputOperationSchema = z
+  .strictObject({
+    kind: z.literal('key_input'),
+    id: guideStepIdSchema,
+    label: z.string().min(1),
+    keyMode: z.enum(['chord', 'sequence']),
+    keys: z.array(z.string().min(1)).min(1),
+    selectionPath: z.array(z.string().min(1)).min(1).optional(),
+    parameters: z.array(parameterAssignmentSchema),
+    opensSurface: shortcutSurfaceSchema.optional(),
+    closesSurfaceOperationId: guideStepIdSchema.optional(),
+  })
+  .refine(
+    (operation) =>
+      operation.opensSurface === undefined || operation.closesSurfaceOperationId === undefined,
+    { message: 'Shortcut key input cannot open and close a surface in the same operation' },
+  );
+export type ShortcutKeyInputOperation = z.infer<typeof shortcutKeyInputOperationSchema>;
+
+export const shortcutOperatorPropertyUpdateOperationSchema = z.strictObject({
+  kind: z.literal('operator_property_update'),
+  id: guideStepIdSchema,
+  label: z.string().min(1),
+  surfaceOperationId: guideStepIdSchema,
+  target: z.strictObject({
+    kind: z.literal('control'),
+    hostId: z.string().min(1),
+  }),
+  path: z.array(z.string().min(1)).min(1),
+  parameters: z
+    .array(parameterAssignmentSchema)
+    .length(1)
+    .refine((parameters) => parameters[0]?.name === 'value', {
+      message: 'Shortcut operator property updates require one value parameter',
+    }),
+});
+export type ShortcutOperatorPropertyUpdateOperation = z.infer<
+  typeof shortcutOperatorPropertyUpdateOperationSchema
+>;
+
+export const extendedShortcutOperationSchema = z.discriminatedUnion('kind', [
+  shortcutKeyInputOperationSchema,
+  shortcutOperatorPropertyUpdateOperationSchema,
+]);
+export type ExtendedShortcutOperation = z.infer<typeof extendedShortcutOperationSchema>;
+
+export const shortcutLedOperationSchema = z.union([
+  orderedShortcutOperationSchema,
+  extendedShortcutOperationSchema,
+]);
+export type ShortcutLedOperation = z.infer<typeof shortcutLedOperationSchema>;
+
 export const availableShortcutProcedureMaterializationSchema = z.strictObject({
   availability: z.literal('available'),
   source: z.literal('catalog.ordered_shortcut_operations'),
@@ -201,7 +260,7 @@ export const availableShortcutProcedureMaterializationSchema = z.strictObject({
       value: z.string().min(1),
     }),
   ),
-  operations: z.array(orderedShortcutOperationSchema).min(1),
+  operations: z.array(shortcutLedOperationSchema).min(1),
   omittedActionArguments: z.array(omittedActionArgumentSchema),
 });
 export type AvailableShortcutProcedureMaterialization = z.infer<
@@ -582,7 +641,11 @@ function validateRecipe(recipe: InteractionRecipe): void {
     }
     const operationIds = new Set<string>();
     const operationLabels = new Set<string>();
-    for (const operation of shortcut.operations) {
+    let openSurfaceOperationId: string | undefined;
+    let openSurfaceExpectedOperatorId: string | undefined;
+    let openSurfacePropertyCount = 0;
+    let openSurfacePropertyHostIds = new Set<string>();
+    for (const [operationIndex, operation] of shortcut.operations.entries()) {
       if (operationIds.has(operation.id)) {
         throw new Error(
           `Interaction recipe ${recipe.id} shortcut contains duplicate operation id ${operation.id}`,
@@ -596,6 +659,111 @@ function validateRecipe(recipe: InteractionRecipe): void {
       operationIds.add(operation.id);
       operationLabels.add(operation.label);
       validateParameterNames(recipe, `shortcut operation ${operation.id}`, operation.parameters);
+
+      if (!('kind' in operation)) {
+        if (openSurfaceOperationId !== undefined) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} requires contiguous property updates and an explicit close`,
+          );
+        }
+        continue;
+      }
+      if (operation.kind === 'operator_property_update') {
+        if (operation.surfaceOperationId !== openSurfaceOperationId) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut property ${operation.id} references a surface that is not currently open`,
+          );
+        }
+        const expectedHostPrefix = `${openSurfaceExpectedOperatorId}.`;
+        if (
+          openSurfaceExpectedOperatorId === undefined ||
+          !operation.target.hostId.startsWith(expectedHostPrefix) ||
+          operation.target.hostId.length === expectedHostPrefix.length
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut property ${operation.id} target ${operation.target.hostId} is outside operator ${openSurfaceExpectedOperatorId ?? 'unknown'}`,
+          );
+        }
+        if (openSurfacePropertyHostIds.has(operation.target.hostId)) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} repeats property target ${operation.target.hostId}`,
+          );
+        }
+        openSurfacePropertyHostIds.add(operation.target.hostId);
+        openSurfacePropertyCount += 1;
+        continue;
+      }
+      if (operation.opensSurface !== undefined) {
+        if (openSurfaceOperationId !== undefined) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut cannot open ${operation.id} while ${openSurfaceOperationId} is open`,
+          );
+        }
+        const previousOperation = shortcut.operations[operationIndex - 1];
+        if (
+          operation.keyMode !== 'sequence' ||
+          operation.keys.length !== 1 ||
+          operation.keys[0] !== 'F9' ||
+          operation.parameters.length !== 0
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface opener ${operation.id} must be a parameterless F9 sequence`,
+          );
+        }
+        if (previousOperation?.id !== operation.opensSurface.sourceOperationId) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface opener ${operation.id} must immediately follow its source operation`,
+          );
+        }
+        if (
+          recipe.guidance.kind !== 'native_path' ||
+          operation.opensSurface.expectedOperatorId !== recipe.guidance.execution.operatorId
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface opener ${operation.id} must bind the guidance execution operator`,
+          );
+        }
+        openSurfaceOperationId = operation.id;
+        openSurfaceExpectedOperatorId = operation.opensSurface.expectedOperatorId;
+        openSurfacePropertyCount = 0;
+        openSurfacePropertyHostIds = new Set<string>();
+        continue;
+      }
+      if (operation.closesSurfaceOperationId !== undefined) {
+        if (
+          operation.closesSurfaceOperationId !== openSurfaceOperationId ||
+          openSurfacePropertyCount === 0
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface closer ${operation.id} does not close an updated open surface`,
+          );
+        }
+        if (
+          operation.keyMode !== 'sequence' ||
+          operation.keys.length !== 1 ||
+          operation.keys[0] !== 'ENTER' ||
+          operation.parameters.length !== 0
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} shortcut surface closer ${operation.id} must be a parameterless ENTER sequence`,
+          );
+        }
+        openSurfaceOperationId = undefined;
+        openSurfaceExpectedOperatorId = undefined;
+        openSurfacePropertyCount = 0;
+        openSurfacePropertyHostIds = new Set<string>();
+        continue;
+      }
+      if (openSurfaceOperationId !== undefined) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} requires contiguous property updates and an explicit close`,
+        );
+      }
+    }
+    if (openSurfaceOperationId !== undefined) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} is not explicitly closed`,
+      );
     }
   }
 

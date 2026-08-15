@@ -5,11 +5,15 @@ import {
   canonicalizeProtocolJsonValue,
   interactionCatalogSchema,
   parseProcedureTree,
+  procedureAuthoringExtendedShortcutMaterializedTreeSchema,
+  procedureAuthoringMaterializationExtendedShortcutFormatVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
+  procedureTreeExtendedShortcutFormatVersion,
+  procedureTreeFormatVersion,
   stableProcedureLeafOrder,
   validateActionArguments,
   validateActionCatalog,
@@ -19,6 +23,7 @@ import {
   type MenuProcedureOperation,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringMaterializedTree,
+  type ProcedureAuthoringExtendedShortcutMaterializedTree,
   type ProcedureAuthoringMaterializationResult,
   type ProcedureLeafNode,
   type ProcedureTree,
@@ -32,8 +37,10 @@ export interface ProcedureAuthoringMaterialization {
   readonly formatVersion:
     | typeof procedureAuthoringMaterializationLegacyFormatVersion
     | typeof procedureAuthoringMaterializationOrderedMenuFormatVersion
-    | typeof procedureAuthoringMaterializationFormatVersion;
-  readonly tree: ProcedureAuthoringMaterializedTree;
+    | typeof procedureAuthoringMaterializationFormatVersion
+    | typeof procedureAuthoringMaterializationExtendedShortcutFormatVersion;
+  readonly tree:
+    ProcedureAuthoringMaterializedTree | ProcedureAuthoringExtendedShortcutMaterializedTree;
   readonly coverage: MaterializationCoverage;
   readonly inputTreeContentSha256: string;
   readonly outputTreeContentSha256: string;
@@ -275,6 +282,7 @@ function materializeParameters(
 function materializeLeaf(
   leaf: ProcedureLeafNode,
   recipe: InteractionCatalog['recipes'][number] | undefined,
+  normalizeShortcutOperations: boolean,
 ): {
   readonly leaf: ProcedureLeafNode;
   readonly coverage: MaterializationCoverage[number];
@@ -380,19 +388,50 @@ function materializeLeaf(
             title: `${recipe!.title} shortcut projection`,
             preconditions: structuredClone(shortcutDeclaration.preconditions),
             modality: 'shortcut' as const,
-            operations: shortcutDeclaration.operations.map((operation, index) => ({
-              id: operation.id,
-              order: index + 1,
-              semanticRefs: [...semanticRefs],
-              description: operation.label,
-              evidenceRefs: [...evidenceRefs],
-              keyMode: operation.keyMode,
-              keys: [...operation.keys],
-              ...(operation.selectionPath === undefined
-                ? {}
-                : { selectionPath: [...operation.selectionPath] }),
-              parameters: materializeParameters(operation.parameters, leaf.action?.arguments ?? {}),
-            })),
+            operations: shortcutDeclaration.operations.map((operation, index) => {
+              const common = {
+                id: operation.id,
+                order: index + 1,
+                semanticRefs: [...semanticRefs],
+                description: operation.label,
+                evidenceRefs: [...evidenceRefs],
+              };
+              if ('kind' in operation && operation.kind === 'operator_property_update') {
+                const materializedParameters = materializeParameters(
+                  operation.parameters,
+                  leaf.action?.arguments ?? {},
+                );
+                return {
+                  ...common,
+                  kind: operation.kind,
+                  surfaceOperationId: operation.surfaceOperationId,
+                  target: structuredClone(operation.target),
+                  path: [...operation.path],
+                  parameters: { value: materializedParameters['value']! },
+                };
+              }
+              const keyInput = {
+                ...common,
+                keyMode: operation.keyMode,
+                keys: [...operation.keys],
+                ...(operation.selectionPath === undefined
+                  ? {}
+                  : { selectionPath: [...operation.selectionPath] }),
+                parameters: materializeParameters(
+                  operation.parameters,
+                  leaf.action?.arguments ?? {},
+                ),
+                ...('kind' in operation && operation.opensSurface !== undefined
+                  ? { opensSurface: structuredClone(operation.opensSurface) }
+                  : {}),
+                ...('kind' in operation && operation.closesSurfaceOperationId !== undefined
+                  ? { closesSurfaceOperationId: operation.closesSurfaceOperationId }
+                  : {}),
+              };
+              return normalizeShortcutOperations || 'kind' in operation
+                ? { ...keyInput, kind: 'key_input' as const }
+                : keyInput;
+            }),
           },
         ];
   const mcpTracks = [
@@ -513,6 +552,15 @@ export function materializeProcedureAuthoringCandidate(
     const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
     return recipe?.procedureMaterialization?.shortcut.availability === 'available';
   });
+  const usesExtendedShortcutMaterialization = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return (
+      recipe?.procedureMaterialization?.shortcut.availability === 'available' &&
+      recipe.procedureMaterialization.shortcut.operations.some(
+        (operation) => 'kind' in operation && operation.kind === 'operator_property_update',
+      )
+    );
+  });
   for (const leaf of orderedCandidateLeaves) {
     if (leaf.action === null) continue;
     const action = actionsByName.get(leaf.action.name);
@@ -532,29 +580,38 @@ export function materializeProcedureAuthoringCandidate(
   const materializedByLeafId = new Map<string, ReturnType<typeof materializeLeaf>>();
   for (const leaf of orderedCandidateLeaves) {
     const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
-    materializedByLeafId.set(leaf.id, materializeLeaf(leaf, recipe));
+    materializedByLeafId.set(
+      leaf.id,
+      materializeLeaf(leaf, recipe, usesExtendedShortcutMaterialization),
+    );
   }
 
-  const tree = procedureAuthoringMaterializedTreeSchema.parse(
-    parseProcedureTree({
-      ...candidate,
-      actionCatalogVersion: actionCatalog.catalogVersion,
-      interactionCatalogVersion: interactionCatalog.catalogVersion,
-      nodes: validatedCandidate.nodes.map((node) =>
-        node.kind === 'leaf' ? materializedByLeafId.get(node.id)!.leaf : structuredClone(node),
-      ),
-    }),
-  );
+  const parsedTree = parseProcedureTree({
+    ...candidate,
+    formatVersion: usesExtendedShortcutMaterialization
+      ? procedureTreeExtendedShortcutFormatVersion
+      : procedureTreeFormatVersion,
+    actionCatalogVersion: actionCatalog.catalogVersion,
+    interactionCatalogVersion: interactionCatalog.catalogVersion,
+    nodes: validatedCandidate.nodes.map((node) =>
+      node.kind === 'leaf' ? materializedByLeafId.get(node.id)!.leaf : structuredClone(node),
+    ),
+  });
+  const tree = usesExtendedShortcutMaterialization
+    ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
+    : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);
   const coverage = stableProcedureLeafOrder(tree).map(
     (leaf) => materializedByLeafId.get(leaf.id)!.coverage,
   );
 
   return {
-    formatVersion: usesShortcutMaterialization
-      ? procedureAuthoringMaterializationFormatVersion
-      : usesOrderedParameterOperations
-        ? procedureAuthoringMaterializationOrderedMenuFormatVersion
-        : procedureAuthoringMaterializationLegacyFormatVersion,
+    formatVersion: usesExtendedShortcutMaterialization
+      ? procedureAuthoringMaterializationExtendedShortcutFormatVersion
+      : usesShortcutMaterialization
+        ? procedureAuthoringMaterializationFormatVersion
+        : usesOrderedParameterOperations
+          ? procedureAuthoringMaterializationOrderedMenuFormatVersion
+          : procedureAuthoringMaterializationLegacyFormatVersion,
     tree,
     coverage,
     inputTreeContentSha256: sha256(candidate),

@@ -7,7 +7,10 @@
       "properties": {
         "formatVersion": {
           "type": "string",
-          "const": "1.0.0"
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
         },
         "id": {
           "type": "string",
@@ -709,79 +712,293 @@
                               "minItems": 1,
                               "type": "array",
                               "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string",
-                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                                  },
-                                  "order": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  "semanticRefs": {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                                    }
-                                  },
-                                  "description": {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  "evidenceRefs": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                                    }
-                                  },
-                                  "keyMode": {
-                                    "type": "string",
-                                    "enum": [
-                                      "chord",
-                                      "sequence"
-                                    ]
-                                  },
-                                  "keys": {
-                                    "minItems": 1,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    }
-                                  },
-                                  "selectionPath": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    }
-                                  },
-                                  "parameters": {
+                                "anyOf": [
+                                  {
                                     "type": "object",
-                                    "propertyNames": {
-                                      "type": "string",
-                                      "minLength": 1
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                      },
+                                      "order": {
+                                        "type": "integer",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "semanticRefs": {
+                                        "minItems": 1,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        }
+                                      },
+                                      "description": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "evidenceRefs": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        }
+                                      },
+                                      "keyMode": {
+                                        "type": "string",
+                                        "enum": [
+                                          "chord",
+                                          "sequence"
+                                        ]
+                                      },
+                                      "keys": {
+                                        "minItems": 1,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "selectionPath": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "parameters": {
+                                        "type": "object",
+                                        "propertyNames": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                          "$ref": "#/$defs/__schema3"
+                                        }
+                                      }
                                     },
-                                    "additionalProperties": {
-                                      "$ref": "#/$defs/__schema3"
-                                    }
+                                    "required": [
+                                      "id",
+                                      "order",
+                                      "semanticRefs",
+                                      "description",
+                                      "evidenceRefs",
+                                      "keys",
+                                      "parameters"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                          },
+                                          "order": {
+                                            "type": "integer",
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "semanticRefs": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            }
+                                          },
+                                          "description": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "evidenceRefs": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            }
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "key_input"
+                                          },
+                                          "keyMode": {
+                                            "type": "string",
+                                            "enum": [
+                                              "chord",
+                                              "sequence"
+                                            ]
+                                          },
+                                          "keys": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "selectionPath": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "parameters": {
+                                            "type": "object",
+                                            "propertyNames": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                              "$ref": "#/$defs/__schema4"
+                                            }
+                                          },
+                                          "opensSurface": {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "adjust_last_operation"
+                                              },
+                                              "hostId": {
+                                                "type": "string",
+                                                "const": "screen.redo_last"
+                                              },
+                                              "sourceOperationId": {
+                                                "type": "string",
+                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                              },
+                                              "expectedOperatorId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "hostId",
+                                              "sourceOperationId",
+                                              "expectedOperatorId"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "closesSurfaceOperationId": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "order",
+                                          "semanticRefs",
+                                          "description",
+                                          "evidenceRefs",
+                                          "kind",
+                                          "keyMode",
+                                          "keys",
+                                          "parameters"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                          },
+                                          "order": {
+                                            "type": "integer",
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "semanticRefs": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            }
+                                          },
+                                          "description": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "evidenceRefs": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            }
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "operator_property_update"
+                                          },
+                                          "surfaceOperationId": {
+                                            "type": "string",
+                                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                          },
+                                          "target": {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "control"
+                                              },
+                                              "hostId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "hostId"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "path": {
+                                            "minItems": 1,
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "parameters": {
+                                            "type": "object",
+                                            "properties": {
+                                              "value": {
+                                                "$ref": "#/$defs/__schema5"
+                                              }
+                                            },
+                                            "required": [
+                                              "value"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "order",
+                                          "semanticRefs",
+                                          "description",
+                                          "evidenceRefs",
+                                          "kind",
+                                          "surfaceOperationId",
+                                          "target",
+                                          "path",
+                                          "parameters"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
                                   }
-                                },
-                                "required": [
-                                  "id",
-                                  "order",
-                                  "semanticRefs",
-                                  "description",
-                                  "evidenceRefs",
-                                  "keys",
-                                  "parameters"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             }
                           },
@@ -938,7 +1155,7 @@
                                       "minLength": 1
                                     },
                                     "additionalProperties": {
-                                      "$ref": "#/$defs/__schema4"
+                                      "$ref": "#/$defs/__schema6"
                                     }
                                   },
                                   "resultBinding": {
@@ -1275,7 +1492,196 @@
         "evidence",
         "nodes"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "formatVersion": {
+                "const": "1.0.0"
+              }
+            },
+            "required": [
+              "formatVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "const": "leaf"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "shortcutTracks": {
+                        "type": "array",
+                        "items": {
+                          "if": {
+                            "type": "object",
+                            "properties": {
+                              "availability": {
+                                "const": "available"
+                              }
+                            },
+                            "required": [
+                              "availability"
+                            ]
+                          },
+                          "then": {
+                            "type": "object",
+                            "properties": {
+                              "operations": {
+                                "type": "array",
+                                "items": {
+                                  "not": {
+                                    "required": [
+                                      "kind"
+                                    ]
+                                  }
+                                }
+                              }
+                            },
+                            "required": [
+                              "operations"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "shortcutTracks"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "formatVersion": {
+                "const": "1.1.0"
+              }
+            },
+            "required": [
+              "formatVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "if": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "const": "leaf"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "then": {
+                    "type": "object",
+                    "properties": {
+                      "shortcutTracks": {
+                        "type": "array",
+                        "items": {
+                          "if": {
+                            "type": "object",
+                            "properties": {
+                              "availability": {
+                                "const": "available"
+                              }
+                            },
+                            "required": [
+                              "availability"
+                            ]
+                          },
+                          "then": {
+                            "type": "object",
+                            "properties": {
+                              "operations": {
+                                "type": "array",
+                                "items": {
+                                  "required": [
+                                    "kind"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "operations"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "shortcutTracks"
+                    ]
+                  }
+                },
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "const": "leaf"
+                    },
+                    "shortcutTracks": {
+                      "type": "array",
+                      "contains": {
+                        "type": "object",
+                        "properties": {
+                          "availability": {
+                            "const": "available"
+                          },
+                          "operations": {
+                            "type": "array",
+                            "contains": {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "const": "operator_property_update"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "availability",
+                          "operations"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "shortcutTracks"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "required": [
@@ -1434,6 +1840,68 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema4"
+          }
+        }
+      ]
+    },
+    "__schema5": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema5"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema5"
+          }
+        }
+      ]
+    },
+    "__schema6": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema6"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema6"
           }
         }
       ]

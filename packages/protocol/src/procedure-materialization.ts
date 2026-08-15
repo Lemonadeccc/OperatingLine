@@ -11,7 +11,10 @@ import {
   procedureCompilationResultSchema,
   procedureGroupNodeSchema,
   procedureLeafNodeSchema,
+  procedureTreeExtendedShortcutFormatVersion,
+  procedureTreeFormatVersion,
   procedureTreeSchema,
+  extendedShortcutProcedureOperationSchema,
   shortcutProcedureOperationSchema,
 } from './procedure-tree.js';
 import { catalogVersionSchema } from './version.js';
@@ -19,10 +22,12 @@ import { catalogVersionSchema } from './version.js';
 export const procedureAuthoringMaterializationLegacyFormatVersion = '1.0.0' as const;
 export const procedureAuthoringMaterializationOrderedMenuFormatVersion = '1.1.0' as const;
 export const procedureAuthoringMaterializationFormatVersion = '1.2.0' as const;
+export const procedureAuthoringMaterializationExtendedShortcutFormatVersion = '1.3.0' as const;
 export const procedureAuthoringMaterializationFormatVersionSchema = z.enum([
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializationFormatVersion,
+  procedureAuthoringMaterializationExtendedShortcutFormatVersion,
 ]);
 
 const procedureAuthoringMaterializationContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -58,6 +63,15 @@ const procedureAuthoringAvailableShortcutTrackSchema = z.strictObject({
   operations: z.array(procedureAuthoringMaterializedShortcutOperationSchema).min(1),
 });
 
+const procedureAuthoringAvailableExtendedShortcutTrackSchema = z.strictObject({
+  id: guideStepIdSchema,
+  availability: z.literal('available'),
+  title: z.string().min(1),
+  preconditions: z.array(procedurePreconditionSchema),
+  modality: z.literal('shortcut'),
+  operations: z.array(extendedShortcutProcedureOperationSchema).min(1),
+});
+
 const procedureAuthoringMaterializedShortcutTrackSchema = z.union([
   procedureAuthoringUnavailableShortcutTrackSchema,
   procedureAuthoringAvailableShortcutTrackSchema,
@@ -89,6 +103,7 @@ const procedureAuthoringMaterializedNodeSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const procedureAuthoringLegacyMaterializedTreeSchema = procedureTreeSchema.safeExtend({
+  formatVersion: z.literal(procedureTreeFormatVersion),
   nodes: z.array(procedureAuthoringMaterializedNodeSchema).min(1),
 });
 export type ProcedureAuthoringLegacyMaterializedTree = z.infer<
@@ -101,10 +116,91 @@ const procedureAuthoringShortcutMaterializedNodeSchema = z.discriminatedUnion('k
 ]);
 
 export const procedureAuthoringMaterializedTreeSchema = procedureTreeSchema.safeExtend({
+  formatVersion: z.literal(procedureTreeFormatVersion),
   nodes: z.array(procedureAuthoringShortcutMaterializedNodeSchema).min(1),
 });
 export type ProcedureAuthoringMaterializedTree = z.infer<
   typeof procedureAuthoringMaterializedTreeSchema
+>;
+
+const procedureAuthoringExtendedShortcutMaterializedTrackSchema = z.union([
+  procedureAuthoringUnavailableShortcutTrackSchema,
+  procedureAuthoringAvailableExtendedShortcutTrackSchema,
+]);
+
+const procedureAuthoringExtendedShortcutMaterializedLeafSchema = procedureLeafNodeSchema.safeExtend(
+  {
+    menuTracks: z.array(menuProcedureTrackSchema).length(1),
+    shortcutTracks: z.array(procedureAuthoringExtendedShortcutMaterializedTrackSchema).length(1),
+    mcpTracks: z.array(procedureAuthoringUnavailableMcpTrackSchema).length(1),
+    validation: procedureLeafNodeSchema.shape.validation.safeExtend({
+      status: z.literal('candidate'),
+      validatedHostVersions: z.array(catalogVersionSchema).length(0),
+    }),
+  },
+);
+
+const procedureAuthoringExtendedShortcutMaterializedNodeSchema = z.discriminatedUnion('kind', [
+  procedureGroupNodeSchema,
+  procedureAuthoringExtendedShortcutMaterializedLeafSchema,
+]);
+
+const procedureAuthoringExtendedShortcutMaterializedNodesSchema = z
+  .array(procedureAuthoringExtendedShortcutMaterializedNodeSchema)
+  .min(1)
+  .superRefine((nodes, context) => {
+    const hasPropertyUpdate = nodes.some(
+      (node) =>
+        node.kind === 'leaf' &&
+        node.shortcutTracks.some(
+          (track) =>
+            track.availability === 'available' &&
+            track.operations.some((operation) => operation.kind === 'operator_property_update'),
+        ),
+    );
+    if (!hasPropertyUpdate) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Materialization result 1.3.0 requires an operator_property_update shortcut operation',
+      });
+    }
+  })
+  .meta({
+    contains: {
+      type: 'object',
+      properties: {
+        kind: { const: 'leaf' },
+        shortcutTracks: {
+          type: 'array',
+          contains: {
+            type: 'object',
+            properties: {
+              availability: { const: 'available' },
+              operations: {
+                type: 'array',
+                contains: {
+                  type: 'object',
+                  properties: { kind: { const: 'operator_property_update' } },
+                  required: ['kind'],
+                },
+              },
+            },
+            required: ['availability', 'operations'],
+          },
+        },
+      },
+      required: ['kind', 'shortcutTracks'],
+    },
+  });
+
+export const procedureAuthoringExtendedShortcutMaterializedTreeSchema =
+  procedureTreeSchema.safeExtend({
+    formatVersion: z.literal(procedureTreeExtendedShortcutFormatVersion),
+    nodes: procedureAuthoringExtendedShortcutMaterializedNodesSchema,
+  });
+export type ProcedureAuthoringExtendedShortcutMaterializedTree = z.infer<
+  typeof procedureAuthoringExtendedShortcutMaterializedTreeSchema
 >;
 
 const procedureAuthoringMaterializationCoverageBaseShape = {
@@ -199,6 +295,19 @@ const procedureAuthoringShortcutMaterializationCoverageArraySchema = z
   })
   .meta({ contains: materializedShortcutCoverageJsonSchema });
 
+const procedureAuthoringExtendedShortcutMaterializationCoverageArraySchema = z
+  .array(procedureAuthoringShortcutMaterializationCoverageSchema)
+  .min(1)
+  .superRefine((coverage, context) => {
+    if (!coverage.some((entry) => entry.shortcut === 'materialized')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Materialization result 1.3.0 requires at least one materialized shortcut',
+      });
+    }
+  })
+  .meta({ contains: materializedShortcutCoverageJsonSchema });
+
 export const procedureAuthoringMaterializationRequestSchema = z.strictObject({
   packet: procedureAuthoringPromptPacketSchema,
   tree: procedureAuthoringCandidateTreeSchema,
@@ -248,6 +357,12 @@ const procedureAuthoringShortcutMaterializationResultShape = {
   tree: procedureAuthoringMaterializedTreeSchema,
 } as const;
 
+const procedureAuthoringExtendedShortcutMaterializationResultShape = {
+  ...procedureAuthoringMaterializationResultBaseShape,
+  coverage: procedureAuthoringExtendedShortcutMaterializationCoverageArraySchema,
+  tree: procedureAuthoringExtendedShortcutMaterializedTreeSchema,
+} as const;
+
 export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnion('formatVersion', [
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationLegacyFormatVersion),
@@ -260,6 +375,10 @@ export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnio
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationFormatVersion),
     ...procedureAuthoringShortcutMaterializationResultShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationExtendedShortcutFormatVersion),
+    ...procedureAuthoringExtendedShortcutMaterializationResultShape,
   }),
 ]);
 export type ProcedureAuthoringMaterializationResult = z.infer<

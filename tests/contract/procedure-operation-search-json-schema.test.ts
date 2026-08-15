@@ -26,6 +26,17 @@ describe('public procedure operation search JSON Schema', () => {
         },
         accepted: true,
       },
+      {
+        value: {
+          operationKind: 'operator_property_update',
+          targetHostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+          interactionPath: ['Adjust Last Operation', 'Subdivisions'],
+          surfaceOperationId: 'shortcut.open_adjust_last',
+        },
+        accepted: true,
+      },
+      { value: { operationKind: 'property_update' }, accepted: false },
+      { value: { interactionPath: [] }, accepted: false },
     ] as const;
 
     for (const contractCase of cases) {

@@ -71,6 +71,98 @@ function procedureFixture(): Record<string, unknown> {
   ) as Record<string, unknown>;
 }
 
+function extendedShortcutProcedureFixture(): Record<string, unknown> {
+  const tree = procedureFixture();
+  tree['formatVersion'] = '1.1.0';
+  tree['id'] = 'snowman.eye.shortcut-surface.procedure';
+  tree['title'] = 'Snowman eye shortcut surface procedure';
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  const track = (leaf?.['shortcutTracks'] as Array<Record<string, unknown>> | undefined)?.find(
+    (candidate) => candidate['availability'] === 'available',
+  );
+  if (track === undefined) throw new Error('Expected available shortcut track fixture');
+  track['operations'] = [
+    {
+      kind: 'key_input',
+      id: 'shortcut.add_sphere',
+      order: 1,
+      keyMode: 'chord',
+      semanticRefs: ['semantic.create'],
+      description: 'Add a UV Sphere.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['SHIFT', 'A'],
+      selectionPath: ['Mesh', 'UV Sphere'],
+      parameters: {},
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.open_adjust_last',
+      order: 2,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.create'],
+      description: 'Open Adjust Last Operation.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['F9'],
+      parameters: {},
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.add_sphere',
+        expectedOperatorId: 'mesh.primitive_uv_sphere_add',
+      },
+    },
+    {
+      kind: 'operator_property_update',
+      id: 'shortcut.set_segments',
+      order: 3,
+      semanticRefs: ['semantic.create'],
+      description: 'Set Segments.',
+      evidenceRefs: ['evidence.prompt'],
+      surfaceOperationId: 'shortcut.open_adjust_last',
+      target: { kind: 'control', hostId: 'mesh.primitive_uv_sphere_add.segments' },
+      path: ['Adjust Last Operation', 'Segments'],
+      parameters: { value: 32 },
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.close_adjust_last',
+      order: 4,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.create'],
+      description: 'Close Adjust Last Operation.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['ENTER'],
+      parameters: {},
+      closesSurfaceOperationId: 'shortcut.open_adjust_last',
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.move',
+      order: 5,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.transform'],
+      description: 'Move the sphere.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['G', 'X'],
+      parameters: { value: 0.32, confirm: 'ENTER' },
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.rename',
+      order: 6,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.rename'],
+      description: 'Rename the sphere.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['F2'],
+      parameters: { text: 'OperatingLine.EyeLeft', confirm: 'ENTER' },
+    },
+  ];
+  return tree;
+}
+
 function authoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -2342,6 +2434,23 @@ describe('procedure compilation runtime', () => {
         ],
       });
 
+      const shortcutContextSearch = await fetch(`${runtime.baseUrl}/api/v1/procedure/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          operationKind: 'shortcut_key_input',
+          shortcutKeys: ['SHIFT', 'A'],
+          interactionPath: ['Mesh', 'UV Sphere'],
+        }),
+      });
+      expect(shortcutContextSearch.status).toBe(200);
+      await expect(shortcutContextSearch.json()).resolves.toMatchObject({
+        operations: [
+          { modality: 'shortcut', operation: { id: 'shortcut.add_sphere' } },
+          { modality: 'shortcut', operation: { id: 'shortcut.add_sphere' } },
+        ],
+      });
+
       const unavailableMcpSearch = await callMcpTool(runtime, 6, 'operatingline.procedure.search', {
         modality: 'mcp',
         mcpToolName: 'create_uv_sphere',
@@ -2387,6 +2496,49 @@ describe('procedure compilation runtime', () => {
       await expect(restartedSearch.json()).resolves.toMatchObject({
         operations: [{ tree: { revision: 1 } }, { tree: { revision: 3 } }],
       });
+
+      const extendedStore = await fetch(`${runtime.baseUrl}/api/v1/procedure/store`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ tree: extendedShortcutProcedureFixture() }),
+      });
+      const extendedStorePayload = await extendedStore.json();
+      expect(extendedStore.status, JSON.stringify(extendedStorePayload)).toBe(200);
+      const propertySearch = await callMcpTool(runtime, 7, 'operatingline.procedure.search', {
+        treeId: 'snowman.eye.shortcut-surface.procedure',
+        operationKind: 'operator_property_update',
+        targetHostId: 'mesh.primitive_uv_sphere_add.segments',
+        interactionPath: ['Adjust Last Operation', 'Segments'],
+        surfaceOperationId: 'shortcut.open_adjust_last',
+        expectedOperatorId: 'mesh.primitive_uv_sphere_add',
+      });
+      expect(propertySearch.result?.isError).not.toBe(true);
+      expect(JSON.parse(propertySearch.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        operations: [
+          {
+            modality: 'shortcut',
+            operation: {
+              kind: 'operator_property_update',
+              id: 'shortcut.set_segments',
+              parameters: { value: 32 },
+            },
+          },
+        ],
+      });
+      const surfaceChainSearch = await callMcpTool(runtime, 8, 'operatingline.procedure.search', {
+        treeId: 'snowman.eye.shortcut-surface.procedure',
+        surfaceOperationId: 'shortcut.open_adjust_last',
+        expectedOperatorId: 'mesh.primitive_uv_sphere_add',
+      });
+      expect(surfaceChainSearch.result?.isError).not.toBe(true);
+      const surfaceChain = JSON.parse(surfaceChainSearch.result?.content?.[0]?.text ?? '{}') as {
+        operations?: Array<{ operation?: { id?: string } }>;
+      };
+      expect(surfaceChain.operations?.map((hit) => hit.operation?.id)).toEqual([
+        'shortcut.open_adjust_last',
+        'shortcut.set_segments',
+        'shortcut.close_adjust_last',
+      ]);
     } finally {
       await runtime?.stop();
       rmSync(directory, { recursive: true, force: true });

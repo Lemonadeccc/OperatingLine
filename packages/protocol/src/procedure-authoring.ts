@@ -9,6 +9,7 @@ import {
   procedureGroupNodeSchema,
   procedureLeafNodeSchema,
   procedureTreeSchema,
+  procedureTreeFormatVersion,
 } from './procedure-tree.js';
 import { catalogVersionSchema } from './version.js';
 
@@ -77,6 +78,7 @@ const procedureCandidateNodeSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const procedureAuthoringCandidateTreeSchema = procedureTreeSchema.safeExtend({
+  formatVersion: z.literal(procedureTreeFormatVersion),
   nodes: z.array(procedureCandidateNodeSchema).min(1),
 });
 export type ProcedureAuthoringCandidateTree = z.infer<typeof procedureAuthoringCandidateTreeSchema>;

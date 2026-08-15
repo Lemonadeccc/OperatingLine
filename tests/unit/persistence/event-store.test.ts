@@ -295,6 +295,80 @@ function indexedProcedureTreeRecord() {
   });
 }
 
+function extendedShortcutProcedureTreeRecord() {
+  const record = indexedProcedureTreeRecord();
+  const tree = structuredClone(record.tree) as {
+    formatVersion: string;
+    nodes: Array<{
+      kind: string;
+      shortcutTracks?: Array<{
+        availability: string;
+        operations?: Array<Record<string, unknown>>;
+      }>;
+    }>;
+  };
+  tree.formatVersion = '1.1.0';
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  const track = leaf?.shortcutTracks?.find((candidate) => candidate.availability === 'available');
+  if (track === undefined) throw new Error('Expected available shortcut track fixture');
+  track.operations = [
+    {
+      kind: 'key_input',
+      id: 'shortcut.add_icosphere',
+      order: 1,
+      keyMode: 'chord',
+      semanticRefs: ['semantic.create'],
+      description: 'Add an Icosphere.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['SHIFT', 'A'],
+      selectionPath: ['Mesh', 'Icosphere'],
+      parameters: {},
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.open_adjust_last',
+      order: 2,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.create'],
+      description: 'Open Adjust Last Operation.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['F9'],
+      parameters: {},
+      opensSurface: {
+        kind: 'adjust_last_operation',
+        hostId: 'screen.redo_last',
+        sourceOperationId: 'shortcut.add_icosphere',
+        expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+      },
+    },
+    {
+      kind: 'operator_property_update',
+      id: 'shortcut.set_subdivisions',
+      order: 3,
+      semanticRefs: ['semantic.create'],
+      description: 'Set Subdivisions.',
+      evidenceRefs: ['evidence.prompt'],
+      surfaceOperationId: 'shortcut.open_adjust_last',
+      target: { kind: 'control', hostId: 'mesh.primitive_ico_sphere_add.subdivisions' },
+      path: ['Adjust Last Operation', 'Subdivisions'],
+      parameters: { value: 3 },
+    },
+    {
+      kind: 'key_input',
+      id: 'shortcut.close_adjust_last',
+      order: 4,
+      keyMode: 'sequence',
+      semanticRefs: ['semantic.create'],
+      description: 'Close Adjust Last Operation.',
+      evidenceRefs: ['evidence.prompt'],
+      keys: ['ENTER'],
+      parameters: {},
+      closesSurfaceOperationId: 'shortcut.open_adjust_last',
+    },
+  ];
+  return { ...record, tree };
+}
+
 describe('OperatingLine persistence', () => {
   it('stores immutable procedure revisions with stable reads, pagination, and audit events', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-tree-test-'));
@@ -416,6 +490,67 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('indexes and searches shortcut surface context without changing legacy selectors', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    expect(database.recordProcedureTree(extendedShortcutProcedureTreeRecord())).toMatchObject({
+      result: 'accepted',
+    });
+
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: 0,
+        limit: 10,
+        operationKind: 'operator_property_update',
+        targetHostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+        interactionPath: ['Adjust Last Operation', 'Subdivisions'],
+        surfaceOperationId: 'shortcut.open_adjust_last',
+      }),
+    ).toMatchObject([
+      {
+        modality: 'shortcut',
+        operationKind: 'operator_property_update',
+        operationId: 'shortcut.set_subdivisions',
+        shortcutKeys: null,
+        targetHostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+        expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+      },
+    ]);
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: 0,
+        limit: 10,
+        shortcutKeys: ['F9'],
+        targetHostId: 'screen.redo_last',
+        surfaceOperationId: 'shortcut.open_adjust_last',
+        expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+      }),
+    ).toMatchObject([{ operationId: 'shortcut.open_adjust_last' }]);
+    expect(
+      database
+        .searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          surfaceOperationId: 'shortcut.open_adjust_last',
+          expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+        })
+        .map((operation) => operation.operationId),
+    ).toEqual([
+      'shortcut.open_adjust_last',
+      'shortcut.set_subdivisions',
+      'shortcut.close_adjust_last',
+    ]);
+    expect(
+      database.searchProcedureOperations({
+        afterSequence: 0,
+        limit: 10,
+        menuTargetHostId: 'mesh.primitive_uv_sphere_add',
+        menuPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+      }),
+    ).toHaveLength(1);
+
+    database.close();
+  });
+
   it('continues indexed operation search after an exact cursor', () => {
     const database = openOperatingLineDatabase(':memory:');
     expect(database.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
@@ -520,10 +655,119 @@ describe('OperatingLine persistence', () => {
       ).toMatchObject([
         {
           modality: 'menu',
+          operationKind: 'menu_interaction',
           semanticActions: ['create_uv_sphere'],
+          targetHostId: 'mesh.primitive_uv_sphere_add',
+          interactionPath: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+        },
+      ]);
+      expect(
+        migrated.searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          treeId: 'snowman.eye.left.procedure',
+          operationKind: 'shortcut_key_input',
+          shortcutKeys: ['SHIFT', 'A'],
+        }),
+      ).toMatchObject([
+        {
+          operationId: 'shortcut.add_sphere',
+          interactionPath: ['Mesh', 'UV Sphere'],
         },
       ]);
       migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rebuilds a schema-13 operation index without losing legacy procedure trees', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-index-v14-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const initial = openOperatingLineDatabase(databasePath);
+      expect(initial.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+        result: 'accepted',
+      });
+      initial.close();
+
+      const schemaThirteen = new DatabaseSync(databasePath);
+      schemaThirteen.exec(`
+        DROP TRIGGER procedure_operations_context_insert;
+        DROP INDEX procedure_operations_kind;
+        DROP INDEX procedure_operations_target;
+        DROP INDEX procedure_operations_surface;
+        ALTER TABLE procedure_operations DROP COLUMN operation_kind;
+        ALTER TABLE procedure_operations DROP COLUMN target_host_id;
+        ALTER TABLE procedure_operations DROP COLUMN interaction_path;
+        ALTER TABLE procedure_operations DROP COLUMN surface_operation_id;
+        ALTER TABLE procedure_operations DROP COLUMN expected_operator_id;
+        DELETE FROM schema_migrations WHERE version = 14;
+      `);
+      schemaThirteen.close();
+
+      const migrated = openOperatingLineDatabase(databasePath);
+      expect(migrated.listProcedureTrees(0, 10)).toMatchObject([
+        { treeId: 'snowman.eye.left.procedure', revision: 1 },
+      ]);
+      expect(
+        migrated.searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          operationKind: 'shortcut_key_input',
+          interactionPath: ['Mesh', 'UV Sphere'],
+        }),
+      ).toMatchObject([
+        {
+          operationId: 'shortcut.add_sphere',
+          shortcutKeys: ['SHIFT', 'A'],
+        },
+      ]);
+      migrated.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers an interrupted schema-14 operation-index rebuild', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-index-v14-recovery-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const initial = openOperatingLineDatabase(databasePath);
+      expect(initial.recordProcedureTree(indexedProcedureTreeRecord())).toMatchObject({
+        result: 'accepted',
+      });
+      initial.close();
+
+      const interrupted = new DatabaseSync(databasePath);
+      interrupted.exec(`
+        DROP TRIGGER procedure_operations_context_insert;
+        UPDATE procedure_operations
+        SET operation_kind = NULL,
+            target_host_id = NULL,
+            interaction_path = NULL,
+            surface_operation_id = NULL,
+            expected_operator_id = NULL;
+        DELETE FROM schema_migrations WHERE version = 14;
+      `);
+      interrupted.close();
+
+      const recovered = openOperatingLineDatabase(databasePath);
+      expect(
+        recovered.searchProcedureOperations({
+          afterSequence: 0,
+          limit: 10,
+          operationKind: 'shortcut_key_input',
+          interactionPath: ['Mesh', 'UV Sphere'],
+        }),
+      ).toMatchObject([
+        {
+          operationId: 'shortcut.add_sphere',
+          targetHostId: null,
+          shortcutKeys: ['SHIFT', 'A'],
+        },
+      ]);
+      recovered.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -557,6 +801,185 @@ describe('OperatingLine persistence', () => {
     expect(database.listProcedureTrees(0, 10)).toEqual([]);
     expect(database.countEvents()).toBe(0);
     database.close();
+  });
+
+  it('fails closed when shortcut key-input or property-update context is incomplete', () => {
+    for (const testCase of [
+      {
+        operationIndex: 1,
+        mutate(operation: Record<string, unknown>) {
+          operation['opensSurface'] = {
+            kind: 'adjust_last_operation',
+            hostId: 'screen.redo_last',
+            sourceOperationId: 'shortcut.add_icosphere',
+          };
+        },
+      },
+      {
+        operationIndex: 2,
+        mutate(operation: Record<string, unknown>) {
+          delete operation['target'];
+        },
+      },
+    ]) {
+      const database = openOperatingLineDatabase(':memory:');
+      const record = extendedShortcutProcedureTreeRecord();
+      const tree = record.tree as {
+        nodes: Array<{
+          kind: string;
+          shortcutTracks?: Array<{ operations?: Array<Record<string, unknown>> }>;
+        }>;
+      };
+      const operations = tree.nodes.find((node) => node.kind === 'leaf')?.shortcutTracks?.[0]
+        ?.operations;
+      if (operations === undefined) throw new Error('Expected extended shortcut operations');
+      testCase.mutate(operations[testCase.operationIndex]!);
+      expect(() => database.recordProcedureTree(record)).toThrow(
+        'context-inconsistent procedure operation index row',
+      );
+      expect(database.listProcedureTrees(0, 10)).toEqual([]);
+      database.close();
+    }
+  });
+
+  it('fails closed for invalid extended shortcut surface lifecycle and associations', () => {
+    const cases: Array<{
+      name: string;
+      mutate: (operations: Array<Record<string, unknown>>) => void;
+    }> = [
+      {
+        name: 'property before opener',
+        mutate(operations) {
+          operations.splice(1, 0, operations.splice(2, 1)[0]!);
+        },
+      },
+      {
+        name: 'property outside the expected operator',
+        mutate(operations) {
+          const property = operations[2]!;
+          property['target'] = { kind: 'control', hostId: 'mesh.primitive_cube_add.size' };
+        },
+      },
+      {
+        name: 'property with a non-control target',
+        mutate(operations) {
+          operations[2]!['target'] = {
+            kind: 'menu_item',
+            hostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+          };
+        },
+      },
+      {
+        name: 'property without a nonempty path',
+        mutate(operations) {
+          operations[2]!['path'] = [];
+        },
+      },
+      {
+        name: 'property with extra parameters',
+        mutate(operations) {
+          operations[2]!['parameters'] = { value: 3, unit: 'segments' };
+        },
+      },
+      {
+        name: 'property carrying an opener association',
+        mutate(operations) {
+          operations[2]!['opensSurface'] = structuredClone(operations[1]!['opensSurface']);
+        },
+      },
+      {
+        name: 'opener not adjacent in operation order',
+        mutate(operations) {
+          operations[0]!['order'] = 2;
+          operations[1]!['order'] = 1;
+        },
+      },
+      {
+        name: 'opener associated with a non-adjacent source',
+        mutate(operations) {
+          (operations[1]!['opensSurface'] as Record<string, unknown>)['sourceOperationId'] =
+            'shortcut.unrelated';
+        },
+      },
+      {
+        name: 'closer associated with another surface',
+        mutate(operations) {
+          operations[3]!['closesSurfaceOperationId'] = 'shortcut.other_surface';
+        },
+      },
+      {
+        name: 'opener also carrying a closer association',
+        mutate(operations) {
+          operations[1]!['closesSurfaceOperationId'] = 'shortcut.open_adjust_last';
+        },
+      },
+      {
+        name: 'surface without an explicit closer',
+        mutate(operations) {
+          operations.pop();
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const database = openOperatingLineDatabase(':memory:');
+      const record = extendedShortcutProcedureTreeRecord();
+      const tree = record.tree as {
+        nodes: Array<{
+          kind: string;
+          shortcutTracks?: Array<{ operations?: Array<Record<string, unknown>> }>;
+        }>;
+      };
+      const operations = tree.nodes.find((node) => node.kind === 'leaf')?.shortcutTracks?.[0]
+        ?.operations;
+      if (operations === undefined) throw new Error('Expected extended shortcut operations');
+      testCase.mutate(operations);
+
+      expect(
+        () => database.recordProcedureTree(record),
+        `Expected ${testCase.name} to be rejected`,
+      ).toThrow('context-inconsistent procedure operation index row');
+      expect(database.listProcedureTrees(0, 10)).toEqual([]);
+      database.close();
+    }
+  });
+
+  it('enforces the public shortcut operation shape for procedure tree versions 1.0 and 1.1', () => {
+    const legacyWithExtendedOperation = extendedShortcutProcedureTreeRecord();
+    (legacyWithExtendedOperation.tree as { formatVersion: string }).formatVersion = '1.0.0';
+
+    const unnormalizedExtended = extendedShortcutProcedureTreeRecord();
+    const unnormalizedTree = unnormalizedExtended.tree as {
+      nodes: Array<{
+        kind: string;
+        shortcutTracks?: Array<{ operations?: Array<Record<string, unknown>> }>;
+      }>;
+    };
+    const unnormalizedOperations = unnormalizedTree.nodes.find((node) => node.kind === 'leaf')
+      ?.shortcutTracks?.[0]?.operations;
+    if (unnormalizedOperations === undefined)
+      throw new Error('Expected extended shortcut operations');
+    delete unnormalizedOperations[0]!['kind'];
+
+    const extendedWithoutProperty = extendedShortcutProcedureTreeRecord();
+    const noPropertyTree = extendedWithoutProperty.tree as typeof unnormalizedTree;
+    const noPropertyTrack = noPropertyTree.nodes.find((node) => node.kind === 'leaf')
+      ?.shortcutTracks?.[0];
+    if (noPropertyTrack === undefined) throw new Error('Expected extended shortcut track');
+    noPropertyTrack.operations = [noPropertyTrack.operations![0]!];
+
+    for (const record of [
+      legacyWithExtendedOperation,
+      unnormalizedExtended,
+      extendedWithoutProperty,
+    ]) {
+      const database = openOperatingLineDatabase(':memory:');
+      expect(() => database.recordProcedureTree(record)).toThrow(
+        'context-inconsistent procedure operation index row',
+      );
+      expect(database.listProcedureTrees(0, 10)).toEqual([]);
+      database.close();
+    }
   });
 
   it('atomically records a semantic revision request with its dialogue transition', () => {
@@ -1520,7 +1943,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 13,
+        count: 14,
       });
       expect(
         inspected

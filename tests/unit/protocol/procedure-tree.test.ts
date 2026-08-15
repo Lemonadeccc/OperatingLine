@@ -324,4 +324,22 @@ describe('procedure tree protocol', () => {
       limit: 10,
     });
   });
+
+  it('accepts exact shortcut property-control selectors', () => {
+    expect(
+      procedureOperationSearchRequestSchema.parse({
+        operationKind: 'operator_property_update',
+        targetHostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+        interactionPath: ['Adjust Last Operation', 'Subdivisions'],
+        surfaceOperationId: 'shortcut.open_adjust_last',
+        expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+      }),
+    ).toEqual({
+      operationKind: 'operator_property_update',
+      targetHostId: 'mesh.primitive_ico_sphere_add.subdivisions',
+      interactionPath: ['Adjust Last Operation', 'Subdivisions'],
+      surfaceOperationId: 'shortcut.open_adjust_last',
+      expectedOperatorId: 'mesh.primitive_ico_sphere_add',
+    });
+  });
 });

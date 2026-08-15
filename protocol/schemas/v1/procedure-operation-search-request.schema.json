@@ -32,6 +32,16 @@
         "mcp"
       ]
     },
+    "operationKind": {
+      "type": "string",
+      "enum": [
+        "semantic_action",
+        "menu_interaction",
+        "shortcut_key_input",
+        "operator_property_update",
+        "mcp_call"
+      ]
+    },
     "validationStatus": {
       "type": "string",
       "enum": [
@@ -67,6 +77,26 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "targetHostId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "interactionPath": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "surfaceOperationId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "expectedOperatorId": {
+      "type": "string",
+      "minLength": 1
     },
     "mcpServerName": {
       "type": "string",
@@ -116,6 +146,11 @@
     },
     {
       "required": [
+        "operationKind"
+      ]
+    },
+    {
+      "required": [
         "validationStatus"
       ]
     },
@@ -142,6 +177,26 @@
     {
       "required": [
         "shortcutKeys"
+      ]
+    },
+    {
+      "required": [
+        "targetHostId"
+      ]
+    },
+    {
+      "required": [
+        "interactionPath"
+      ]
+    },
+    {
+      "required": [
+        "surfaceOperationId"
+      ]
+    },
+    {
+      "required": [
+        "expectedOperatorId"
       ]
     },
     {

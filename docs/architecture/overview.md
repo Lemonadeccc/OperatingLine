@@ -386,7 +386,16 @@ grounding attestation。完整决策见
 [ADR 0053](../adr/0053-cone-segment-frame-menu-materialization.md) 与
 [ADR 0054](../adr/0054-cylinder-segment-frame-menu-materialization.md) 与
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
-[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。更多 action 的封闭声明、verified
+[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。
+
+协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
+绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数
+`ENTER` 关闭同一 surface。使用该形状时所有 shortcut key operation 规范化为显式 `key_input`，输出
+ProcedureTree `1.1.0` / MaterializationResult `1.3.0`。Schema 14 将 operation kind、逻辑 target/path、
+共享 surface 与 expected operator 纳入精确索引；opener/property/closer 可以作为一条链检索，但仍从原始
+不可变树复核。当前 InteractionCatalog `1.20.0` 未声明这种 shortcut，故没有现有目录结果升级到新版本，
+Icosphere 仍等待真实 Blender 4.5/5.1 前台参数回放。见
+[ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
 Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 

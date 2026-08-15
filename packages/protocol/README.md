@@ -18,3 +18,11 @@ unbaked Plane mesh and object `scale = size / 2`, unlike the managed executor's 
 and do not establish managed collection, resource-tag, receipt/idempotency, or compensation equivalence.
 Frozen `1.19.0` preserves Plane shortcut unavailability. Cube and UV Sphere shortcuts remain available;
 Icosphere, Torus, Cone, and Cylinder shortcuts remain unavailable.
+
+The protocol also defines the next opt-in shortcut shape for Blender operator-property surfaces. A
+parameterless `F9` `key_input` opens `screen.redo_last` for an exact expected operator, contiguous
+`operator_property_update` operations bind one ordered value to each named control, and a parameterless
+`ENTER` closes the same surface. Materialization that actually uses this shape emits ProcedureTree `1.1.0`
+and Result `1.3.0`; schema-14 exact search can retrieve the whole opener/property/closer chain by shared
+surface and operator identity. InteractionCatalog `1.20.0` does not opt in, so all current catalog outputs
+retain their existing versions and Icosphere remains unavailable pending real Blender 4.5/5.1 UI replay.

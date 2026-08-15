@@ -771,154 +771,512 @@
                         "minItems": 1,
                         "type": "array",
                         "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                            },
-                            "label": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "keyMode": {
-                              "type": "string",
-                              "enum": [
-                                "chord",
-                                "sequence"
-                              ]
-                            },
-                            "keys": {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "selectionPath": {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "parameters": {
-                              "minItems": 1,
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "name": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "keyMode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "chord",
+                                    "sequence"
+                                  ]
+                                },
+                                "keys": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
                                     "type": "string",
-                                    "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
-                                  },
-                                  "source": {
-                                    "oneOf": [
-                                      {
-                                        "type": "object",
-                                        "properties": {
-                                          "kind": {
-                                            "type": "string",
-                                            "const": "literal"
-                                          },
-                                          "value": {
-                                            "$ref": "#/$defs/__schema0"
-                                          }
-                                        },
-                                        "required": [
-                                          "kind",
-                                          "value"
-                                        ],
-                                        "additionalProperties": false
+                                    "minLength": 1
+                                  }
+                                },
+                                "selectionPath": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "parameters": {
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string",
+                                        "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
                                       },
-                                      {
+                                      "source": {
+                                        "oneOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "literal"
+                                              },
+                                              "value": {
+                                                "$ref": "#/$defs/__schema0"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "value"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "action_argument"
+                                              },
+                                              "argumentName": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "transform": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "identity",
+                                                  "divide_by_two",
+                                                  "uniform_vector3",
+                                                  "vector3_x",
+                                                  "vector3_y",
+                                                  "vector3_z"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "argumentName",
+                                              "transform"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "derived_action_arguments"
+                                              },
+                                              "derivation": {
+                                                "type": "string",
+                                                "const": "segment_frame"
+                                              },
+                                              "startArgumentName": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "endArgumentName": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "output": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "distance",
+                                                  "midpoint",
+                                                  "rotation_euler_xyz_align_z"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "derivation",
+                                              "startArgumentName",
+                                              "endArgumentName",
+                                              "output"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "source"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "keyMode",
+                                "keys",
+                                "parameters"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "key_input"
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "keyMode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "chord",
+                                        "sequence"
+                                      ]
+                                    },
+                                    "keys": {
+                                      "minItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "selectionPath": {
+                                      "minItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "parameters": {
+                                      "type": "array",
+                                      "items": {
                                         "type": "object",
                                         "properties": {
-                                          "kind": {
+                                          "name": {
                                             "type": "string",
-                                            "const": "action_argument"
+                                            "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
                                           },
-                                          "argumentName": {
-                                            "type": "string",
-                                            "minLength": 1
-                                          },
-                                          "transform": {
-                                            "type": "string",
-                                            "enum": [
-                                              "identity",
-                                              "divide_by_two",
-                                              "uniform_vector3",
-                                              "vector3_x",
-                                              "vector3_y",
-                                              "vector3_z"
+                                          "source": {
+                                            "oneOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "literal"
+                                                  },
+                                                  "value": {
+                                                    "$ref": "#/$defs/__schema0"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "action_argument"
+                                                  },
+                                                  "argumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "transform": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "identity",
+                                                      "divide_by_two",
+                                                      "uniform_vector3",
+                                                      "vector3_x",
+                                                      "vector3_y",
+                                                      "vector3_z"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "argumentName",
+                                                  "transform"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "derived_action_arguments"
+                                                  },
+                                                  "derivation": {
+                                                    "type": "string",
+                                                    "const": "segment_frame"
+                                                  },
+                                                  "startArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "endArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "output": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "distance",
+                                                      "midpoint",
+                                                      "rotation_euler_xyz_align_z"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "derivation",
+                                                  "startArgumentName",
+                                                  "endArgumentName",
+                                                  "output"
+                                                ],
+                                                "additionalProperties": false
+                                              }
                                             ]
                                           }
                                         },
                                         "required": [
-                                          "kind",
-                                          "argumentName",
-                                          "transform"
-                                        ],
-                                        "additionalProperties": false
-                                      },
-                                      {
-                                        "type": "object",
-                                        "properties": {
-                                          "kind": {
-                                            "type": "string",
-                                            "const": "derived_action_arguments"
-                                          },
-                                          "derivation": {
-                                            "type": "string",
-                                            "const": "segment_frame"
-                                          },
-                                          "startArgumentName": {
-                                            "type": "string",
-                                            "minLength": 1
-                                          },
-                                          "endArgumentName": {
-                                            "type": "string",
-                                            "minLength": 1
-                                          },
-                                          "output": {
-                                            "type": "string",
-                                            "enum": [
-                                              "distance",
-                                              "midpoint",
-                                              "rotation_euler_xyz_align_z"
-                                            ]
-                                          }
-                                        },
-                                        "required": [
-                                          "kind",
-                                          "derivation",
-                                          "startArgumentName",
-                                          "endArgumentName",
-                                          "output"
+                                          "name",
+                                          "source"
                                         ],
                                         "additionalProperties": false
                                       }
-                                    ]
-                                  }
+                                    },
+                                    "opensSurface": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "adjust_last_operation"
+                                        },
+                                        "hostId": {
+                                          "type": "string",
+                                          "const": "screen.redo_last"
+                                        },
+                                        "sourceOperationId": {
+                                          "type": "string",
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "expectedOperatorId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "hostId",
+                                        "sourceOperationId",
+                                        "expectedOperatorId"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "closesSurfaceOperationId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "id",
+                                    "label",
+                                    "keyMode",
+                                    "keys",
+                                    "parameters"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "required": [
-                                  "name",
-                                  "source"
-                                ],
-                                "additionalProperties": false
-                              }
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "operator_property_update"
+                                    },
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "surfaceOperationId": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "target": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "control"
+                                        },
+                                        "hostId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "hostId"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "path": {
+                                      "minItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "parameters": {
+                                      "minItems": 1,
+                                      "maxItems": 1,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "name": {
+                                            "type": "string",
+                                            "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                                          },
+                                          "source": {
+                                            "oneOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "literal"
+                                                  },
+                                                  "value": {
+                                                    "$ref": "#/$defs/__schema0"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "value"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "action_argument"
+                                                  },
+                                                  "argumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "transform": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "identity",
+                                                      "divide_by_two",
+                                                      "uniform_vector3",
+                                                      "vector3_x",
+                                                      "vector3_y",
+                                                      "vector3_z"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "argumentName",
+                                                  "transform"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "kind": {
+                                                    "type": "string",
+                                                    "const": "derived_action_arguments"
+                                                  },
+                                                  "derivation": {
+                                                    "type": "string",
+                                                    "const": "segment_frame"
+                                                  },
+                                                  "startArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "endArgumentName": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "output": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "distance",
+                                                      "midpoint",
+                                                      "rotation_euler_xyz_align_z"
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "kind",
+                                                  "derivation",
+                                                  "startArgumentName",
+                                                  "endArgumentName",
+                                                  "output"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "name",
+                                          "source"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "id",
+                                    "label",
+                                    "surfaceOperationId",
+                                    "target",
+                                    "path",
+                                    "parameters"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
                             }
-                          },
-                          "required": [
-                            "id",
-                            "label",
-                            "keyMode",
-                            "keys",
-                            "parameters"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       },
                       "omittedActionArguments": {

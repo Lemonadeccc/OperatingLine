@@ -79,6 +79,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   路径、leaf 验证状态、轨迹、来源和证据；unavailable 轨迹不返回。分页使用独立的存储
   `indexSequence`，不把它当作 operation 顺序；接口不做向量/相似度检索，也不执行宿主动作。见
   [ADR 0044](docs/adr/0044-exact-procedure-operation-index.md)。
+- **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
+  `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
+  不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
+  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.20.0`
+  未启用该形状，Icosphere shortcut 仍 unavailable，等待 Blender 4.5/5.1 真实前台参数回放与 Observation。
+  见 [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md)。
 - **自然语言 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
   `POST /api/v1/procedure/prompt` 返回供应商无关的 `1.0.0` packet，精确绑定 ActionCatalog、
   InteractionCatalog、tree identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
@@ -157,7 +163,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0053](docs/adr/0053-cone-segment-frame-menu-materialization.md) 与
   [ADR 0054](docs/adr/0054-cylinder-segment-frame-menu-materialization.md) 与
   [ADR 0055](docs/adr/0055-cube-candidate-shortcut-materialization.md) 与
-  [ADR 0056](docs/adr/0056-plane-candidate-shortcut-materialization.md)。
+  [ADR 0056](docs/adr/0056-plane-candidate-shortcut-materialization.md) 与
+  [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、

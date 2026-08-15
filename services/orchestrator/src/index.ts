@@ -851,7 +851,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           const found = foundTrack.operations.find(
             (candidate) => candidate.id === indexed.operationId,
           );
-          if (found === undefined || !sameStringArray(found.keys, indexed.shortcutKeys)) {
+          const shortcutContextIsConsistent = (() => {
+            if (found === undefined) return false;
+            if ('kind' in found && found.kind === 'operator_property_update') {
+              const surface = foundTrack.operations.find(
+                (candidate) => candidate.id === found.surfaceOperationId,
+              );
+              const expectedOperatorId =
+                surface !== undefined &&
+                'kind' in surface &&
+                surface.kind === 'key_input' &&
+                surface.opensSurface !== undefined
+                  ? surface.opensSurface.expectedOperatorId
+                  : null;
+              return (
+                indexed.operationKind === 'operator_property_update' &&
+                indexed.shortcutKeys === null &&
+                found.target.hostId === indexed.targetHostId &&
+                sameStringArray(found.path, indexed.interactionPath) &&
+                found.surfaceOperationId === indexed.surfaceOperationId &&
+                expectedOperatorId === indexed.expectedOperatorId
+              );
+            }
+            const opensSurface = 'opensSurface' in found ? found.opensSurface : undefined;
+            const closesSurfaceOperationId =
+              'closesSurfaceOperationId' in found ? found.closesSurfaceOperationId : undefined;
+            const closedSurface =
+              closesSurfaceOperationId === undefined
+                ? undefined
+                : foundTrack.operations.find(
+                    (candidate) => candidate.id === closesSurfaceOperationId,
+                  );
+            const expectedOperatorId =
+              opensSurface?.expectedOperatorId ??
+              (closedSurface as { opensSurface?: { expectedOperatorId: string } } | undefined)
+                ?.opensSurface?.expectedOperatorId ??
+              null;
+            return (
+              indexed.operationKind === 'shortcut_key_input' &&
+              sameStringArray(found.keys, indexed.shortcutKeys) &&
+              sameStringArray(found.selectionPath ?? null, indexed.interactionPath) &&
+              (opensSurface?.hostId ?? null) === indexed.targetHostId &&
+              (opensSurface === undefined ? (closesSurfaceOperationId ?? null) : found.id) ===
+                indexed.surfaceOperationId &&
+              expectedOperatorId === indexed.expectedOperatorId
+            );
+          })();
+          if (!shortcutContextIsConsistent || found === undefined) {
             throw new Error(`Indexed shortcut operation is inconsistent: ${indexed.operationId}`);
           }
           operation = found;
@@ -963,6 +1009,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ...(request.leafId === undefined ? {} : { leafId: request.leafId }),
         ...(request.operationId === undefined ? {} : { operationId: request.operationId }),
         ...(request.modality === undefined ? {} : { modality: request.modality }),
+        ...(request.operationKind === undefined ? {} : { operationKind: request.operationKind }),
         ...(request.validationStatus === undefined
           ? {}
           : { validationStatus: request.validationStatus }),
@@ -973,6 +1020,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           : { menuTargetHostId: request.menuTargetHostId }),
         ...(request.menuPath === undefined ? {} : { menuPath: request.menuPath }),
         ...(request.shortcutKeys === undefined ? {} : { shortcutKeys: request.shortcutKeys }),
+        ...(request.targetHostId === undefined ? {} : { targetHostId: request.targetHostId }),
+        ...(request.interactionPath === undefined
+          ? {}
+          : { interactionPath: request.interactionPath }),
+        ...(request.surfaceOperationId === undefined
+          ? {}
+          : { surfaceOperationId: request.surfaceOperationId }),
+        ...(request.expectedOperatorId === undefined
+          ? {}
+          : { expectedOperatorId: request.expectedOperatorId }),
         ...(request.mcpServerName === undefined ? {} : { mcpServerName: request.mcpServerName }),
         ...(request.mcpToolName === undefined ? {} : { mcpToolName: request.mcpToolName }),
       });
@@ -1708,7 +1765,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.search',
         {
           description:
-            'Search immutable ProcedureTree operations using exact structured selectors for semantic actions, ActionCatalog actions, menu targets and paths, shortcut keys, MCP tools, validation state, and revision provenance. Returns no similarity score and never executes host work.',
+            'Search immutable ProcedureTree operations using exact structured selectors for semantic actions, ActionCatalog actions, menu targets and paths, shortcut keys and operator-property surface context, MCP tools, validation state, and revision provenance. Returns no similarity score and never executes host work.',
           inputSchema: deferMcpInputValidation(procedureOperationSearchRequestSchema),
           outputSchema: procedureOperationSearchResultSchema,
         },

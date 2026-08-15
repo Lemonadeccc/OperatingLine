@@ -81,7 +81,10 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0053](../adr/0053-cone-segment-frame-menu-materialization.md) 与
 [ADR 0054](../adr/0054-cylinder-segment-frame-menu-materialization.md) 与
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
-[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。
+[ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。Extension 的严格目录 loader 也能解析并
+验证未来的 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；
+但 `1.20.0` 尚无 recipe 使用该能力，不能据此声称 Icosphere shortcut 已回放或可执行。见
+[ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md)。
 Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus` 七条 `native_path` 接到
 真实控件：Guidance 可见时临时替换三个原生菜单类的 draw 方法，隐藏或卸载时精确恢复；最终绿色
 菜单项与 `Next` 进入同一个 Session action 和 receipt。相同 action 的叶节点会复用同一路径，例如

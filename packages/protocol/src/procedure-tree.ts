@@ -14,7 +14,11 @@ import {
 import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const procedureTreeFormatVersion = '1.0.0' as const;
-export const procedureTreeFormatVersionSchema = z.literal(procedureTreeFormatVersion);
+export const procedureTreeExtendedShortcutFormatVersion = '1.1.0' as const;
+export const procedureTreeFormatVersionSchema = z.enum([
+  procedureTreeFormatVersion,
+  procedureTreeExtendedShortcutFormatVersion,
+]);
 
 export const procedureSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -118,6 +122,62 @@ export const shortcutProcedureOperationSchema = z.strictObject({
 });
 export type ShortcutProcedureOperation = z.infer<typeof shortcutProcedureOperationSchema>;
 
+const shortcutProcedureSurfaceSchema = z.strictObject({
+  kind: z.literal('adjust_last_operation'),
+  hostId: z.literal('screen.redo_last'),
+  sourceOperationId: guideStepIdSchema,
+  expectedOperatorId: z.string().min(1),
+});
+
+export const shortcutKeyInputProcedureOperationSchema = z
+  .strictObject({
+    ...procedureOperationBaseShape,
+    kind: z.literal('key_input'),
+    keyMode: z.enum(['chord', 'sequence']),
+    keys: z.array(z.string().min(1)).min(1),
+    selectionPath: z.array(z.string().min(1)).min(1).optional(),
+    parameters: z.record(z.string().min(1), z.json()),
+    opensSurface: shortcutProcedureSurfaceSchema.optional(),
+    closesSurfaceOperationId: guideStepIdSchema.optional(),
+  })
+  .refine(
+    (operation) =>
+      operation.opensSurface === undefined || operation.closesSurfaceOperationId === undefined,
+    { message: 'Shortcut key input cannot open and close a surface in the same operation' },
+  );
+export type ShortcutKeyInputProcedureOperation = z.infer<
+  typeof shortcutKeyInputProcedureOperationSchema
+>;
+
+export const shortcutOperatorPropertyUpdateProcedureOperationSchema = z.strictObject({
+  ...procedureOperationBaseShape,
+  kind: z.literal('operator_property_update'),
+  surfaceOperationId: guideStepIdSchema,
+  target: z.strictObject({
+    kind: z.literal('control'),
+    hostId: z.string().min(1),
+  }),
+  path: z.array(z.string().min(1)).min(1),
+  parameters: z.strictObject({ value: z.json() }),
+});
+export type ShortcutOperatorPropertyUpdateProcedureOperation = z.infer<
+  typeof shortcutOperatorPropertyUpdateProcedureOperationSchema
+>;
+
+export const extendedShortcutProcedureOperationSchema = z.discriminatedUnion('kind', [
+  shortcutKeyInputProcedureOperationSchema,
+  shortcutOperatorPropertyUpdateProcedureOperationSchema,
+]);
+export type ExtendedShortcutProcedureOperation = z.infer<
+  typeof extendedShortcutProcedureOperationSchema
+>;
+
+export const shortcutLedProcedureOperationSchema = z.union([
+  shortcutProcedureOperationSchema,
+  extendedShortcutProcedureOperationSchema,
+]);
+export type ShortcutLedProcedureOperation = z.infer<typeof shortcutLedProcedureOperationSchema>;
+
 export const mcpProcedureCallSchema = z.strictObject({
   ...procedureOperationBaseShape,
   serverName: z.string().min(1),
@@ -155,7 +215,7 @@ export const shortcutProcedureTrackSchema = z.discriminatedUnion('availability',
   z.strictObject({
     ...availableTrackShape,
     modality: z.literal('shortcut'),
-    operations: z.array(shortcutProcedureOperationSchema).min(1),
+    operations: z.array(shortcutLedProcedureOperationSchema).min(1),
   }),
   z.strictObject({ ...unavailableTrackShape, modality: z.literal('shortcut') }),
 ]);
@@ -224,20 +284,162 @@ export const procedureNodeSchema = z.discriminatedUnion('kind', [
 ]);
 export type ProcedureNode = z.infer<typeof procedureNodeSchema>;
 
-export const procedureTreeSchema = z.strictObject({
-  formatVersion: procedureTreeFormatVersionSchema,
-  id: guideStepIdSchema,
-  revision: z.number().int().positive(),
-  title: z.string().min(1),
-  adapterId: z.string().min(1),
-  actionCatalogVersion: catalogVersionSchema,
-  interactionCatalogVersion: catalogVersionSchema,
-  hostVersionRange: stableVersionRangeSchema,
-  rootNodeId: guideStepIdSchema,
-  sources: z.array(procedureSourceSchema).min(1),
-  evidence: z.array(procedureEvidenceSchema),
-  nodes: z.array(procedureNodeSchema).min(1),
+const procedureTreeVersionedNodesJsonSchema = (operationConstraint: object) => ({
+  type: 'array',
+  items: {
+    if: {
+      type: 'object',
+      properties: { kind: { const: 'leaf' } },
+      required: ['kind'],
+    },
+    then: {
+      type: 'object',
+      properties: {
+        shortcutTracks: {
+          type: 'array',
+          items: {
+            if: {
+              type: 'object',
+              properties: { availability: { const: 'available' } },
+              required: ['availability'],
+            },
+            then: {
+              type: 'object',
+              properties: {
+                operations: {
+                  type: 'array',
+                  items: operationConstraint,
+                },
+              },
+              required: ['operations'],
+            },
+          },
+        },
+      },
+      required: ['shortcutTracks'],
+    },
+  },
 });
+
+const extendedPropertyNodeJsonSchema = {
+  type: 'object',
+  properties: {
+    kind: { const: 'leaf' },
+    shortcutTracks: {
+      type: 'array',
+      contains: {
+        type: 'object',
+        properties: {
+          availability: { const: 'available' },
+          operations: {
+            type: 'array',
+            contains: {
+              type: 'object',
+              properties: { kind: { const: 'operator_property_update' } },
+              required: ['kind'],
+            },
+          },
+        },
+        required: ['availability', 'operations'],
+      },
+    },
+  },
+  required: ['kind', 'shortcutTracks'],
+} as const;
+
+export const procedureTreeSchema = z
+  .strictObject({
+    formatVersion: procedureTreeFormatVersionSchema,
+    id: guideStepIdSchema,
+    revision: z.number().int().positive(),
+    title: z.string().min(1),
+    adapterId: z.string().min(1),
+    actionCatalogVersion: catalogVersionSchema,
+    interactionCatalogVersion: catalogVersionSchema,
+    hostVersionRange: stableVersionRangeSchema,
+    rootNodeId: guideStepIdSchema,
+    sources: z.array(procedureSourceSchema).min(1),
+    evidence: z.array(procedureEvidenceSchema),
+    nodes: z.array(procedureNodeSchema).min(1),
+  })
+  .superRefine((tree, context) => {
+    let propertyUpdateCount = 0;
+    for (const [nodeIndex, node] of tree.nodes.entries()) {
+      if (node.kind !== 'leaf') continue;
+      for (const [trackIndex, track] of node.shortcutTracks.entries()) {
+        if (track.availability !== 'available') continue;
+        for (const [operationIndex, operation] of track.operations.entries()) {
+          const operationPath = [
+            'nodes',
+            nodeIndex,
+            'shortcutTracks',
+            trackIndex,
+            'operations',
+            operationIndex,
+          ];
+          if (tree.formatVersion === procedureTreeFormatVersion && 'kind' in operation) {
+            context.addIssue({
+              code: 'custom',
+              path: operationPath,
+              message: 'Procedure tree 1.0.0 requires legacy untyped shortcut operations',
+            });
+          }
+          if (
+            tree.formatVersion === procedureTreeExtendedShortcutFormatVersion &&
+            !('kind' in operation)
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: operationPath,
+              message: 'Procedure tree 1.1.0 requires normalized typed shortcut operations',
+            });
+          }
+          if ('kind' in operation && operation.kind === 'operator_property_update') {
+            propertyUpdateCount += 1;
+          }
+        }
+      }
+    }
+    if (
+      tree.formatVersion === procedureTreeExtendedShortcutFormatVersion &&
+      propertyUpdateCount === 0
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['nodes'],
+        message: 'Procedure tree 1.1.0 requires an operator_property_update shortcut operation',
+      });
+    }
+  })
+  .meta({
+    allOf: [
+      {
+        if: {
+          properties: { formatVersion: { const: procedureTreeFormatVersion } },
+          required: ['formatVersion'],
+        },
+        then: {
+          properties: {
+            nodes: procedureTreeVersionedNodesJsonSchema({ not: { required: ['kind'] } }),
+          },
+        },
+      },
+      {
+        if: {
+          properties: { formatVersion: { const: procedureTreeExtendedShortcutFormatVersion } },
+          required: ['formatVersion'],
+        },
+        then: {
+          properties: {
+            nodes: {
+              ...procedureTreeVersionedNodesJsonSchema({ required: ['kind'] }),
+              contains: extendedPropertyNodeJsonSchema,
+            },
+          },
+        },
+      },
+    ],
+  });
 export type ProcedureTree = z.infer<typeof procedureTreeSchema>;
 
 export const procedureCompilationRequestSchema = z.strictObject({
@@ -339,18 +541,32 @@ export type ProcedureOperationSearchModality = z.infer<
   typeof procedureOperationSearchModalitySchema
 >;
 
+export const procedureOperationSearchKindSchema = z.enum([
+  'semantic_action',
+  'menu_interaction',
+  'shortcut_key_input',
+  'operator_property_update',
+  'mcp_call',
+]);
+export type ProcedureOperationSearchKind = z.infer<typeof procedureOperationSearchKindSchema>;
+
 const procedureOperationSearchSelectorFields = [
   'treeId',
   'adapterId',
   'leafId',
   'operationId',
   'modality',
+  'operationKind',
   'validationStatus',
   'actionName',
   'semanticAction',
   'menuTargetHostId',
   'menuPath',
   'shortcutKeys',
+  'targetHostId',
+  'interactionPath',
+  'surfaceOperationId',
+  'expectedOperatorId',
   'mcpServerName',
   'mcpToolName',
 ] as const;
@@ -363,12 +579,17 @@ export const procedureOperationSearchRequestSchema = z
     leafId: guideStepIdSchema.optional(),
     operationId: guideStepIdSchema.optional(),
     modality: procedureOperationSearchModalitySchema.optional(),
+    operationKind: procedureOperationSearchKindSchema.optional(),
     validationStatus: procedureValidationSchema.shape.status.optional(),
     actionName: z.string().min(1).optional(),
     semanticAction: guideStepIdSchema.optional(),
     menuTargetHostId: z.string().min(1).optional(),
     menuPath: z.array(z.string().min(1)).min(1).optional(),
     shortcutKeys: z.array(z.string().min(1)).min(1).optional(),
+    targetHostId: z.string().min(1).optional(),
+    interactionPath: z.array(z.string().min(1)).min(1).optional(),
+    surfaceOperationId: guideStepIdSchema.optional(),
+    expectedOperatorId: z.string().min(1).optional(),
     mcpServerName: z.string().min(1).optional(),
     mcpToolName: z.string().min(1).optional(),
     afterSequence: z.number().int().nonnegative().optional(),
@@ -439,7 +660,7 @@ export const procedureOperationSearchHitSchema = z.discriminatedUnion('modality'
     ...procedureOperationSearchHitBaseShape,
     modality: z.literal('shortcut'),
     track: procedureOperationSearchTrackSchema,
-    operation: shortcutProcedureOperationSchema,
+    operation: shortcutLedProcedureOperationSchema,
   }),
   z.strictObject({
     ...procedureOperationSearchHitBaseShape,
@@ -462,7 +683,7 @@ export type ProcedureOperationSearchResult = z.infer<typeof procedureOperationSe
 export const procedureTrackModalities = ['menu', 'shortcut', 'mcp'] as const;
 export type ProcedureTrackModality = (typeof procedureTrackModalities)[number];
 export type ProcedureTrackOperation =
-  MenuProcedureOperation | ShortcutProcedureOperation | McpProcedureCall;
+  MenuProcedureOperation | ShortcutLedProcedureOperation | McpProcedureCall;
 export interface MaterializedProcedureOperation {
   readonly globalOrder: number;
   readonly leafId: string;
@@ -577,8 +798,140 @@ function validateLeaf(leaf: ProcedureLeafNode, evidenceIds: ReadonlySet<string>)
   }
 }
 
+function validateShortcutSurfaceProtocol(tree: ProcedureTree): void {
+  let extendedPropertyOperationCount = 0;
+  for (const node of tree.nodes) {
+    if (node.kind !== 'leaf') continue;
+    for (const track of node.shortcutTracks) {
+      if (track.availability !== 'available') continue;
+      let openSurfaceOperationId: string | undefined;
+      let openSurfaceExpectedOperatorId: string | undefined;
+      let openSurfacePropertyCount = 0;
+      let openSurfacePropertyHostIds = new Set<string>();
+      for (const [operationIndex, operation] of track.operations.entries()) {
+        if (!('kind' in operation)) {
+          if (tree.formatVersion === procedureTreeExtendedShortcutFormatVersion) {
+            throw new Error(
+              `Procedure tree ${tree.id} format 1.1.0 requires normalized key_input shortcut operations`,
+            );
+          }
+          if (openSurfaceOperationId !== undefined) {
+            throw new Error(
+              `Procedure shortcut track ${track.id} surface ${openSurfaceOperationId} requires contiguous property updates and an explicit close`,
+            );
+          }
+          continue;
+        }
+        if (tree.formatVersion === procedureTreeFormatVersion) {
+          throw new Error(
+            `Procedure tree ${tree.id} format 1.0.0 cannot contain extended shortcut operations`,
+          );
+        }
+        if (operation.kind === 'operator_property_update') {
+          extendedPropertyOperationCount += 1;
+          if (operation.surfaceOperationId !== openSurfaceOperationId) {
+            throw new Error(
+              `Procedure shortcut property ${operation.id} references a surface that is not currently open`,
+            );
+          }
+          const expectedHostPrefix = `${openSurfaceExpectedOperatorId}.`;
+          if (
+            openSurfaceExpectedOperatorId === undefined ||
+            !operation.target.hostId.startsWith(expectedHostPrefix) ||
+            operation.target.hostId.length === expectedHostPrefix.length
+          ) {
+            throw new Error(
+              `Procedure shortcut property ${operation.id} target ${operation.target.hostId} is outside operator ${openSurfaceExpectedOperatorId ?? 'unknown'}`,
+            );
+          }
+          if (openSurfacePropertyHostIds.has(operation.target.hostId)) {
+            throw new Error(
+              `Procedure shortcut surface ${openSurfaceOperationId} repeats property target ${operation.target.hostId}`,
+            );
+          }
+          openSurfacePropertyHostIds.add(operation.target.hostId);
+          openSurfacePropertyCount += 1;
+          continue;
+        }
+        if (operation.opensSurface !== undefined) {
+          const previousOperation = track.operations[operationIndex - 1];
+          if (openSurfaceOperationId !== undefined) {
+            throw new Error(
+              `Procedure shortcut track ${track.id} cannot open ${operation.id} while ${openSurfaceOperationId} is open`,
+            );
+          }
+          if (
+            operation.keyMode !== 'sequence' ||
+            operation.keys.length !== 1 ||
+            operation.keys[0] !== 'F9' ||
+            Object.keys(operation.parameters).length !== 0
+          ) {
+            throw new Error(
+              `Procedure shortcut surface opener ${operation.id} must be a parameterless F9 sequence`,
+            );
+          }
+          if (previousOperation?.id !== operation.opensSurface.sourceOperationId) {
+            throw new Error(
+              `Procedure shortcut surface opener ${operation.id} must immediately follow its source operation`,
+            );
+          }
+          openSurfaceOperationId = operation.id;
+          openSurfaceExpectedOperatorId = operation.opensSurface.expectedOperatorId;
+          openSurfacePropertyCount = 0;
+          openSurfacePropertyHostIds = new Set<string>();
+          continue;
+        }
+        if (operation.closesSurfaceOperationId !== undefined) {
+          if (
+            operation.closesSurfaceOperationId !== openSurfaceOperationId ||
+            openSurfacePropertyCount === 0
+          ) {
+            throw new Error(
+              `Procedure shortcut surface closer ${operation.id} does not close an updated open surface`,
+            );
+          }
+          if (
+            operation.keyMode !== 'sequence' ||
+            operation.keys.length !== 1 ||
+            operation.keys[0] !== 'ENTER' ||
+            Object.keys(operation.parameters).length !== 0
+          ) {
+            throw new Error(
+              `Procedure shortcut surface closer ${operation.id} must be a parameterless ENTER sequence`,
+            );
+          }
+          openSurfaceOperationId = undefined;
+          openSurfaceExpectedOperatorId = undefined;
+          openSurfacePropertyCount = 0;
+          openSurfacePropertyHostIds = new Set<string>();
+          continue;
+        }
+        if (openSurfaceOperationId !== undefined) {
+          throw new Error(
+            `Procedure shortcut track ${track.id} surface ${openSurfaceOperationId} requires contiguous property updates and an explicit close`,
+          );
+        }
+      }
+      if (openSurfaceOperationId !== undefined) {
+        throw new Error(
+          `Procedure shortcut track ${track.id} surface ${openSurfaceOperationId} is not explicitly closed`,
+        );
+      }
+    }
+  }
+  if (
+    tree.formatVersion === procedureTreeExtendedShortcutFormatVersion &&
+    extendedPropertyOperationCount === 0
+  ) {
+    throw new Error(
+      `Procedure tree ${tree.id} format 1.1.0 requires an operator_property_update shortcut operation`,
+    );
+  }
+}
+
 /** Validate cross-reference, ordering, hierarchy, and modality-alignment invariants. */
 export function validateProcedureTree(tree: ProcedureTree): void {
+  validateShortcutSurfaceProtocol(tree);
   const sourceById = new Map<string, ProcedureSource>();
   for (const source of tree.sources) {
     if (sourceById.has(source.id)) {

@@ -43,7 +43,10 @@
       "properties": {
         "formatVersion": {
           "type": "string",
-          "const": "1.0.0"
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
         },
         "procedureTreeId": {
           "type": "string",
