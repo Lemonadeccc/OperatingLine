@@ -294,7 +294,7 @@ Transport、线程和 UI 规则由各宿主实现，但不得改变以下不变�
 `operatingline.plan_and_propose` MCP Prompt、调用 `operatingline.planning.prompt.get` Tool，或直接调用
 `operatingline.planning.context`，取得目标宿主的精确版本化目录、Companion 状态、revision 提示、
 计划约束和目录声明的有序阶段。客户端根据自然语言目标选择 `requiredPhaseIds` 并生成完整
-GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.20.0` 目录提供十九项适配器自有
+GuidePlan，再调用 `operatingline.planning.evaluate`。当前 Blender `1.21.0` 目录提供十九项适配器自有
 `semanticCapabilities`；capability-aware 规划必须在 `planning.capabilityCoverage` 中声明
 `requirement -> capability -> executable leaf` 链。quality baseline `1.1.0` 除既有阶段树、阶段顺序、
 资源创建与依赖、语义锚点和预期观察外，还确定性检查能力/步骤存在、步骤可执行且 action 属于相应能力。
@@ -327,7 +327,7 @@ Provider coordinator、可视化编辑器或训练导出。完整边界见
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.30.0` 精确绑定 ActionCatalog `1.20.0`，冻结 `1.29.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.31.0` 精确绑定 ActionCatalog `1.21.0`，冻结 `1.30.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
 `subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；九步 candidate shortcut 依次为
@@ -455,20 +455,23 @@ grounding attestation。完整决策见
 
 首个可执行桥接使用独立的 `ProcedureLeafReplay 1.0.0` 合同。调用方把原始 authoring packet、候选树、
 目标实例和单一 leaf 提交给 MCP/HTTP `procedure.replay.propose`；Orchestrator 重新运行 packet-bound
-validation/materialization，只接受单一 UV Sphere、Icosphere、Cube 或 Plane action、`rollback_step`
-成功门、补偿回退和参数完全匹配的 `uv_sphere_ready`、`icosphere_ready`、`cube_ready` 或
-`plane_ready`；Icosphere 验证细分级别对应的精确拓扑，Cube/Plane 验证尺寸对应的坐标与固定拓扑。完整 request、
+validation/materialization，只接受单一 UV Sphere、Icosphere、Cube、Plane 或 Torus action、`rollback_step`
+成功门、补偿回退和参数完全匹配的 `uv_sphere_ready`、`icosphere_ready`、`cube_ready`、
+`plane_ready` 或 `torus_ready`；Icosphere 验证细分级别对应的精确拓扑，Cube/Plane 验证尺寸对应的坐标与固定拓扑，
+Torus 验证 segments/radii 对应的逐顶点参数化坐标与动态拓扑。完整 request、
 materialization、编译 Plan 与待审 Proposal 作为不可变
 binding 原子入库，Proposal 仍必须由同一 Blender 实例人工 Accept。decision 与 terminal report 在接收时
 必须通过同一协商 lease，并以服务端单调 receipt 序列证明 Proposal → decision → report 顺序。执行后，
 `procedure.replay.finalize` 只关联这条认证链；Plan hash、execution、
 step、host version 和强 Observation 任一不匹配都会 fail closed。最终 attestation 与 replay 事件为追加式，
 可进入 Eval/replay 导出。其证据范围严格是 managed Action 结果：menu 为
-`catalog_grounded_not_executed`、shortcut 为 `candidate_not_executed`、MCP 为 `unavailable`；合同不声称
+`catalog_grounded_not_executed`、shortcut 按物化事实为 `candidate_not_executed` 或 `unavailable`、MCP 为
+`unavailable`；合同不声称
 逐控件 UI 回放、快捷键等价、具体 UI 执行入口、action-level MCP 调用或原生 Undo checkpoint 已被证明。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
-[ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md)。
+[ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
+[ADR 0068](../adr/0068-torus-managed-replay-attestation.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数
@@ -505,7 +508,7 @@ Orchestrator 不内置模型，也不通过关键词假装理解目标；目标�
 [ADR 0012](../adr/0012-provider-neutral-planner-packets.md)。目录约束 coverage 决策见
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 
-节点局部重规划对当前 Blender `1.20.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
+节点局部重规划对当前 Blender `1.21.0` 使用独立的 `ReplanningPromptPacket 1.1.0`；历史目录继续使用
 `1.0.0`。MCP
 `operatingline.replan.prompt.get` 与 HTTP `POST /api/v1/replan/prompt` 从一个仍 pending 的线性 thread
 head 构建相同 packet；其中绑定完整 immutable base Plan、引用节点、精确 ActionCatalog、发起实例最新

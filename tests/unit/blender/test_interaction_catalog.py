@@ -299,8 +299,8 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.30.0")
-        self.assertEqual(catalog.action_catalog_version, "1.20.0")
+        self.assertEqual(catalog.catalog_version, "1.31.0")
+        self.assertEqual(catalog.action_catalog_version, "1.21.0")
         self.assertEqual(
             catalog.host_version_range,
             ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",

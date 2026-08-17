@@ -22,6 +22,7 @@ export const procedureLeafReplayActionNameSchema = z.enum([
   'blender.mesh.create_icosphere',
   'blender.mesh.create_cube',
   'blender.mesh.create_plane',
+  'blender.mesh.create_torus',
 ]);
 export type ProcedureLeafReplayActionName = z.infer<typeof procedureLeafReplayActionNameSchema>;
 
@@ -30,6 +31,7 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_icosphere': 'icosphere_ready',
   'blender.mesh.create_cube': 'cube_ready',
   'blender.mesh.create_plane': 'plane_ready',
+  'blender.mesh.create_torus': 'torus_ready',
 } as const satisfies Record<ProcedureLeafReplayActionName, string>;
 
 const replayIntegritySchema = z.strictObject({
@@ -135,7 +137,7 @@ const procedureLeafReplayClaimsSchema = z.strictObject({
   hostExecutionStarted: z.literal(false),
   managedActionResult: z.literal('pending'),
   menuTrack: z.literal('catalog_grounded_not_executed'),
-  shortcutTrack: z.literal('candidate_not_executed'),
+  shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.literal('unavailable'),
 });
 
@@ -209,6 +211,19 @@ export const procedureLeafReplayBindingSchema = procedureLeafReplayBindingConten
         code: 'custom',
         path: ['recipeId'],
         message: 'Replay recipeId must match the materialization coverage for leafId',
+      });
+    }
+    const expectedShortcutClaim =
+      coverage?.shortcut === 'materialized'
+        ? 'candidate_not_executed'
+        : coverage?.shortcut === 'unavailable'
+          ? 'unavailable'
+          : null;
+    if (expectedShortcutClaim === null || binding.claims.shortcutTrack !== expectedShortcutClaim) {
+      context.addIssue({
+        code: 'custom',
+        path: ['claims', 'shortcutTrack'],
+        message: 'Replay shortcut claim must match materialization coverage',
       });
     }
     if (
@@ -352,6 +367,16 @@ const procedureLeafReplaySizedPrimitiveParametersSchema = z.strictObject({
   resourceId: guideStepIdSchema,
   objectName: z.string().min(1),
   size: z.number().positive().finite(),
+  location: z.array(z.number().finite()).length(3),
+});
+
+const procedureLeafReplayTorusParametersSchema = z.strictObject({
+  resourceId: guideStepIdSchema,
+  objectName: z.string().min(1),
+  majorSegments: z.number().int().min(3).max(128),
+  minorSegments: z.number().int().min(3).max(64),
+  majorRadius: z.number().positive().finite(),
+  minorRadius: z.number().positive().finite(),
   location: z.array(z.number().finite()).length(3),
 });
 
@@ -510,6 +535,47 @@ const procedureLeafReplayPlaneDetailsSchema = z
     }
   });
 
+const procedureLeafReplayTorusDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayTorusParametersSchema,
+    ...procedureLeafReplayPrimitiveDetailsShape,
+    geometryMatches: z.literal(true),
+    vertexCount: z.number().int().positive(),
+    edgeCount: z.number().int().positive(),
+    faceCount: z.number().int().positive(),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.resourceId !== details.parameters.resourceId ||
+      details.objectName !== details.parameters.objectName
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Torus replay details must match their evaluated parameters',
+      });
+    }
+    if (details.meshId !== `${details.resourceId}.mesh`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['meshId'],
+        message: 'Torus replay meshId must derive from resourceId',
+      });
+    }
+    const vertexCount = details.parameters.majorSegments * details.parameters.minorSegments;
+    if (
+      details.vertexCount !== vertexCount ||
+      details.edgeCount !== vertexCount * 2 ||
+      details.faceCount !== vertexCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vertexCount'],
+        message: 'Torus replay topology must match its accepted segment counts',
+      });
+    }
+  });
+
 const procedureLeafReplayUvSphereObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('uv_sphere_ready'),
   satisfied: z.literal(true),
@@ -534,11 +600,18 @@ const procedureLeafReplayPlaneObservationSchema = companionObservationSchema.saf
   details: procedureLeafReplayPlaneDetailsSchema,
 });
 
+const procedureLeafReplayTorusObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('torus_ready'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplayTorusDetailsSchema,
+});
+
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
   procedureLeafReplayUvSphereObservationSchema,
   procedureLeafReplayIcosphereObservationSchema,
   procedureLeafReplayCubeObservationSchema,
   procedureLeafReplayPlaneObservationSchema,
+  procedureLeafReplayTorusObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 
@@ -579,7 +652,7 @@ const procedureLeafReplaySuccessGateSchema = z
 const procedureLeafReplayVerificationScopeSchema = z.strictObject({
   managedActionResult: z.literal('verified'),
   menuTrack: z.literal('catalog_grounded_not_executed'),
-  shortcutTrack: z.literal('candidate_not_executed'),
+  shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.literal('unavailable'),
 });
 

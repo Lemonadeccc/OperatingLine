@@ -11466,7 +11466,8 @@
             "blender.mesh.create_uv_sphere",
             "blender.mesh.create_icosphere",
             "blender.mesh.create_cube",
-            "blender.mesh.create_plane"
+            "blender.mesh.create_plane",
+            "blender.mesh.create_torus"
           ]
         },
         "claims": {
@@ -11494,7 +11495,10 @@
             },
             "shortcutTrack": {
               "type": "string",
-              "const": "candidate_not_executed"
+              "enum": [
+                "candidate_not_executed",
+                "unavailable"
+              ]
             },
             "mcpTrack": {
               "type": "string",

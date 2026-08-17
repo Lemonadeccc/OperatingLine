@@ -269,6 +269,20 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         claims: { ...binding.claims, menuTrack: 'verified' },
       }).success,
     ).toBe(false);
+    const mismatchedShortcutContent = {
+      ...content,
+      claims: { ...content.claims, shortcutTrack: 'unavailable' as const },
+    };
+    expect(
+      procedureLeafReplayBindingSchema.safeParse({
+        ...mismatchedShortcutContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256: computeProcedureLeafReplayBindingContentSha256(mismatchedShortcutContent),
+        },
+      }).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayBindingSchema.safeParse({
         ...binding,
@@ -555,6 +569,63 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       expect(procedureLeafReplayAttestationSchema.safeParse(sizedAttestation).success).toBe(true);
       return sizedAttestation;
     });
+    const torusObservation = {
+      kind: 'torus_ready',
+      satisfied: true,
+      details: {
+        ...sizedPrimitiveDetails,
+        parameters: {
+          resourceId,
+          objectName,
+          majorSegments: 16,
+          minorSegments: 8,
+          majorRadius: 0.25,
+          minorRadius: 0.75,
+          location: leaf.action!.arguments['location'],
+        },
+        geometryMatches: true,
+        vertexCount: 128,
+        edgeCount: 256,
+        faceCount: 128,
+      },
+    } as const;
+    const torusContent = {
+      ...content,
+      report: { ...content.report, observations: [torusObservation] },
+      execution: {
+        ...content.execution,
+        action: { adapterId: 'blender', name: 'blender.mesh.create_torus' },
+      },
+      successGate: { observations: [torusObservation], allSatisfied: true },
+      verificationScope: { ...content.verificationScope, shortcutTrack: 'unavailable' },
+    } as const;
+    const torusAttestation = attest(torusContent);
+    expect(procedureLeafReplayAttestationSchema.safeParse(torusAttestation).success).toBe(true);
+    expect(
+      procedureLeafReplayAttestationSchema.safeParse(
+        attest({
+          ...torusContent,
+          report: {
+            ...torusContent.report,
+            observations: [
+              {
+                ...torusObservation,
+                details: { ...torusObservation.details, edgeCount: 255 },
+              },
+            ],
+          },
+          successGate: {
+            observations: [
+              {
+                ...torusObservation,
+                details: { ...torusObservation.details, edgeCount: 255 },
+              },
+            ],
+            allSatisfied: true,
+          },
+        }),
+      ).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayAttestationSchema.safeParse({
         ...attestation,
@@ -663,6 +734,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         { value: attestation, accepted: true },
         { value: icosphereAttestation, accepted: true },
         ...sizedPrimitiveAttestations.map((value) => ({ value, accepted: true as const })),
+        { value: torusAttestation, accepted: true },
         {
           value: {
             ...attestation,
@@ -675,7 +747,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
             ...attestation,
             execution: {
               ...attestation.execution,
-              action: { ...attestation.execution.action, name: 'blender.mesh.create_torus' },
+              action: { ...attestation.execution.action, name: 'blender.mesh.create_cone' },
             },
           },
           accepted: false,

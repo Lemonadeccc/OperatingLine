@@ -85,6 +85,37 @@ const replayActionContracts = {
     }),
     expectedTopology: () => ({ vertexCount: 4, edgeCount: 4, faceCount: 1 }),
   },
+  'blender.mesh.create_torus': {
+    observationKind: 'torus_ready',
+    dimensionMatchDetailKey: 'geometryMatches',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      majorSegments: actionArguments['majorSegments'],
+      minorSegments: actionArguments['minorSegments'],
+      majorRadius: actionArguments['majorRadius'],
+      minorRadius: actionArguments['minorRadius'],
+      location: actionArguments['location'],
+    }),
+    expectedTopology: (actionArguments: Record<string, unknown>) => {
+      const majorSegments = actionArguments['majorSegments'];
+      const minorSegments = actionArguments['minorSegments'];
+      if (
+        typeof majorSegments !== 'number' ||
+        !Number.isInteger(majorSegments) ||
+        majorSegments < 3 ||
+        majorSegments > 128 ||
+        typeof minorSegments !== 'number' ||
+        !Number.isInteger(minorSegments) ||
+        minorSegments < 3 ||
+        minorSegments > 64
+      ) {
+        return null;
+      }
+      const vertexCount = majorSegments * minorSegments;
+      return { vertexCount, edgeCount: vertexCount * 2, faceCount: vertexCount };
+    },
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   {
@@ -198,23 +229,26 @@ export function prepareProcedureLeafReplay(
 
   const coverage = materialization.coverage;
   const leafCoverage = coverage[0];
+  const shortcutCoverageValid =
+    leafCoverage?.shortcut === 'materialized' || leafCoverage?.shortcut === 'unavailable';
   if (
     coverage.length !== 1 ||
     leafCoverage?.leafId !== leaf.id ||
     leafCoverage.menu !== 'materialized' ||
-    leafCoverage.shortcut !== 'materialized' ||
+    !shortcutCoverageValid ||
     leafCoverage.mcp !== 'unavailable' ||
     leafCoverage.recipeId === null
   ) {
     throw new ProcedureLeafReplayError(
-      'Replay leaf requires one catalog-grounded menu and candidate shortcut recipe with unavailable MCP',
+      'Replay leaf requires one catalog-grounded menu, an explicit shortcut state, and unavailable MCP',
     );
   }
   if (
     leaf.menuTracks.length !== 1 ||
     leaf.menuTracks[0]?.availability !== 'available' ||
     leaf.shortcutTracks.length !== 1 ||
-    leaf.shortcutTracks[0]?.availability !== 'available' ||
+    leaf.shortcutTracks[0]?.availability !==
+      (leafCoverage.shortcut === 'materialized' ? 'available' : 'unavailable') ||
     leaf.mcpTracks.length !== 1 ||
     leaf.mcpTracks[0]?.availability !== 'unavailable'
   ) {
@@ -270,6 +304,9 @@ export function buildProcedureLeafReplayBinding(input: {
   readonly actionName: ProcedureLeafReplayActionName;
   readonly createdAt: string;
 }): ProcedureLeafReplayBinding {
+  const leafCoverage = input.materialization.coverage.find(
+    (entry) => entry.leafId === input.request.leafId,
+  );
   const content: Omit<ProcedureLeafReplayBinding, 'integrity'> = {
     formatVersion: procedureLeafReplayFormatVersion,
     replayId: input.request.replayId,
@@ -288,7 +325,8 @@ export function buildProcedureLeafReplayBinding(input: {
       hostExecutionStarted: false,
       managedActionResult: 'pending',
       menuTrack: 'catalog_grounded_not_executed',
-      shortcutTrack: 'candidate_not_executed',
+      shortcutTrack:
+        leafCoverage?.shortcut === 'materialized' ? 'candidate_not_executed' : 'unavailable',
       mcpTrack: 'unavailable',
     },
     createdAt: input.createdAt,
@@ -402,14 +440,20 @@ export function buildProcedureLeafReplayAttestation(input: {
   const expectedParameters = expectedObservation?.parameters;
   const expectedResourceId = expectedParameters?.['resourceId'];
   const expectedObjectName = expectedParameters?.['objectName'];
-  const expectedDimension =
-    expectedParameters?.[
-      binding.actionName === 'blender.mesh.create_uv_sphere' ||
-      binding.actionName === 'blender.mesh.create_icosphere'
-        ? 'radius'
-        : 'size'
-    ];
+  const expectedDimensions =
+    binding.actionName === 'blender.mesh.create_torus'
+      ? [expectedParameters?.['majorRadius'], expectedParameters?.['minorRadius']]
+      : [
+          expectedParameters?.[
+            binding.actionName === 'blender.mesh.create_uv_sphere' ||
+            binding.actionName === 'blender.mesh.create_icosphere'
+              ? 'radius'
+              : 'size'
+          ],
+        ];
   const expectedSubdivisions = expectedParameters?.['subdivisions'];
+  const expectedMajorSegments = expectedParameters?.['majorSegments'];
+  const expectedMinorSegments = expectedParameters?.['minorSegments'];
   const expectedLocation = expectedParameters?.['location'];
   const expectedLocationX = Array.isArray(expectedLocation) ? expectedLocation[0] : undefined;
   const expectedLocationY = Array.isArray(expectedLocation) ? expectedLocation[1] : undefined;
@@ -464,9 +508,9 @@ export function buildProcedureLeafReplayAttestation(input: {
     !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
     typeof expectedResourceId !== 'string' ||
     typeof expectedObjectName !== 'string' ||
-    typeof expectedDimension !== 'number' ||
-    !Number.isFinite(expectedDimension) ||
-    expectedDimension <= 0 ||
+    expectedDimensions.some(
+      (dimension) => typeof dimension !== 'number' || !Number.isFinite(dimension) || dimension <= 0,
+    ) ||
     !Array.isArray(expectedLocation) ||
     expectedLocation.length !== 3 ||
     typeof expectedLocationX !== 'number' ||
@@ -480,6 +524,15 @@ export function buildProcedureLeafReplayAttestation(input: {
         !Number.isInteger(expectedSubdivisions) ||
         expectedSubdivisions < 1 ||
         expectedSubdivisions > 5)) ||
+    (binding.actionName === 'blender.mesh.create_torus' &&
+      (typeof expectedMajorSegments !== 'number' ||
+        !Number.isInteger(expectedMajorSegments) ||
+        expectedMajorSegments < 3 ||
+        expectedMajorSegments > 128 ||
+        typeof expectedMinorSegments !== 'number' ||
+        !Number.isInteger(expectedMinorSegments) ||
+        expectedMinorSegments < 3 ||
+        expectedMinorSegments > 64)) ||
     expectedTopology === null ||
     observation.details['resourceId'] !== expectedResourceId ||
     observation.details['objectName'] !== expectedObjectName ||
@@ -585,7 +638,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     verificationScope: {
       managedActionResult: 'verified',
       menuTrack: 'catalog_grounded_not_executed',
-      shortcutTrack: 'candidate_not_executed',
+      shortcutTrack: binding.claims.shortcutTrack,
       mcpTrack: 'unavailable',
     },
     attestedAt: input.attestedAt,

@@ -77,35 +77,134 @@ def _mesh_signature_sha256(signature: tuple[Any, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _bounded_integer_parameter(
+    value: Any,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int | None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not float(value).is_integer()
+    ):
+        return None
+    result = int(value)
+    return result if minimum <= result <= maximum else None
+
+
+def _torus_coordinates_match(
+    mesh: bpy.types.Mesh,
+    major_segments: int,
+    minor_segments: int,
+    major_radius: float,
+    minor_radius: float,
+) -> bool:
+    if len(mesh.vertices) != major_segments * minor_segments:
+        return False
+    tolerance = max(1e-6, (major_radius + minor_radius) * 1e-5)
+    for vertex_index, vertex in enumerate(mesh.vertices):
+        major_index, minor_index = divmod(vertex_index, minor_segments)
+        major_angle = math.tau * major_index / major_segments
+        minor_angle = math.tau * minor_index / minor_segments
+        radial = major_radius + minor_radius * math.cos(minor_angle)
+        expected = (
+            radial * math.cos(major_angle),
+            radial * math.sin(major_angle),
+            minor_radius * math.sin(minor_angle),
+        )
+        if not all(
+            math.isclose(
+                float(actual),
+                target,
+                rel_tol=1e-5,
+                abs_tol=tolerance,
+            )
+            for actual, target in zip(vertex.co, expected)
+        ):
+            return False
+    return True
+
+
 def _single_mesh_primitive_ready(
     parameters: Mapping[str, Any],
     receipts: Mapping[str, ActionReceipt],
     *,
     action_name: str,
-    primitive_kind: Literal["uv_sphere", "icosphere", "cube", "plane"],
+    primitive_kind: Literal["uv_sphere", "icosphere", "cube", "plane", "torus"],
 ) -> ObservationResult:
     spherical = primitive_kind in {"uv_sphere", "icosphere"}
     subdivisions_required = primitive_kind == "icosphere"
-    dimension_parameter = "radius" if spherical else "size"
-    dimension_detail = "radiusMatches" if spherical else "sizeMatches"
-    allowed_parameters = {
-        "resourceId",
-        "objectName",
-        dimension_parameter,
-        "location",
-    }
+    torus = primitive_kind == "torus"
+    dimension_parameter = None if torus else ("radius" if spherical else "size")
+    dimension_detail = (
+        "geometryMatches"
+        if torus
+        else ("radiusMatches" if spherical else "sizeMatches")
+    )
+    allowed_parameters = (
+        {
+            "resourceId",
+            "objectName",
+            "majorSegments",
+            "minorSegments",
+            "majorRadius",
+            "minorRadius",
+            "location",
+        }
+        if torus
+        else {
+            "resourceId",
+            "objectName",
+            dimension_parameter,
+            "location",
+        }
+    )
     if subdivisions_required:
         allowed_parameters.add("subdivisions")
     resource_id = parameters.get("resourceId")
     object_name = parameters.get("objectName")
     raw_subdivisions = parameters.get("subdivisions")
-    raw_dimension = parameters.get(dimension_parameter)
+    raw_major_segments = parameters.get("majorSegments")
+    raw_minor_segments = parameters.get("minorSegments")
+    raw_major_radius = parameters.get("majorRadius")
+    raw_minor_radius = parameters.get("minorRadius")
+    raw_dimension = (
+        parameters.get(dimension_parameter)
+        if dimension_parameter is not None
+        else None
+    )
     raw_location = parameters.get("location")
-    subdivisions = (
-        raw_subdivisions
-        if not isinstance(raw_subdivisions, bool)
-        and isinstance(raw_subdivisions, int)
-        and 1 <= raw_subdivisions <= 5
+    subdivisions = _bounded_integer_parameter(
+        raw_subdivisions,
+        minimum=1,
+        maximum=5,
+    )
+    major_segments = _bounded_integer_parameter(
+        raw_major_segments,
+        minimum=3,
+        maximum=128,
+    )
+    minor_segments = _bounded_integer_parameter(
+        raw_minor_segments,
+        minimum=3,
+        maximum=64,
+    )
+    major_radius = (
+        float(raw_major_radius)
+        if not isinstance(raw_major_radius, bool)
+        and isinstance(raw_major_radius, (int, float))
+        and math.isfinite(float(raw_major_radius))
+        and float(raw_major_radius) > 0
+        else None
+    )
+    minor_radius = (
+        float(raw_minor_radius)
+        if not isinstance(raw_minor_radius, bool)
+        and isinstance(raw_minor_radius, (int, float))
+        and math.isfinite(float(raw_minor_radius))
+        and float(raw_minor_radius) > 0
         else None
     )
     dimension = (
@@ -135,7 +234,14 @@ def _single_mesh_primitive_ready(
         and isinstance(object_name, str)
         and object_name
         and (not subdivisions_required or subdivisions is not None)
-        and dimension is not None
+        and (
+            major_segments is not None
+            and minor_segments is not None
+            and major_radius is not None
+            and minor_radius is not None
+            if torus
+            else dimension is not None
+        )
         and len(location) == 3
     )
 
@@ -318,7 +424,10 @@ def _single_mesh_primitive_ready(
         if isinstance(mesh, bpy.types.Mesh)
         else (0, 0, 0)
     )
-    if primitive_kind == "icosphere" and subdivisions is not None:
+    if primitive_kind == "torus" and major_segments is not None and minor_segments is not None:
+        vertex_count = major_segments * minor_segments
+        expected_counts = (vertex_count, vertex_count * 2, vertex_count)
+    elif primitive_kind == "icosphere" and subdivisions is not None:
         subdivision_scale = 4 ** (subdivisions - 1)
         expected_counts = (
             10 * subdivision_scale + 2,
@@ -340,7 +449,22 @@ def _single_mesh_primitive_ready(
             for component in vertex.co
         )
     )
-    if spherical:
+    if primitive_kind == "torus":
+        dimension_matches = bool(
+            isinstance(mesh, bpy.types.Mesh)
+            and major_segments is not None
+            and minor_segments is not None
+            and major_radius is not None
+            and minor_radius is not None
+            and _torus_coordinates_match(
+                mesh,
+                major_segments,
+                minor_segments,
+                major_radius,
+                minor_radius,
+            )
+        )
+    elif spherical:
         dimension_matches = bool(
             isinstance(mesh, bpy.types.Mesh)
             and dimension is not None
@@ -505,6 +629,17 @@ def _plane_ready(
         receipts,
         action_name="blender.mesh.create_plane",
         primitive_kind="plane",
+    )
+
+
+def _torus_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _single_mesh_primitive_ready(
+        parameters,
+        receipts,
+        action_name="blender.mesh.create_torus",
+        primitive_kind="torus",
     )
 
 
@@ -2020,6 +2155,7 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "icosphere_ready": _icosphere_ready,
     "cube_ready": _cube_ready,
     "plane_ready": _plane_ready,
+    "torus_ready": _torus_ready,
     "material_assigned": _material_assigned,
     "armature_ready": _armature_ready,
     "pose_animation_ready": _pose_animation_ready,

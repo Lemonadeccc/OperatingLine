@@ -4517,6 +4517,100 @@ def assert_torus_action_round_trip() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def assert_torus_ready_observation() -> None:
+    object_name = "OperatingLine.ObservedTorus"
+    parameters = {
+        "resourceId": "torus.observed",
+        "objectName": object_name,
+        "majorSegments": 16.0,
+        "minorSegments": 8.0,
+        "majorRadius": 0.25,
+        "minorRadius": 0.75,
+        "location": [1.0, -2.0, 3.0],
+    }
+    torus_step = step(
+        "torus.observed.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_torus",
+            "arguments": parameters,
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), torus_step])
+    session = DemoSession(root, action_registry(root))
+
+    def observe(
+        candidate_parameters=parameters,
+        candidate_receipts=None,
+    ):
+        return observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "torus_ready",
+                    "parameters": candidate_parameters,
+                },
+            ),
+            session.receipts if candidate_receipts is None else candidate_receipts,
+        )[0]
+
+    session.start()
+    assert session.next() is not None
+    torus = bpy.data.objects.get(object_name)
+    assert torus is not None and torus.type == "MESH"
+    successful = observe()
+    assert successful["satisfied"] is True
+    details = successful["details"]
+    assert (
+        details["vertexCount"],
+        details["edgeCount"],
+        details["faceCount"],
+    ) == (128, 256, 128)
+    assert details["geometryMatches"] is True
+    assert "radiusMatches" not in details
+    assert "sizeMatches" not in details
+    assert details["parameters"] == parameters
+
+    for malformed in (
+        {key: value for key, value in parameters.items() if key != "minorRadius"},
+        {**parameters, "unexpected": True},
+        {**parameters, "majorSegments": True},
+        {**parameters, "majorSegments": 16.5},
+        {**parameters, "minorRadius": True},
+    ):
+        assert observe(malformed)["satisfied"] is False
+
+    assert observe({**parameters, "majorRadius": 0.5})["satisfied"] is False
+    mesh = torus.data
+    original_coordinate = mesh.vertices[0].co.copy()
+    mesh.vertices[0].co.x += 0.125
+    mesh.update()
+    assert observe()["satisfied"] is False
+    mesh.vertices[0].co = original_coordinate
+    mesh.update()
+
+    original_action_tag = torus["operating_line_action"]
+    torus["operating_line_action"] = "blender.mesh.create_uv_sphere"
+    assert observe()["satisfied"] is False
+    torus["operating_line_action"] = original_action_tag
+
+    receipt = session.receipts["torus.observed.create"]
+    mismatched_receipts = {
+        **session.receipts,
+        "torus.observed.create": replace(
+            receipt,
+            action_name="blender.mesh.create_uv_sphere",
+        ),
+    }
+    assert observe(candidate_receipts=mismatched_receipts)["satisfied"] is False
+    assert observe()["satisfied"] is True
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
 def assert_torus_maximum_topology() -> None:
     object_name = "OperatingLine.MaximumTorus"
     torus_step = step(
@@ -8983,6 +9077,7 @@ def main() -> None:
     )
     assert_torus_argument_boundaries()
     assert_torus_action_round_trip()
+    assert_torus_ready_observation()
     assert_torus_maximum_topology()
     assert_cone_materialized_operator_contract()
     assert_cylinder_materialized_operator_contract()

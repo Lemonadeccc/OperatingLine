@@ -34,8 +34,8 @@
 
 任意内置按钮的像素边界不是稳定协议。本项目优先标注自有 Panel 控件、对象、骨骼、材质节点
 和世界坐标；Plan 的 `operatorId`/`menuPath` 只保留语义，不决定可点击 UI。Blender InteractionCatalog
-`1.30.0` 与 ActionCatalog `1.20.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
-`1.9.0` 至已冻结的 `1.29.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
+`1.31.0` 与 ActionCatalog `1.21.0` 一一绑定 27 个 action，并由活动叶节点的 `actionName` 选择配方；历史
+`1.9.0` 至已冻结的 `1.30.0` 保持精确回放。UV Sphere 保留目录绑定的七步 menu 与六步
 candidate shortcut；快捷键显式区分 chord/sequence 并把 location 分量绑定到 `G → X/Y/Z`。Icosphere
 保留四步 guidance 加 Location、Object Name 的六步 menu，精确绑定 `subdivisions`、`radius`、`location`
 与 `objectName`；其九步 candidate shortcut 依次执行 `Shift+A → Mesh → Ico Sphere`、`F9`、
@@ -137,7 +137,7 @@ Plane 的 Blender 4.5.3/5.1.1 operator/transform 探针不是实际键盘事件�
 [ADR 0055](../adr/0055-cube-candidate-shortcut-materialization.md) 与
 [ADR 0056](../adr/0056-plane-candidate-shortcut-materialization.md)。Extension 的严格目录 loader 能解析并
 验证 `F9` opener、逐控件 property update 与 `ENTER` closer，且要求控件属于 expected operator；对于
-`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.30.0` 保留双版本
+`semantic_path`，expected operator 必须来自唯一的 execute/operator guidance step。`1.31.0` 保留双版本
 前台证据启用的 Edit Mode Bevel、Individual Inset Faces 与 Poke Faces candidate materialization，
 不把它们升级为 verified execution。
 见 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
@@ -165,21 +165,24 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 [ADR 0038](../adr/0038-bounded-edit-triangulate.md)。
 
 当前 Procedure replay 切片不驱动上述菜单，也不模拟快捷键。Orchestrator 重新验证并物化单一 UV Sphere、
-Icosphere、Cube 或 Plane leaf 后，只向目标实例投递普通待审 GuideProposal；用户 Accept 后仍由 Blender
+Icosphere、Cube、Plane 或 Torus leaf 后，只向目标实例投递普通待审 GuideProposal；用户 Accept 后仍由 Blender
 的既有受管 Session action 执行。ActionCatalog `1.18.0` 为 UV Sphere 增加 `uv_sphere_ready`，`1.19.0`
-为 Icosphere 增加 `icosphere_ready`，`1.20.0` 为 Cube/Plane 增加 `cube_ready`/`plane_ready`。四者都从
+为 Icosphere 增加 `icosphere_ready`，`1.20.0` 为 Cube/Plane 增加 `cube_ready`/`plane_ready`，`1.21.0`
+为 Torus 增加 `torus_ready`。五者都从
 receipt 核对 Collection/Object/Mesh ownership、data/link/content mutations、名称、location、实际 basis
 rotation、单位 scale 和 Mesh 内容签名；球体验证顶点半径，Cube/Plane 验证 accepted `size` 对应的局部坐标；
 UV Sphere 固定 32×16 topology，Icosphere 按 `subdivisions` 验证精确 topology，Cube/Plane 固定验证
-`8/12/6` 与 `4/4/1`，并拒绝额外
+`8/12/6` 与 `4/4/1`；Torus 按两组 segments 验证动态拓扑，并按 accepted radii 逐顶点复算参数化坐标。五者都拒绝额外
 modifier、shape key、material slot、parent 或 constraint。accepted decision 与 terminal
 `step_succeeded` report 必须由同一协商 lease 提交，Runtime 以服务端 receipt 序列固定先后；之后调用方
 才可 finalize 追加式
-attestation。该证明只覆盖 managed Action 结果；menu/shortcut 仍未执行，MCP unavailable，且当前合同不含
+attestation。该证明只覆盖 managed Action 结果；menu 未执行，shortcut 按目录事实保持 candidate 未执行或
+unavailable，MCP unavailable，且当前合同不含
 独立的原生 Undo checkpoint 或具体 UI 执行入口证明。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
-[ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md)。
+[ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
+[ADR 0068](../adr/0068-torus-managed-replay-attestation.md)。
 
 ## 视觉引导状态
 
@@ -218,7 +221,7 @@ GoalRequest，并短轮询 GuidePlan/GuideProposal、Provider descriptor、异�
 与 Dialogue Run 状态，再把 JSON 放入队列。Provider 的对话 SSE 只在 Runtime 内消费；助手增量先写入
 durable append-only revision，Blender 始终只读取短 JSON 状态。
 网络线程启动后先使用 Companion Session `1.0.0` 声明宿主/Companion 版本、支持的 Guide 协议、
-ActionCatalog `1.20.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
+ActionCatalog `1.21.0` 和能力画像；只有 Runtime 返回匹配目录与当前 Guide `1.5.0` 后，UI 才显示
 Connected。Guide、状态与 Proposal decision 请求绑定服务端签发的 lease，线程按协商周期发送严格递增
 心跳；失联、过期、
 Runtime 重启或同实例新会话替代旧 lease 时清空本地会话并自动重新握手。在线发现与持久化快照的边界
@@ -244,7 +247,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.20.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.21.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用
@@ -355,8 +358,8 @@ Request-linked Proposal
 ActionCatalog 1.3.0 Human Eval 套件的精确回放；打包同步脚本会把 teaching fixture 复制成扩展内部
 稳定资源名 `resources/snowman.plan.json`。
 
-当前动作目录 `1.20.0` 允许以下 27 类 action，把它们完整划分到 Geometry、Materials、Animation、
-Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.19.0` 供精确回放：
+当前动作目录 `1.21.0` 允许以下 27 类 action，把它们完整划分到 Geometry、Materials、Animation、
+Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` 至 `1.20.0` 供精确回放：
 
 - `blender.mesh.create_plane`
 - `blender.mesh.create_cube`
@@ -386,7 +389,7 @@ Render setup 和 Output 五个有序规划阶段，并保留不可变 `1.0.0` �
 - `blender.render_rig.create`
 - `blender.render.execute_preview`
 
-`1.20.0` 提供十九项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
+`1.21.0` 提供十九项适配器自有 `semanticCapabilities`：ground plane、primitive assembly、whole-mesh
 subdivide、whole-mesh triangulate、connected face-region extrusion、whole-mesh Edit Mode edge bevel、
 whole-mesh individual face inset、whole-mesh face poke、
 Bevel Modifier、Solidify Modifier、Subdivision Surface Modifier、Mirror Modifier、Transform Geometry Nodes、Principled material palette、rigid armature、

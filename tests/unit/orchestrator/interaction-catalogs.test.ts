@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.30.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.31.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -1432,6 +1432,23 @@ describe('interaction catalog registry', () => {
     );
     expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
       '6463810d4ffaf0145e11748a642ae1190c6e16f55928ccf9ff556f3f0123b8ff',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.30.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
+    active.catalogVersion = frozen.catalogVersion;
+    active.actionCatalogVersion = frozen.actionCatalogVersion;
+    active.description = frozen.description;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.30.0 and changes only the ActionCatalog binding in 1.31.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.30.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'a8fcf2441ac6448db9d086155aee0d2c52c611b9100064e99e3b0caf37d73231',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
     const active = structuredClone(blenderInteractionCatalog);

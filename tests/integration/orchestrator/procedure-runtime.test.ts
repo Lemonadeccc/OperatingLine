@@ -766,28 +766,43 @@ function planeAuthoringCandidateFixture(
   return tree;
 }
 
-function sizedPrimitiveReplayAuthoringCandidateFixture(
+function primitiveReplayAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
-  primitive: 'cube' | 'plane',
+  primitive: 'cube' | 'plane' | 'torus',
 ): Record<string, unknown> {
   const tree =
     primitive === 'cube'
       ? cubeAuthoringCandidateFixture(packet)
-      : planeAuthoringCandidateFixture(packet);
+      : primitive === 'plane'
+        ? planeAuthoringCandidateFixture(packet)
+        : torusAuthoringCandidateFixture(packet);
   const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
     (node) => node['kind'] === 'leaf',
   );
   if (leaf === undefined) throw new Error(`Expected one ${primitive} replay leaf`);
   const action = leaf['action'] as { arguments: Record<string, unknown> };
+  const parameters =
+    primitive === 'torus'
+      ? {
+          resourceId: action.arguments['resourceId'],
+          objectName: action.arguments['objectName'],
+          majorSegments: action.arguments['majorSegments'],
+          minorSegments: action.arguments['minorSegments'],
+          majorRadius: action.arguments['majorRadius'],
+          minorRadius: action.arguments['minorRadius'],
+          location: action.arguments['location'],
+        }
+      : {
+          resourceId: action.arguments['resourceId'],
+          objectName: action.arguments['objectName'],
+          size: action.arguments['size'],
+          location: action.arguments['location'],
+        };
   leaf['expectedObservations'] = [
     {
-      kind: primitive === 'cube' ? 'cube_ready' : 'plane_ready',
-      parameters: {
-        resourceId: action.arguments['resourceId'],
-        objectName: action.arguments['objectName'],
-        size: action.arguments['size'],
-        location: action.arguments['location'],
-      },
+      kind:
+        primitive === 'cube' ? 'cube_ready' : primitive === 'plane' ? 'plane_ready' : 'torus_ready',
+      parameters,
     },
   ];
   return tree;
@@ -4734,6 +4749,8 @@ describe('procedure compilation runtime', () => {
       observationKind: 'cube_ready' as const,
       goal: '创建一个边长 2.5、位置精确的 Cube。',
       topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
+      geometryDetailKey: 'sizeMatches' as const,
+      shortcutCoverage: 'materialized' as const,
     },
     {
       primitive: 'plane' as const,
@@ -4741,10 +4758,29 @@ describe('procedure compilation runtime', () => {
       observationKind: 'plane_ready' as const,
       goal: '创建一个边长 12.5、位置精确的 Plane。',
       topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
+      geometryDetailKey: 'sizeMatches' as const,
+      shortcutCoverage: 'materialized' as const,
+    },
+    {
+      primitive: 'torus' as const,
+      actionName: 'blender.mesh.create_torus' as const,
+      observationKind: 'torus_ready' as const,
+      goal: '创建一个分段、半径和位置精确的 Torus。',
+      topology: { vertexCount: 576, edgeCount: 1152, faceCount: 576 },
+      geometryDetailKey: 'geometryMatches' as const,
+      shortcutCoverage: 'unavailable' as const,
     },
   ])(
-    'attests an approved managed $primitive replay with exact size and topology',
-    async ({ primitive, actionName, observationKind, goal, topology }) => {
+    'attests an approved managed $primitive replay with exact geometry and topology',
+    async ({
+      primitive,
+      actionName,
+      observationKind,
+      goal,
+      topology,
+      geometryDetailKey,
+      shortcutCoverage,
+    }) => {
       const runtime = await startRuntime({
         databasePath: ':memory:',
         accessToken,
@@ -4768,7 +4804,7 @@ describe('procedure compilation runtime', () => {
         });
         expect(promptResponse.status).toBe(200);
         const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
-        const tree = sizedPrimitiveReplayAuthoringCandidateFixture(packet, primitive);
+        const tree = primitiveReplayAuthoringCandidateFixture(packet, primitive);
         const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
           (node) => node['kind'] === 'leaf',
         );
@@ -4798,12 +4834,16 @@ describe('procedure compilation runtime', () => {
             actionName,
             targetInstanceId,
             leafId: replayRequest.leafId,
+            claims: {
+              shortcutTrack:
+                shortcutCoverage === 'materialized' ? 'candidate_not_executed' : 'unavailable',
+            },
             materialization: {
               coverage: [
                 expect.objectContaining({
                   leafId: replayRequest.leafId,
                   menu: 'materialized',
-                  shortcut: 'materialized',
+                  shortcut: shortcutCoverage,
                   mcp: 'unavailable',
                 }),
               ],
@@ -4890,7 +4930,7 @@ describe('procedure compilation runtime', () => {
                 contentIntact: true,
                 topologyMatches: true,
                 finiteCoordinates: true,
-                sizeMatches: true,
+                [geometryDetailKey]: true,
                 vertexCount,
                 edgeCount: topology.edgeCount,
                 faceCount: topology.faceCount,
@@ -4950,13 +4990,17 @@ describe('procedure compilation runtime', () => {
           attestation: {
             replayId: replayRequest.replayId,
             execution: { action: { adapterId: 'blender', name: actionName } },
+            verificationScope: {
+              shortcutTrack:
+                shortcutCoverage === 'materialized' ? 'candidate_not_executed' : 'unavailable',
+            },
             successGate: {
               observations: [
                 {
                   kind: observationKind,
                   details: {
                     parameters: observationParameters,
-                    sizeMatches: true,
+                    [geometryDetailKey]: true,
                     ...topology,
                   },
                 },

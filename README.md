@@ -11,7 +11,7 @@
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
-> Orchestrator 现在可以查询 Blender `1.20.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
+> Orchestrator 现在可以查询 Blender `1.21.0` ActionCatalog 和 PlanningContext，并导出带冻结快照游标
 > 与内容哈希的 Eval/replay 原始证据。仓库还提供独立、无分数的人工 Eval 协议、内部
 > `@operatingline/eval-kit`、7 个 `collecting` Blender 案例，以及本地
 > `eval:snapshot` → `eval:manifest` → `eval:capture` → `eval:blind` → `eval:status`/`eval:review` →
@@ -19,7 +19,7 @@
 > annotation。修订请求现在支持持久化线性多轮 thread；每个返回提案都带
 > 精确 Plan diff，并在 Blender 内显示节点与简单参数前后值。结构化修订消息历史现在可分页回放，
 > Blender 可展开或继续加载更早轮次。跨目标规划现在还有版本化阶段画像、确定性质量门和一个在
-> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.20.0` 目录提供十九项 `semanticCapabilities`，要求
+> Blender 4.5/5.1 中真实执行的机器人基准。当前 `1.21.0` 目录提供十九项 `semanticCapabilities`，要求
 > provider 把具体目标需求映射到目录能力和可执行叶子。版本化 Planner Packet 还能通过 MCP Prompt、Tool 或
 > HTTP 把同一份上下文、严格输出 Schema 和 evaluate→propose 工作流交给客户端自己的模型；运行时
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
@@ -82,7 +82,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
-  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.30.0`
+  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.31.0`
   已用该形状声明 Icosphere、Edit Mode Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface Modifier 的 candidate shortcut；
   六条轨迹均有 Blender 4.5.3/5.1.1 前台事件证据，但仍保持 `structural_only`，不冒充 managed action
   等价执行。见 [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md) 与
@@ -103,7 +103,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.30.0` 为
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.31.0` 为
   UV Sphere 生成七步菜单，
   以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
   `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
@@ -183,7 +183,7 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。leaf 仍为 `candidate` 且
   `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
   radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史
-  `1.9.0` 至已冻结的 `1.29.0` 保持可回放；只有完整 result 信封保留目录
+  `1.9.0` 至已冻结的 `1.30.0` 保持可回放；只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender；
   当前 Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 轨迹都未经过完整 UI operation 的真实
@@ -211,28 +211,30 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   [ADR 0064](docs/adr/0064-bounded-mirror-modifier.md)。
 - **受管 Procedure 叶节点回放证明**：MCP/HTTP 的 `procedure.replay.propose` 对原始 packet + candidate
   重新验证和物化，并把完整绑定与只投递给目标 Blender 实例的 GuideProposal 原子持久化。当前切片仅接受
-  单一 UV Sphere、Icosphere、Cube 或 Plane 叶节点、`rollback_step` 成功门，以及与 Action 参数完全一致的
-  `uv_sphere_ready`、`icosphere_ready`、`cube_ready` 或 `plane_ready` Observation；Icosphere 把
-  `subdivisions` 绑定到精确拓扑，Cube/Plane 则把 `size` 绑定到精确坐标和固定拓扑。用户在 Blender 接受
+  单一 UV Sphere、Icosphere、Cube、Plane 或 Torus 叶节点、`rollback_step` 成功门，以及与 Action 参数完全一致的
+  `uv_sphere_ready`、`icosphere_ready`、`cube_ready`、`plane_ready` 或 `torus_ready` Observation；Icosphere 把
+  `subdivisions` 绑定到精确拓扑，Cube/Plane 把 `size` 绑定到精确坐标和固定拓扑，Torus 则把两组 segments 与
+  radii 绑定到逐顶点局部坐标和动态拓扑。用户在 Blender 接受
   Proposal 并通过受管 Action 完成该叶节点后，
   decision 与终态 report 必须由同一协商 lease 提交，并按服务端持久化 receipt 顺序发生；
   `procedure.replay.finalize` 才能把它们、精确 Plan/执行/步骤身份和强 Observation 写成追加式 attestation，
   并进入 Eval/replay 导出。证明范围只包含
-  `managedActionResult: verified`；菜单保持 `catalog_grounded_not_executed`，快捷键保持
-  `candidate_not_executed`，MCP 保持 `unavailable`。它不是逐控件 UI replay，也不单独证明 Blender 原生
+  `managedActionResult: verified`；菜单保持 `catalog_grounded_not_executed`，快捷键严格保留目录事实：有候选时为
+  `candidate_not_executed`，Torus 等无候选时为 `unavailable`；MCP 保持 `unavailable`。它不是逐控件 UI replay，也不单独证明 Blender 原生
   Undo checkpoint，也不声称具体 UI 执行入口。见
   [ADR 0065](docs/adr/0065-managed-procedure-leaf-replay-attestation.md) 与
   [ADR 0066](docs/adr/0066-icosphere-managed-replay-attestation.md) 与
-  [ADR 0067](docs/adr/0067-sized-primitive-managed-replay-attestation.md)。
+  [ADR 0067](docs/adr/0067-sized-primitive-managed-replay-attestation.md) 与
+  [ADR 0068](docs/adr/0068-torus-managed-replay-attestation.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.30.0` 精确绑定
-  ActionCatalog `1.20.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.31.0` 精确绑定
+  ActionCatalog `1.21.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.29.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.30.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与
@@ -248,7 +250,7 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md) 与
   [ADR 0063](docs/adr/0063-bounded-edit-mode-poke-faces.md) 与
   [ADR 0064](docs/adr/0064-bounded-mirror-modifier.md)。
-- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.20.0` 把 27 个动作划分为 Geometry、Materials、
+- **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.21.0` 把 27 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十九项目录语义能力进一步要求 provider
   声明 `requirement -> capability -> executable leaf` 覆盖链。缺失、未知、不匹配或局部重规划范围外的

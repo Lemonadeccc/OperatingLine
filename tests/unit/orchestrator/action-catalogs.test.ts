@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.20.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.21.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.18.0' }).catalogVersion,
     ).toBe('1.18.0');
@@ -249,7 +249,9 @@ describe('action catalog registry', () => {
       'fd9c8881a63d2df275712d23ba5d1b9c5fb20bd4873416bd4a933c0719805468',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.20.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     for (const [actionName, observationKind] of [
       ['blender.mesh.create_cube', 'cube_ready'],
@@ -261,6 +263,24 @@ describe('action catalog registry', () => {
         (kind) => kind !== observationKind,
       );
     }
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.20.0 and adds only the strong Torus observation in 1.21.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.20.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '77f4520c3673f28325cd0f0581fca11e30bb1fd2a365713484bf8c9c6c7f781a',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    const torus = active.actions.find((action) => action.name === 'blender.mesh.create_torus');
+    if (torus === undefined) throw new Error('Expected Torus action');
+    torus.supportedObservationKinds = torus.supportedObservationKinds.filter(
+      (kind) => kind !== 'torus_ready',
+    );
     expect(active).toEqual(frozen);
   });
 
