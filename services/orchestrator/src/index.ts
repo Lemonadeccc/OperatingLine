@@ -1746,7 +1746,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.replay.propose',
         {
           description:
-            'Revalidate and materialize one bounded UV Sphere or Icosphere leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted provenance.',
+            'Revalidate and materialize one bounded UV Sphere, Icosphere, Cube, or Plane leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted provenance.',
           inputSchema: deferMcpInputValidation(procedureLeafReplayProposalRequestSchema),
           outputSchema: procedureLeafReplayProposalResultSchema,
         },
@@ -1794,7 +1794,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.replay.finalize',
         {
           description:
-            'Append one managed-action replay attestation only after the exact proposal was accepted and a stored terminal Companion report proves its strong action-specific spherical success gate. It never upgrades menu or shortcut tracks to executed.',
+            'Append one managed-action replay attestation only after the exact proposal was accepted and a stored terminal Companion report proves its strong action-specific primitive success gate. It never upgrades menu or shortcut tracks to executed.',
           inputSchema: procedureLeafReplayFinalizeRequestSchema,
           outputSchema: procedureLeafReplayFinalizeResultSchema,
         },

@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.19.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.20.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.18.0' }).catalogVersion,
     ).toBe('1.18.0');
@@ -227,7 +227,9 @@ describe('action catalog registry', () => {
       '9953fd031873716a098055edc958ffc3db593f1eb4f0bfc84309754a7f00443a',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.19.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     const icosphere = active.actions.find(
       (action) => action.name === 'blender.mesh.create_icosphere',
@@ -236,6 +238,29 @@ describe('action catalog registry', () => {
     icosphere.supportedObservationKinds = icosphere.supportedObservationKinds.filter(
       (kind) => kind !== 'icosphere_ready',
     );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.19.0 and adds only strong Cube and Plane observations in 1.20.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.19.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'fd9c8881a63d2df275712d23ba5d1b9c5fb20bd4873416bd4a933c0719805468',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    for (const [actionName, observationKind] of [
+      ['blender.mesh.create_cube', 'cube_ready'],
+      ['blender.mesh.create_plane', 'plane_ready'],
+    ] as const) {
+      const action = active.actions.find((candidate) => candidate.name === actionName);
+      if (action === undefined) throw new Error(`Expected ${actionName} action`);
+      action.supportedObservationKinds = action.supportedObservationKinds.filter(
+        (kind) => kind !== observationKind,
+      );
+    }
     expect(active).toEqual(frozen);
   });
 

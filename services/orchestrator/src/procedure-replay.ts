@@ -26,6 +26,7 @@ import { satisfiesStableVersionRange } from './stable-version-ranges.js';
 const replayActionContracts = {
   'blender.mesh.create_uv_sphere': {
     observationKind: 'uv_sphere_ready',
+    dimensionMatchDetailKey: 'radiusMatches',
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
@@ -36,6 +37,7 @@ const replayActionContracts = {
   },
   'blender.mesh.create_icosphere': {
     observationKind: 'icosphere_ready',
+    dimensionMatchDetailKey: 'radiusMatches',
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
@@ -61,10 +63,33 @@ const replayActionContracts = {
       };
     },
   },
+  'blender.mesh.create_cube': {
+    observationKind: 'cube_ready',
+    dimensionMatchDetailKey: 'sizeMatches',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      size: actionArguments['size'],
+      location: actionArguments['location'],
+    }),
+    expectedTopology: () => ({ vertexCount: 8, edgeCount: 12, faceCount: 6 }),
+  },
+  'blender.mesh.create_plane': {
+    observationKind: 'plane_ready',
+    dimensionMatchDetailKey: 'sizeMatches',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      size: actionArguments['size'],
+      location: actionArguments['location'],
+    }),
+    expectedTopology: () => ({ vertexCount: 4, edgeCount: 4, faceCount: 1 }),
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   {
     readonly observationKind: string;
+    readonly dimensionMatchDetailKey: string;
     readonly expectedParameters: (
       actionArguments: Record<string, unknown>,
     ) => Record<string, unknown>;
@@ -377,7 +402,13 @@ export function buildProcedureLeafReplayAttestation(input: {
   const expectedParameters = expectedObservation?.parameters;
   const expectedResourceId = expectedParameters?.['resourceId'];
   const expectedObjectName = expectedParameters?.['objectName'];
-  const expectedRadius = expectedParameters?.['radius'];
+  const expectedDimension =
+    expectedParameters?.[
+      binding.actionName === 'blender.mesh.create_uv_sphere' ||
+      binding.actionName === 'blender.mesh.create_icosphere'
+        ? 'radius'
+        : 'size'
+    ];
   const expectedSubdivisions = expectedParameters?.['subdivisions'];
   const expectedLocation = expectedParameters?.['location'];
   const expectedLocationX = Array.isArray(expectedLocation) ? expectedLocation[0] : undefined;
@@ -405,7 +436,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     'contentIntact',
     'topologyMatches',
     'finiteCoordinates',
-    'radiusMatches',
+    actionContract.dimensionMatchDetailKey,
   ] as const;
   const strongDetailKeys = new Set<string>([
     'parameters',
@@ -433,9 +464,9 @@ export function buildProcedureLeafReplayAttestation(input: {
     !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
     typeof expectedResourceId !== 'string' ||
     typeof expectedObjectName !== 'string' ||
-    typeof expectedRadius !== 'number' ||
-    !Number.isFinite(expectedRadius) ||
-    expectedRadius <= 0 ||
+    typeof expectedDimension !== 'number' ||
+    !Number.isFinite(expectedDimension) ||
+    expectedDimension <= 0 ||
     !Array.isArray(expectedLocation) ||
     expectedLocation.length !== 3 ||
     typeof expectedLocationX !== 'number' ||

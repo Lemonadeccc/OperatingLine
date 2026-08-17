@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.28.0` 与 ActionCatalog `1.18.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.27.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.30.0` 与 ActionCatalog `1.20.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.29.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
@@ -160,7 +160,7 @@
 - [x] 跨目标结构规划质量基线：历史 catalog `1.2.0` 发布有序阶段画像；MCP/HTTP 可对完整候选 Plan
       检查阶段树、资源依赖、锚点和观察，Proposal 自动执行同一门禁；雪人和机器人两个目标均通过，
       机器人参考计划已在 Blender 4.5/5.1 中完成建模、材质、渲染与全量回退。
-- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.18.0` 提供十九项 `semanticCapabilities`；
+- [x] 目录约束的目标需求覆盖证据：Blender catalog `1.20.0` 提供十九项 `semanticCapabilities`；
       capability-aware Planning/Replanning Packet `1.1.0` 要求 provider 声明
       `requirement -> capability -> executable leaf`，quality baseline `1.1.0` 确定性拒绝缺失、未知、
       action 不匹配或局部范围外的映射。无能力的历史目录仍使用 packet/baseline `1.0.0` 精确回放；
@@ -473,8 +473,13 @@
           `10×4^(n-1)+2 / 30×4^(n-1) / 20×4^(n-1)` 的顶点/边/面数量。错误细分参数、拓扑、receipt
           action 或 Mesh 内容均 fail closed；证明范围仍不升级 menu/shortcut/MCP 或原生 Undo。见
           [ADR 0066](adr/0066-icosphere-managed-replay-attestation.md)。
+    - [x] Cube/Plane 受管结果证明：ActionCatalog `1.20.0` 增加 `cube_ready` 与 `plane_ready`，
+          InteractionCatalog `1.30.0` 只更新精确 binding；两种 Observation 都把 accepted `size` 绑定到
+          实际局部坐标、固定 `8/12/6` 或 `4/4/1` 拓扑、receipt 和 Mesh 内容签名。错误尺寸、坐标、
+          拓扑、action identity 或内容均 fail closed。见
+          [ADR 0067](adr/0067-sized-primitive-managed-replay-attestation.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor、原生 Undo checkpoint attestation，
-          以及 UV Sphere/Icosphere 之外的叶节点覆盖。
+          以及 UV Sphere/Icosphere/Cube/Plane 之外的叶节点覆盖。
   - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，
         增加显式 Provider coordinator、经验证的语义召回与结果治理，使不会 Blender 的用户能先审阅结构
         和参数，再对局部效果评论与精修；输入不依赖教学视频。

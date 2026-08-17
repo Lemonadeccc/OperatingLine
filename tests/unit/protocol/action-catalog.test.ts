@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.19.0');
+    expect(catalog.catalogVersion).toBe('1.20.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -57,6 +57,14 @@ describe('action catalog protocol', () => {
       catalog.actions.find((action) => action.name === 'blender.mesh.create_icosphere')
         ?.supportedObservationKinds,
     ).toEqual(['resource_exists', 'icosphere_ready']);
+    expect(
+      catalog.actions.find((action) => action.name === 'blender.mesh.create_cube')
+        ?.supportedObservationKinds,
+    ).toEqual(['resource_exists', 'cube_ready']);
+    expect(
+      catalog.actions.find((action) => action.name === 'blender.mesh.create_plane')
+        ?.supportedObservationKinds,
+    ).toEqual(['resource_exists', 'plane_ready']);
     expect(catalog.planningPhases?.map((phase) => phase.id)).toEqual([
       'geometry',
       'materials',
@@ -108,6 +116,7 @@ describe('action catalog protocol', () => {
       '1.17.0',
       '1.18.0',
       '1.19.0',
+      '1.20.0',
     ]);
   });
 

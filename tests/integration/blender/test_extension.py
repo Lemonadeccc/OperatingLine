@@ -529,6 +529,125 @@ def assert_icosphere_ready_observation() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def assert_sized_primitive_ready_observations() -> None:
+    cases = (
+        {
+            "kind": "cube",
+            "actionName": "blender.mesh.create_cube",
+            "observationKind": "cube_ready",
+            "resourceId": "replay.cube",
+            "objectName": "OperatingLine.ReplayCube",
+            "size": 2.5,
+            "location": [1.0, -2.0, 3.0],
+            "topology": (8, 12, 6),
+        },
+        {
+            "kind": "plane",
+            "actionName": "blender.mesh.create_plane",
+            "observationKind": "plane_ready",
+            "resourceId": "replay.plane",
+            "objectName": "OperatingLine.ReplayPlane",
+            "size": 5.0,
+            "location": [-1.5, 2.5, -0.75],
+            "topology": (4, 4, 1),
+        },
+    )
+
+    for case in cases:
+        step_id = f"{case['resourceId']}.create"
+        primitive_step = step(
+            step_id,
+            "root",
+            1,
+            step_action={
+                "adapterId": "blender",
+                "name": case["actionName"],
+                "arguments": {
+                    "resourceId": case["resourceId"],
+                    "objectName": case["objectName"],
+                    "size": case["size"],
+                    "location": case["location"],
+                },
+            },
+        )
+        root = load_temporary_plan([step("root", None, 0), primitive_step])
+        session = DemoSession(root, action_registry(root))
+        parameters = {
+            "resourceId": case["resourceId"],
+            "objectName": case["objectName"],
+            "size": case["size"],
+            "location": case["location"],
+        }
+
+        def observe(
+            candidate_parameters=parameters,
+            candidate_receipts=None,
+        ):
+            return observation_module.evaluate_observations(
+                (
+                    {
+                        "kind": case["observationKind"],
+                        "parameters": candidate_parameters,
+                    },
+                ),
+                session.receipts
+                if candidate_receipts is None
+                else candidate_receipts,
+            )[0]
+
+        session.start()
+        assert session.next() is not None
+        primitive = bpy.data.objects.get(case["objectName"])
+        assert primitive is not None and primitive.type == "MESH"
+        mesh = primitive.data
+        successful = observe()
+        assert successful["satisfied"] is True
+        details = successful["details"]
+        assert (
+            details["vertexCount"],
+            details["edgeCount"],
+            details["faceCount"],
+        ) == case["topology"]
+        assert details["sizeMatches"] is True
+        assert "radiusMatches" not in details
+        assert details["parameters"] == parameters
+
+        malformed_parameters = (
+            {key: value for key, value in parameters.items() if key != "size"},
+            {**parameters, "unexpected": True},
+            {**parameters, "size": True},
+        )
+        for malformed in malformed_parameters:
+            assert observe(malformed)["satisfied"] is False
+
+        original_coordinate = mesh.vertices[0].co.copy()
+        mesh.vertices[0].co.x += 0.125
+        mesh.update()
+        assert observe()["satisfied"] is False
+        mesh.vertices[0].co = original_coordinate
+        mesh.update()
+
+        original_action_tag = primitive["operating_line_action"]
+        primitive["operating_line_action"] = "blender.mesh.create_uv_sphere"
+        assert observe()["satisfied"] is False
+        primitive["operating_line_action"] = original_action_tag
+
+        receipt = session.receipts[step_id]
+        mismatched_receipts = {
+            **session.receipts,
+            step_id: replace(
+                receipt,
+                action_name="blender.mesh.create_uv_sphere",
+            ),
+        }
+        assert observe(candidate_receipts=mismatched_receipts)["satisfied"] is False
+        assert observe()["satisfied"] is True
+
+        assert session.back() is not None
+        assert bpy.data.objects.get(case["objectName"]) is None
+        assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
 def assert_edit_modifier_geometry_nodes_round_trip() -> None:
     object_name = "OperatingLine.EditPipelineCube"
     steps = [
@@ -8870,6 +8989,7 @@ def main() -> None:
     assert_icosphere_argument_boundaries()
     assert_icosphere_action_round_trip()
     assert_icosphere_ready_observation()
+    assert_sized_primitive_ready_observations()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
     assert_uv_sphere_ready_observation()

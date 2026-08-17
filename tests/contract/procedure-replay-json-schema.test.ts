@@ -512,6 +512,49 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     expect(
       procedureLeafReplayAttestationSchema.safeParse(attest(wrongIcosphereTopologyContent)).success,
     ).toBe(false);
+    const sizedPrimitiveDetails = Object.fromEntries(
+      Object.entries(observations[0].details).filter(([key]) => key !== 'radiusMatches'),
+    );
+    const sizedPrimitiveAttestations = [
+      {
+        actionName: 'blender.mesh.create_cube',
+        observationKind: 'cube_ready',
+        topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
+      },
+      {
+        actionName: 'blender.mesh.create_plane',
+        observationKind: 'plane_ready',
+        topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
+      },
+    ].map(({ actionName, observationKind, topology }) => {
+      const sizedObservation = {
+        kind: observationKind,
+        satisfied: true,
+        details: {
+          ...sizedPrimitiveDetails,
+          parameters: {
+            resourceId,
+            objectName,
+            size: 2.5,
+            location: leaf.action!.arguments['location'],
+          },
+          sizeMatches: true,
+          ...topology,
+        },
+      };
+      const sizedContent = {
+        ...content,
+        report: { ...content.report, observations: [sizedObservation] },
+        execution: {
+          ...content.execution,
+          action: { adapterId: 'blender', name: actionName },
+        },
+        successGate: { observations: [sizedObservation], allSatisfied: true },
+      };
+      const sizedAttestation = attest(sizedContent);
+      expect(procedureLeafReplayAttestationSchema.safeParse(sizedAttestation).success).toBe(true);
+      return sizedAttestation;
+    });
     expect(
       procedureLeafReplayAttestationSchema.safeParse({
         ...attestation,
@@ -619,6 +662,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       [
         { value: attestation, accepted: true },
         { value: icosphereAttestation, accepted: true },
+        ...sizedPrimitiveAttestations.map((value) => ({ value, accepted: true as const })),
         {
           value: {
             ...attestation,
@@ -631,7 +675,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
             ...attestation,
             execution: {
               ...attestation.execution,
-              action: { ...attestation.execution.action, name: 'blender.mesh.create_cube' },
+              action: { ...attestation.execution.action, name: 'blender.mesh.create_torus' },
             },
           },
           accepted: false,

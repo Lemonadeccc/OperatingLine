@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import bpy
 
@@ -77,20 +77,29 @@ def _mesh_signature_sha256(signature: tuple[Any, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _spherical_primitive_ready(
+def _single_mesh_primitive_ready(
     parameters: Mapping[str, Any],
     receipts: Mapping[str, ActionReceipt],
     *,
     action_name: str,
-    subdivisions_required: bool,
+    primitive_kind: Literal["uv_sphere", "icosphere", "cube", "plane"],
 ) -> ObservationResult:
-    allowed_parameters = {"resourceId", "objectName", "radius", "location"}
+    spherical = primitive_kind in {"uv_sphere", "icosphere"}
+    subdivisions_required = primitive_kind == "icosphere"
+    dimension_parameter = "radius" if spherical else "size"
+    dimension_detail = "radiusMatches" if spherical else "sizeMatches"
+    allowed_parameters = {
+        "resourceId",
+        "objectName",
+        dimension_parameter,
+        "location",
+    }
     if subdivisions_required:
         allowed_parameters.add("subdivisions")
     resource_id = parameters.get("resourceId")
     object_name = parameters.get("objectName")
     raw_subdivisions = parameters.get("subdivisions")
-    raw_radius = parameters.get("radius")
+    raw_dimension = parameters.get(dimension_parameter)
     raw_location = parameters.get("location")
     subdivisions = (
         raw_subdivisions
@@ -99,12 +108,12 @@ def _spherical_primitive_ready(
         and 1 <= raw_subdivisions <= 5
         else None
     )
-    radius = (
-        float(raw_radius)
-        if not isinstance(raw_radius, bool)
-        and isinstance(raw_radius, (int, float))
-        and math.isfinite(float(raw_radius))
-        and float(raw_radius) > 0
+    dimension = (
+        float(raw_dimension)
+        if not isinstance(raw_dimension, bool)
+        and isinstance(raw_dimension, (int, float))
+        and math.isfinite(float(raw_dimension))
+        and float(raw_dimension) > 0
         else None
     )
     location = (
@@ -126,7 +135,7 @@ def _spherical_primitive_ready(
         and isinstance(object_name, str)
         and object_name
         and (not subdivisions_required or subdivisions is not None)
-        and radius is not None
+        and dimension is not None
         and len(location) == 3
     )
 
@@ -309,15 +318,19 @@ def _spherical_primitive_ready(
         if isinstance(mesh, bpy.types.Mesh)
         else (0, 0, 0)
     )
-    if subdivisions_required and subdivisions is not None:
+    if primitive_kind == "icosphere" and subdivisions is not None:
         subdivision_scale = 4 ** (subdivisions - 1)
         expected_counts = (
             10 * subdivision_scale + 2,
             30 * subdivision_scale,
             20 * subdivision_scale,
         )
-    else:
+    elif primitive_kind == "uv_sphere":
         expected_counts = (482, 992, 512)
+    elif primitive_kind == "cube":
+        expected_counts = (8, 12, 6)
+    else:
+        expected_counts = (4, 4, 1)
     topology_matches = counts == expected_counts
     finite_coordinates = bool(
         isinstance(mesh, bpy.types.Mesh)
@@ -327,19 +340,63 @@ def _spherical_primitive_ready(
             for component in vertex.co
         )
     )
-    radius_matches = bool(
-        isinstance(mesh, bpy.types.Mesh)
-        and radius is not None
-        and all(
-            math.isclose(
-                math.sqrt(sum(float(component) ** 2 for component in vertex.co)),
-                radius,
-                rel_tol=1e-5,
-                abs_tol=max(1e-6, radius * 1e-5),
+    if spherical:
+        dimension_matches = bool(
+            isinstance(mesh, bpy.types.Mesh)
+            and dimension is not None
+            and all(
+                math.isclose(
+                    math.sqrt(sum(float(component) ** 2 for component in vertex.co)),
+                    dimension,
+                    rel_tol=1e-5,
+                    abs_tol=max(1e-6, dimension * 1e-5),
+                )
+                for vertex in mesh.vertices
             )
-            for vertex in mesh.vertices
         )
-    )
+    elif primitive_kind == "cube":
+        half_size = dimension / 2.0 if dimension is not None else None
+        dimension_matches = bool(
+            isinstance(mesh, bpy.types.Mesh)
+            and half_size is not None
+            and all(
+                math.isclose(
+                    abs(float(component)),
+                    half_size,
+                    rel_tol=1e-5,
+                    abs_tol=max(1e-6, half_size * 1e-5),
+                )
+                for vertex in mesh.vertices
+                for component in vertex.co
+            )
+        )
+    else:
+        half_size = dimension / 2.0 if dimension is not None else None
+        dimension_matches = bool(
+            isinstance(mesh, bpy.types.Mesh)
+            and half_size is not None
+            and all(
+                math.isclose(
+                    abs(float(vertex.co.x)),
+                    half_size,
+                    rel_tol=1e-5,
+                    abs_tol=max(1e-6, half_size * 1e-5),
+                )
+                and math.isclose(
+                    abs(float(vertex.co.y)),
+                    half_size,
+                    rel_tol=1e-5,
+                    abs_tol=max(1e-6, half_size * 1e-5),
+                )
+                and math.isclose(
+                    float(vertex.co.z),
+                    0.0,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                )
+                for vertex in mesh.vertices
+            )
+        )
     current_signature = (
         mesh_content_signature(mesh) if isinstance(mesh, bpy.types.Mesh) else None
     )
@@ -372,10 +429,10 @@ def _spherical_primitive_ready(
         and materials_absent
         and topology_matches
         and finite_coordinates
-        and radius_matches
+        and dimension_matches
         and content_intact
     )
-    return satisfied, {
+    details = {
         "resourceId": resource_id if isinstance(resource_id, str) else None,
         "objectName": object_name if isinstance(object_name, str) else None,
         "meshId": mesh_id,
@@ -398,33 +455,56 @@ def _spherical_primitive_ready(
         "contentIntact": content_intact,
         "topologyMatches": topology_matches,
         "finiteCoordinates": finite_coordinates,
-        "radiusMatches": radius_matches,
         "vertexCount": counts[0],
         "edgeCount": counts[1],
         "faceCount": counts[2],
         "meshContentSha256": mesh_content_sha256,
     }
+    details[dimension_detail] = dimension_matches
+    return satisfied, details
 
 
 def _uv_sphere_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
-    return _spherical_primitive_ready(
+    return _single_mesh_primitive_ready(
         parameters,
         receipts,
         action_name="blender.mesh.create_uv_sphere",
-        subdivisions_required=False,
+        primitive_kind="uv_sphere",
     )
 
 
 def _icosphere_ready(
     parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
 ) -> ObservationResult:
-    return _spherical_primitive_ready(
+    return _single_mesh_primitive_ready(
         parameters,
         receipts,
         action_name="blender.mesh.create_icosphere",
-        subdivisions_required=True,
+        primitive_kind="icosphere",
+    )
+
+
+def _cube_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _single_mesh_primitive_ready(
+        parameters,
+        receipts,
+        action_name="blender.mesh.create_cube",
+        primitive_kind="cube",
+    )
+
+
+def _plane_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _single_mesh_primitive_ready(
+        parameters,
+        receipts,
+        action_name="blender.mesh.create_plane",
+        primitive_kind="plane",
     )
 
 
@@ -1938,6 +2018,8 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "resource_exists": _resource_exists,
     "uv_sphere_ready": _uv_sphere_ready,
     "icosphere_ready": _icosphere_ready,
+    "cube_ready": _cube_ready,
+    "plane_ready": _plane_ready,
     "material_assigned": _material_assigned,
     "armature_ready": _armature_ready,
     "pose_animation_ready": _pose_animation_ready,

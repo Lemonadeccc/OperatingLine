@@ -11464,7 +11464,9 @@
           "type": "string",
           "enum": [
             "blender.mesh.create_uv_sphere",
-            "blender.mesh.create_icosphere"
+            "blender.mesh.create_icosphere",
+            "blender.mesh.create_cube",
+            "blender.mesh.create_plane"
           ]
         },
         "claims": {

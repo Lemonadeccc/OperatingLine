@@ -766,6 +766,33 @@ function planeAuthoringCandidateFixture(
   return tree;
 }
 
+function sizedPrimitiveReplayAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+  primitive: 'cube' | 'plane',
+): Record<string, unknown> {
+  const tree =
+    primitive === 'cube'
+      ? cubeAuthoringCandidateFixture(packet)
+      : planeAuthoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error(`Expected one ${primitive} replay leaf`);
+  const action = leaf['action'] as { arguments: Record<string, unknown> };
+  leaf['expectedObservations'] = [
+    {
+      kind: primitive === 'cube' ? 'cube_ready' : 'plane_ready',
+      parameters: {
+        resourceId: action.arguments['resourceId'],
+        objectName: action.arguments['objectName'],
+        size: action.arguments['size'],
+        location: action.arguments['location'],
+      },
+    },
+  ];
+  return tree;
+}
+
 function torusAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -4699,6 +4726,250 @@ describe('procedure compilation runtime', () => {
       await runtime.stop();
     }
   });
+
+  it.each([
+    {
+      primitive: 'cube' as const,
+      actionName: 'blender.mesh.create_cube' as const,
+      observationKind: 'cube_ready' as const,
+      goal: '创建一个边长 2.5、位置精确的 Cube。',
+      topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
+    },
+    {
+      primitive: 'plane' as const,
+      actionName: 'blender.mesh.create_plane' as const,
+      observationKind: 'plane_ready' as const,
+      goal: '创建一个边长 12.5、位置精确的 Plane。',
+      topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
+    },
+  ])(
+    'attests an approved managed $primitive replay with exact size and topology',
+    async ({ primitive, actionName, observationKind, goal, topology }) => {
+      const runtime = await startRuntime({
+        databasePath: ':memory:',
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      try {
+        const targetInstanceId = randomUUID();
+        const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            targetAdapterId: 'blender',
+            actionCatalogVersion: blenderActionCatalog.catalogVersion,
+            interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+            goal,
+            treeId: 'snowman.eye.left.procedure',
+            revision: 1,
+            locale: 'zh-CN',
+          }),
+        });
+        expect(promptResponse.status).toBe(200);
+        const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+        const tree = sizedPrimitiveReplayAuthoringCandidateFixture(packet, primitive);
+        const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+          (node) => node['kind'] === 'leaf',
+        );
+        if (leaf === undefined) throw new Error(`Expected one ${primitive} replay leaf`);
+        const replayRequest = {
+          formatVersion: '1.0.0',
+          replayId: randomUUID(),
+          targetInstanceId,
+          leafId: String(leaf['id']),
+          replayMode: 'managed_action',
+          packet,
+          tree,
+        };
+        const proposedMcp = await callMcpTool(
+          runtime,
+          903,
+          'operatingline.procedure.replay.propose',
+          replayRequest,
+        );
+        expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+        const proposed = procedureLeafReplayProposalResultSchema.parse(
+          proposedMcp.result?.structuredContent,
+        );
+        expect(proposed).toMatchObject({
+          status: 'accepted',
+          binding: {
+            actionName,
+            targetInstanceId,
+            leafId: replayRequest.leafId,
+            materialization: {
+              coverage: [
+                expect.objectContaining({
+                  leafId: replayRequest.leafId,
+                  menu: 'materialized',
+                  shortcut: 'materialized',
+                  mcp: 'unavailable',
+                }),
+              ],
+            },
+          },
+        });
+
+        const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+        });
+        expect(sessionResponse.status).toBe(200);
+        const session = (await sessionResponse.json()) as { leaseId: string };
+        const leaseHeaders = {
+          ...headers,
+          'x-operatingline-companion-lease': session.leaseId,
+        };
+        const proposal = proposed.binding.proposal;
+        const decision = {
+          protocolVersion: guideProtocolVersion,
+          decisionId: randomUUID(),
+          proposalId: proposal.proposalId,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          decision: 'accepted',
+          occurredAt: new Date(Date.now() - 10_000).toISOString(),
+        };
+        const decisionResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+        );
+        expect(decisionResponse.status).toBe(200);
+
+        const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
+        const observationParameters = step?.expectedObservations[0]?.parameters;
+        const resourceId = observationParameters?.['resourceId'];
+        const objectName = observationParameters?.['objectName'];
+        if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
+          throw new Error(`Expected ${primitive} replay observation identities`);
+        }
+        const report = (sequence: number, vertexCount: number) => ({
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion: '4.5.3 LTS',
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256: computePlanContentSha256(proposal.plan),
+          executionId: randomUUID(),
+          phase: 'completed',
+          activeStepId: replayRequest.leafId,
+          completedStepIds: [replayRequest.leafId],
+          transition: 'step_succeeded',
+          stepId: replayRequest.leafId,
+          observations: [
+            {
+              kind: observationKind,
+              satisfied: true,
+              details: {
+                parameters: observationParameters,
+                supported: true,
+                resourceId,
+                objectName,
+                meshId: `${resourceId}.mesh`,
+                collectionId: 'snowman.collection',
+                parametersValid: true,
+                objectOwned: true,
+                meshOwned: true,
+                collectionOwned: true,
+                receiptMatches: true,
+                objectDataMatches: true,
+                collectionLinkMatches: true,
+                nameMatches: true,
+                locationMatches: true,
+                rotationMatches: true,
+                scaleMatches: true,
+                transformIsolated: true,
+                modifiersAbsent: true,
+                shapeKeysAbsent: true,
+                materialsAbsent: true,
+                contentIntact: true,
+                topologyMatches: true,
+                finiteCoordinates: true,
+                sizeMatches: true,
+                vertexCount,
+                edgeCount: topology.edgeCount,
+                faceCount: topology.faceCount,
+                meshContentSha256: 'd'.repeat(64),
+              },
+            },
+          ],
+          observationGate: null,
+          artifactAttestation: null,
+          error: null,
+          occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
+        });
+
+        const wrongTopologyReport = report(1, topology.vertexCount + 1);
+        const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(wrongTopologyReport),
+        });
+        expect(wrongState.status).toBe(200);
+        const wrongFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: replayRequest.replayId,
+            attestationId: randomUUID(),
+            reportId: wrongTopologyReport.reportId,
+          }),
+        });
+        expect(wrongFinalize.status).toBe(409);
+
+        const terminalReport = report(2, topology.vertexCount);
+        const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(terminalReport),
+        });
+        expect(stateResponse.status).toBe(200);
+        const finalizedResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              replayId: replayRequest.replayId,
+              attestationId: randomUUID(),
+              reportId: terminalReport.reportId,
+            }),
+          },
+        );
+        expect(finalizedResponse.status).toBe(200);
+        const finalized = procedureLeafReplayFinalizeResultSchema.parse(
+          await finalizedResponse.json(),
+        );
+        expect(finalized).toMatchObject({
+          status: 'accepted',
+          attestation: {
+            replayId: replayRequest.replayId,
+            execution: { action: { adapterId: 'blender', name: actionName } },
+            successGate: {
+              observations: [
+                {
+                  kind: observationKind,
+                  details: {
+                    parameters: observationParameters,
+                    sizeMatches: true,
+                    ...topology,
+                  },
+                },
+              ],
+              allSatisfied: true,
+            },
+          },
+        });
+      } finally {
+        await runtime.stop();
+      }
+    },
+  );
 
   it('compiles through MCP and HTTP without publishing, proposing, or executing', async () => {
     const runtime = await startRuntime({
