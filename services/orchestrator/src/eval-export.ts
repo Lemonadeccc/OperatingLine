@@ -219,6 +219,29 @@ function publishedPlanMatches(payload: unknown, request: EvalExportRequest): boo
   return adapterId === null || adapterId === request.targetAdapterId;
 }
 
+function procedureLeafReplayProposalMatches(payload: unknown, request: EvalExportRequest): boolean {
+  const targetInstanceId = stringAt(payload, 'targetInstanceId');
+  return (
+    targetInstanceId !== null &&
+    stringAt(payload, 'proposal', 'targetAdapterId') === request.targetAdapterId &&
+    stringAt(payload, 'proposal', 'plan', 'id') === request.planId &&
+    (request.instanceId === undefined || targetInstanceId === request.instanceId)
+  );
+}
+
+function procedureLeafReplayAttestationMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+): boolean {
+  const instanceId = stringAt(payload, 'execution', 'host', 'instanceId');
+  return (
+    instanceId !== null &&
+    stringAt(payload, 'execution', 'host', 'adapterId') === request.targetAdapterId &&
+    stringAt(payload, 'execution', 'plan', 'id') === request.planId &&
+    (request.instanceId === undefined || instanceId === request.instanceId)
+  );
+}
+
 function collectRelations(events: readonly StoredExecutionEvent[], request: EvalExportRequest) {
   const proposalPayloads = new Map<string, unknown>();
   const revisionRequestPayloads = new Map<string, unknown>();
@@ -389,6 +412,10 @@ function eventMatches(
         (request.instanceId === undefined ||
           stringAt(event.payload, 'instanceId') === request.instanceId)
       );
+    case 'procedure.leaf-replay.proposed':
+      return procedureLeafReplayProposalMatches(event.payload, request);
+    case 'procedure.leaf-replay.attested':
+      return procedureLeafReplayAttestationMatches(event.payload, request);
     default:
       return false;
   }

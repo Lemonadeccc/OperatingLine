@@ -63,6 +63,12 @@ import {
   procedureOperationSearchHitSchema,
   procedureOperationSearchRequestSchema,
   procedureOperationSearchResultSchema,
+  procedureLeafReplayAttestationSchema,
+  procedureLeafReplayBindingSchema,
+  procedureLeafReplayFinalizeRequestSchema,
+  procedureLeafReplayFinalizeResultSchema,
+  procedureLeafReplayProposalRequestSchema,
+  procedureLeafReplayProposalResultSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
   procedureTreeGetRequestSchema,
@@ -85,6 +91,7 @@ import {
   type InteractionCatalog,
   type PlanningIntent,
   type PlanningQualityReport,
+  type ProcedureLeafReplayBinding,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -125,6 +132,13 @@ import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
+import {
+  buildProcedureLeafReplayAttestation,
+  buildProcedureLeafReplayBinding,
+  prepareProcedureLeafReplay,
+  ProcedureLeafReplayError,
+  sameProcedureLeafReplayValue,
+} from './procedure-replay.js';
 import {
   buildProcedureAuthoringPromptPacket,
   validateProcedureAuthoringCandidate,
@@ -1142,6 +1156,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         mergeBaseRequestId?: string;
       };
       planning?: PlanningIntent;
+      persistProposal?: (proposal: GuideProposal) => void;
     }): { proposal: GuideProposal; planningQuality: PlanningQualityReport } => {
       validateProposalTarget(input.plan, input.targetAdapterId);
       const catalog = actionCatalogRegistry.get({
@@ -1222,7 +1237,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         catalogVersion: catalog.catalogVersion,
         proposedAt: new Date().toISOString(),
       });
-      if (input.goalRequestId !== undefined) {
+      if (input.persistProposal !== undefined) {
+        if (input.goalRequestId !== undefined || input.replan !== undefined) {
+          throw new Error('Custom proposal persistence is limited to standalone proposals');
+        }
+        input.persistProposal(proposal);
+      } else if (input.goalRequestId !== undefined) {
         database.recordGuideGoalProposal(
           proposal,
           input.goalRequestId,
@@ -1257,6 +1277,189 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       planDiff: proposal.planDiff ?? null,
       planningQuality,
     });
+
+    const proposeProcedureLeafReplay = (
+      request: ReturnType<typeof procedureLeafReplayProposalRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplay(request.replayId);
+      if (existingPayload !== null) {
+        const existing = procedureLeafReplayBindingSchema.parse(existingPayload);
+        if (!sameProcedureLeafReplayValue(existing.request, request)) {
+          throw new ProcedureLeafReplayError(
+            `Replay id ${request.replayId} is already bound to different input`,
+            409,
+          );
+        }
+        return procedureLeafReplayProposalResultSchema.parse({
+          status: 'duplicate',
+          binding: existing,
+        });
+      }
+
+      const materialization = materializeProcedureAuthoring({
+        packet: request.packet,
+        tree: request.tree,
+      });
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: materialization.catalogBinding.adapterId,
+        catalogVersion: materialization.catalogBinding.actionCatalogVersion,
+      });
+      const prepared = prepareProcedureLeafReplay(request, materialization, actionCatalog);
+      const plan = materialization.compilation.plan;
+      const planContentSha256 = computePlanContentSha256(plan);
+      let binding: ProcedureLeafReplayBinding | undefined;
+      let persistenceResult: 'accepted' | 'duplicate' | undefined;
+      createProposal({
+        targetAdapterId: actionCatalog.adapterId,
+        targetInstanceId: request.targetInstanceId,
+        catalogVersion: actionCatalog.catalogVersion,
+        plan,
+        planning: prepared.planning,
+        persistProposal: (proposal) => {
+          const candidateBinding = buildProcedureLeafReplayBinding({
+            request,
+            materialization,
+            proposal,
+            planContentSha256,
+            recipeId: prepared.recipeId,
+            actionName: prepared.actionName,
+            createdAt: proposal.proposedAt,
+          });
+          const result = database.recordProcedureLeafReplayProposal(proposal, {
+            replayId: candidateBinding.replayId,
+            proposalId: proposal.proposalId,
+            treeId: candidateBinding.materialization.tree.id,
+            treeRevision: candidateBinding.materialization.tree.revision,
+            leafId: candidateBinding.leafId,
+            adapterId: candidateBinding.materialization.tree.adapterId,
+            instanceId: candidateBinding.targetInstanceId,
+            bindingContentSha256: candidateBinding.integrity.contentSha256,
+            payload: candidateBinding,
+            createdAt: candidateBinding.createdAt,
+          });
+          if (result === 'conflict') {
+            throw new ProcedureLeafReplayError(
+              'Replay proposal conflicts with an existing proposal or replay binding',
+              409,
+            );
+          }
+          binding = candidateBinding;
+          persistenceResult = result;
+        },
+      });
+      if (binding === undefined || persistenceResult === undefined) {
+        throw new Error('Replay proposal persistence did not return a binding');
+      }
+      return procedureLeafReplayProposalResultSchema.parse({
+        status: persistenceResult,
+        binding,
+      });
+    };
+
+    const finalizeProcedureLeafReplay = (
+      request: ReturnType<typeof procedureLeafReplayFinalizeRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplayAttestation(request.replayId);
+      if (existingPayload !== null) {
+        const existing = procedureLeafReplayAttestationSchema.parse(existingPayload);
+        if (
+          existing.attestationId !== request.attestationId ||
+          existing.report.reportId !== request.reportId
+        ) {
+          throw new ProcedureLeafReplayError(
+            `Replay ${request.replayId} already has a different attestation`,
+            409,
+          );
+        }
+        return procedureLeafReplayFinalizeResultSchema.parse({
+          status: 'duplicate',
+          attestation: existing,
+        });
+      }
+
+      const bindingPayload = database.getProcedureLeafReplay(request.replayId);
+      if (bindingPayload === null) {
+        throw new ProcedureLeafReplayError(`Unknown replay: ${request.replayId}`, 404);
+      }
+      const binding = procedureLeafReplayBindingSchema.parse(bindingPayload);
+      const proposalPayload = database.getGuideProposal(binding.proposal.proposalId);
+      if (
+        proposalPayload === null ||
+        !sameProcedureLeafReplayValue(proposalPayload, binding.proposal)
+      ) {
+        throw new ProcedureLeafReplayError(
+          'Stored replay proposal is missing or differs from its binding',
+          409,
+        );
+      }
+      const decisionPayload = database.getGuideProposalDecision(
+        binding.proposal.proposalId,
+        binding.proposal.targetAdapterId,
+        binding.targetInstanceId,
+      );
+      if (decisionPayload === null) {
+        throw new ProcedureLeafReplayError(
+          'Replay proposal has no persisted decision for the target instance',
+          409,
+        );
+      }
+      const decision = guideProposalDecisionSchema.parse(decisionPayload);
+      const reportPayload = database.getCompanionStateReport(request.reportId);
+      if (reportPayload === null) {
+        throw new ProcedureLeafReplayError(
+          `Unknown companion state report: ${request.reportId}`,
+          404,
+        );
+      }
+      const report = companionStateReportSchema.parse(reportPayload);
+      const proposalReceipt = database.getManagedReplayReceipt(
+        'replay_proposal',
+        binding.proposal.proposalId,
+      );
+      const decisionReceipt = database.getManagedReplayReceipt(
+        'guide_proposal_decision',
+        decision.decisionId,
+      );
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        report.reportId,
+      );
+      if (proposalReceipt === null || decisionReceipt === null || reportReceipt === null) {
+        throw new ProcedureLeafReplayError(
+          'Replay evidence lacks an authenticated server receipt chain',
+          409,
+        );
+      }
+      const attestation = buildProcedureLeafReplayAttestation({
+        binding,
+        decision,
+        report,
+        proposalReceipt,
+        decisionReceipt,
+        reportReceipt,
+        attestationId: request.attestationId,
+        attestedAt: new Date().toISOString(),
+      });
+      const persistenceResult = database.recordProcedureLeafReplayAttestation({
+        attestationId: attestation.attestationId,
+        replayId: attestation.replayId,
+        reportId: attestation.report.reportId,
+        executionId: attestation.execution.execution.id,
+        contentSha256: attestation.integrity.contentSha256,
+        payload: attestation,
+        attestedAt: attestation.attestedAt,
+      });
+      if (persistenceResult === 'conflict') {
+        throw new ProcedureLeafReplayError(
+          'Replay attestation conflicts with existing append-only evidence',
+          409,
+        );
+      }
+      return procedureLeafReplayFinalizeResultSchema.parse({
+        status: persistenceResult,
+        attestation,
+      });
+    };
 
     const replanningService = createReplanningService({
       database,
@@ -1531,6 +1734,105 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                       error instanceof Error
                         ? error.message
                         : 'Procedure authoring materialization failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.replay.propose',
+        {
+          description:
+            'Revalidate and materialize one bounded UV Sphere leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted provenance.',
+          inputSchema: deferMcpInputValidation(procedureLeafReplayProposalRequestSchema),
+          outputSchema: procedureLeafReplayProposalResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureLeafReplayProposalRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_leaf_replay_proposal_request',
+                    message: 'Procedure leaf replay proposal violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = proposeProcedureLeafReplay(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_leaf_replay_proposal_failed',
+                    message:
+                      error instanceof Error ? error.message : 'Procedure leaf replay failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.replay.finalize',
+        {
+          description:
+            'Append one managed-action replay attestation only after the exact proposal was accepted and a stored terminal Companion report proves the strong UV Sphere success gate. It never upgrades menu or shortcut tracks to executed.',
+          inputSchema: procedureLeafReplayFinalizeRequestSchema,
+          outputSchema: procedureLeafReplayFinalizeResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureLeafReplayFinalizeRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_leaf_replay_finalize_request',
+                    message:
+                      'Procedure leaf replay finalization violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = finalizeProcedureLeafReplay(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_leaf_replay_finalize_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Procedure leaf replay finalization failed',
                   }),
                 },
               ],
@@ -2449,6 +2751,43 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/replay/propose', async (request, reply) => {
+      const parsedRequest = procedureLeafReplayProposalRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_leaf_replay_proposal_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return proposeProcedureLeafReplay(parsedRequest.data);
+      } catch (error) {
+        const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 422;
+        return reply.code(statusCode).send({
+          error: 'procedure_leaf_replay_proposal_failed',
+          message: error instanceof Error ? error.message : 'Procedure leaf replay proposal failed',
+        });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/replay/finalize', async (request, reply) => {
+      const parsedRequest = procedureLeafReplayFinalizeRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_leaf_replay_finalize_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return finalizeProcedureLeafReplay(parsedRequest.data);
+      } catch (error) {
+        const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 422;
+        return reply.code(statusCode).send({
+          error: 'procedure_leaf_replay_finalize_failed',
+          message:
+            error instanceof Error ? error.message : 'Procedure leaf replay finalization failed',
+        });
+      }
+    });
     runtimeApp.post('/api/v1/procedure/compile', async (request, reply) => {
       const parsedRequest = procedureCompilationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -2993,7 +3332,50 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .code(400)
           .send({ error: 'invalid_decision', issues: parsedDecision.error.issues });
       }
-      const result = database.recordGuideProposalDecision(parsedDecision.data);
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      const replayProposalReceipt = database.getManagedReplayReceipt(
+        'replay_proposal',
+        parsedDecision.data.proposalId,
+      );
+      if (leaseHeader === undefined && replayProposalReceipt !== null) {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Managed replay proposal decisions require a negotiated Companion lease',
+        });
+      }
+      let authenticatedSessionProvenance: { sessionFingerprintSha256: string } | undefined;
+      if (leaseHeader !== undefined) {
+        if (typeof leaseHeader !== 'string') {
+          return reply.code(400).send({ error: 'invalid_companion_lease' });
+        }
+        try {
+          const session = companionLeaseManager.authorize(
+            leaseHeader,
+            parsedDecision.data.adapterId,
+            parsedDecision.data.instanceId,
+          );
+          if (
+            session.lease.negotiatedGuideProtocolVersion !== parsedDecision.data.protocolVersion
+          ) {
+            return reply.code(409).send({
+              error: 'companion_session_identity_mismatch',
+              message: 'Proposal decision protocol differs from its negotiated session',
+            });
+          }
+          authenticatedSessionProvenance = {
+            sessionFingerprintSha256: createHash('sha256').update(leaseHeader).digest('hex'),
+          };
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      }
+      const result = database.recordGuideProposalDecision(
+        parsedDecision.data,
+        authenticatedSessionProvenance,
+      );
       if (result === 'unknown') {
         return reply.code(404).send({ result });
       }
@@ -3009,6 +3391,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
       const leaseHeader = request.headers['x-operatingline-companion-lease'];
       let legacyReport = false;
+      let authenticatedSessionProvenance: { sessionFingerprintSha256: string } | undefined;
       if (leaseHeader !== undefined) {
         if (typeof leaseHeader !== 'string') {
           return reply.code(400).send({ error: 'invalid_companion_lease' });
@@ -3029,6 +3412,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               message: 'State report identity or protocol differs from its negotiated session',
             });
           }
+          authenticatedSessionProvenance = {
+            sessionFingerprintSha256: createHash('sha256').update(leaseHeader).digest('hex'),
+          };
         } catch (error) {
           if (error instanceof CompanionLeaseError) {
             return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -3049,7 +3435,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           throw error;
         }
       }
-      const result = database.recordCompanionState(parsedReport.data);
+      const result = database.recordCompanionState(
+        parsedReport.data,
+        authenticatedSessionProvenance,
+      );
       if (result === 'conflict') {
         return reply.code(409).send({ result });
       }

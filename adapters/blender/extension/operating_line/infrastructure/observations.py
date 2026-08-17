@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 import hashlib
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ import bpy
 
 from ..application.session import ActionReceipt
 from .snowman_actions.common import (
+    COLLECTION_LOGICAL_ID,
+    COLLECTION_NAME,
     action_fcurves,
     build_resource_registry,
     find_artifact,
@@ -61,6 +64,321 @@ def _resource_exists(
     return bool(requested) and len(available) == len(requested), {
         "resourceIds": list(requested),
         "availableResourceIds": available,
+    }
+
+
+def _mesh_signature_sha256(signature: tuple[Any, ...]) -> str:
+    payload = json.dumps(
+        signature,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _uv_sphere_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    allowed_parameters = {"resourceId", "objectName", "radius", "location"}
+    resource_id = parameters.get("resourceId")
+    object_name = parameters.get("objectName")
+    raw_radius = parameters.get("radius")
+    raw_location = parameters.get("location")
+    radius = (
+        float(raw_radius)
+        if not isinstance(raw_radius, bool)
+        and isinstance(raw_radius, (int, float))
+        and math.isfinite(float(raw_radius))
+        and float(raw_radius) > 0
+        else None
+    )
+    location = (
+        tuple(float(component) for component in raw_location)
+        if isinstance(raw_location, list)
+        and len(raw_location) == 3
+        and all(
+            not isinstance(component, bool)
+            and isinstance(component, (int, float))
+            and math.isfinite(float(component))
+            for component in raw_location
+        )
+        else ()
+    )
+    parameters_valid = bool(
+        set(parameters) == allowed_parameters
+        and isinstance(resource_id, str)
+        and resource_id
+        and isinstance(object_name, str)
+        and object_name
+        and radius is not None
+        and len(location) == 3
+    )
+
+    registry = build_resource_registry(receipts)
+    object_identity = registry.get(resource_id) if parameters_valid else None
+    mesh_id = f"{resource_id}.mesh" if isinstance(resource_id, str) else None
+    mesh_identity = registry.get(mesh_id) if mesh_id is not None else None
+    collection_identity = registry.get(COLLECTION_LOGICAL_ID)
+    obj = resolve_resource(object_identity) if object_identity is not None else None
+    mesh = resolve_resource(mesh_identity) if mesh_identity is not None else None
+    collection = (
+        resolve_resource(collection_identity)
+        if collection_identity is not None
+        else None
+    )
+    object_owned = bool(
+        object_identity is not None
+        and object_identity.resource_type == "OBJECT"
+        and isinstance(obj, bpy.types.Object)
+        and obj.type == "MESH"
+    )
+    mesh_owned = bool(
+        mesh_identity is not None
+        and mesh_identity.resource_type == "MESH"
+        and isinstance(mesh, bpy.types.Mesh)
+    )
+    collection_owned = bool(
+        collection_identity is not None
+        and collection_identity.resource_type == "COLLECTION"
+        and isinstance(collection, bpy.types.Collection)
+        and collection.name == COLLECTION_NAME
+    )
+
+    matching_receipts = tuple(
+        receipt
+        for receipt in receipts.values()
+        if receipt.action_name == "blender.mesh.create_uv_sphere"
+        and object_identity is not None
+        and mesh_identity is not None
+        and collection_identity is not None
+        and object_identity in receipt.created
+        and mesh_identity in receipt.created
+        and collection_identity in receipt.created
+    )
+    receipt = matching_receipts[0] if len(matching_receipts) == 1 else None
+    data_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.resource == object_identity and mutation.attribute == "data"
+        )
+        if receipt is not None
+        else ()
+    )
+    collection_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.resource == object_identity
+            and mutation.attribute == "users_collection"
+        )
+        if receipt is not None
+        else ()
+    )
+    content_mutations = (
+        tuple(
+            mutation
+            for mutation in receipt.mutations
+            if mutation.resource == mesh_identity and mutation.attribute == "mesh_content"
+        )
+        if receipt is not None
+        else ()
+    )
+    data_mutation = data_mutations[0] if len(data_mutations) == 1 else None
+    collection_mutation = (
+        collection_mutations[0] if len(collection_mutations) == 1 else None
+    )
+    content_mutation = content_mutations[0] if len(content_mutations) == 1 else None
+    receipt_matches = bool(
+        receipt is not None
+        and receipt.anchor == object_identity
+        and len(receipt.created) == 3
+        and set(receipt.created)
+        == {object_identity, mesh_identity, collection_identity}
+        and len(receipt.mutations) == 3
+        and data_mutation is not None
+        and data_mutation.before is None
+        and data_mutation.after == mesh_identity
+        and collection_mutation is not None
+        and collection_mutation.before == ()
+        and collection_mutation.after == (collection_identity,)
+        and content_mutation is not None
+        and content_mutation.before is None
+    )
+
+    object_data_matches = bool(
+        object_owned and mesh_owned and isinstance(obj, bpy.types.Object) and obj.data is mesh
+    )
+    collection_link_matches = bool(
+        object_owned
+        and collection_owned
+        and isinstance(obj, bpy.types.Object)
+        and isinstance(collection, bpy.types.Collection)
+        and tuple(obj.users_collection) == (collection,)
+        and tuple(collection.objects) == (obj,)
+        and not collection.children
+        and any(
+            child is collection for child in bpy.context.scene.collection.children
+        )
+    )
+    name_matches = bool(
+        object_owned
+        and mesh_owned
+        and isinstance(obj, bpy.types.Object)
+        and isinstance(mesh, bpy.types.Mesh)
+        and obj.name == object_name
+        and object_identity is not None
+        and object_identity.display_name == object_name
+        and mesh.name == f"{object_name}.Mesh"
+        and mesh_identity is not None
+        and mesh_identity.display_name == f"{object_name}.Mesh"
+    )
+
+    tolerance = 1e-6
+    location_matches = bool(
+        object_owned
+        and isinstance(obj, bpy.types.Object)
+        and len(location) == 3
+        and all(
+            math.isclose(float(actual), expected, rel_tol=0.0, abs_tol=tolerance)
+            for actual, expected in zip(obj.location, location)
+        )
+    )
+    rotation_matches = bool(
+        object_owned
+        and isinstance(obj, bpy.types.Object)
+        and math.isclose(
+            float(obj.matrix_basis.to_quaternion().angle),
+            0.0,
+            rel_tol=0.0,
+            abs_tol=tolerance,
+        )
+    )
+    scale_matches = bool(
+        object_owned
+        and isinstance(obj, bpy.types.Object)
+        and all(
+            math.isclose(float(component), 1.0, rel_tol=0.0, abs_tol=tolerance)
+            for component in obj.scale
+        )
+        and all(
+            math.isclose(float(component), 1.0, rel_tol=0.0, abs_tol=tolerance)
+            for component in obj.delta_scale
+        )
+    )
+    transform_isolated = bool(
+        object_owned
+        and isinstance(obj, bpy.types.Object)
+        and obj.parent is None
+        and len(obj.constraints) == 0
+        and all(
+            math.isclose(float(component), 0.0, rel_tol=0.0, abs_tol=tolerance)
+            for component in obj.delta_location
+        )
+    )
+    modifiers_absent = bool(
+        object_owned and isinstance(obj, bpy.types.Object) and len(obj.modifiers) == 0
+    )
+    shape_keys_absent = bool(
+        mesh_owned
+        and isinstance(mesh, bpy.types.Mesh)
+        and mesh.shape_keys is None
+    )
+    materials_absent = bool(
+        mesh_owned and isinstance(mesh, bpy.types.Mesh) and len(mesh.materials) == 0
+    )
+
+    counts = (
+        (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
+        if isinstance(mesh, bpy.types.Mesh)
+        else (0, 0, 0)
+    )
+    topology_matches = counts == (482, 992, 512)
+    finite_coordinates = bool(
+        isinstance(mesh, bpy.types.Mesh)
+        and all(
+            math.isfinite(float(component))
+            for vertex in mesh.vertices
+            for component in vertex.co
+        )
+    )
+    radius_matches = bool(
+        isinstance(mesh, bpy.types.Mesh)
+        and radius is not None
+        and all(
+            math.isclose(
+                math.sqrt(sum(float(component) ** 2 for component in vertex.co)),
+                radius,
+                rel_tol=1e-5,
+                abs_tol=max(1e-6, radius * 1e-5),
+            )
+            for vertex in mesh.vertices
+        )
+    )
+    current_signature = (
+        mesh_content_signature(mesh) if isinstance(mesh, bpy.types.Mesh) else None
+    )
+    content_intact = bool(
+        current_signature is not None
+        and content_mutation is not None
+        and content_mutation.after == current_signature
+    )
+    mesh_content_sha256 = (
+        _mesh_signature_sha256(current_signature)
+        if current_signature is not None
+        else None
+    )
+
+    satisfied = bool(
+        parameters_valid
+        and object_owned
+        and mesh_owned
+        and collection_owned
+        and receipt_matches
+        and object_data_matches
+        and collection_link_matches
+        and name_matches
+        and location_matches
+        and rotation_matches
+        and scale_matches
+        and transform_isolated
+        and modifiers_absent
+        and shape_keys_absent
+        and materials_absent
+        and topology_matches
+        and finite_coordinates
+        and radius_matches
+        and content_intact
+    )
+    return satisfied, {
+        "resourceId": resource_id if isinstance(resource_id, str) else None,
+        "objectName": object_name if isinstance(object_name, str) else None,
+        "meshId": mesh_id,
+        "collectionId": COLLECTION_LOGICAL_ID,
+        "parametersValid": parameters_valid,
+        "objectOwned": object_owned,
+        "meshOwned": mesh_owned,
+        "collectionOwned": collection_owned,
+        "receiptMatches": receipt_matches,
+        "objectDataMatches": object_data_matches,
+        "collectionLinkMatches": collection_link_matches,
+        "nameMatches": name_matches,
+        "locationMatches": location_matches,
+        "rotationMatches": rotation_matches,
+        "scaleMatches": scale_matches,
+        "transformIsolated": transform_isolated,
+        "modifiersAbsent": modifiers_absent,
+        "shapeKeysAbsent": shape_keys_absent,
+        "materialsAbsent": materials_absent,
+        "contentIntact": content_intact,
+        "topologyMatches": topology_matches,
+        "finiteCoordinates": finite_coordinates,
+        "radiusMatches": radius_matches,
+        "vertexCount": counts[0],
+        "edgeCount": counts[1],
+        "faceCount": counts[2],
+        "meshContentSha256": mesh_content_sha256,
     }
 
 
@@ -1572,6 +1890,7 @@ def _geometry_nodes_ready(
 OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "object_exists": _object_exists,
     "resource_exists": _resource_exists,
+    "uv_sphere_ready": _uv_sphere_ready,
     "material_assigned": _material_assigned,
     "armature_ready": _armature_ready,
     "pose_animation_ready": _pose_animation_ready,

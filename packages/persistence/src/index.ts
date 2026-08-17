@@ -24,6 +24,49 @@ export interface CompanionStateInput {
 
 export type RecordCompanionStateResult = 'accepted' | 'duplicate' | 'stale' | 'conflict';
 
+export interface ProcedureLeafReplayInput {
+  replayId: string;
+  proposalId: string;
+  treeId: string;
+  treeRevision: number;
+  leafId: string;
+  adapterId: string;
+  instanceId: string;
+  bindingContentSha256: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface ProcedureLeafReplayAttestationInput {
+  attestationId: string;
+  replayId: string;
+  reportId: string;
+  executionId: string;
+  contentSha256: string;
+  payload: unknown;
+  attestedAt: string;
+}
+
+export type RecordProcedureLeafReplayResult = 'accepted' | 'duplicate' | 'conflict';
+
+export interface AuthenticatedSessionProvenance {
+  sessionFingerprintSha256: string;
+}
+
+export type ManagedReplayReceiptSubjectType =
+  'replay_proposal' | 'guide_proposal_decision' | 'companion_state_report';
+
+export interface StoredManagedReplayReceipt {
+  sequence: number;
+  subjectType: ManagedReplayReceiptSubjectType;
+  subjectId: string;
+  authentication: 'orchestrator_internal' | 'negotiated_companion_lease';
+  adapterId: string;
+  instanceId: string;
+  sessionFingerprintSha256: string | null;
+  receivedAt: string;
+}
+
 export interface GuideProposalInput {
   proposalId: string;
   targetAdapterId: string;
@@ -450,6 +493,11 @@ export interface OperatingLineDatabase {
   listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
   getExecutionEvent(id: string): StoredExecutionEvent | null;
   recordGuideProposal<T extends GuideProposalInput>(proposal: T): void;
+  getGuideProposal(proposalId: string): unknown | null;
+  recordProcedureLeafReplayProposal<T extends GuideProposalInput>(
+    proposal: T,
+    replay: ProcedureLeafReplayInput,
+  ): RecordProcedureLeafReplayResult;
   recordGuideGoalProposal<T extends GuideProposalInput>(
     proposal: T,
     goalRequestId: string,
@@ -464,6 +512,7 @@ export interface OperatingLineDatabase {
   listLatestGuidePlanRevisions(): Array<{ planId: string; revision: number }>;
   recordGuideProposalDecision<T extends GuideProposalDecisionInput>(
     decision: T,
+    provenance?: AuthenticatedSessionProvenance,
   ): RecordGuideProposalDecisionResult;
   recordGuideRevisionRequest<T extends GuideRevisionRequestInput>(
     request: T,
@@ -538,7 +587,20 @@ export interface OperatingLineDatabase {
     adapterId?: string,
   ): StoredProcedureTreeSummary[];
   searchProcedureOperations(input: ProcedureOperationSearchInput): StoredProcedureOperationIndex[];
-  recordCompanionState<T extends CompanionStateInput>(report: T): RecordCompanionStateResult;
+  recordCompanionState<T extends CompanionStateInput>(
+    report: T,
+    provenance?: AuthenticatedSessionProvenance,
+  ): RecordCompanionStateResult;
+  getManagedReplayReceipt(
+    subjectType: ManagedReplayReceiptSubjectType,
+    subjectId: string,
+  ): StoredManagedReplayReceipt | null;
+  getCompanionStateReport(reportId: string): unknown | null;
+  getProcedureLeafReplay(replayId: string): unknown | null;
+  recordProcedureLeafReplayAttestation(
+    input: ProcedureLeafReplayAttestationInput,
+  ): RecordProcedureLeafReplayResult;
+  getProcedureLeafReplayAttestation(replayId: string): unknown | null;
   listLatestCompanionStates(): unknown[];
   close(): void;
 }
@@ -1045,6 +1107,86 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     VALUES (14, datetime('now'));
   `);
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_leaf_replays (
+      replay_id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL UNIQUE,
+      tree_id TEXT NOT NULL,
+      tree_revision INTEGER NOT NULL CHECK (tree_revision > 0),
+      leaf_id TEXT NOT NULL,
+      adapter_id TEXT NOT NULL,
+      instance_id TEXT NOT NULL,
+      binding_content_sha256 TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (proposal_id) REFERENCES guide_proposals(proposal_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS procedure_leaf_replay_attestations (
+      attestation_id TEXT PRIMARY KEY,
+      replay_id TEXT NOT NULL UNIQUE,
+      report_id TEXT NOT NULL UNIQUE,
+      execution_id TEXT NOT NULL,
+      content_sha256 TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      attested_at TEXT NOT NULL,
+      FOREIGN KEY (replay_id) REFERENCES procedure_leaf_replays(replay_id),
+      FOREIGN KEY (report_id) REFERENCES companion_state_reports(report_id)
+    );
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (15, datetime('now'));
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS managed_replay_receipts (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject_type TEXT NOT NULL CHECK (
+        subject_type IN ('replay_proposal', 'guide_proposal_decision', 'companion_state_report')
+      ),
+      trust_source TEXT NOT NULL CHECK (
+        trust_source IN ('orchestrator_internal', 'negotiated_companion_lease')
+      ),
+      proposal_id TEXT UNIQUE,
+      decision_id TEXT UNIQUE,
+      report_id TEXT UNIQUE,
+      adapter_id TEXT NOT NULL CHECK (adapter_id <> ''),
+      instance_id TEXT NOT NULL CHECK (instance_id <> ''),
+      session_fingerprint_sha256 TEXT,
+      received_at TEXT NOT NULL CHECK (received_at <> ''),
+      CHECK (
+        (subject_type = 'replay_proposal'
+          AND trust_source = 'orchestrator_internal'
+          AND proposal_id IS NOT NULL
+          AND decision_id IS NULL
+          AND report_id IS NULL
+          AND session_fingerprint_sha256 IS NULL)
+        OR (subject_type = 'guide_proposal_decision'
+          AND trust_source = 'negotiated_companion_lease'
+          AND proposal_id IS NULL
+          AND decision_id IS NOT NULL
+          AND report_id IS NULL
+          AND session_fingerprint_sha256 IS NOT NULL
+          AND length(session_fingerprint_sha256) = 64
+          AND session_fingerprint_sha256 NOT GLOB '*[^0-9a-f]*')
+        OR (subject_type = 'companion_state_report'
+          AND trust_source = 'negotiated_companion_lease'
+          AND proposal_id IS NULL
+          AND decision_id IS NULL
+          AND report_id IS NOT NULL
+          AND session_fingerprint_sha256 IS NOT NULL
+          AND length(session_fingerprint_sha256) = 64
+          AND session_fingerprint_sha256 NOT GLOB '*[^0-9a-f]*')
+      ),
+      FOREIGN KEY (proposal_id) REFERENCES procedure_leaf_replays(proposal_id),
+      FOREIGN KEY (decision_id) REFERENCES guide_proposal_decisions(decision_id),
+      FOREIGN KEY (report_id) REFERENCES companion_state_reports(report_id)
+    ) STRICT;
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (16, datetime('now'));
+  `);
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
@@ -1061,6 +1203,72 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     SELECT sequence, id, event_type, payload, created_at
     FROM execution_events
     WHERE id = ?
+  `);
+  const findGuideProposalPayload = sqlite.prepare(`
+    SELECT payload FROM guide_proposals WHERE proposal_id = ?
+  `);
+  const findGuideProposalForReplay = sqlite.prepare(`
+    SELECT proposal_id, plan_id, plan_revision, payload
+    FROM guide_proposals
+    WHERE proposal_id = ? OR (plan_id = ? AND plan_revision = ?)
+  `);
+  const findProcedureLeafReplay = sqlite.prepare(`
+    SELECT
+      replay_id,
+      proposal_id,
+      tree_id,
+      tree_revision,
+      leaf_id,
+      adapter_id,
+      instance_id,
+      binding_content_sha256,
+      payload,
+      created_at
+    FROM procedure_leaf_replays
+    WHERE replay_id = ? OR proposal_id = ?
+  `);
+  const findProcedureLeafReplayById = sqlite.prepare(`
+    SELECT payload FROM procedure_leaf_replays WHERE replay_id = ?
+  `);
+  const insertProcedureLeafReplay = sqlite.prepare(`
+    INSERT INTO procedure_leaf_replays (
+      replay_id,
+      proposal_id,
+      tree_id,
+      tree_revision,
+      leaf_id,
+      adapter_id,
+      instance_id,
+      binding_content_sha256,
+      payload,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const findProcedureLeafReplayAttestation = sqlite.prepare(`
+    SELECT
+      attestation_id,
+      replay_id,
+      report_id,
+      execution_id,
+      content_sha256,
+      payload,
+      attested_at
+    FROM procedure_leaf_replay_attestations
+    WHERE attestation_id = ? OR replay_id = ? OR report_id = ?
+  `);
+  const findProcedureLeafReplayAttestationByReplayId = sqlite.prepare(`
+    SELECT payload FROM procedure_leaf_replay_attestations WHERE replay_id = ?
+  `);
+  const insertProcedureLeafReplayAttestation = sqlite.prepare(`
+    INSERT INTO procedure_leaf_replay_attestations (
+      attestation_id,
+      replay_id,
+      report_id,
+      execution_id,
+      content_sha256,
+      payload,
+      attested_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const insertProcedureTree = sqlite.prepare(`
     INSERT INTO procedure_trees (
@@ -1750,6 +1958,56 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       decision,
       payload
     ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const insertReplayProposalReceipt = sqlite.prepare(`
+    INSERT INTO managed_replay_receipts (
+      subject_type, trust_source, proposal_id, adapter_id, instance_id, received_at
+    ) VALUES ('replay_proposal', 'orchestrator_internal', ?, ?, ?, ?)
+    ON CONFLICT(proposal_id) DO NOTHING
+  `);
+  const insertGuideProposalDecisionReceipt = sqlite.prepare(`
+    INSERT INTO managed_replay_receipts (
+      subject_type,
+      trust_source,
+      decision_id,
+      adapter_id,
+      instance_id,
+      session_fingerprint_sha256,
+      received_at
+    ) VALUES ('guide_proposal_decision', 'negotiated_companion_lease', ?, ?, ?, ?, ?)
+    ON CONFLICT(decision_id) DO NOTHING
+  `);
+  const insertCompanionStateReportReceipt = sqlite.prepare(`
+    INSERT INTO managed_replay_receipts (
+      subject_type,
+      trust_source,
+      report_id,
+      adapter_id,
+      instance_id,
+      session_fingerprint_sha256,
+      received_at
+    ) VALUES ('companion_state_report', 'negotiated_companion_lease', ?, ?, ?, ?, ?)
+    ON CONFLICT(report_id) DO NOTHING
+  `);
+  const findManagedReplayReceipt = sqlite.prepare(`
+    SELECT
+      sequence,
+      subject_type,
+      proposal_id,
+      decision_id,
+      report_id,
+      trust_source,
+      adapter_id,
+      instance_id,
+      session_fingerprint_sha256,
+      received_at
+    FROM managed_replay_receipts
+    WHERE subject_type = ?
+      AND CASE subject_type
+        WHEN 'replay_proposal' THEN proposal_id
+        WHEN 'guide_proposal_decision' THEN decision_id
+        WHEN 'companion_state_report' THEN report_id
+      END = ?
   `);
   const findStateReport = sqlite.prepare(`
     SELECT adapter_id, instance_id, sequence, payload
@@ -2467,6 +2725,147 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         throw error;
       }
     },
+    getGuideProposal(proposalId) {
+      const row = findGuideProposalPayload.get(proposalId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid guide proposal payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    recordProcedureLeafReplayProposal(proposal, replay) {
+      if (replay.proposalId !== proposal.proposalId) {
+        return 'conflict';
+      }
+      const proposalPayload = canonicalJson(proposal);
+      const replayPayload = canonicalJson(replay.payload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingProposal = findGuideProposalForReplay.get(
+          proposal.proposalId,
+          proposal.plan.id,
+          proposal.plan.revision,
+        ) as
+          | {
+              proposal_id: string;
+              plan_id: string;
+              plan_revision: number;
+              payload: string;
+            }
+          | undefined;
+        const existingReplay = findProcedureLeafReplay.get(replay.replayId, replay.proposalId) as
+          | {
+              replay_id: string;
+              proposal_id: string;
+              tree_id: string;
+              tree_revision: number;
+              leaf_id: string;
+              adapter_id: string;
+              instance_id: string;
+              binding_content_sha256: string;
+              payload: string;
+              created_at: string;
+            }
+          | undefined;
+        const proposalMatches =
+          existingProposal === undefined ||
+          (existingProposal.proposal_id === proposal.proposalId &&
+            existingProposal.plan_id === proposal.plan.id &&
+            existingProposal.plan_revision === proposal.plan.revision &&
+            existingProposal.payload === proposalPayload);
+        const replayMatches =
+          existingReplay === undefined ||
+          (existingReplay.replay_id === replay.replayId &&
+            existingReplay.proposal_id === replay.proposalId &&
+            existingReplay.tree_id === replay.treeId &&
+            existingReplay.tree_revision === replay.treeRevision &&
+            existingReplay.leaf_id === replay.leafId &&
+            existingReplay.adapter_id === replay.adapterId &&
+            existingReplay.instance_id === replay.instanceId &&
+            existingReplay.binding_content_sha256 === replay.bindingContentSha256 &&
+            existingReplay.payload === replayPayload &&
+            existingReplay.created_at === replay.createdAt);
+        if (!proposalMatches || !replayMatches) {
+          sqlite.exec('ROLLBACK;');
+          return 'conflict';
+        }
+        if (existingProposal !== undefined && existingReplay !== undefined) {
+          insertReplayProposalReceipt.run(
+            proposal.proposalId,
+            replay.adapterId,
+            replay.instanceId,
+            new Date().toISOString(),
+          );
+          sqlite.exec('COMMIT;');
+          return 'duplicate';
+        }
+        if (existingProposal === undefined) {
+          const unresolvedProposal =
+            proposal.targetInstanceId === undefined
+              ? findAnyUnresolvedTargetedGuideProposalForAdapter.get(proposal.targetAdapterId)
+              : findPendingGuideProposal.get(
+                  proposal.targetAdapterId,
+                  proposal.targetInstanceId,
+                  proposal.targetAdapterId,
+                  proposal.targetInstanceId,
+                );
+          if (unresolvedProposal !== undefined) {
+            sqlite.exec('ROLLBACK;');
+            return 'conflict';
+          }
+          insertGuideProposal.run(
+            proposal.proposalId,
+            proposal.targetAdapterId,
+            proposal.plan.id,
+            proposal.plan.revision,
+            proposal.proposedAt,
+            proposalPayload,
+          );
+          insertEvent.run(
+            `guide-proposal:${proposal.proposalId}`,
+            'guide.proposal.created',
+            proposalPayload,
+            new Date().toISOString(),
+          );
+        }
+        if (existingReplay === undefined) {
+          insertProcedureLeafReplay.run(
+            replay.replayId,
+            replay.proposalId,
+            replay.treeId,
+            replay.treeRevision,
+            replay.leafId,
+            replay.adapterId,
+            replay.instanceId,
+            replay.bindingContentSha256,
+            replayPayload,
+            replay.createdAt,
+          );
+          insertEvent.run(
+            `procedure-leaf-replay:${replay.replayId}:proposed`,
+            'procedure.leaf-replay.proposed',
+            replayPayload,
+            replay.createdAt,
+          );
+        }
+        insertReplayProposalReceipt.run(
+          proposal.proposalId,
+          replay.adapterId,
+          replay.instanceId,
+          new Date().toISOString(),
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+          return 'conflict';
+        }
+        throw error;
+      }
+    },
     recordGuideGoalProposal(proposal, goalRequestId, generationRequestId) {
       const payload = canonicalJson(proposal);
       sqlite.exec('BEGIN IMMEDIATE;');
@@ -2658,7 +3057,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         return { planId: candidate.plan_id, revision: candidate.revision };
       });
     },
-    recordGuideProposalDecision(decision) {
+    recordGuideProposalDecision(decision, provenance) {
       const payload = canonicalJson(decision);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
@@ -2672,14 +3071,23 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             }
           | undefined;
         if (existingById !== undefined) {
-          sqlite.exec('COMMIT;');
-          return existingById.proposal_id === decision.proposalId &&
+          const exactMatch =
+            existingById.proposal_id === decision.proposalId &&
             existingById.adapter_id === decision.adapterId &&
             existingById.instance_id === decision.instanceId &&
             existingById.decision === decision.decision &&
-            existingById.payload === payload
-            ? 'duplicate'
-            : 'conflict';
+            existingById.payload === payload;
+          if (exactMatch && provenance !== undefined) {
+            insertGuideProposalDecisionReceipt.run(
+              decision.decisionId,
+              decision.adapterId,
+              decision.instanceId,
+              provenance.sessionFingerprintSha256,
+              new Date().toISOString(),
+            );
+          }
+          sqlite.exec('COMMIT;');
+          return exactMatch ? 'duplicate' : 'conflict';
         }
 
         const proposal = findGuideProposalTarget.get(decision.proposalId) as
@@ -2711,6 +3119,15 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           decision.decision,
           payload,
         );
+        if (provenance !== undefined) {
+          insertGuideProposalDecisionReceipt.run(
+            decision.decisionId,
+            decision.adapterId,
+            decision.instanceId,
+            provenance.sessionFingerprintSha256,
+            new Date().toISOString(),
+          );
+        }
         insertEvent.run(
           `guide-proposal-decision:${decision.decisionId}`,
           'guide.proposal.decided',
@@ -3479,7 +3896,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         return JSON.parse(payload) as unknown;
       });
     },
-    recordCompanionState(report) {
+    recordCompanionState(report, provenance) {
       const payload = canonicalJson(report);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
@@ -3487,13 +3904,22 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           | { adapter_id: string; instance_id: string; sequence: number; payload: string }
           | undefined;
         if (existingReport !== undefined) {
-          sqlite.exec('COMMIT;');
-          return existingReport.adapter_id === report.adapterId &&
+          const exactMatch =
+            existingReport.adapter_id === report.adapterId &&
             existingReport.instance_id === report.instanceId &&
             existingReport.sequence === report.sequence &&
-            existingReport.payload === payload
-            ? 'duplicate'
-            : 'conflict';
+            existingReport.payload === payload;
+          if (exactMatch && provenance !== undefined) {
+            insertCompanionStateReportReceipt.run(
+              report.reportId,
+              report.adapterId,
+              report.instanceId,
+              provenance.sessionFingerprintSha256,
+              new Date().toISOString(),
+            );
+          }
+          sqlite.exec('COMMIT;');
+          return exactMatch ? 'duplicate' : 'conflict';
         }
 
         const latestState = findLatestState.get(report.adapterId, report.instanceId) as
@@ -3510,6 +3936,15 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           report.sequence,
           payload,
         );
+        if (provenance !== undefined) {
+          insertCompanionStateReportReceipt.run(
+            report.reportId,
+            report.adapterId,
+            report.instanceId,
+            provenance.sessionFingerprintSha256,
+            new Date().toISOString(),
+          );
+        }
         upsertLatestState.run(
           report.adapterId,
           report.instanceId,
@@ -3529,6 +3964,144 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         sqlite.exec('ROLLBACK;');
         throw error;
       }
+    },
+    getManagedReplayReceipt(subjectType, subjectId) {
+      const row = findManagedReplayReceipt.get(subjectType, subjectId) as
+        | {
+            sequence: unknown;
+            subject_type: unknown;
+            proposal_id: unknown;
+            decision_id: unknown;
+            report_id: unknown;
+            trust_source: unknown;
+            adapter_id: unknown;
+            instance_id: unknown;
+            session_fingerprint_sha256: unknown;
+            received_at: unknown;
+          }
+        | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      const storedSubjectId =
+        row.subject_type === 'replay_proposal'
+          ? row.proposal_id
+          : row.subject_type === 'guide_proposal_decision'
+            ? row.decision_id
+            : row.report_id;
+      if (
+        typeof row.sequence !== 'number' ||
+        (row.subject_type !== 'replay_proposal' &&
+          row.subject_type !== 'guide_proposal_decision' &&
+          row.subject_type !== 'companion_state_report') ||
+        typeof storedSubjectId !== 'string' ||
+        (row.trust_source !== 'orchestrator_internal' &&
+          row.trust_source !== 'negotiated_companion_lease') ||
+        typeof row.adapter_id !== 'string' ||
+        typeof row.instance_id !== 'string' ||
+        (row.session_fingerprint_sha256 !== null &&
+          typeof row.session_fingerprint_sha256 !== 'string') ||
+        typeof row.received_at !== 'string'
+      ) {
+        throw new Error('SQLite returned an invalid managed replay receipt');
+      }
+      return {
+        sequence: row.sequence,
+        subjectType: row.subject_type,
+        subjectId: storedSubjectId,
+        authentication: row.trust_source,
+        adapterId: row.adapter_id,
+        instanceId: row.instance_id,
+        sessionFingerprintSha256: row.session_fingerprint_sha256,
+        receivedAt: row.received_at,
+      };
+    },
+    getCompanionStateReport(reportId) {
+      const row = findStateReport.get(reportId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid companion state report payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    getProcedureLeafReplay(replayId) {
+      const row = findProcedureLeafReplayById.get(replayId) as { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid procedure leaf replay payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    recordProcedureLeafReplayAttestation(input) {
+      const payload = canonicalJson(input.payload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findProcedureLeafReplayAttestation.get(
+          input.attestationId,
+          input.replayId,
+          input.reportId,
+        ) as
+          | {
+              attestation_id: string;
+              replay_id: string;
+              report_id: string;
+              execution_id: string;
+              content_sha256: string;
+              payload: string;
+              attested_at: string;
+            }
+          | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.attestation_id === input.attestationId &&
+            existing.replay_id === input.replayId &&
+            existing.report_id === input.reportId &&
+            existing.execution_id === input.executionId &&
+            existing.content_sha256 === input.contentSha256 &&
+            existing.payload === payload &&
+            existing.attested_at === input.attestedAt
+            ? 'duplicate'
+            : 'conflict';
+        }
+        if (findProcedureLeafReplayById.get(input.replayId) === undefined) {
+          throw new Error(`Unknown procedure leaf replay: ${input.replayId}`);
+        }
+        insertProcedureLeafReplayAttestation.run(
+          input.attestationId,
+          input.replayId,
+          input.reportId,
+          input.executionId,
+          input.contentSha256,
+          payload,
+          input.attestedAt,
+        );
+        insertEvent.run(
+          `procedure-leaf-replay:${input.replayId}:attested`,
+          'procedure.leaf-replay.attested',
+          payload,
+          input.attestedAt,
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getProcedureLeafReplayAttestation(replayId) {
+      const row = findProcedureLeafReplayAttestationByReplayId.get(replayId) as
+        { payload?: unknown } | undefined;
+      if (row === undefined) {
+        return null;
+      }
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid procedure leaf replay attestation payload');
+      }
+      return JSON.parse(row.payload) as unknown;
     },
     listLatestCompanionStates() {
       return listLatestStates.all().map((row) => {

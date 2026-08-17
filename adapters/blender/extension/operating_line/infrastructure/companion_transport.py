@@ -404,6 +404,7 @@ class CompanionTransport:
         if (
             path.startswith("/api/v1/companion/guide?")
             or path == "/api/v1/companion/state"
+            or path == "/api/v1/companion/proposal-decision"
         ):
             session = self._session_snapshot
             if session is None:

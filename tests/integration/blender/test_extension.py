@@ -2,6 +2,7 @@
 
 import importlib.util
 from copy import deepcopy
+from dataclasses import replace
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -284,6 +285,149 @@ def assert_cube_resource_id_boundaries() -> None:
         assert "arguments.resourceId" in str(error)
     else:
         raise AssertionError("Cube resourceId longer than 180 characters must fail")
+
+
+def assert_uv_sphere_ready_observation() -> None:
+    object_name = "OperatingLine.ReplayUvSphere"
+    resource_id = "replay.uv_sphere"
+    radius = 0.75
+    location = [1.25, -2.5, 3.75]
+    sphere_step = step(
+        "replay.uv_sphere.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_uv_sphere",
+            "arguments": {
+                "resourceId": resource_id,
+                "objectName": object_name,
+                "radius": radius,
+                "location": location,
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), sphere_step])
+    session = DemoSession(root, action_registry(root))
+    parameters = {
+        "resourceId": resource_id,
+        "objectName": object_name,
+        "radius": radius,
+        "location": location,
+    }
+
+    def observe(
+        candidate_parameters=parameters,
+        candidate_receipts=None,
+    ):
+        return observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "uv_sphere_ready",
+                    "parameters": candidate_parameters,
+                },
+            ),
+            session.receipts if candidate_receipts is None else candidate_receipts,
+        )[0]
+
+    session.start()
+    assert session.next() is not None
+    sphere = bpy.data.objects.get(object_name)
+    collection = bpy.data.collections.get(COLLECTION_NAME)
+    assert sphere is not None and sphere.type == "MESH"
+    assert collection is not None
+    mesh = sphere.data
+    successful = observe()
+    assert successful["satisfied"] is True
+    details = successful["details"]
+    assert (details["vertexCount"], details["edgeCount"], details["faceCount"]) == (
+        482,
+        992,
+        512,
+    )
+    assert len(details["meshContentSha256"]) == 64
+    serialized_details = json.dumps(details, sort_keys=True)
+    for forbidden_field in ('"receiptToken"', '"pointer"', '"sessionUid"'):
+        assert forbidden_field not in serialized_details
+
+    malformed_parameters = (
+        {key: value for key, value in parameters.items() if key != "objectName"},
+        {**parameters, "unexpected": True},
+        {**parameters, "radius": True},
+        {**parameters, "location": [1.25, -2.5]},
+    )
+    for malformed in malformed_parameters:
+        assert observe(malformed)["satisfied"] is False
+
+    sphere.name = f"{object_name}.Tampered"
+    assert observe()["satisfied"] is False
+    sphere.name = object_name
+    sphere.location.x += 0.25
+    assert observe()["satisfied"] is False
+    sphere.location = location
+    sphere.scale = (1.0, 1.0, 1.25)
+    assert observe()["satisfied"] is False
+    sphere.scale = (1.0, 1.0, 1.0)
+
+    sphere.rotation_mode = "QUATERNION"
+    sphere.rotation_quaternion = (math.cos(0.25), 0.0, 0.0, math.sin(0.25))
+    assert observe()["satisfied"] is False
+    sphere.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+    sphere.rotation_mode = "AXIS_ANGLE"
+    sphere.rotation_axis_angle = (0.5, 0.0, 0.0, 1.0)
+    assert observe()["satisfied"] is False
+    sphere.rotation_axis_angle = (0.0, 0.0, 0.0, 1.0)
+    sphere.rotation_mode = "XYZ"
+
+    alternate_mesh = bpy.data.meshes.new(f"{object_name}.Alternate")
+    sphere.data = alternate_mesh
+    assert observe()["satisfied"] is False
+    sphere.data = mesh
+    bpy.data.meshes.remove(alternate_mesh)
+
+    original_coordinate = mesh.vertices[0].co.copy()
+    mesh.vertices[0].co.x += 0.125
+    mesh.update()
+    assert observe()["satisfied"] is False
+    mesh.vertices[0].co = original_coordinate
+    mesh.update()
+
+    external_modifier = sphere.modifiers.new(f"{object_name}.External", "BEVEL")
+    assert observe()["satisfied"] is False
+    sphere.modifiers.remove(external_modifier)
+    sphere.shape_key_add(name="Basis")
+    assert observe()["satisfied"] is False
+    sphere.shape_key_clear()
+    external_material = bpy.data.materials.new(f"{object_name}.External")
+    mesh.materials.append(external_material)
+    material_observation = observe()
+    assert material_observation["satisfied"] is False
+    assert material_observation["details"]["materialsAbsent"] is False
+    mesh.materials.clear()
+    bpy.data.materials.remove(external_material)
+
+    collection.objects.unlink(sphere)
+    assert observe()["satisfied"] is False
+    collection.objects.link(sphere)
+    original_action_tag = sphere["operating_line_action"]
+    sphere["operating_line_action"] = "blender.mesh.create_cube"
+    assert observe()["satisfied"] is False
+    sphere["operating_line_action"] = original_action_tag
+
+    receipt = session.receipts["replay.uv_sphere.create"]
+    mismatched_receipts = {
+        **session.receipts,
+        "replay.uv_sphere.create": replace(
+            receipt,
+            action_name="blender.mesh.create_cube",
+        ),
+    }
+    assert observe(candidate_receipts=mismatched_receipts)["satisfied"] is False
+    assert observe()["satisfied"] is True
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
 def assert_edit_modifier_geometry_nodes_round_trip() -> None:
@@ -4932,6 +5076,10 @@ def assert_companion_and_plan_semantics() -> None:
                 )
                 return
             if request_path == "/api/v1/companion/proposal-decision":
+                assert (
+                    self.headers.get("x-operatingline-companion-lease")
+                    is not None
+                )
                 proposal_decisions.append(payload)
                 self._reply({"result": "accepted"})
                 return
@@ -8624,6 +8772,7 @@ def main() -> None:
     assert_icosphere_action_round_trip()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
+    assert_uv_sphere_ready_observation()
     assert_cube_candidate_shortcut_projection_contract()
     assert_plane_candidate_shortcut_projection_contract()
     assert_editing_argument_boundaries()

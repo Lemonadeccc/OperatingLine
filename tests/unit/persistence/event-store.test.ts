@@ -58,6 +58,41 @@ function guideProposal(planId = 'snowman', revision = 1) {
   };
 }
 
+function procedureLeafReplay(proposalId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    replayId: randomUUID(),
+    proposalId,
+    treeId: 'snowman.eye.procedure',
+    treeRevision: 1,
+    leafId: 'snowman.eye.create',
+    adapterId: 'blender',
+    instanceId: randomUUID(),
+    bindingContentSha256: 'a'.repeat(64),
+    payload: {
+      contractVersion: '1.0.0',
+      operationIds: ['create-eye'],
+    },
+    createdAt: '2026-08-17T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function procedureLeafReplayAttestation(replayId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    attestationId: randomUUID(),
+    replayId,
+    reportId: randomUUID(),
+    executionId: randomUUID(),
+    contentSha256: 'b'.repeat(64),
+    payload: {
+      contractVersion: '1.0.0',
+      result: 'verified',
+    },
+    attestedAt: '2026-08-17T08:01:00.000Z',
+    ...overrides,
+  };
+}
+
 function proposalDecision(
   proposalId: string,
   instanceId: string,
@@ -1943,7 +1978,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 14,
+        count: 16,
       });
       expect(
         inspected
@@ -2079,5 +2114,352 @@ describe('OperatingLine persistence', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('stores leaf replay bindings and attestations append-only across reopen', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-leaf-replay-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const proposal = guideProposal('snowman-replay', 1);
+      const replay = procedureLeafReplay(proposal.proposalId);
+      const attestation = procedureLeafReplayAttestation(replay.replayId);
+      const report = {
+        reportId: attestation.reportId,
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sequence: 1,
+        occurredAt: attestation.attestedAt,
+      };
+      const first = openOperatingLineDatabase(databasePath);
+      expect(first.recordProcedureLeafReplayProposal(proposal, replay)).toBe('accepted');
+      expect(first.recordProcedureLeafReplayProposal(proposal, replay)).toBe('duplicate');
+      expect(first.recordCompanionState(report)).toBe('accepted');
+      expect(first.recordProcedureLeafReplayAttestation(attestation)).toBe('accepted');
+      expect(first.recordProcedureLeafReplayAttestation(attestation)).toBe('duplicate');
+      expect(first.getGuideProposal(proposal.proposalId)).toEqual(proposal);
+      expect(first.getCompanionStateReport(report.reportId)).toEqual(report);
+      expect(first.getProcedureLeafReplay(replay.replayId)).toEqual(replay.payload);
+      expect(first.getProcedureLeafReplayAttestation(replay.replayId)).toEqual(attestation.payload);
+      expect(
+        first.listExecutionEventsByTypes([
+          'procedure.leaf-replay.proposed',
+          'procedure.leaf-replay.attested',
+        ]),
+      ).toMatchObject([
+        { eventType: 'procedure.leaf-replay.proposed', payload: replay.payload },
+        { eventType: 'procedure.leaf-replay.attested', payload: attestation.payload },
+      ]);
+      first.close();
+
+      const reopened = openOperatingLineDatabase(databasePath);
+      expect(reopened.recordProcedureLeafReplayProposal(proposal, replay)).toBe('duplicate');
+      expect(reopened.recordProcedureLeafReplayAttestation(attestation)).toBe('duplicate');
+      expect(reopened.getProcedureLeafReplay(replay.replayId)).toEqual(replay.payload);
+      expect(reopened.getProcedureLeafReplayAttestation(replay.replayId)).toEqual(
+        attestation.payload,
+      );
+      reopened.close();
+
+      const inspected = new DatabaseSync(databasePath);
+      expect(
+        inspected.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 15').get(),
+      ).toEqual({ applied: 1 });
+      expect(
+        inspected.prepare('SELECT COUNT(*) AS count FROM procedure_leaf_replays').get(),
+      ).toEqual({ count: 1 });
+      expect(
+        inspected.prepare('SELECT COUNT(*) AS count FROM procedure_leaf_replay_attestations').get(),
+      ).toEqual({ count: 1 });
+      expect(inspected.prepare("PRAGMA foreign_key_list('procedure_leaf_replays')").all()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            table: 'guide_proposals',
+            from: 'proposal_id',
+            to: 'proposal_id',
+          }),
+        ]),
+      );
+      expect(
+        inspected.prepare("PRAGMA foreign_key_list('procedure_leaf_replay_attestations')").all(),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            table: 'procedure_leaf_replays',
+            from: 'replay_id',
+            to: 'replay_id',
+          }),
+          expect.objectContaining({
+            table: 'companion_state_reports',
+            from: 'report_id',
+            to: 'report_id',
+          }),
+        ]),
+      );
+      inspected.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects replay and attestation identity conflicts without appending events', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const proposal = guideProposal('snowman-replay-conflicts', 1);
+    const replay = procedureLeafReplay(proposal.proposalId);
+    const attestation = procedureLeafReplayAttestation(replay.replayId);
+    expect(database.recordProcedureLeafReplayProposal(proposal, replay)).toBe('accepted');
+    expect(database.recordProcedureLeafReplayProposal(proposal, replay)).toBe('duplicate');
+    expect(
+      database.recordProcedureLeafReplayProposal(proposal, {
+        ...replay,
+        payload: { ...replay.payload, operationIds: ['different'] },
+      }),
+    ).toBe('conflict');
+    expect(
+      database.recordProcedureLeafReplayProposal(proposal, {
+        ...replay,
+        replayId: randomUUID(),
+      }),
+    ).toBe('conflict');
+    expect(() => database.recordProcedureLeafReplayAttestation(attestation)).toThrow(
+      'FOREIGN KEY constraint failed',
+    );
+    expect(database.getProcedureLeafReplayAttestation(replay.replayId)).toBeNull();
+    expect(
+      database.recordCompanionState({
+        reportId: attestation.reportId,
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sequence: 1,
+      }),
+    ).toBe('accepted');
+    expect(database.recordProcedureLeafReplayAttestation(attestation)).toBe('accepted');
+    const eventCount = database.countEvents();
+    expect(
+      database.recordProcedureLeafReplayAttestation({
+        ...attestation,
+        contentSha256: 'c'.repeat(64),
+      }),
+    ).toBe('conflict');
+    expect(
+      database.recordProcedureLeafReplayAttestation({
+        ...attestation,
+        attestationId: randomUUID(),
+      }),
+    ).toBe('conflict');
+    expect(() =>
+      database.recordProcedureLeafReplayAttestation(procedureLeafReplayAttestation(randomUUID())),
+    ).toThrow('Unknown procedure leaf replay');
+    expect(database.getProcedureLeafReplay(randomUUID())).toBeNull();
+    expect(database.getProcedureLeafReplayAttestation(randomUUID())).toBeNull();
+    expect(database.countEvents()).toBe(eventCount);
+    database.close();
+  });
+
+  it('rolls back atomic proposal creation when its replay sidecar conflicts', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const existingProposal = guideProposal('existing-replay-plan', 1);
+    const existingReplay = procedureLeafReplay(existingProposal.proposalId);
+    expect(database.recordProcedureLeafReplayProposal(existingProposal, existingReplay)).toBe(
+      'accepted',
+    );
+    const conflictingProposal = guideProposal('rolled-back-replay-plan', 1);
+    const conflictingReplay = procedureLeafReplay(conflictingProposal.proposalId, {
+      replayId: existingReplay.replayId,
+    });
+    const eventCount = database.countEvents();
+    expect(database.recordProcedureLeafReplayProposal(conflictingProposal, conflictingReplay)).toBe(
+      'conflict',
+    );
+    expect(database.getGuideProposal(conflictingProposal.proposalId)).toBeNull();
+    expect(database.getProcedureLeafReplay(existingReplay.replayId)).toEqual(
+      existingReplay.payload,
+    );
+    expect(database.countEvents()).toBe(eventCount);
+    database.close();
+  });
+
+  it('stores append-ordered managed replay trust receipts across reopen', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-managed-replay-receipts-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      const fingerprint = 'c'.repeat(64);
+      const proposal = guideProposal('trusted-replay-plan', 1);
+      const replay = procedureLeafReplay(proposal.proposalId);
+      const decision = proposalDecision(proposal.proposalId, replay.instanceId);
+      const report = {
+        reportId: randomUUID(),
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sequence: 1,
+        occurredAt: '2026-08-17T08:02:00.000Z',
+      };
+      const first = openOperatingLineDatabase(databasePath);
+      expect(first.recordProcedureLeafReplayProposal(proposal, replay)).toBe('accepted');
+      expect(
+        first.recordGuideProposalDecision(decision, {
+          sessionFingerprintSha256: fingerprint,
+        }),
+      ).toBe('accepted');
+      expect(first.recordCompanionState(report, { sessionFingerprintSha256: fingerprint })).toBe(
+        'accepted',
+      );
+
+      const proposalReceipt = first.getManagedReplayReceipt('replay_proposal', proposal.proposalId);
+      const decisionReceipt = first.getManagedReplayReceipt(
+        'guide_proposal_decision',
+        decision.decisionId,
+      );
+      const reportReceipt = first.getManagedReplayReceipt(
+        'companion_state_report',
+        report.reportId,
+      );
+      expect(proposalReceipt).toMatchObject({
+        subjectType: 'replay_proposal',
+        subjectId: proposal.proposalId,
+        authentication: 'orchestrator_internal',
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sessionFingerprintSha256: null,
+      });
+      expect(decisionReceipt).toMatchObject({
+        subjectType: 'guide_proposal_decision',
+        subjectId: decision.decisionId,
+        authentication: 'negotiated_companion_lease',
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sessionFingerprintSha256: fingerprint,
+      });
+      expect(reportReceipt).toMatchObject({
+        subjectType: 'companion_state_report',
+        subjectId: report.reportId,
+        authentication: 'negotiated_companion_lease',
+        adapterId: replay.adapterId,
+        instanceId: replay.instanceId,
+        sessionFingerprintSha256: fingerprint,
+      });
+      expect(proposalReceipt!.sequence).toBeLessThan(decisionReceipt!.sequence);
+      expect(decisionReceipt!.sequence).toBeLessThan(reportReceipt!.sequence);
+      expect(Date.parse(proposalReceipt!.receivedAt)).not.toBeNaN();
+      expect(Date.parse(decisionReceipt!.receivedAt)).not.toBeNaN();
+      expect(Date.parse(reportReceipt!.receivedAt)).not.toBeNaN();
+      first.close();
+
+      const reopened = openOperatingLineDatabase(databasePath);
+      expect(
+        reopened.getManagedReplayReceipt('guide_proposal_decision', decision.decisionId),
+      ).toEqual(decisionReceipt);
+      expect(reopened.getManagedReplayReceipt('companion_state_report', report.reportId)).toEqual(
+        reportReceipt,
+      );
+      reopened.close();
+
+      const inspected = new DatabaseSync(databasePath);
+      expect(
+        inspected.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 16').get(),
+      ).toEqual({ applied: 1 });
+      expect(inspected.prepare("PRAGMA table_list('managed_replay_receipts')").get()).toMatchObject(
+        {
+          strict: 1,
+        },
+      );
+      expect(inspected.prepare("PRAGMA foreign_key_list('managed_replay_receipts')").all()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ table: 'procedure_leaf_replays', from: 'proposal_id' }),
+          expect.objectContaining({ table: 'guide_proposal_decisions', from: 'decision_id' }),
+          expect.objectContaining({ table: 'companion_state_reports', from: 'report_id' }),
+        ]),
+      );
+      expect(() =>
+        inspected
+          .prepare(
+            `
+            INSERT INTO managed_replay_receipts (
+              subject_type, trust_source, report_id, adapter_id, instance_id,
+              session_fingerprint_sha256, received_at
+            ) VALUES ('companion_state_report', 'orchestrator_internal', ?, 'blender', 'instance', ?, ?)
+          `,
+          )
+          .run(report.reportId, fingerprint, new Date().toISOString()),
+      ).toThrow('CHECK constraint failed');
+      expect(() =>
+        inspected
+          .prepare(
+            `
+            INSERT INTO managed_replay_receipts (
+              subject_type, trust_source, report_id, adapter_id, instance_id, received_at
+            ) VALUES ('companion_state_report', 'negotiated_companion_lease', ?, 'blender', 'instance', ?)
+          `,
+          )
+          .run(report.reportId, new Date().toISOString()),
+      ).toThrow('CHECK constraint failed');
+      inspected.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('allows legacy writes without lease receipts and backfills only exact authenticated retries', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const proposal = guideProposal('legacy-managed-replay-plan', 1);
+    const replay = procedureLeafReplay(proposal.proposalId);
+    const decision = proposalDecision(proposal.proposalId, replay.instanceId);
+    const report = {
+      reportId: randomUUID(),
+      adapterId: replay.adapterId,
+      instanceId: replay.instanceId,
+      sequence: 1,
+    };
+    expect(database.recordProcedureLeafReplayProposal(proposal, replay)).toBe('accepted');
+    expect(database.recordGuideProposalDecision(decision)).toBe('accepted');
+    expect(database.recordCompanionState(report)).toBe('accepted');
+    expect(
+      database.getManagedReplayReceipt('guide_proposal_decision', decision.decisionId),
+    ).toBeNull();
+    expect(database.getManagedReplayReceipt('companion_state_report', report.reportId)).toBeNull();
+
+    const fingerprint = 'd'.repeat(64);
+    expect(
+      database.recordGuideProposalDecision(decision, {
+        sessionFingerprintSha256: fingerprint,
+      }),
+    ).toBe('duplicate');
+    expect(database.recordCompanionState(report, { sessionFingerprintSha256: fingerprint })).toBe(
+      'duplicate',
+    );
+    const decisionReceipt = database.getManagedReplayReceipt(
+      'guide_proposal_decision',
+      decision.decisionId,
+    );
+    const reportReceipt = database.getManagedReplayReceipt(
+      'companion_state_report',
+      report.reportId,
+    );
+    expect(decisionReceipt?.sessionFingerprintSha256).toBe(fingerprint);
+    expect(reportReceipt?.sessionFingerprintSha256).toBe(fingerprint);
+
+    expect(
+      database.recordGuideProposalDecision(decision, {
+        sessionFingerprintSha256: 'e'.repeat(64),
+      }),
+    ).toBe('duplicate');
+    expect(
+      database.getManagedReplayReceipt('guide_proposal_decision', decision.decisionId),
+    ).toEqual(decisionReceipt);
+    expect(
+      database.recordCompanionState(
+        { ...report, sequence: 2 },
+        { sessionFingerprintSha256: 'e'.repeat(64) },
+      ),
+    ).toBe('conflict');
+    expect(database.getManagedReplayReceipt('companion_state_report', report.reportId)).toEqual(
+      reportReceipt,
+    );
+    expect(() =>
+      database.recordCompanionState(
+        { ...report, reportId: randomUUID(), sequence: 2 },
+        { sessionFingerprintSha256: 'not-a-sha256' },
+      ),
+    ).toThrow('CHECK constraint failed');
+    database.close();
   });
 });

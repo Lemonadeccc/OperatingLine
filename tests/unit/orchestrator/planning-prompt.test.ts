@@ -61,7 +61,7 @@ describe('planning prompt packet', () => {
         goal: 'Create a friendly robot and render a preview',
         requestedPlanId: 'robot-generated',
         recommendedRevision: 3,
-        catalog: { catalogVersion: '1.17.0' },
+        catalog: { catalogVersion: '1.18.0' },
       },
       responseContract: {
         mediaType: 'application/json',

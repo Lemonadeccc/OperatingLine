@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    maxWorkers: '40%',
     coverage: {
       reporter: ['text', 'html'],
     },

@@ -8,6 +8,7 @@ import {
 describe('stable version ranges', () => {
   it('preserves companion version matching semantics', () => {
     expect(satisfiesStableVersionRange('4.5.3', '>=4.5.0 <4.6.0', 'Host')).toBe(true);
+    expect(satisfiesStableVersionRange('4.5.3 LTS', '>=4.5.0 <4.6.0', 'Host')).toBe(true);
     expect(satisfiesStableVersionRange('4.6.0', '>=4.5.0 <4.6.0', 'Host')).toBe(false);
     expect(satisfiesStableVersionRange('5.1.1', '>=4.5.0 <4.6.0 || =5.1.1', 'Host')).toBe(true);
   });

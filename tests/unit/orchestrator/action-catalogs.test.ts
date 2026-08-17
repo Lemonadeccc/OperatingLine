@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.17.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.18.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.14.0' }).catalogVersion,
     ).toBe('1.14.0');
@@ -177,7 +177,9 @@ describe('action catalog registry', () => {
     );
 
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.17.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.planningNotes = frozen.planningNotes;
     active.planningPhases![0]!.actionNames = active.planningPhases![0]!.actionNames.filter(
@@ -188,6 +190,26 @@ describe('action catalog registry', () => {
     );
     active.actions = active.actions.filter(
       (action) => action.name !== 'blender.modifier.add_mirror',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.17.0 and adds only the strong UV Sphere observation in 1.18.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.17.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '0c1da28ec0aff7a7cc5ffa5e43b096920c14652d86fde8984954b4be88e43ce6',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    const uvSphere = active.actions.find(
+      (action) => action.name === 'blender.mesh.create_uv_sphere',
+    );
+    if (uvSphere === undefined) throw new Error('Expected UV Sphere action');
+    uvSphere.supportedObservationKinds = uvSphere.supportedObservationKinds.filter(
+      (kind) => kind !== 'uv_sphere_ready',
     );
     expect(active).toEqual(frozen);
   });

@@ -19,7 +19,7 @@ describe('action catalog protocol', () => {
   it('validates the versioned Blender allowlist and argument contracts', () => {
     const catalog = actionCatalogSchema.parse(blenderActionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.17.0');
+    expect(catalog.catalogVersion).toBe('1.18.0');
     expect(catalog.adapterId).toBe('blender');
     expect(catalog.actions.map((action) => action.name)).toEqual([
       'blender.mesh.create_uv_sphere',
@@ -102,6 +102,7 @@ describe('action catalog protocol', () => {
       '1.15.0',
       '1.16.0',
       '1.17.0',
+      '1.18.0',
     ]);
   });
 

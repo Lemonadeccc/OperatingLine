@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -14,23 +15,59 @@ import {
 import {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,
+  computePlanContentSha256,
   procedureAuthoringPromptPacketContent,
   startRuntime,
   type RunningRuntime,
 } from '@operatingline/orchestrator';
 import {
   canonicalizeProtocolJsonValue,
+  guideProtocolVersion,
+  procedureLeafReplayFinalizeResultSchema,
+  procedureLeafReplayProposalResultSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
   type ProcedureAuthoringPromptPacket,
 } from '@operatingline/protocol';
 
+import { buildProcedureLeafReplayAttestation } from '../../../services/orchestrator/src/procedure-replay.js';
+
 const accessToken = 'procedure-runtime-test-token';
 const headers = {
   authorization: `Bearer ${accessToken}`,
   'content-type': 'application/json',
 };
+
+function blenderCompanionHello(instanceId: string) {
+  return {
+    contractVersion: '1.0.0',
+    adapterId: 'blender',
+    instanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3 LTS',
+    supportedGuideProtocolVersions: [blenderActionCatalog.protocolVersion, guideProtocolVersion],
+    catalogVersion: blenderActionCatalog.catalogVersion,
+    capabilities: {
+      presentation: {
+        taskTree: 'native',
+        viewportOverlay: 'native',
+        interactiveAnchors: 'emulated',
+      },
+      execution: {
+        inspect: 'native',
+        invokeActions: 'native',
+        screenshot: 'native',
+        rollbackModes: ['compensating_action', 'native_undo'],
+      },
+      runtime: {
+        dispatch: 'main_thread_serial',
+        network: 'native',
+        persistentProjectState: 'native',
+      },
+    },
+  };
+}
 
 interface McpToolResponse {
   result?: {
@@ -194,6 +231,29 @@ function authoringCandidateFixture(
   const evidence = { ...packet.context.goalProvenance.evidence, sourceId: source.id };
   (tree['sources'] as Array<Record<string, unknown>>).push(source);
   (tree['evidence'] as Array<Record<string, unknown>>).push(evidence);
+  return tree;
+}
+
+function replayAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['id'] === 'snowman.head.eyes.left',
+  );
+  if (leaf === undefined) throw new Error('Expected one UV Sphere replay leaf');
+  const action = leaf['action'] as { arguments: Record<string, unknown> };
+  leaf['expectedObservations'] = [
+    {
+      kind: 'uv_sphere_ready',
+      parameters: {
+        resourceId: action.arguments['resourceId'],
+        objectName: action.arguments['objectName'],
+        radius: action.arguments['radius'],
+        location: action.arguments['location'],
+      },
+    },
+  ];
   return tree;
 }
 
@@ -1232,7 +1292,7 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.27.0' },
+        catalogBinding: { interactionCatalogVersion: '1.28.0' },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2556,7 +2616,7 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.27.0' },
+        catalogBinding: { interactionCatalogVersion: '1.28.0' },
         coverage: [
           {
             leafId: leaf.id,
@@ -2669,8 +2729,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.0.0',
         catalogBinding: {
-          actionCatalogVersion: '1.17.0',
-          interactionCatalogVersion: '1.27.0',
+          actionCatalogVersion: '1.18.0',
+          interactionCatalogVersion: '1.28.0',
         },
         coverage: [
           {
@@ -2711,7 +2771,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.17.0',
+        actionCatalogVersion: '1.18.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2906,8 +2966,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.17.0',
-          interactionCatalogVersion: '1.27.0',
+          actionCatalogVersion: '1.18.0',
+          interactionCatalogVersion: '1.28.0',
         },
         coverage: [
           {
@@ -3021,7 +3081,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.17.0',
+        actionCatalogVersion: '1.18.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3078,8 +3138,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.17.0',
-          interactionCatalogVersion: '1.27.0',
+          actionCatalogVersion: '1.18.0',
+          interactionCatalogVersion: '1.28.0',
         },
         coverage: [
           {
@@ -3194,7 +3254,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.17.0',
+        actionCatalogVersion: '1.18.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3249,8 +3309,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.17.0',
-          interactionCatalogVersion: '1.27.0',
+          actionCatalogVersion: '1.18.0',
+          interactionCatalogVersion: '1.28.0',
         },
         coverage: [
           {
@@ -3337,7 +3397,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.17.0',
+        actionCatalogVersion: '1.18.0',
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3890,6 +3950,501 @@ describe('procedure compilation runtime', () => {
     }
   });
 
+  it('attests only an approved terminal managed UV Sphere replay without upgrading UI tracks', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '制作雪人的头部，并创建、定位、缩放和命名左眼球体。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const weakRequest = {
+        formatVersion: '1.0.0',
+        replayId: randomUUID(),
+        targetInstanceId,
+        leafId: 'snowman.head.eyes.left',
+        replayMode: 'managed_action',
+        packet,
+        tree: authoringCandidateFixture(packet),
+      };
+      const multiLeafTree = replayAuthoringCandidateFixture(packet);
+      const replayLeaf = (multiLeafTree['nodes'] as Array<Record<string, unknown>>).find(
+        (node) => node['id'] === weakRequest.leafId,
+      );
+      if (replayLeaf === undefined) throw new Error('Expected one replay leaf');
+      const manualLeaf = structuredClone(replayLeaf);
+      manualLeaf['id'] = 'snowman.head.eyes.manual-check';
+      manualLeaf['order'] = 2;
+      manualLeaf['action'] = null;
+      manualLeaf['expectedObservations'] = [];
+      delete manualLeaf['observationPolicy'];
+      manualLeaf['rollback'] = { mode: 'checkpoint_restore', checkpointRequired: true };
+      (multiLeafTree['nodes'] as Array<Record<string, unknown>>).push(manualLeaf);
+      const multiLeafProposal = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...weakRequest, replayId: randomUUID(), tree: multiLeafTree }),
+      });
+      expect(multiLeafProposal.status).toBe(422);
+      await expect(multiLeafProposal.json()).resolves.toMatchObject({
+        error: 'procedure_leaf_replay_proposal_failed',
+        message: expect.stringContaining('exactly one materialized leaf'),
+      });
+      const weakProposal = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(weakRequest),
+      });
+      expect(weakProposal.status).toBe(422);
+      await expect(weakProposal.json()).resolves.toMatchObject({
+        error: 'procedure_leaf_replay_proposal_failed',
+        message: expect.stringContaining('uv_sphere_ready'),
+      });
+
+      const replayRequest = {
+        ...weakRequest,
+        replayId: randomUUID(),
+        tree: replayAuthoringCandidateFixture(packet),
+      };
+      const proposedMcp = await callMcpTool(
+        runtime,
+        900,
+        'operatingline.procedure.replay.propose',
+        replayRequest,
+      );
+      expect(proposedMcp.result?.isError).not.toBe(true);
+      const proposed = procedureLeafReplayProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed).toMatchObject({
+        status: 'accepted',
+        binding: {
+          replayId: replayRequest.replayId,
+          targetInstanceId,
+          leafId: replayRequest.leafId,
+          request: replayRequest,
+          claims: {
+            materialization: 'catalog_grounded',
+            approval: 'pending',
+            hostExecutionStarted: false,
+            managedActionResult: 'pending',
+            menuTrack: 'catalog_grounded_not_executed',
+            shortcutTrack: 'candidate_not_executed',
+            mcpTrack: 'unavailable',
+          },
+        },
+      });
+      const proposal = proposed.binding.proposal;
+      expect(proposed.binding.materialization.coverage).toEqual([
+        expect.objectContaining({
+          leafId: replayRequest.leafId,
+          menu: 'materialized',
+          shortcut: 'materialized',
+          mcp: 'unavailable',
+        }),
+      ]);
+
+      const duplicateProposal = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(replayRequest),
+      });
+      expect(duplicateProposal.status).toBe(200);
+      await expect(duplicateProposal.json()).resolves.toMatchObject({
+        status: 'duplicate',
+        binding: { replayId: replayRequest.replayId, proposal },
+      });
+      const conflictingProposal = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/propose`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...replayRequest, targetInstanceId: randomUUID() }),
+        },
+      );
+      expect(conflictingProposal.status).toBe(409);
+
+      const delivery = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/guide?adapterId=blender&instanceId=${targetInstanceId}`,
+        { headers },
+      );
+      expect(delivery.status).toBe(200);
+      await expect(delivery.json()).resolves.toMatchObject({
+        plan: null,
+        proposal: { proposalId: proposal.proposalId, targetInstanceId },
+        proposalPlanContentSha256: proposed.binding.planContentSha256,
+      });
+
+      const prematureFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          replayId: replayRequest.replayId,
+          attestationId: randomUUID(),
+          reportId: randomUUID(),
+        }),
+      });
+      expect(prematureFinalize.status).toBe(409);
+
+      const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
+      if (step?.action === null || step?.action === undefined) {
+        throw new Error('Expected replay proposal action step');
+      }
+      const observationParameters = step.expectedObservations[0]?.parameters;
+      const resourceId = observationParameters?.['resourceId'];
+      const objectName = observationParameters?.['objectName'];
+      if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
+        throw new Error('Expected replay observation identities');
+      }
+      const executionId = randomUUID();
+      const report = (sequence: number, hostVersion: string) => ({
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion,
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256: computePlanContentSha256(proposal.plan),
+        executionId,
+        phase: 'completed',
+        activeStepId: replayRequest.leafId,
+        completedStepIds: [replayRequest.leafId],
+        transition: 'step_succeeded',
+        stepId: replayRequest.leafId,
+        observations: [
+          {
+            kind: 'uv_sphere_ready',
+            satisfied: true,
+            details: {
+              parameters: observationParameters,
+              supported: true,
+              resourceId,
+              objectName,
+              meshId: `${resourceId}.mesh`,
+              collectionId: 'snowman.collection',
+              parametersValid: true,
+              objectOwned: true,
+              meshOwned: true,
+              collectionOwned: true,
+              receiptMatches: true,
+              objectDataMatches: true,
+              collectionLinkMatches: true,
+              nameMatches: true,
+              locationMatches: true,
+              rotationMatches: true,
+              scaleMatches: true,
+              transformIsolated: true,
+              modifiersAbsent: true,
+              shapeKeysAbsent: true,
+              materialsAbsent: true,
+              contentIntact: true,
+              topologyMatches: true,
+              finiteCoordinates: true,
+              radiusMatches: true,
+              vertexCount: 482,
+              edgeCount: 992,
+              faceCount: 512,
+              meshContentSha256: 'a'.repeat(64),
+            },
+          },
+        ],
+        observationGate: null,
+        artifactAttestation: null,
+        error: null,
+        occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
+      });
+
+      const legacyReport = report(1, '4.5.3 LTS');
+      const legacyState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(legacyReport),
+      });
+      expect(legacyState.status).toBe(200);
+
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date(Date.now() - 10_000).toISOString(),
+      };
+      const unauthenticatedDecision = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers, body: JSON.stringify(decision) },
+      );
+      expect(unauthenticatedDecision.status).toBe(409);
+      await expect(unauthenticatedDecision.json()).resolves.toMatchObject({
+        error: 'companion_lease_required',
+      });
+
+      const preDecisionReport = report(2, '4.5.3 LTS');
+      const unauthenticatedState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(preDecisionReport),
+      });
+      expect(unauthenticatedState.status).toBe(409);
+      await expect(unauthenticatedState.json()).resolves.toMatchObject({
+        error: 'lease_not_current',
+      });
+      const preDecisionState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(preDecisionReport),
+      });
+      expect(preDecisionState.status).toBe(200);
+
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+      );
+      expect(decisionResponse.status).toBe(200);
+      await expect(decisionResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const legacyFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          replayId: replayRequest.replayId,
+          attestationId: randomUUID(),
+          reportId: legacyReport.reportId,
+        }),
+      });
+      expect(legacyFinalize.status).toBe(409);
+
+      const reportBeforeDecisionFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: replayRequest.replayId,
+            attestationId: randomUUID(),
+            reportId: preDecisionReport.reportId,
+          }),
+        },
+      );
+      expect(reportBeforeDecisionFinalize.status).toBe(409);
+
+      const weakReport = report(3, '4.5.3 LTS');
+      weakReport.observations[0]!.details = {
+        parameters: observationParameters,
+        supported: true,
+      } as (typeof weakReport.observations)[number]['details'];
+      const weakState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(weakReport),
+      });
+      expect(weakState.status).toBe(200);
+      const weakFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          replayId: replayRequest.replayId,
+          attestationId: randomUUID(),
+          reportId: weakReport.reportId,
+        }),
+      });
+      expect(weakFinalize.status).toBe(409);
+
+      const incompatibleReport = report(4, '5.0.0');
+      const incompatibleState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(incompatibleReport),
+      });
+      expect(incompatibleState.status).toBe(409);
+      await expect(incompatibleState.json()).resolves.toMatchObject({
+        error: 'companion_session_identity_mismatch',
+      });
+
+      const terminalReport = report(5, '4.5.3 LTS');
+      const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(terminalReport),
+      });
+      expect(stateResponse.status).toBe(200);
+      await expect(stateResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const finalizeRequest = {
+        replayId: replayRequest.replayId,
+        attestationId: randomUUID(),
+        reportId: terminalReport.reportId,
+      };
+      const finalizedResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(finalizeRequest),
+      });
+      expect(finalizedResponse.status).toBe(200);
+      const finalized = procedureLeafReplayFinalizeResultSchema.parse(
+        await finalizedResponse.json(),
+      );
+      expect(finalized).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          replayId: replayRequest.replayId,
+          attestationId: finalizeRequest.attestationId,
+          decision,
+          report: terminalReport,
+          evidenceClass: 'companion_reported_managed_action_leaf_replay',
+          provenance: {
+            authentication: 'negotiated_companion_lease',
+            sessionFingerprintSha256: createHash('sha256').update(session.leaseId).digest('hex'),
+          },
+          bindingContentSha256: proposed.binding.integrity.contentSha256,
+          execution: {
+            action: { adapterId: 'blender', name: 'blender.mesh.create_uv_sphere' },
+          },
+          verificationScope: {
+            managedActionResult: 'verified',
+            menuTrack: 'catalog_grounded_not_executed',
+            shortcutTrack: 'candidate_not_executed',
+            mcpTrack: 'unavailable',
+          },
+        },
+      });
+      expect(finalized.attestation.execution).not.toHaveProperty('entryPoint');
+      expect(finalized.attestation.provenance.proposalReceipt.sequence).toBeLessThan(
+        finalized.attestation.provenance.decisionReceipt.sequence,
+      );
+      expect(finalized.attestation.provenance.decisionReceipt.sequence).toBeLessThan(
+        finalized.attestation.provenance.reportReceipt.sequence,
+      );
+      const receiptBase = {
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+      } as const;
+      expect(() =>
+        buildProcedureLeafReplayAttestation({
+          binding: proposed.binding,
+          decision: finalized.attestation.decision,
+          report: finalized.attestation.report,
+          proposalReceipt: {
+            ...receiptBase,
+            ...finalized.attestation.provenance.proposalReceipt,
+            subjectType: 'replay_proposal',
+            subjectId: proposal.proposalId,
+            authentication: 'orchestrator_internal',
+            sessionFingerprintSha256: null,
+          },
+          decisionReceipt: {
+            ...receiptBase,
+            ...finalized.attestation.provenance.decisionReceipt,
+            subjectType: 'guide_proposal_decision',
+            subjectId: decision.decisionId,
+            authentication: 'negotiated_companion_lease',
+            sessionFingerprintSha256: finalized.attestation.provenance.sessionFingerprintSha256,
+          },
+          reportReceipt: {
+            ...receiptBase,
+            ...finalized.attestation.provenance.reportReceipt,
+            subjectType: 'companion_state_report',
+            subjectId: terminalReport.reportId,
+            authentication: 'negotiated_companion_lease',
+            sessionFingerprintSha256: 'b'.repeat(64),
+          },
+          attestationId: randomUUID(),
+          attestedAt: new Date().toISOString(),
+        }),
+      ).toThrow(/ordered authenticated Companion session receipt chain/);
+
+      const duplicateFinalize = await callMcpTool(
+        runtime,
+        901,
+        'operatingline.procedure.replay.finalize',
+        finalizeRequest,
+      );
+      expect(duplicateFinalize.result?.isError).not.toBe(true);
+      expect(
+        procedureLeafReplayFinalizeResultSchema.parse(duplicateFinalize.result?.structuredContent),
+      ).toMatchObject({ status: 'duplicate', attestation: finalized.attestation });
+      const conflictingFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...finalizeRequest, attestationId: randomUUID() }),
+        },
+      );
+      expect(conflictingFinalize.status).toBe(409);
+      const unknownFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          replayId: randomUUID(),
+          attestationId: randomUUID(),
+          reportId: terminalReport.reportId,
+        }),
+      });
+      expect(unknownFinalize.status).toBe(404);
+
+      const evalUrl = new URL('/api/v1/eval/export', runtime.baseUrl);
+      evalUrl.searchParams.set('targetAdapterId', 'blender');
+      evalUrl.searchParams.set('planId', proposal.plan.id);
+      evalUrl.searchParams.set('instanceId', targetInstanceId);
+      const evalResponse = await fetch(evalUrl, { headers });
+      expect(evalResponse.status).toBe(200);
+      const evalBundle = (await evalResponse.json()) as {
+        summary: { eventTypeCounts: Record<string, number> };
+        events: Array<{ eventType: string; payload: unknown }>;
+      };
+      expect(evalBundle.summary.eventTypeCounts).toMatchObject({
+        'procedure.leaf-replay.proposed': 1,
+        'procedure.leaf-replay.attested': 1,
+      });
+      expect(
+        evalBundle.events.filter((event) => event.eventType.startsWith('procedure.leaf-replay.')),
+      ).toEqual([
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.proposed',
+          payload: proposed.binding,
+        }),
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.attested',
+          payload: finalized.attestation,
+        }),
+      ]);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it('compiles through MCP and HTTP without publishing, proposing, or executing', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -3958,7 +4513,7 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.17.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.18.0 range');
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

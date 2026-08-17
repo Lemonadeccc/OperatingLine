@@ -283,6 +283,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.authoring.materialize' },
+            { name: 'operatingline.procedure.replay.propose' },
+            { name: 'operatingline.procedure.replay.finalize' },
             { name: 'operatingline.procedure.compile' },
             { name: 'operatingline.procedure.store' },
             { name: 'operatingline.procedure.get' },
