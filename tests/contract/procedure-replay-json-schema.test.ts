@@ -443,13 +443,15 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       },
       attestedAt: occurredAt,
     } as const;
-    const attest = (candidate: typeof content) =>
+    const attest = <T extends Record<string, unknown>>(candidate: T) =>
       ({
         ...candidate,
         integrity: {
           algorithm: 'sha256',
           canonicalization: 'operatingline-json-value-v1',
-          contentSha256: computeProcedureLeafReplayAttestationContentSha256(candidate),
+          contentSha256: computeProcedureLeafReplayAttestationContentSha256(
+            candidate as Parameters<typeof computeProcedureLeafReplayAttestationContentSha256>[0],
+          ),
         },
       }) as const;
     const attestation = attest(content);
@@ -457,6 +459,59 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       createHash('sha256').update(canonicalizeProtocolJsonValue(content)).digest('hex'),
     );
     expect(procedureLeafReplayAttestationSchema.safeParse(attestation).success).toBe(true);
+
+    const icosphereObservation = {
+      ...observations[0],
+      kind: 'icosphere_ready',
+      details: {
+        ...observations[0].details,
+        parameters: {
+          ...observations[0].details.parameters,
+          subdivisions: 3,
+        },
+        vertexCount: 162,
+        edgeCount: 480,
+        faceCount: 320,
+      },
+    } as const;
+    const icosphereContent = {
+      ...content,
+      report: { ...content.report, observations: [icosphereObservation] },
+      execution: {
+        ...content.execution,
+        action: {
+          adapterId: 'blender',
+          name: 'blender.mesh.create_icosphere',
+        },
+      },
+      successGate: { observations: [icosphereObservation], allSatisfied: true },
+    } as const;
+    const icosphereAttestation = attest(icosphereContent);
+    expect(procedureLeafReplayAttestationSchema.safeParse(icosphereAttestation).success).toBe(true);
+    const wrongIcosphereTopologyContent = {
+      ...icosphereContent,
+      report: {
+        ...icosphereContent.report,
+        observations: [
+          {
+            ...icosphereObservation,
+            details: { ...icosphereObservation.details, vertexCount: 42 },
+          },
+        ],
+      },
+      successGate: {
+        observations: [
+          {
+            ...icosphereObservation,
+            details: { ...icosphereObservation.details, vertexCount: 42 },
+          },
+        ],
+        allSatisfied: true,
+      },
+    } as const;
+    expect(
+      procedureLeafReplayAttestationSchema.safeParse(attest(wrongIcosphereTopologyContent)).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayAttestationSchema.safeParse({
         ...attestation,
@@ -563,6 +618,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
       publicSchema('procedure-leaf-replay-attestation.schema.json'),
       [
         { value: attestation, accepted: true },
+        { value: icosphereAttestation, accepted: true },
         {
           value: {
             ...attestation,

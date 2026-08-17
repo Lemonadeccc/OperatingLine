@@ -11,7 +11,10 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.18.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.19.0');
+    expect(
+      registry.get({ targetAdapterId: 'blender', catalogVersion: '1.18.0' }).catalogVersion,
+    ).toBe('1.18.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.14.0' }).catalogVersion,
     ).toBe('1.14.0');
@@ -202,7 +205,9 @@ describe('action catalog registry', () => {
       '0c1da28ec0aff7a7cc5ffa5e43b096920c14652d86fde8984954b4be88e43ce6',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.18.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     const uvSphere = active.actions.find(
       (action) => action.name === 'blender.mesh.create_uv_sphere',
@@ -210,6 +215,26 @@ describe('action catalog registry', () => {
     if (uvSphere === undefined) throw new Error('Expected UV Sphere action');
     uvSphere.supportedObservationKinds = uvSphere.supportedObservationKinds.filter(
       (kind) => kind !== 'uv_sphere_ready',
+    );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.18.0 and adds only the strong Icosphere observation in 1.19.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.18.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '9953fd031873716a098055edc958ffc3db593f1eb4f0bfc84309754a7f00443a',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    const icosphere = active.actions.find(
+      (action) => action.name === 'blender.mesh.create_icosphere',
+    );
+    if (icosphere === undefined) throw new Error('Expected Icosphere action');
+    icosphere.supportedObservationKinds = icosphere.supportedObservationKinds.filter(
+      (kind) => kind !== 'icosphere_ready',
     );
     expect(active).toEqual(frozen);
   });

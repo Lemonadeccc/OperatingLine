@@ -311,6 +311,30 @@ function icosphereAuthoringCandidateFixture(
   return tree;
 }
 
+function icosphereReplayAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = icosphereAuthoringCandidateFixture(packet);
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['kind'] === 'leaf',
+  );
+  if (leaf === undefined) throw new Error('Expected one Icosphere replay leaf');
+  const action = leaf['action'] as { arguments: Record<string, unknown> };
+  leaf['expectedObservations'] = [
+    {
+      kind: 'icosphere_ready',
+      parameters: {
+        resourceId: action.arguments['resourceId'],
+        objectName: action.arguments['objectName'],
+        subdivisions: action.arguments['subdivisions'],
+        radius: action.arguments['radius'],
+        location: action.arguments['location'],
+      },
+    },
+  ];
+  return tree;
+}
+
 function subdivideAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
@@ -1292,7 +1316,9 @@ describe('procedure compilation runtime', () => {
       );
       expect(icosphereMaterialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.28.0' },
+        catalogBinding: {
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        },
         coverage: [
           {
             leafId: 'snowman.head.eyes.left',
@@ -2616,7 +2642,9 @@ describe('procedure compilation runtime', () => {
 
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
-        catalogBinding: { interactionCatalogVersion: '1.28.0' },
+        catalogBinding: {
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        },
         coverage: [
           {
             leafId: leaf.id,
@@ -2729,8 +2757,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.0.0',
         catalogBinding: {
-          actionCatalogVersion: '1.18.0',
-          interactionCatalogVersion: '1.28.0',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
         coverage: [
           {
@@ -2771,7 +2799,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.18.0',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -2966,8 +2994,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.18.0',
-          interactionCatalogVersion: '1.28.0',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
         coverage: [
           {
@@ -3081,7 +3109,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.18.0',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3138,8 +3166,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.18.0',
-          interactionCatalogVersion: '1.28.0',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
         coverage: [
           {
@@ -3254,7 +3282,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.18.0',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -3309,8 +3337,8 @@ describe('procedure compilation runtime', () => {
       expect(materialization).toMatchObject({
         formatVersion: '1.3.0',
         catalogBinding: {
-          actionCatalogVersion: '1.18.0',
-          interactionCatalogVersion: '1.28.0',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
         coverage: [
           {
@@ -3397,7 +3425,7 @@ describe('procedure compilation runtime', () => {
       });
       expect(compiledMcp.result?.isError).not.toBe(true);
       expect(compiledMcp.result?.structuredContent).toMatchObject({
-        actionCatalogVersion: '1.18.0',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
         validation: {
           procedureStructure: 'validated',
           actionCatalogBinding: 'validated',
@@ -4028,7 +4056,7 @@ describe('procedure compilation runtime', () => {
         'operatingline.procedure.replay.propose',
         replayRequest,
       );
-      expect(proposedMcp.result?.isError).not.toBe(true);
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
       const proposed = procedureLeafReplayProposalResultSchema.parse(
         proposedMcp.result?.structuredContent,
       );
@@ -4445,6 +4473,233 @@ describe('procedure compilation runtime', () => {
     }
   });
 
+  it('attests an approved managed Icosphere replay with subdivision-bound topology', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const tree = icosphereReplayAuthoringCandidateFixture(packet);
+      const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+        (node) => node['kind'] === 'leaf',
+      );
+      if (leaf === undefined) throw new Error('Expected one Icosphere replay leaf');
+      const replayRequest = {
+        formatVersion: '1.0.0',
+        replayId: randomUUID(),
+        targetInstanceId,
+        leafId: String(leaf['id']),
+        replayMode: 'managed_action',
+        packet,
+        tree,
+      };
+      const proposedMcp = await callMcpTool(
+        runtime,
+        902,
+        'operatingline.procedure.replay.propose',
+        replayRequest,
+      );
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+      const proposed = procedureLeafReplayProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed).toMatchObject({
+        status: 'accepted',
+        binding: {
+          actionName: 'blender.mesh.create_icosphere',
+          targetInstanceId,
+          leafId: replayRequest.leafId,
+          materialization: {
+            coverage: [
+              expect.objectContaining({
+                leafId: replayRequest.leafId,
+                menu: 'materialized',
+                shortcut: 'materialized',
+                mcp: 'unavailable',
+              }),
+            ],
+          },
+        },
+      });
+
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const proposal = proposed.binding.proposal;
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date(Date.now() - 10_000).toISOString(),
+      };
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+      );
+      expect(decisionResponse.status).toBe(200);
+
+      const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
+      const observationParameters = step?.expectedObservations[0]?.parameters;
+      const resourceId = observationParameters?.['resourceId'];
+      const objectName = observationParameters?.['objectName'];
+      if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
+        throw new Error('Expected Icosphere replay observation identities');
+      }
+      const report = (sequence: number, vertexCount: number) => ({
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256: computePlanContentSha256(proposal.plan),
+        executionId: randomUUID(),
+        phase: 'completed',
+        activeStepId: replayRequest.leafId,
+        completedStepIds: [replayRequest.leafId],
+        transition: 'step_succeeded',
+        stepId: replayRequest.leafId,
+        observations: [
+          {
+            kind: 'icosphere_ready',
+            satisfied: true,
+            details: {
+              parameters: observationParameters,
+              supported: true,
+              resourceId,
+              objectName,
+              meshId: `${resourceId}.mesh`,
+              collectionId: 'snowman.collection',
+              parametersValid: true,
+              objectOwned: true,
+              meshOwned: true,
+              collectionOwned: true,
+              receiptMatches: true,
+              objectDataMatches: true,
+              collectionLinkMatches: true,
+              nameMatches: true,
+              locationMatches: true,
+              rotationMatches: true,
+              scaleMatches: true,
+              transformIsolated: true,
+              modifiersAbsent: true,
+              shapeKeysAbsent: true,
+              materialsAbsent: true,
+              contentIntact: true,
+              topologyMatches: true,
+              finiteCoordinates: true,
+              radiusMatches: true,
+              vertexCount,
+              edgeCount: 480,
+              faceCount: 320,
+              meshContentSha256: 'c'.repeat(64),
+            },
+          },
+        ],
+        observationGate: null,
+        artifactAttestation: null,
+        error: null,
+        occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
+      });
+
+      const wrongTopologyReport = report(1, 42);
+      const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(wrongTopologyReport),
+      });
+      expect(wrongState.status).toBe(200);
+      const wrongFinalize = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          replayId: replayRequest.replayId,
+          attestationId: randomUUID(),
+          reportId: wrongTopologyReport.reportId,
+        }),
+      });
+      expect(wrongFinalize.status).toBe(409);
+
+      const terminalReport = report(2, 162);
+      const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(terminalReport),
+      });
+      expect(stateResponse.status).toBe(200);
+      const finalizeRequest = {
+        replayId: replayRequest.replayId,
+        attestationId: randomUUID(),
+        reportId: terminalReport.reportId,
+      };
+      const finalizedResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/finalize`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(finalizeRequest),
+      });
+      expect(finalizedResponse.status).toBe(200);
+      const finalized = procedureLeafReplayFinalizeResultSchema.parse(
+        await finalizedResponse.json(),
+      );
+      expect(finalized).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          replayId: replayRequest.replayId,
+          execution: {
+            action: { adapterId: 'blender', name: 'blender.mesh.create_icosphere' },
+          },
+          successGate: {
+            observations: [
+              {
+                kind: 'icosphere_ready',
+                details: {
+                  parameters: observationParameters,
+                  vertexCount: 162,
+                  edgeCount: 480,
+                  faceCount: 320,
+                },
+              },
+            ],
+            allSatisfied: true,
+          },
+        },
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it('compiles through MCP and HTTP without publishing, proposing, or executing', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
@@ -4513,7 +4768,9 @@ describe('procedure compilation runtime', () => {
         tree: mismatched,
       });
       expect(mcp.result).toMatchObject({ isError: true });
-      expect(mcp.result?.content?.[0]?.text).toContain('is not contained by blender@1.18.0 range');
+      expect(mcp.result?.content?.[0]?.text).toContain(
+        `is not contained by blender@${blenderActionCatalog.catalogVersion} range`,
+      );
 
       const http = await fetch(`${runtime.baseUrl}/api/v1/procedure/compile`, {
         method: 'POST',

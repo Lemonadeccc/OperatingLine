@@ -430,6 +430,105 @@ def assert_uv_sphere_ready_observation() -> None:
     assert bpy.data.collections.get(COLLECTION_NAME) is None
 
 
+def assert_icosphere_ready_observation() -> None:
+    object_name = "OperatingLine.ReplayIcosphere"
+    resource_id = "replay.icosphere"
+    subdivisions = 2
+    radius = 1.25
+    location = [-1.0, 2.0, 3.5]
+    ico_step = step(
+        "replay.icosphere.create",
+        "root",
+        1,
+        step_action={
+            "adapterId": "blender",
+            "name": "blender.mesh.create_icosphere",
+            "arguments": {
+                "resourceId": resource_id,
+                "objectName": object_name,
+                "subdivisions": subdivisions,
+                "radius": radius,
+                "location": location,
+            },
+        },
+    )
+    root = load_temporary_plan([step("root", None, 0), ico_step])
+    session = DemoSession(root, action_registry(root))
+    parameters = {
+        "resourceId": resource_id,
+        "objectName": object_name,
+        "subdivisions": subdivisions,
+        "radius": radius,
+        "location": location,
+    }
+
+    def observe(
+        candidate_parameters=parameters,
+        candidate_receipts=None,
+    ):
+        return observation_module.evaluate_observations(
+            (
+                {
+                    "kind": "icosphere_ready",
+                    "parameters": candidate_parameters,
+                },
+            ),
+            session.receipts if candidate_receipts is None else candidate_receipts,
+        )[0]
+
+    session.start()
+    assert session.next() is not None
+    icosphere = bpy.data.objects.get(object_name)
+    assert icosphere is not None and icosphere.type == "MESH"
+    mesh = icosphere.data
+    successful = observe()
+    assert successful["satisfied"] is True
+    details = successful["details"]
+    assert (details["vertexCount"], details["edgeCount"], details["faceCount"]) == (
+        42,
+        120,
+        80,
+    )
+    assert len(details["meshContentSha256"]) == 64
+    assert details["parameters"] == parameters
+
+    malformed_parameters = (
+        {key: value for key, value in parameters.items() if key != "subdivisions"},
+        {**parameters, "unexpected": True},
+        {**parameters, "subdivisions": True},
+        {**parameters, "subdivisions": 6},
+    )
+    for malformed in malformed_parameters:
+        assert observe(malformed)["satisfied"] is False
+
+    original_coordinate = mesh.vertices[0].co.copy()
+    mesh.vertices[0].co.x += 0.125
+    mesh.update()
+    assert observe()["satisfied"] is False
+    mesh.vertices[0].co = original_coordinate
+    mesh.update()
+
+    original_action_tag = icosphere["operating_line_action"]
+    icosphere["operating_line_action"] = "blender.mesh.create_uv_sphere"
+    assert observe()["satisfied"] is False
+    icosphere["operating_line_action"] = original_action_tag
+
+    receipt = session.receipts["replay.icosphere.create"]
+    mismatched_receipts = {
+        **session.receipts,
+        "replay.icosphere.create": replace(
+            receipt,
+            action_name="blender.mesh.create_uv_sphere",
+        ),
+    }
+    assert observe(candidate_receipts=mismatched_receipts)["satisfied"] is False
+    assert observe()["satisfied"] is True
+
+    assert session.back() is not None
+    assert bpy.data.objects.get(object_name) is None
+    assert bpy.data.collections.get(COLLECTION_NAME) is None
+
+
 def assert_edit_modifier_geometry_nodes_round_trip() -> None:
     object_name = "OperatingLine.EditPipelineCube"
     steps = [
@@ -8770,6 +8869,7 @@ def main() -> None:
     assert_cylinder_materialized_operator_contract()
     assert_icosphere_argument_boundaries()
     assert_icosphere_action_round_trip()
+    assert_icosphere_ready_observation()
     assert_cube_resource_id_boundaries()
     assert_cube_action_round_trip()
     assert_uv_sphere_ready_observation()

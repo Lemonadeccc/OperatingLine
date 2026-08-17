@@ -179,22 +179,57 @@
               "maxItems": 1,
               "type": "array",
               "items": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "uv_sphere_ready"
-                  },
-                  "satisfied": {
-                    "type": "boolean",
-                    "const": true
-                  },
-                  "details": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "properties": {
-                      "parameters": {
+                      "kind": {
+                        "type": "string",
+                        "const": "uv_sphere_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
                         "type": "object",
                         "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "radius": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "location": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              }
+                            },
+                            "required": [
+                              "resourceId",
+                              "objectName",
+                              "radius",
+                              "location"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
                           "resourceId": {
                             "type": "string",
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -203,180 +238,358 @@
                             "type": "string",
                             "minLength": 1
                           },
-                          "radius": {
-                            "type": "number",
-                            "exclusiveMinimum": 0
+                          "meshId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                           },
-                          "location": {
-                            "minItems": 3,
-                            "maxItems": 3,
-                            "type": "array",
-                            "items": {
-                              "type": "number"
-                            }
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "parametersValid": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectDataMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionLinkMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "nameMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "locationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "rotationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "scaleMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "transformIsolated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "modifiersAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shapeKeysAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialsAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "contentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "topologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "finiteCoordinates": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "radiusMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshContentSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "vertexCount": {
+                            "type": "number",
+                            "const": 482
+                          },
+                          "edgeCount": {
+                            "type": "number",
+                            "const": 992
+                          },
+                          "faceCount": {
+                            "type": "number",
+                            "const": 512
                           }
                         },
                         "required": [
+                          "parameters",
+                          "supported",
                           "resourceId",
                           "objectName",
-                          "radius",
-                          "location"
+                          "meshId",
+                          "collectionId",
+                          "parametersValid",
+                          "objectOwned",
+                          "meshOwned",
+                          "collectionOwned",
+                          "receiptMatches",
+                          "objectDataMatches",
+                          "collectionLinkMatches",
+                          "nameMatches",
+                          "locationMatches",
+                          "rotationMatches",
+                          "scaleMatches",
+                          "transformIsolated",
+                          "modifiersAbsent",
+                          "shapeKeysAbsent",
+                          "materialsAbsent",
+                          "contentIntact",
+                          "topologyMatches",
+                          "finiteCoordinates",
+                          "radiusMatches",
+                          "meshContentSha256",
+                          "vertexCount",
+                          "edgeCount",
+                          "faceCount"
                         ],
                         "additionalProperties": false
-                      },
-                      "supported": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "resourceId": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                      },
-                      "objectName": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "meshId": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                      },
-                      "collectionId": {
-                        "type": "string",
-                        "const": "snowman.collection"
-                      },
-                      "parametersValid": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "objectOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "meshOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "collectionOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "receiptMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "objectDataMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "collectionLinkMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "nameMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "locationMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "rotationMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "scaleMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "transformIsolated": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "modifiersAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "shapeKeysAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "materialsAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "contentIntact": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "topologyMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "finiteCoordinates": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "radiusMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "vertexCount": {
-                        "type": "number",
-                        "const": 482
-                      },
-                      "edgeCount": {
-                        "type": "number",
-                        "const": 992
-                      },
-                      "faceCount": {
-                        "type": "number",
-                        "const": 512
-                      },
-                      "meshContentSha256": {
-                        "type": "string",
-                        "pattern": "^[a-f0-9]{64}$"
                       }
                     },
                     "required": [
-                      "parameters",
-                      "supported",
-                      "resourceId",
-                      "objectName",
-                      "meshId",
-                      "collectionId",
-                      "parametersValid",
-                      "objectOwned",
-                      "meshOwned",
-                      "collectionOwned",
-                      "receiptMatches",
-                      "objectDataMatches",
-                      "collectionLinkMatches",
-                      "nameMatches",
-                      "locationMatches",
-                      "rotationMatches",
-                      "scaleMatches",
-                      "transformIsolated",
-                      "modifiersAbsent",
-                      "shapeKeysAbsent",
-                      "materialsAbsent",
-                      "contentIntact",
-                      "topologyMatches",
-                      "finiteCoordinates",
-                      "radiusMatches",
-                      "vertexCount",
-                      "edgeCount",
-                      "faceCount",
-                      "meshContentSha256"
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "icosphere_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "subdivisions": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              },
+                              "radius": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "location": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              }
+                            },
+                            "required": [
+                              "resourceId",
+                              "objectName",
+                              "subdivisions",
+                              "radius",
+                              "location"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "resourceId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "objectName": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "meshId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "parametersValid": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectDataMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionLinkMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "nameMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "locationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "rotationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "scaleMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "transformIsolated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "modifiersAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shapeKeysAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialsAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "contentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "topologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "finiteCoordinates": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "radiusMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshContentSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "vertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "edgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "faceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "resourceId",
+                          "objectName",
+                          "meshId",
+                          "collectionId",
+                          "parametersValid",
+                          "objectOwned",
+                          "meshOwned",
+                          "collectionOwned",
+                          "receiptMatches",
+                          "objectDataMatches",
+                          "collectionLinkMatches",
+                          "nameMatches",
+                          "locationMatches",
+                          "rotationMatches",
+                          "scaleMatches",
+                          "transformIsolated",
+                          "modifiersAbsent",
+                          "shapeKeysAbsent",
+                          "materialsAbsent",
+                          "contentIntact",
+                          "topologyMatches",
+                          "finiteCoordinates",
+                          "radiusMatches",
+                          "meshContentSha256",
+                          "vertexCount",
+                          "edgeCount",
+                          "faceCount"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
                     ],
                     "additionalProperties": false
                   }
-                },
-                "required": [
-                  "kind",
-                  "satisfied",
-                  "details"
-                ],
-                "additionalProperties": false
+                ]
               }
             },
             "observationGate": {
@@ -607,7 +820,10 @@
                 },
                 "name": {
                   "type": "string",
-                  "const": "blender.mesh.create_uv_sphere"
+                  "enum": [
+                    "blender.mesh.create_uv_sphere",
+                    "blender.mesh.create_icosphere"
+                  ]
                 }
               },
               "required": [
@@ -641,22 +857,57 @@
               "maxItems": 1,
               "type": "array",
               "items": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "uv_sphere_ready"
-                  },
-                  "satisfied": {
-                    "type": "boolean",
-                    "const": true
-                  },
-                  "details": {
+                "oneOf": [
+                  {
                     "type": "object",
                     "properties": {
-                      "parameters": {
+                      "kind": {
+                        "type": "string",
+                        "const": "uv_sphere_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
                         "type": "object",
                         "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "radius": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "location": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              }
+                            },
+                            "required": [
+                              "resourceId",
+                              "objectName",
+                              "radius",
+                              "location"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
                           "resourceId": {
                             "type": "string",
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -665,180 +916,358 @@
                             "type": "string",
                             "minLength": 1
                           },
-                          "radius": {
-                            "type": "number",
-                            "exclusiveMinimum": 0
+                          "meshId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                           },
-                          "location": {
-                            "minItems": 3,
-                            "maxItems": 3,
-                            "type": "array",
-                            "items": {
-                              "type": "number"
-                            }
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "parametersValid": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectDataMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionLinkMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "nameMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "locationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "rotationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "scaleMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "transformIsolated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "modifiersAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shapeKeysAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialsAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "contentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "topologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "finiteCoordinates": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "radiusMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshContentSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "vertexCount": {
+                            "type": "number",
+                            "const": 482
+                          },
+                          "edgeCount": {
+                            "type": "number",
+                            "const": 992
+                          },
+                          "faceCount": {
+                            "type": "number",
+                            "const": 512
                           }
                         },
                         "required": [
+                          "parameters",
+                          "supported",
                           "resourceId",
                           "objectName",
-                          "radius",
-                          "location"
+                          "meshId",
+                          "collectionId",
+                          "parametersValid",
+                          "objectOwned",
+                          "meshOwned",
+                          "collectionOwned",
+                          "receiptMatches",
+                          "objectDataMatches",
+                          "collectionLinkMatches",
+                          "nameMatches",
+                          "locationMatches",
+                          "rotationMatches",
+                          "scaleMatches",
+                          "transformIsolated",
+                          "modifiersAbsent",
+                          "shapeKeysAbsent",
+                          "materialsAbsent",
+                          "contentIntact",
+                          "topologyMatches",
+                          "finiteCoordinates",
+                          "radiusMatches",
+                          "meshContentSha256",
+                          "vertexCount",
+                          "edgeCount",
+                          "faceCount"
                         ],
                         "additionalProperties": false
-                      },
-                      "supported": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "resourceId": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                      },
-                      "objectName": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "meshId": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                      },
-                      "collectionId": {
-                        "type": "string",
-                        "const": "snowman.collection"
-                      },
-                      "parametersValid": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "objectOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "meshOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "collectionOwned": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "receiptMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "objectDataMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "collectionLinkMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "nameMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "locationMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "rotationMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "scaleMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "transformIsolated": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "modifiersAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "shapeKeysAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "materialsAbsent": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "contentIntact": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "topologyMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "finiteCoordinates": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "radiusMatches": {
-                        "type": "boolean",
-                        "const": true
-                      },
-                      "vertexCount": {
-                        "type": "number",
-                        "const": 482
-                      },
-                      "edgeCount": {
-                        "type": "number",
-                        "const": 992
-                      },
-                      "faceCount": {
-                        "type": "number",
-                        "const": 512
-                      },
-                      "meshContentSha256": {
-                        "type": "string",
-                        "pattern": "^[a-f0-9]{64}$"
                       }
                     },
                     "required": [
-                      "parameters",
-                      "supported",
-                      "resourceId",
-                      "objectName",
-                      "meshId",
-                      "collectionId",
-                      "parametersValid",
-                      "objectOwned",
-                      "meshOwned",
-                      "collectionOwned",
-                      "receiptMatches",
-                      "objectDataMatches",
-                      "collectionLinkMatches",
-                      "nameMatches",
-                      "locationMatches",
-                      "rotationMatches",
-                      "scaleMatches",
-                      "transformIsolated",
-                      "modifiersAbsent",
-                      "shapeKeysAbsent",
-                      "materialsAbsent",
-                      "contentIntact",
-                      "topologyMatches",
-                      "finiteCoordinates",
-                      "radiusMatches",
-                      "vertexCount",
-                      "edgeCount",
-                      "faceCount",
-                      "meshContentSha256"
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "icosphere_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "subdivisions": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 5
+                              },
+                              "radius": {
+                                "type": "number",
+                                "exclusiveMinimum": 0
+                              },
+                              "location": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "type": "array",
+                                "items": {
+                                  "type": "number"
+                                }
+                              }
+                            },
+                            "required": [
+                              "resourceId",
+                              "objectName",
+                              "subdivisions",
+                              "radius",
+                              "location"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "resourceId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "objectName": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "meshId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "collectionId": {
+                            "type": "string",
+                            "const": "snowman.collection"
+                          },
+                          "parametersValid": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionOwned": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "receiptMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "objectDataMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "collectionLinkMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "nameMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "locationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "rotationMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "scaleMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "transformIsolated": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "modifiersAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "shapeKeysAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "materialsAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "contentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "topologyMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "finiteCoordinates": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "radiusMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "meshContentSha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "vertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "edgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "faceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "resourceId",
+                          "objectName",
+                          "meshId",
+                          "collectionId",
+                          "parametersValid",
+                          "objectOwned",
+                          "meshOwned",
+                          "collectionOwned",
+                          "receiptMatches",
+                          "objectDataMatches",
+                          "collectionLinkMatches",
+                          "nameMatches",
+                          "locationMatches",
+                          "rotationMatches",
+                          "scaleMatches",
+                          "transformIsolated",
+                          "modifiersAbsent",
+                          "shapeKeysAbsent",
+                          "materialsAbsent",
+                          "contentIntact",
+                          "topologyMatches",
+                          "finiteCoordinates",
+                          "radiusMatches",
+                          "meshContentSha256",
+                          "vertexCount",
+                          "edgeCount",
+                          "faceCount"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
                     ],
                     "additionalProperties": false
                   }
-                },
-                "required": [
-                  "kind",
-                  "satisfied",
-                  "details"
-                ],
-                "additionalProperties": false
+                ]
               }
             },
             "allSatisfied": {

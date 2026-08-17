@@ -164,17 +164,20 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 [ADR 0037](../adr/0037-bounded-solidify-modifier.md) 与
 [ADR 0038](../adr/0038-bounded-edit-triangulate.md)。
 
-首个 Procedure replay 切片不驱动上述菜单，也不模拟快捷键。Orchestrator 重新验证并物化单一
-`blender.mesh.create_uv_sphere` leaf 后，只向目标实例投递普通待审 GuideProposal；用户 Accept 后仍由
-Blender 的既有受管 Session action 执行。ActionCatalog `1.18.0` 为该 action 增加严格
-`uv_sphere_ready`：它从 receipt 核对 Collection/Object/Mesh ownership、data/link/content mutations、名称、
-location、实际 basis rotation、单位 scale、固定 topology、顶点半径和 Mesh 内容签名，并拒绝额外
+当前 Procedure replay 切片不驱动上述菜单，也不模拟快捷键。Orchestrator 重新验证并物化单一
+`blender.mesh.create_uv_sphere` 或 `blender.mesh.create_icosphere` leaf 后，只向目标实例投递普通待审
+GuideProposal；用户 Accept 后仍由 Blender 的既有受管 Session action 执行。ActionCatalog `1.18.0`
+为 UV Sphere 增加严格 `uv_sphere_ready`，`1.19.0` 为 Icosphere 增加严格 `icosphere_ready`：两者都从
+receipt 核对 Collection/Object/Mesh ownership、data/link/content mutations、名称、location、实际 basis
+rotation、单位 scale、顶点半径和 Mesh 内容签名；UV Sphere 固定 32×16 topology，Icosphere 按
+`subdivisions` 验证精确 topology，并拒绝额外
 modifier、shape key、material slot、parent 或 constraint。accepted decision 与 terminal
 `step_succeeded` report 必须由同一协商 lease 提交，Runtime 以服务端 receipt 序列固定先后；之后调用方
 才可 finalize 追加式
 attestation。该证明只覆盖 managed Action 结果；menu/shortcut 仍未执行，MCP unavailable，且当前合同不含
 独立的原生 Undo checkpoint 或具体 UI 执行入口证明。见
-[ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md)。
+[ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
+[ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md)。
 
 ## 视觉引导状态
 
@@ -239,7 +242,7 @@ Companion timer 事件，可能要等到 Blender 的下一次正常界面重绘�
 会暂存并只报告一次 pending/error；用户 Back 到起点后由主线程自动安装。
 
 `Goal to Guidance` 路径只把用户输入构造成 `GuideGoalRequest 1.1.0`：请求绑定当前
-`blender + instanceId + ActionCatalog 1.18.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
+`blender + instanceId + ActionCatalog 1.19.0`、原始目标和一个新 Plan ID，不包含 Provider 或凭据。
 提交在既有网络线程排队，主线程只显示 local、delivering、awaiting planner、proposal received 或
 error；断线重试复用同一 payload 和 request ID。同一实例已有 active goal、revision request、Provider
 Run 或待审 Proposal 时不能再提交。Runtime acknowledgement 只说明请求已持久化，不会自动选择或调用

@@ -182,7 +182,7 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。leaf 仍为 `candidate` 且
   `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
   radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史
-  `1.9.0` 至已冻结的 `1.26.0` 保持可回放；只有完整 result 信封保留目录
+  `1.9.0` 至已冻结的 `1.28.0` 保持可回放；只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender；
   当前 Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 轨迹都未经过完整 UI operation 的真实
@@ -209,25 +209,27 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   [ADR 0063](docs/adr/0063-bounded-edit-mode-poke-faces.md) 与
   [ADR 0064](docs/adr/0064-bounded-mirror-modifier.md)。
 - **受管 Procedure 叶节点回放证明**：MCP/HTTP 的 `procedure.replay.propose` 对原始 packet + candidate
-  重新验证和物化，并把完整绑定与只投递给目标 Blender 实例的 GuideProposal 原子持久化。首个切片仅接受
-  单一 `blender.mesh.create_uv_sphere` 叶节点、`rollback_step` 成功门和参数完全一致的
-  `uv_sphere_ready` Observation。用户在 Blender 接受 Proposal 并通过受管 Action 完成该叶节点后，
+  重新验证和物化，并把完整绑定与只投递给目标 Blender 实例的 GuideProposal 原子持久化。当前切片仅接受
+  单一 `blender.mesh.create_uv_sphere` 或 `blender.mesh.create_icosphere` 叶节点、`rollback_step` 成功门，
+  以及与 Action 参数完全一致的 `uv_sphere_ready` 或 `icosphere_ready` Observation；Icosphere 还把
+  `subdivisions` 绑定到精确的顶点/边/面数量。用户在 Blender 接受 Proposal 并通过受管 Action 完成该叶节点后，
   decision 与终态 report 必须由同一协商 lease 提交，并按服务端持久化 receipt 顺序发生；
   `procedure.replay.finalize` 才能把它们、精确 Plan/执行/步骤身份和强 Observation 写成追加式 attestation，
   并进入 Eval/replay 导出。证明范围只包含
   `managedActionResult: verified`；菜单保持 `catalog_grounded_not_executed`，快捷键保持
   `candidate_not_executed`，MCP 保持 `unavailable`。它不是逐控件 UI replay，也不单独证明 Blender 原生
   Undo checkpoint，也不声称具体 UI 执行入口。见
-  [ADR 0065](docs/adr/0065-managed-procedure-leaf-replay-attestation.md)。
+  [ADR 0065](docs/adr/0065-managed-procedure-leaf-replay-attestation.md) 与
+  [ADR 0066](docs/adr/0066-icosphere-managed-replay-attestation.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.28.0` 精确绑定
-  ActionCatalog `1.18.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.29.0` 精确绑定
+  ActionCatalog `1.19.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.27.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.28.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与

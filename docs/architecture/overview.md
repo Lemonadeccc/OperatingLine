@@ -455,8 +455,10 @@ grounding attestation。完整决策见
 
 首个可执行桥接使用独立的 `ProcedureLeafReplay 1.0.0` 合同。调用方把原始 authoring packet、候选树、
 目标实例和单一 leaf 提交给 MCP/HTTP `procedure.replay.propose`；Orchestrator 重新运行 packet-bound
-validation/materialization，只接受 `blender.mesh.create_uv_sphere`、`rollback_step` 成功门、补偿回退和
-参数完全匹配的 `uv_sphere_ready`。完整 request、materialization、编译 Plan 与待审 Proposal 作为不可变
+validation/materialization，只接受单一 `blender.mesh.create_uv_sphere` 或
+`blender.mesh.create_icosphere`、`rollback_step` 成功门、补偿回退和参数完全匹配的
+`uv_sphere_ready` 或 `icosphere_ready`；后者还验证细分级别对应的精确拓扑。完整 request、
+materialization、编译 Plan 与待审 Proposal 作为不可变
 binding 原子入库，Proposal 仍必须由同一 Blender 实例人工 Accept。decision 与 terminal report 在接收时
 必须通过同一协商 lease，并以服务端单调 receipt 序列证明 Proposal → decision → report 顺序。执行后，
 `procedure.replay.finalize` 只关联这条认证链；Plan hash、execution、
@@ -464,7 +466,8 @@ step、host version 和强 Observation 任一不匹配都会 fail closed。最�
 可进入 Eval/replay 导出。其证据范围严格是 managed Action 结果：menu 为
 `catalog_grounded_not_executed`、shortcut 为 `candidate_not_executed`、MCP 为 `unavailable`；合同不声称
 逐控件 UI 回放、快捷键等价、具体 UI 执行入口、action-level MCP 调用或原生 Undo checkpoint 已被证明。见
-[ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md)。
+[ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
+[ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数

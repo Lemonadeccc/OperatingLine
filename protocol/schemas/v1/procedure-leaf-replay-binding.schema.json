@@ -11452,7 +11452,10 @@
     },
     "actionName": {
       "type": "string",
-      "minLength": 1
+      "enum": [
+        "blender.mesh.create_uv_sphere",
+        "blender.mesh.create_icosphere"
+      ]
     },
     "claims": {
       "type": "object",

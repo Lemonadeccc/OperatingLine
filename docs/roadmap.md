@@ -468,8 +468,13 @@
           Eval/replay 事件。只验证 managed Action 结果；menu/shortcut 未执行、MCP unavailable，也不把
           attestation 写成原生 Undo checkpoint 证明。见
           [ADR 0065](adr/0065-managed-procedure-leaf-replay-attestation.md)。
+    - [x] Icosphere 受管结果证明：ActionCatalog `1.19.0` 增加 `icosphere_ready`，InteractionCatalog
+          `1.29.0` 精确绑定它；同一 replay 合同接受单一 Icosphere leaf，并把 `subdivisions` 绑定到
+          `10×4^(n-1)+2 / 30×4^(n-1) / 20×4^(n-1)` 的顶点/边/面数量。错误细分参数、拓扑、receipt
+          action 或 Mesh 内容均 fail closed；证明范围仍不升级 menu/shortcut/MCP 或原生 Undo。见
+          [ADR 0066](adr/0066-icosphere-managed-replay-attestation.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor、原生 Undo checkpoint attestation，
-          以及 UV Sphere 之外的叶节点覆盖。
+          以及 UV Sphere/Icosphere 之外的叶节点覆盖。
   - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，
         增加显式 Provider coordinator、经验证的语义召回与结果治理，使不会 Blender 的用户能先审阅结构
         和参数，再对局部效果评论与精修；输入不依赖教学视频。

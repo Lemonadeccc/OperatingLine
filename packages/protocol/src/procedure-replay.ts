@@ -17,6 +17,12 @@ export const procedureLeafReplayFormatVersionSchema = z.literal(procedureLeafRep
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
+export const procedureLeafReplayActionNameSchema = z.enum([
+  'blender.mesh.create_uv_sphere',
+  'blender.mesh.create_icosphere',
+]);
+export type ProcedureLeafReplayActionName = z.infer<typeof procedureLeafReplayActionNameSchema>;
+
 const replayIntegritySchema = z.strictObject({
   algorithm: z.literal('sha256'),
   canonicalization: z.literal(protocolJsonValueCanonicalization),
@@ -135,7 +141,7 @@ const procedureLeafReplayBindingContentSchema = z.strictObject({
   proposal: guideProposalSchema,
   planContentSha256: contentSha256Schema,
   recipeId: guideStepIdSchema,
-  actionName: z.string().min(1),
+  actionName: procedureLeafReplayActionNameSchema,
   claims: procedureLeafReplayClaimsSchema,
   createdAt: z.iso.datetime({ offset: true }),
 });
@@ -277,7 +283,7 @@ const procedureLeafReplayExecutionSchema = z.strictObject({
   step: z.strictObject({ id: guideStepIdSchema }),
   action: z.strictObject({
     adapterId: z.literal('blender'),
-    name: z.literal('blender.mesh.create_uv_sphere'),
+    name: procedureLeafReplayActionNameSchema,
   }),
   occurredAt: z.iso.datetime({ offset: true }),
 });
@@ -325,37 +331,49 @@ const procedureLeafReplayUvSphereParametersSchema = z.strictObject({
   location: z.array(z.number().finite()).length(3),
 });
 
+const procedureLeafReplayIcosphereParametersSchema = z.strictObject({
+  resourceId: guideStepIdSchema,
+  objectName: z.string().min(1),
+  subdivisions: z.number().int().min(1).max(5),
+  radius: z.number().positive().finite(),
+  location: z.array(z.number().finite()).length(3),
+});
+
+const procedureLeafReplaySphericalDetailsShape = {
+  supported: z.literal(true),
+  resourceId: guideStepIdSchema,
+  objectName: z.string().min(1),
+  meshId: guideStepIdSchema,
+  collectionId: z.literal('snowman.collection'),
+  parametersValid: z.literal(true),
+  objectOwned: z.literal(true),
+  meshOwned: z.literal(true),
+  collectionOwned: z.literal(true),
+  receiptMatches: z.literal(true),
+  objectDataMatches: z.literal(true),
+  collectionLinkMatches: z.literal(true),
+  nameMatches: z.literal(true),
+  locationMatches: z.literal(true),
+  rotationMatches: z.literal(true),
+  scaleMatches: z.literal(true),
+  transformIsolated: z.literal(true),
+  modifiersAbsent: z.literal(true),
+  shapeKeysAbsent: z.literal(true),
+  materialsAbsent: z.literal(true),
+  contentIntact: z.literal(true),
+  topologyMatches: z.literal(true),
+  finiteCoordinates: z.literal(true),
+  radiusMatches: z.literal(true),
+  meshContentSha256: contentSha256Schema,
+} as const;
+
 const procedureLeafReplayUvSphereDetailsSchema = z
   .strictObject({
     parameters: procedureLeafReplayUvSphereParametersSchema,
-    supported: z.literal(true),
-    resourceId: guideStepIdSchema,
-    objectName: z.string().min(1),
-    meshId: guideStepIdSchema,
-    collectionId: z.literal('snowman.collection'),
-    parametersValid: z.literal(true),
-    objectOwned: z.literal(true),
-    meshOwned: z.literal(true),
-    collectionOwned: z.literal(true),
-    receiptMatches: z.literal(true),
-    objectDataMatches: z.literal(true),
-    collectionLinkMatches: z.literal(true),
-    nameMatches: z.literal(true),
-    locationMatches: z.literal(true),
-    rotationMatches: z.literal(true),
-    scaleMatches: z.literal(true),
-    transformIsolated: z.literal(true),
-    modifiersAbsent: z.literal(true),
-    shapeKeysAbsent: z.literal(true),
-    materialsAbsent: z.literal(true),
-    contentIntact: z.literal(true),
-    topologyMatches: z.literal(true),
-    finiteCoordinates: z.literal(true),
-    radiusMatches: z.literal(true),
+    ...procedureLeafReplaySphericalDetailsShape,
     vertexCount: z.literal(482),
     edgeCount: z.literal(992),
     faceCount: z.literal(512),
-    meshContentSha256: contentSha256Schema,
   })
   .superRefine((details, context) => {
     if (
@@ -377,11 +395,63 @@ const procedureLeafReplayUvSphereDetailsSchema = z
     }
   });
 
+const procedureLeafReplayIcosphereDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayIcosphereParametersSchema,
+    ...procedureLeafReplaySphericalDetailsShape,
+    vertexCount: z.number().int().positive(),
+    edgeCount: z.number().int().positive(),
+    faceCount: z.number().int().positive(),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.resourceId !== details.parameters.resourceId ||
+      details.objectName !== details.parameters.objectName
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Icosphere replay details must match their evaluated parameters',
+      });
+    }
+    if (details.meshId !== `${details.resourceId}.mesh`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['meshId'],
+        message: 'Icosphere replay meshId must derive from resourceId',
+      });
+    }
+    const scale = 4 ** (details.parameters.subdivisions - 1);
+    if (
+      details.vertexCount !== 10 * scale + 2 ||
+      details.edgeCount !== 30 * scale ||
+      details.faceCount !== 20 * scale
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vertexCount'],
+        message: 'Icosphere replay topology must match its accepted subdivision level',
+      });
+    }
+  });
+
 const procedureLeafReplayUvSphereObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('uv_sphere_ready'),
   satisfied: z.literal(true),
   details: procedureLeafReplayUvSphereDetailsSchema,
 });
+
+const procedureLeafReplayIcosphereObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('icosphere_ready'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplayIcosphereDetailsSchema,
+});
+
+export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
+  procedureLeafReplayUvSphereObservationSchema,
+  procedureLeafReplayIcosphereObservationSchema,
+]);
+export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 
 const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   adapterId: z.literal('blender'),
@@ -396,7 +466,7 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   completedStepIds: z.array(guideStepIdSchema).length(1),
   transition: z.literal('step_succeeded'),
   stepId: guideStepIdSchema,
-  observations: z.array(procedureLeafReplayUvSphereObservationSchema).length(1),
+  observations: z.array(procedureLeafReplayObservationSchema).length(1),
   observationGate: z.null(),
   artifactAttestation: z.null(),
   error: z.null(),
@@ -404,7 +474,7 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
 
 const procedureLeafReplaySuccessGateSchema = z
   .strictObject({
-    observations: z.array(procedureLeafReplayUvSphereObservationSchema).length(1),
+    observations: z.array(procedureLeafReplayObservationSchema).length(1),
     allSatisfied: z.literal(true),
   })
   .superRefine((gate, context) => {
@@ -446,6 +516,18 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
   .safeExtend({ integrity: replayIntegritySchema })
   .superRefine((attestation, context) => {
     const { decision, report, execution } = attestation;
+    const observation = report.observations[0];
+    const expectedObservationKind =
+      execution.action.name === 'blender.mesh.create_uv_sphere'
+        ? 'uv_sphere_ready'
+        : 'icosphere_ready';
+    if (observation?.kind !== expectedObservationKind) {
+      context.addIssue({
+        code: 'custom',
+        path: ['report', 'observations'],
+        message: 'Replay observation kind must match the attested managed action',
+      });
+    }
     if (decision.decision !== 'accepted') {
       context.addIssue({
         code: 'custom',

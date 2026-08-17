@@ -3,15 +3,18 @@ import {
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
   protocolJsonValueCanonicalization,
+  procedureLeafReplayActionNameSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayFormatVersion,
+  procedureLeafReplayObservationSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type GuideProposal,
   type GuideProposalDecision,
   type PlanningIntent,
   type ProcedureAuthoringMaterializationResult,
+  type ProcedureLeafReplayActionName,
   type ProcedureLeafReplayAttestation,
   type ProcedureLeafReplayBinding,
   type ProcedureLeafReplayProposalRequest,
@@ -20,8 +23,58 @@ import type { StoredManagedReplayReceipt } from '@operatingline/persistence';
 
 import { satisfiesStableVersionRange } from './stable-version-ranges.js';
 
-const replayActionName = 'blender.mesh.create_uv_sphere' as const;
-const replayObservationKind = 'uv_sphere_ready' as const;
+const replayActionContracts = {
+  'blender.mesh.create_uv_sphere': {
+    observationKind: 'uv_sphere_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      radius: actionArguments['radius'],
+      location: actionArguments['location'],
+    }),
+    expectedTopology: () => ({ vertexCount: 482, edgeCount: 992, faceCount: 512 }),
+  },
+  'blender.mesh.create_icosphere': {
+    observationKind: 'icosphere_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      subdivisions: actionArguments['subdivisions'],
+      radius: actionArguments['radius'],
+      location: actionArguments['location'],
+    }),
+    expectedTopology: (actionArguments: Record<string, unknown>) => {
+      const subdivisions = actionArguments['subdivisions'];
+      if (
+        typeof subdivisions !== 'number' ||
+        !Number.isInteger(subdivisions) ||
+        subdivisions < 1 ||
+        subdivisions > 5
+      ) {
+        return null;
+      }
+      const scale = 4 ** (subdivisions - 1);
+      return {
+        vertexCount: 10 * scale + 2,
+        edgeCount: 30 * scale,
+        faceCount: 20 * scale,
+      };
+    },
+  },
+} as const satisfies Record<
+  ProcedureLeafReplayActionName,
+  {
+    readonly observationKind: string;
+    readonly expectedParameters: (
+      actionArguments: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    readonly expectedTopology: (actionArguments: Record<string, unknown>) => {
+      readonly vertexCount: number;
+      readonly edgeCount: number;
+      readonly faceCount: number;
+    } | null;
+  }
+>;
 
 export class ProcedureLeafReplayError extends Error {
   constructor(
@@ -44,17 +97,8 @@ function sameCanonicalValue(left: unknown, right: unknown): boolean {
 
 export const sameProcedureLeafReplayValue = sameCanonicalValue;
 
-function expectedUvSphereObservationParameters(actionArguments: Record<string, unknown>) {
-  return {
-    resourceId: actionArguments['resourceId'],
-    objectName: actionArguments['objectName'],
-    radius: actionArguments['radius'],
-    location: actionArguments['location'],
-  };
-}
-
 export interface PreparedProcedureLeafReplay {
-  readonly actionName: typeof replayActionName;
+  readonly actionName: ProcedureLeafReplayActionName;
   readonly recipeId: string;
   readonly planning: PlanningIntent;
 }
@@ -85,11 +129,12 @@ export function prepareProcedureLeafReplay(
   if (leaf?.kind !== 'leaf' || leaf.action === null) {
     throw new ProcedureLeafReplayError('Replay leafId does not identify an executable leaf');
   }
-  if (leaf.action.name !== replayActionName || leaf.action.adapterId !== 'blender') {
-    throw new ProcedureLeafReplayError(
-      `Managed leaf replay currently supports only ${replayActionName}`,
-    );
+  const parsedActionName = procedureLeafReplayActionNameSchema.safeParse(leaf.action.name);
+  if (!parsedActionName.success || leaf.action.adapterId !== 'blender') {
+    throw new ProcedureLeafReplayError(`Managed leaf replay does not support ${leaf.action.name}`);
   }
+  const actionName = parsedActionName.data;
+  const actionContract = replayActionContracts[actionName];
 
   const executablePlanSteps = materialization.compilation.plan.steps.filter(
     (step) => step.action !== null,
@@ -98,7 +143,7 @@ export function prepareProcedureLeafReplay(
   if (
     executablePlanSteps.length !== 1 ||
     planStep?.id !== leaf.id ||
-    planStep.action?.name !== replayActionName ||
+    planStep.action?.name !== actionName ||
     !sameCanonicalValue(planStep.action.arguments, leaf.action.arguments)
   ) {
     throw new ProcedureLeafReplayError(
@@ -115,16 +160,14 @@ export function prepareProcedureLeafReplay(
       'Managed leaf replay requires a rollback_step success gate and compensating action',
     );
   }
-  const expectedObservationParameters = expectedUvSphereObservationParameters(
-    leaf.action.arguments,
-  );
+  const expectedObservationParameters = actionContract.expectedParameters(leaf.action.arguments);
   if (
     leaf.expectedObservations.length !== 1 ||
-    leaf.expectedObservations[0]?.kind !== replayObservationKind ||
+    leaf.expectedObservations[0]?.kind !== actionContract.observationKind ||
     !sameCanonicalValue(leaf.expectedObservations[0].parameters, expectedObservationParameters)
   ) {
     throw new ProcedureLeafReplayError(
-      `Managed UV Sphere replay requires one exact ${replayObservationKind} success gate`,
+      `Managed ${actionName} replay requires one exact ${actionContract.observationKind} success gate`,
     );
   }
 
@@ -155,17 +198,17 @@ export function prepareProcedureLeafReplay(
     );
   }
 
-  const actionEntry = actionCatalog.actions.find((entry) => entry.name === replayActionName);
-  if (!actionEntry?.supportedObservationKinds.includes(replayObservationKind)) {
+  const actionEntry = actionCatalog.actions.find((entry) => entry.name === actionName);
+  if (!actionEntry?.supportedObservationKinds.includes(actionContract.observationKind)) {
     throw new ProcedureLeafReplayError(
-      `ActionCatalog ${actionCatalog.catalogVersion} does not support ${replayObservationKind}`,
+      `ActionCatalog ${actionCatalog.catalogVersion} does not support ${actionContract.observationKind}`,
     );
   }
   const phases = (actionCatalog.planningPhases ?? []).filter((phase) =>
-    phase.actionNames.includes(replayActionName),
+    phase.actionNames.includes(actionName),
   );
   const capabilities = (actionCatalog.semanticCapabilities ?? []).filter((capability) =>
-    capability.actionNames.includes(replayActionName),
+    capability.actionNames.includes(actionName),
   );
   if (phases.length !== 1 || capabilities.length !== 1) {
     throw new ProcedureLeafReplayError(
@@ -174,7 +217,7 @@ export function prepareProcedureLeafReplay(
   }
 
   return {
-    actionName: replayActionName,
+    actionName,
     recipeId: leafCoverage.recipeId,
     planning: {
       goal: request.packet.context.goalProvenance.source.text,
@@ -199,7 +242,7 @@ export function buildProcedureLeafReplayBinding(input: {
   readonly proposal: GuideProposal;
   readonly planContentSha256: string;
   readonly recipeId: string;
-  readonly actionName: string;
+  readonly actionName: ProcedureLeafReplayActionName;
   readonly createdAt: string;
 }): ProcedureLeafReplayBinding {
   const content: Omit<ProcedureLeafReplayBinding, 'integrity'> = {
@@ -247,6 +290,7 @@ export function buildProcedureLeafReplayAttestation(input: {
 }): ProcedureLeafReplayAttestation {
   const { binding, decision, report } = input;
   const proposal = binding.proposal;
+  const actionContract = replayActionContracts[binding.actionName];
   if (
     decision.proposalId !== proposal.proposalId ||
     decision.decision !== 'accepted' ||
@@ -334,11 +378,14 @@ export function buildProcedureLeafReplayAttestation(input: {
   const expectedResourceId = expectedParameters?.['resourceId'];
   const expectedObjectName = expectedParameters?.['objectName'];
   const expectedRadius = expectedParameters?.['radius'];
+  const expectedSubdivisions = expectedParameters?.['subdivisions'];
   const expectedLocation = expectedParameters?.['location'];
   const expectedLocationX = Array.isArray(expectedLocation) ? expectedLocation[0] : undefined;
   const expectedLocationY = Array.isArray(expectedLocation) ? expectedLocation[1] : undefined;
   const expectedLocationZ = Array.isArray(expectedLocation) ? expectedLocation[2] : undefined;
   const meshContentSha256 = observation?.details['meshContentSha256'];
+  const expectedTopology =
+    expectedParameters === undefined ? null : actionContract.expectedTopology(expectedParameters);
   const strongBooleanDetailKeys = [
     'parametersValid',
     'objectOwned',
@@ -376,9 +423,9 @@ export function buildProcedureLeafReplayAttestation(input: {
   if (
     expectedStep?.action?.name !== binding.actionName ||
     expectedStep.expectedObservations.length !== 1 ||
-    expectedObservation?.kind !== replayObservationKind ||
+    expectedObservation?.kind !== actionContract.observationKind ||
     report.observations.length !== 1 ||
-    observation?.kind !== replayObservationKind ||
+    observation?.kind !== actionContract.observationKind ||
     observation.satisfied !== true ||
     Object.keys(observation.details).length !== strongDetailKeys.size ||
     Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
@@ -397,19 +444,25 @@ export function buildProcedureLeafReplayAttestation(input: {
     !Number.isFinite(expectedLocationY) ||
     typeof expectedLocationZ !== 'number' ||
     !Number.isFinite(expectedLocationZ) ||
+    (binding.actionName === 'blender.mesh.create_icosphere' &&
+      (typeof expectedSubdivisions !== 'number' ||
+        !Number.isInteger(expectedSubdivisions) ||
+        expectedSubdivisions < 1 ||
+        expectedSubdivisions > 5)) ||
+    expectedTopology === null ||
     observation.details['resourceId'] !== expectedResourceId ||
     observation.details['objectName'] !== expectedObjectName ||
     observation.details['meshId'] !== `${expectedResourceId}.mesh` ||
     observation.details['collectionId'] !== 'snowman.collection' ||
     strongBooleanDetailKeys.some((key) => observation.details[key] !== true) ||
-    observation.details['vertexCount'] !== 482 ||
-    observation.details['edgeCount'] !== 992 ||
-    observation.details['faceCount'] !== 512 ||
+    observation.details['vertexCount'] !== expectedTopology.vertexCount ||
+    observation.details['edgeCount'] !== expectedTopology.edgeCount ||
+    observation.details['faceCount'] !== expectedTopology.faceCount ||
     typeof meshContentSha256 !== 'string' ||
     !/^[0-9a-f]{64}$/.test(meshContentSha256)
   ) {
     throw new ProcedureLeafReplayError(
-      `Companion report lacks the exact satisfied ${replayObservationKind} observation`,
+      `Companion report lacks the exact satisfied ${actionContract.observationKind} observation`,
       409,
     );
   }
@@ -429,50 +482,11 @@ export function buildProcedureLeafReplayAttestation(input: {
     adapterId: 'blender' as const,
     decision: 'accepted' as const,
   };
-  const attestedObservation = {
-    kind: replayObservationKind,
-    satisfied: true as const,
-    details: {
-      parameters: {
-        resourceId: expectedResourceId,
-        objectName: expectedObjectName,
-        radius: expectedRadius,
-        location: [expectedLocationX, expectedLocationY, expectedLocationZ] as [
-          number,
-          number,
-          number,
-        ],
-      },
-      supported: true as const,
-      resourceId: expectedResourceId,
-      objectName: expectedObjectName,
-      meshId: `${expectedResourceId}.mesh`,
-      collectionId: 'snowman.collection' as const,
-      parametersValid: true as const,
-      objectOwned: true as const,
-      meshOwned: true as const,
-      collectionOwned: true as const,
-      receiptMatches: true as const,
-      objectDataMatches: true as const,
-      collectionLinkMatches: true as const,
-      nameMatches: true as const,
-      locationMatches: true as const,
-      rotationMatches: true as const,
-      scaleMatches: true as const,
-      transformIsolated: true as const,
-      modifiersAbsent: true as const,
-      shapeKeysAbsent: true as const,
-      materialsAbsent: true as const,
-      contentIntact: true as const,
-      topologyMatches: true as const,
-      finiteCoordinates: true as const,
-      radiusMatches: true as const,
-      vertexCount: 482 as const,
-      edgeCount: 992 as const,
-      faceCount: 512 as const,
-      meshContentSha256,
-    },
-  };
+  const attestedObservation = procedureLeafReplayObservationSchema.parse({
+    kind: actionContract.observationKind,
+    satisfied: true,
+    details: structuredClone(observation.details),
+  });
   const attestedReport = {
     ...report,
     adapterId: 'blender' as const,
@@ -489,7 +503,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     artifactAttestation: null,
     error: null,
   };
-  const content = {
+  const content: Omit<ProcedureLeafReplayAttestation, 'integrity'> = {
     formatVersion: procedureLeafReplayFormatVersion,
     replayId: binding.replayId,
     attestationId: input.attestationId,
@@ -529,7 +543,7 @@ export function buildProcedureLeafReplayAttestation(input: {
       step: { id: binding.leafId },
       action: {
         adapterId: 'blender',
-        name: replayActionName,
+        name: binding.actionName,
       },
       occurredAt: report.occurredAt,
     },
@@ -544,7 +558,7 @@ export function buildProcedureLeafReplayAttestation(input: {
       mcpTrack: 'unavailable',
     },
     attestedAt: input.attestedAt,
-  } satisfies Omit<ProcedureLeafReplayAttestation, 'integrity'>;
+  };
   return procedureLeafReplayAttestationSchema.parse({
     ...content,
     integrity: {

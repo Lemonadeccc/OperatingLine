@@ -1,12 +1,12 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.29.0",
+  "catalogVersion": "1.28.0",
   "adapterId": "blender",
-  "actionCatalogVersion": "1.19.0",
+  "actionCatalogVersion": "1.18.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
   "title": "OperatingLine Blender interaction catalog",
-  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.19.0 action.",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.18.0 action.",
   "recipes": [
     {
       "id": "blender.mesh.create_uv_sphere.native",
