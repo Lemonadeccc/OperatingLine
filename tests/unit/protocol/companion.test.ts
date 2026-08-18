@@ -235,6 +235,82 @@ describe('companion protocol', () => {
     ).toBe(false);
   });
 
+  it('binds retained Observation failures to the next checkpoint but forbids one after rollback', () => {
+    const terminal = completedStateReport();
+    const stepId = terminal.stepId;
+    const blocked = {
+      ...terminal,
+      phase: 'blocked',
+      completedStepIds: [],
+      transition: 'step_observation_failed',
+      observations: [{ kind: 'render_ready', satisfied: false, details: {} }],
+      observationGate: {
+        stepId,
+        status: 'repair_required',
+        failureStrategy: 'retain_for_repair',
+        message: 'Repair the retained step.',
+      },
+      artifactAttestation: null,
+      nativeUndoCheckpoint: {
+        formatVersion: '1.0.0',
+        evidenceClass: 'companion_reported_native_undo_checkpoint',
+        checkpointId: randomUUID(),
+        previousCheckpointId: randomUUID(),
+        operation: 'next',
+        committedAt: '2026-08-04T09:59:59Z',
+        marker: { key: '_operating_line_native_history_v1', matched: true },
+        journal: {
+          entryPresent: true,
+          snapshotMatchesSession: true,
+          artifactsBackedUp: true,
+        },
+        session: {
+          plan: terminal.plan,
+          planContentSha256: terminal.planContentSha256,
+          executionId: terminal.executionId,
+          activeStepId: stepId,
+          completedStepIds: [],
+          receiptStepIds: [stepId],
+        },
+      },
+    } as const;
+    const parsedBlocked = companionStateReportSchema.safeParse(blocked);
+    expect(parsedBlocked.success, parsedBlocked.error?.message).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...blocked,
+        nativeUndoCheckpoint: { ...blocked.nativeUndoCheckpoint, operation: 'recheck' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...blocked,
+        nativeUndoCheckpoint: {
+          ...blocked.nativeUndoCheckpoint,
+          session: {
+            ...blocked.nativeUndoCheckpoint.session,
+            receiptStepIds: ['different.step'],
+          },
+        },
+      }).success,
+    ).toBe(false);
+
+    const rolledBack = {
+      ...blocked,
+      phase: 'running',
+      activeStepId: null,
+      observationGate: {
+        ...blocked.observationGate,
+        status: 'failed_rolled_back',
+        failureStrategy: 'rollback_step',
+      },
+    } as const;
+    const withoutCheckpoint = { ...rolledBack } as Record<string, unknown>;
+    delete withoutCheckpoint['nativeUndoCheckpoint'];
+    expect(companionStateReportSchema.safeParse(withoutCheckpoint).success).toBe(true);
+    expect(companionStateReportSchema.safeParse(rolledBack).success).toBe(false);
+  });
+
   it('binds nonce-based replay current-state requests to protocol 1.5 recheck reports', () => {
     const report = completedStateReport();
     const request = {

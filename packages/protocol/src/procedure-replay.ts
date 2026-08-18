@@ -7,6 +7,7 @@ import {
 import {
   companionNativeUndoCheckpointSchema,
   companionObservationSchema,
+  companionObservationGateSchema,
   companionProcedureReplayCurrentStateRequestSchema,
   companionStateReportSchema,
 } from './companion.js';
@@ -298,6 +299,26 @@ export const procedureLeafReplayFinalizeRequestSchema = z.strictObject({
 });
 export type ProcedureLeafReplayFinalizeRequest = z.infer<
   typeof procedureLeafReplayFinalizeRequestSchema
+>;
+
+export const procedureLeafReplayFailureRecoveryFinalizeRequestSchema = z
+  .strictObject({
+    replayId: z.uuid(),
+    attestationId: z.uuid(),
+    failureReportId: z.uuid(),
+    recoveryReportId: z.uuid().optional(),
+  })
+  .superRefine((request, context) => {
+    if (request.recoveryReportId === request.failureReportId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recoveryReportId'],
+        message: 'Recovery report must differ from the failure report',
+      });
+    }
+  });
+export type ProcedureLeafReplayFailureRecoveryFinalizeRequest = z.infer<
+  typeof procedureLeafReplayFailureRecoveryFinalizeRequestSchema
 >;
 
 export const procedureLeafReplayCurrentStateRequestSchema = z.strictObject({
@@ -962,6 +983,394 @@ export function computeProcedureLeafReplayAttestationContentSha256(
 ): string {
   return computeContentSha256(withoutIntegrity(attestation));
 }
+
+const procedureLeafReplayFailedObservationSchema = companionObservationSchema.safeExtend({
+  satisfied: z.literal(false),
+});
+
+const procedureLeafReplayFailedGateSchema = companionObservationGateSchema.safeExtend({
+  status: z.enum(['failed_rolled_back', 'repair_required', 'rollback_failed']),
+});
+
+const procedureLeafReplayRecoveredGateSchema = companionObservationGateSchema.safeExtend({
+  status: z.literal('recovered'),
+});
+
+const procedureLeafReplayFailureReportSchema = companionStateReportSchema.safeExtend({
+  protocolVersion: z.literal('1.5.0'),
+  adapterId: z.literal('blender'),
+  plan: z.strictObject({
+    id: z.string().min(1),
+    revision: z.number().int().positive(),
+  }),
+  planContentSha256: contentSha256Schema,
+  executionId: z.uuid(),
+  phase: z.enum(['running', 'blocked']),
+  completedStepIds: z.array(guideStepIdSchema).length(0),
+  transition: z.literal('step_observation_failed'),
+  stepId: guideStepIdSchema,
+  observations: z.array(procedureLeafReplayFailedObservationSchema).length(1),
+  observationGate: procedureLeafReplayFailedGateSchema,
+  artifactAttestation: z.null(),
+  error: z.null(),
+});
+
+const procedureLeafReplayRecoveryReportSchema = companionStateReportSchema.safeExtend({
+  protocolVersion: z.literal('1.5.0'),
+  adapterId: z.literal('blender'),
+  plan: z.strictObject({
+    id: z.string().min(1),
+    revision: z.number().int().positive(),
+  }),
+  planContentSha256: contentSha256Schema,
+  executionId: z.uuid(),
+  phase: z.literal('completed'),
+  activeStepId: guideStepIdSchema,
+  completedStepIds: z.array(guideStepIdSchema).length(1),
+  transition: z.literal('observation_recovered'),
+  stepId: guideStepIdSchema,
+  observations: z.array(procedureLeafReplayObservationSchema).length(1),
+  observationGate: procedureLeafReplayRecoveredGateSchema,
+  artifactAttestation: z.null(),
+  nativeUndoCheckpoint: companionNativeUndoCheckpointSchema,
+  error: z.null(),
+});
+
+const procedureLeafReplayFailureRecoveryProvenanceSchema = z
+  .strictObject({
+    authentication: z.literal('negotiated_companion_lease'),
+    executionSessionFingerprintSha256: contentSha256Schema,
+    recoverySessionFingerprintSha256: contentSha256Schema.nullable(),
+    proposalReceipt: procedureLeafReplayReceiptSchema,
+    decisionReceipt: procedureLeafReplayReceiptSchema,
+    failureReportReceipt: procedureLeafReplayReceiptSchema,
+    recoveryReportReceipt: procedureLeafReplayReceiptSchema.nullable(),
+  })
+  .superRefine((provenance, context) => {
+    const recoveryPresent = provenance.recoveryReportReceipt !== null;
+    if (recoveryPresent !== (provenance.recoverySessionFingerprintSha256 !== null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recoverySessionFingerprintSha256'],
+        message: 'Recovery fingerprint and receipt must be present together',
+      });
+    }
+    const receipts = [
+      provenance.proposalReceipt,
+      provenance.decisionReceipt,
+      provenance.failureReportReceipt,
+      ...(provenance.recoveryReportReceipt === null ? [] : [provenance.recoveryReportReceipt]),
+    ];
+    if (
+      receipts.some(
+        (receipt, index) =>
+          index > 0 &&
+          (receipts[index - 1]!.sequence >= receipt.sequence ||
+            Date.parse(receipts[index - 1]!.receivedAt) > Date.parse(receipt.receivedAt)),
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['failureReportReceipt'],
+        message: 'Failure/recovery receipt chain must be strictly ordered',
+      });
+    }
+  });
+
+const procedureLeafReplayFailureRecoveryVerificationScopeSchema = z.strictObject({
+  managedActionAttempt: z.literal('observation_failed'),
+  rollbackOutcome: z.enum([
+    'companion_reported_succeeded',
+    'companion_reported_failed',
+    'not_requested',
+  ]),
+  recoveryOutcome: z.enum(['not_required', 'companion_reported_verified']),
+  menuTrack: z.literal('catalog_grounded_not_executed'),
+  shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
+  mcpTrack: z.literal('unavailable'),
+  failureNativeUndoCheckpoint: z.enum([
+    'companion_reported_current_at_failure_report',
+    'not_verified_at_failure_report',
+  ]),
+  terminalNativeUndoCheckpoint: z.enum([
+    'not_applicable_no_retained_step',
+    'companion_reported_current_at_recovery_report',
+  ]),
+  currentHostStateAfterReport: z.literal('not_verified'),
+});
+
+const procedureLeafReplayFailureRecoveryAttestationContentSchema = z.strictObject({
+  formatVersion: procedureLeafReplayFormatVersionSchema,
+  replayId: z.uuid(),
+  attestationId: z.uuid(),
+  decision: guideProposalDecisionSchema.safeExtend({
+    adapterId: z.literal('blender'),
+    decision: z.literal('accepted'),
+  }),
+  failureReport: procedureLeafReplayFailureReportSchema,
+  recoveryReport: procedureLeafReplayRecoveryReportSchema.nullable(),
+  evidenceClass: z.literal('companion_reported_managed_action_failure_recovery'),
+  outcome: z.enum(['automatically_rolled_back', 'recovered_after_repair']),
+  provenance: procedureLeafReplayFailureRecoveryProvenanceSchema,
+  bindingContentSha256: contentSha256Schema,
+  execution: procedureLeafReplayExecutionSchema,
+  verificationScope: procedureLeafReplayFailureRecoveryVerificationScopeSchema,
+  attestedAt: z.iso.datetime({ offset: true }),
+});
+
+export const procedureLeafReplayFailureRecoveryAttestationSchema =
+  procedureLeafReplayFailureRecoveryAttestationContentSchema
+    .safeExtend({ integrity: replayIntegritySchema })
+    .meta({
+      allOf: [
+        {
+          if: {
+            properties: { outcome: { const: 'automatically_rolled_back' } },
+            required: ['outcome'],
+          },
+          then: {
+            properties: {
+              failureReport: {
+                not: { required: ['nativeUndoCheckpoint'] },
+                properties: {
+                  phase: { const: 'running' },
+                  activeStepId: { type: 'null' },
+                  observationGate: {
+                    properties: { status: { const: 'failed_rolled_back' } },
+                  },
+                },
+              },
+              recoveryReport: { type: 'null' },
+              provenance: {
+                properties: {
+                  recoverySessionFingerprintSha256: { type: 'null' },
+                  recoveryReportReceipt: { type: 'null' },
+                },
+              },
+              verificationScope: {
+                properties: {
+                  rollbackOutcome: { const: 'companion_reported_succeeded' },
+                  recoveryOutcome: { const: 'not_required' },
+                  failureNativeUndoCheckpoint: { const: 'not_verified_at_failure_report' },
+                  terminalNativeUndoCheckpoint: { const: 'not_applicable_no_retained_step' },
+                },
+              },
+            },
+          },
+        },
+        {
+          if: {
+            properties: { outcome: { const: 'recovered_after_repair' } },
+            required: ['outcome'],
+          },
+          then: {
+            properties: {
+              failureReport: {
+                required: ['nativeUndoCheckpoint'],
+                properties: {
+                  phase: { const: 'blocked' },
+                  activeStepId: { type: 'string' },
+                  observationGate: {
+                    properties: {
+                      status: { enum: ['repair_required', 'rollback_failed'] },
+                    },
+                  },
+                  nativeUndoCheckpoint: {
+                    properties: { operation: { const: 'next' } },
+                  },
+                },
+              },
+              recoveryReport: { type: 'object' },
+              provenance: {
+                properties: {
+                  recoverySessionFingerprintSha256: { type: 'string' },
+                  recoveryReportReceipt: { type: 'object' },
+                },
+              },
+              verificationScope: {
+                properties: {
+                  recoveryOutcome: { const: 'companion_reported_verified' },
+                  failureNativeUndoCheckpoint: {
+                    const: 'companion_reported_current_at_failure_report',
+                  },
+                  terminalNativeUndoCheckpoint: {
+                    const: 'companion_reported_current_at_recovery_report',
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    })
+    .superRefine((attestation, context) => {
+      const { decision, execution, failureReport, recoveryReport, provenance } = attestation;
+      const failureGate = failureReport.observationGate;
+      const automaticRollback = failureGate.status === 'failed_rolled_back';
+      const failureCheckpoint = failureReport.nativeUndoCheckpoint;
+      const expectedObservationKind =
+        procedureLeafReplayObservationKindByAction[execution.action.name];
+      if (
+        failureReport.observations[0]?.kind !== expectedObservationKind ||
+        recoveryReport?.observations[0]?.kind !==
+          (recoveryReport === null ? undefined : expectedObservationKind)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['failureReport', 'observations'],
+          message: 'Failure and recovery observations must match the managed action',
+        });
+      }
+      if (
+        failureReport.instanceId !== execution.host.instanceId ||
+        failureReport.adapterId !== execution.host.adapterId ||
+        failureReport.hostVersion !== execution.host.version ||
+        failureReport.companionVersion !== execution.companion.version ||
+        failureReport.plan.id !== execution.plan.id ||
+        failureReport.plan.revision !== execution.plan.revision ||
+        failureReport.planContentSha256 !== execution.plan.contentSha256 ||
+        failureReport.executionId !== execution.execution.id ||
+        failureReport.stepId !== execution.step.id ||
+        failureReport.occurredAt !== execution.occurredAt ||
+        failureGate.stepId !== execution.step.id ||
+        decision.instanceId !== execution.host.instanceId ||
+        decision.adapterId !== execution.host.adapterId
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['execution'],
+          message: 'Failure execution must exactly match its decision and report',
+        });
+      }
+      if (
+        automaticRollback
+          ? failureReport.phase !== 'running' ||
+            failureReport.activeStepId !== null ||
+            failureReport.nativeUndoCheckpoint !== undefined ||
+            recoveryReport !== null
+          : failureReport.phase !== 'blocked' ||
+            failureReport.activeStepId !== execution.step.id ||
+            failureCheckpoint === undefined ||
+            recoveryReport === null
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['failureReport'],
+          message: 'Failure state must match automatic rollback or a recoverable blocked gate',
+        });
+      }
+      if (
+        failureCheckpoint !== undefined &&
+        (failureCheckpoint.operation !== 'next' ||
+          failureCheckpoint.session.receiptStepIds.length !== 1 ||
+          failureCheckpoint.session.receiptStepIds[0] !== execution.step.id)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['failureReport', 'nativeUndoCheckpoint'],
+          message: 'Failure checkpoint must bind the retained managed step',
+        });
+      }
+      if (recoveryReport !== null) {
+        const recoveryCheckpoint = recoveryReport.nativeUndoCheckpoint;
+        if (
+          recoveryReport.instanceId !== execution.host.instanceId ||
+          recoveryReport.adapterId !== execution.host.adapterId ||
+          recoveryReport.hostVersion !== execution.host.version ||
+          recoveryReport.companionVersion !== execution.companion.version ||
+          recoveryReport.plan.id !== execution.plan.id ||
+          recoveryReport.plan.revision !== execution.plan.revision ||
+          recoveryReport.planContentSha256 !== execution.plan.contentSha256 ||
+          recoveryReport.executionId !== execution.execution.id ||
+          recoveryReport.activeStepId !== execution.step.id ||
+          recoveryReport.stepId !== execution.step.id ||
+          recoveryReport.completedStepIds[0] !== execution.step.id ||
+          recoveryReport.observationGate.stepId !== execution.step.id ||
+          recoveryReport.observationGate.failureStrategy !== failureGate.failureStrategy ||
+          recoveryCheckpoint.operation !== 'recheck' ||
+          recoveryCheckpoint.session.receiptStepIds.length !== 1 ||
+          recoveryCheckpoint.session.receiptStepIds[0] !== execution.step.id ||
+          Date.parse(recoveryReport.occurredAt) < Date.parse(failureReport.occurredAt)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['recoveryReport'],
+            message: 'Recovery report must prove the same repaired execution and leaf',
+          });
+        }
+      }
+      const expectedRollbackOutcome =
+        failureGate.status === 'failed_rolled_back'
+          ? 'companion_reported_succeeded'
+          : failureGate.status === 'rollback_failed'
+            ? 'companion_reported_failed'
+            : 'not_requested';
+      if (
+        attestation.outcome !==
+          (automaticRollback ? 'automatically_rolled_back' : 'recovered_after_repair') ||
+        attestation.verificationScope.rollbackOutcome !== expectedRollbackOutcome ||
+        attestation.verificationScope.recoveryOutcome !==
+          (automaticRollback ? 'not_required' : 'companion_reported_verified') ||
+        attestation.verificationScope.failureNativeUndoCheckpoint !==
+          (failureCheckpoint === undefined
+            ? 'not_verified_at_failure_report'
+            : 'companion_reported_current_at_failure_report') ||
+        attestation.verificationScope.terminalNativeUndoCheckpoint !==
+          (automaticRollback
+            ? 'not_applicable_no_retained_step'
+            : 'companion_reported_current_at_recovery_report')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['verificationScope'],
+          message: 'Failure/recovery scope must match its observed terminal outcome',
+        });
+      }
+      if (
+        (recoveryReport === null) !== (provenance.recoveryReportReceipt === null) ||
+        Date.parse(decision.occurredAt) > Date.parse(failureReport.occurredAt) ||
+        Date.parse(failureReport.occurredAt) >
+          Date.parse(recoveryReport?.occurredAt ?? attestation.attestedAt) ||
+        Date.parse(
+          provenance.recoveryReportReceipt?.receivedAt ??
+            provenance.failureReportReceipt.receivedAt,
+        ) > Date.parse(attestation.attestedAt)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['attestedAt'],
+          message: 'Failure/recovery attestation must follow its ordered evidence',
+        });
+      }
+      if (
+        computeContentSha256(withoutIntegrity(attestation)) !== attestation.integrity.contentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['integrity', 'contentSha256'],
+          message: 'Failure/recovery attestation integrity must match its canonical content',
+        });
+      }
+    });
+export type ProcedureLeafReplayFailureRecoveryAttestation = z.infer<
+  typeof procedureLeafReplayFailureRecoveryAttestationSchema
+>;
+
+export function computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(
+  attestation:
+    | Omit<ProcedureLeafReplayFailureRecoveryAttestation, 'integrity'>
+    | ProcedureLeafReplayFailureRecoveryAttestation,
+): string {
+  return computeContentSha256(withoutIntegrity(attestation));
+}
+
+export const procedureLeafReplayFailureRecoveryFinalizeResultSchema = z.strictObject({
+  status: z.enum(['accepted', 'duplicate']),
+  attestation: procedureLeafReplayFailureRecoveryAttestationSchema,
+});
+export type ProcedureLeafReplayFailureRecoveryFinalizeResult = z.infer<
+  typeof procedureLeafReplayFailureRecoveryFinalizeResultSchema
+>;
 
 const procedureLeafReplayCurrentStateReportSchema = companionStateReportSchema.safeExtend({
   protocolVersion: z.literal('1.5.0'),

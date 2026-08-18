@@ -288,12 +288,15 @@ export const companionNativeUndoCheckpointSchema = z
     }),
   })
   .superRefine((checkpoint, context) => {
-    const completedStepIds = new Set(checkpoint.session.completedStepIds);
-    if (checkpoint.session.receiptStepIds.some((stepId) => !completedStepIds.has(stepId))) {
+    const allowedReceiptStepIds = new Set(checkpoint.session.completedStepIds);
+    if (checkpoint.session.activeStepId !== null) {
+      allowedReceiptStepIds.add(checkpoint.session.activeStepId);
+    }
+    if (checkpoint.session.receiptStepIds.some((stepId) => !allowedReceiptStepIds.has(stepId))) {
       context.addIssue({
         code: 'custom',
         path: ['session', 'receiptStepIds'],
-        message: 'Native Undo receipts must belong to completed steps',
+        message: 'Native Undo receipts must belong to completed or active steps',
       });
     }
   });
@@ -664,6 +667,7 @@ export const companionStateReportSchema = z
         });
       }
     }
+    const gate = report.observationGate;
     const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
     if (nativeUndoCheckpoint !== undefined) {
       let expectedOperation: 'start' | 'next' | 'recheck' | 'back' | undefined;
@@ -673,6 +677,12 @@ export const companionStateReportSchema = z
           break;
         case 'step_succeeded':
           expectedOperation = 'next';
+          break;
+        case 'step_observation_failed':
+          expectedOperation =
+            gate?.status === 'repair_required' || gate?.status === 'rollback_failed'
+              ? 'next'
+              : undefined;
           break;
         case 'observation_recovered':
           expectedOperation = 'recheck';
@@ -713,6 +723,25 @@ export const companionStateReportSchema = z
           message: 'Native Undo checkpoint must bind the exact reported session state',
         });
       }
+      const completedStepIds = new Set(nativeUndoCheckpoint.session.completedStepIds);
+      const retainedBlockedReceipt =
+        report.transition === 'step_observation_failed' &&
+        (gate?.status === 'repair_required' || gate?.status === 'rollback_failed');
+      if (
+        nativeUndoCheckpoint.session.receiptStepIds.some(
+          (stepId) =>
+            !completedStepIds.has(stepId) && (!retainedBlockedReceipt || stepId !== report.stepId),
+        ) ||
+        (retainedBlockedReceipt &&
+          (report.stepId === null ||
+            !nativeUndoCheckpoint.session.receiptStepIds.includes(report.stepId)))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeUndoCheckpoint', 'session', 'receiptStepIds'],
+          message: 'Native Undo receipts must exactly cover completed or retained blocked steps',
+        });
+      }
       if (Date.parse(nativeUndoCheckpoint.committedAt) > Date.parse(report.occurredAt)) {
         context.addIssue({
           code: 'custom',
@@ -721,7 +750,6 @@ export const companionStateReportSchema = z
         });
       }
     }
-    const gate = report.observationGate;
     if (report.phase === 'blocked') {
       if (
         gate === undefined ||

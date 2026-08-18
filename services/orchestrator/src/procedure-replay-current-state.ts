@@ -122,7 +122,14 @@ export function createProcedureLeafReplayCurrentStateCoordinator(
           404,
         );
       }
-      const attestation = procedureLeafReplayAttestationSchema.parse(attestationPayload);
+      const parsedAttestation = procedureLeafReplayAttestationSchema.safeParse(attestationPayload);
+      if (!parsedAttestation.success) {
+        throw new ProcedureLeafReplayError(
+          'Current-state verification currently requires a successful replay attestation',
+          409,
+        );
+      }
+      const attestation = parsedAttestation.data;
       const request = companionProcedureReplayCurrentStateRequestSchema.parse(
         buildProcedureLeafReplayCurrentStateRequest({
           attestation,
@@ -217,8 +224,15 @@ export function createProcedureLeafReplayCurrentStateCoordinator(
           404,
         );
       }
+      const parsedAttestation = procedureLeafReplayAttestationSchema.safeParse(attestationPayload);
+      if (!parsedAttestation.success) {
+        throw new ProcedureLeafReplayError(
+          'Current-state verification no longer references a successful replay attestation',
+          409,
+        );
+      }
       const verification = buildProcedureLeafReplayCurrentStateVerification({
-        attestation: procedureLeafReplayAttestationSchema.parse(attestationPayload),
+        attestation: parsedAttestation.data,
         request,
         report,
         reportReceipt: receipt,

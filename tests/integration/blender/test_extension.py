@@ -7699,6 +7699,7 @@ def assert_companion_and_plan_semantics() -> None:
                 "test_gate_ready; the step was rolled back"
             ),
         }
+        assert "nativeUndoCheckpoint" not in companion.last_report
 
         one_shot_plan = deepcopy(rollback_gate_plan)
         one_shot_plan["id"] = "observation-one-shot-gate-plan"
@@ -7747,6 +7748,10 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion.last_report["observationGate"]["status"] == (
             "repair_required"
         )
+        assert companion.last_report["nativeUndoCheckpoint"]["operation"] == "next"
+        assert companion.last_report["nativeUndoCheckpoint"]["session"][
+            "receiptStepIds"
+        ] == [retain_gate_step_data["id"]]
         assert bpy.ops.operating_line.next() == {"CANCELLED"}
         assert bpy.data.objects[EXPECTED[0]].as_pointer() == retained_pointer
 
@@ -7759,6 +7764,9 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion.last_report["transition"] == "observation_recovered"
         assert companion.last_report["observationGate"]["status"] == "recovered"
         assert companion.last_report["observations"][0]["satisfied"] is True
+        assert companion.last_report["nativeUndoCheckpoint"]["operation"] == (
+            "recheck"
+        )
         retain_gate_session.back()
         assert bpy.data.objects.get(EXPECTED[0]) is None
 

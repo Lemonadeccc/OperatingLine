@@ -25,6 +25,7 @@ import {
   guideProtocolVersion,
   procedureLeafReplayCurrentStateRequestResultSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
+  procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalResultSchema,
   procedureAuthoringMaterializationResultSchema,
@@ -78,13 +79,15 @@ function replayNativeUndoCheckpoint(input: {
   readonly executionId: string;
   readonly stepId: string;
   readonly occurredAt: string;
+  readonly operation?: 'next' | 'recheck';
+  readonly completedStepIds?: readonly string[];
 }) {
   return {
     formatVersion: '1.0.0' as const,
     evidenceClass: 'companion_reported_native_undo_checkpoint' as const,
     checkpointId: randomUUID(),
     previousCheckpointId: randomUUID(),
-    operation: 'next' as const,
+    operation: input.operation ?? ('next' as const),
     committedAt: new Date(Date.parse(input.occurredAt) - 1).toISOString(),
     marker: {
       key: '_operating_line_native_history_v1' as const,
@@ -100,7 +103,7 @@ function replayNativeUndoCheckpoint(input: {
       planContentSha256: input.planContentSha256,
       executionId: input.executionId,
       activeStepId: input.stepId,
-      completedStepIds: [input.stepId],
+      completedStepIds: input.completedStepIds ?? [input.stepId],
       receiptStepIds: [input.stepId],
     },
   };
@@ -4810,6 +4813,398 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('attests automatic rollback and checkpointed repair recovery as exclusive replay outcomes', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '创建一个可验证失败、回退和修复恢复的 UV Sphere。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      let reportSequence = 0;
+
+      const prepareReplay = async (
+        failureStrategy: 'rollback_step' | 'retain_for_repair',
+        replayPacket: ProcedureAuthoringPromptPacket = packet,
+      ) => {
+        const tree = replayAuthoringCandidateFixture(replayPacket);
+        tree['id'] = replayPacket.context.requestedTreeId;
+        tree['revision'] = replayPacket.context.recommendedRevision;
+        const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+          (node) => node['kind'] === 'leaf',
+        );
+        if (leaf === undefined) throw new Error('Expected one recovery replay leaf');
+        leaf['observationPolicy'] = { mode: 'success_gate', failureStrategy };
+        const replayRequest = {
+          formatVersion: '1.0.0' as const,
+          replayId: randomUUID(),
+          targetInstanceId,
+          leafId: String(leaf['id']),
+          replayMode: 'managed_action' as const,
+          packet: replayPacket,
+          tree,
+        };
+        const proposedResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/replay/propose`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(replayRequest),
+        });
+        const proposedPayload = await proposedResponse.json();
+        expect(proposedResponse.status, JSON.stringify(proposedPayload)).toBe(200);
+        const proposed = procedureLeafReplayProposalResultSchema.parse(proposedPayload);
+        const proposal = proposed.binding.proposal;
+        const decision = {
+          protocolVersion: guideProtocolVersion,
+          decisionId: randomUUID(),
+          proposalId: proposal.proposalId,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          decision: 'accepted',
+          occurredAt: new Date(Date.now() - 10_000).toISOString(),
+        } as const;
+        const decisionResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+        );
+        expect(decisionResponse.status).toBe(200);
+        const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
+        const parameters = step?.expectedObservations[0]?.parameters;
+        const resourceId = parameters?.['resourceId'];
+        const objectName = parameters?.['objectName'];
+        if (
+          step?.action === null ||
+          step?.action === undefined ||
+          typeof resourceId !== 'string' ||
+          typeof objectName !== 'string'
+        ) {
+          throw new Error('Expected one executable recovery replay step');
+        }
+        return { replayRequest, proposed, proposal, parameters, resourceId, objectName };
+      };
+
+      const strongObservation = (input: {
+        parameters: Record<string, unknown>;
+        resourceId: string;
+        objectName: string;
+      }) => ({
+        kind: 'uv_sphere_ready' as const,
+        satisfied: true as const,
+        details: {
+          parameters: input.parameters,
+          supported: true,
+          resourceId: input.resourceId,
+          objectName: input.objectName,
+          meshId: `${input.resourceId}.mesh`,
+          collectionId: 'snowman.collection',
+          parametersValid: true,
+          objectOwned: true,
+          meshOwned: true,
+          collectionOwned: true,
+          receiptMatches: true,
+          objectDataMatches: true,
+          collectionLinkMatches: true,
+          nameMatches: true,
+          locationMatches: true,
+          rotationMatches: true,
+          scaleMatches: true,
+          transformIsolated: true,
+          modifiersAbsent: true,
+          shapeKeysAbsent: true,
+          materialsAbsent: true,
+          contentIntact: true,
+          topologyMatches: true,
+          finiteCoordinates: true,
+          radiusMatches: true,
+          vertexCount: 482,
+          edgeCount: 992,
+          faceCount: 512,
+          meshContentSha256: 'a'.repeat(64),
+        },
+      });
+      const postState = async (report: Record<string, unknown>) => {
+        const response = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(report),
+        });
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      };
+
+      const retained = await prepareReplay('retain_for_repair');
+      const retainedExecutionId = randomUUID();
+      const retainedPlanSha256 = computePlanContentSha256(retained.proposal.plan);
+      const failureOccurredAt = new Date().toISOString();
+      const retainedFailureReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: retained.proposal.plan.id, revision: retained.proposal.plan.revision },
+        planContentSha256: retainedPlanSha256,
+        executionId: retainedExecutionId,
+        phase: 'blocked',
+        activeStepId: retained.replayRequest.leafId,
+        completedStepIds: [],
+        transition: 'step_observation_failed',
+        stepId: retained.replayRequest.leafId,
+        observations: [
+          {
+            kind: 'uv_sphere_ready',
+            satisfied: false,
+            details: {
+              parameters: retained.parameters,
+              supported: true,
+              contentIntact: false,
+            },
+          },
+        ],
+        observationGate: {
+          stepId: retained.replayRequest.leafId,
+          status: 'repair_required',
+          failureStrategy: 'retain_for_repair',
+          message: 'Repair the retained managed step.',
+        },
+        artifactAttestation: null,
+        nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+          planId: retained.proposal.plan.id,
+          planRevision: retained.proposal.plan.revision,
+          planContentSha256: retainedPlanSha256,
+          executionId: retainedExecutionId,
+          stepId: retained.replayRequest.leafId,
+          occurredAt: failureOccurredAt,
+          completedStepIds: [],
+        }),
+        error: null,
+        occurredAt: failureOccurredAt,
+      } as const;
+      await postState(retainedFailureReport);
+      const recoveryOccurredAt = new Date(Date.now() + 1).toISOString();
+      const retainedRecoveryReport = {
+        ...retainedFailureReport,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        phase: 'completed',
+        completedStepIds: [retained.replayRequest.leafId],
+        transition: 'observation_recovered',
+        observations: [strongObservation(retained)],
+        observationGate: {
+          ...retainedFailureReport.observationGate,
+          status: 'recovered',
+          message: 'The repaired managed step passed its Observation.',
+        },
+        nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+          planId: retained.proposal.plan.id,
+          planRevision: retained.proposal.plan.revision,
+          planContentSha256: retainedPlanSha256,
+          executionId: retainedExecutionId,
+          stepId: retained.replayRequest.leafId,
+          occurredAt: recoveryOccurredAt,
+          operation: 'recheck',
+        }),
+        occurredAt: recoveryOccurredAt,
+      } as const;
+      await postState(retainedRecoveryReport);
+      const retainedFinalizeRequest = {
+        replayId: retained.replayRequest.replayId,
+        attestationId: randomUUID(),
+        failureReportId: retainedFailureReport.reportId,
+        recoveryReportId: retainedRecoveryReport.reportId,
+      };
+      const retainedFinalize = await callMcpTool(
+        runtime,
+        920,
+        'operatingline.procedure.replay.failure-recovery.finalize',
+        retainedFinalizeRequest,
+      );
+      expect(
+        retainedFinalize.result?.isError,
+        retainedFinalize.result?.content?.[0]?.text,
+      ).not.toBe(true);
+      const recovered = procedureLeafReplayFailureRecoveryFinalizeResultSchema.parse(
+        retainedFinalize.result?.structuredContent,
+      );
+      expect(recovered).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          outcome: 'recovered_after_repair',
+          provenance: {
+            executionSessionFingerprintSha256: createHash('sha256')
+              .update(session.leaseId)
+              .digest('hex'),
+            recoverySessionFingerprintSha256: createHash('sha256')
+              .update(session.leaseId)
+              .digest('hex'),
+          },
+          verificationScope: {
+            rollbackOutcome: 'not_requested',
+            recoveryOutcome: 'companion_reported_verified',
+            failureNativeUndoCheckpoint: 'companion_reported_current_at_failure_report',
+            terminalNativeUndoCheckpoint: 'companion_reported_current_at_recovery_report',
+            currentHostStateAfterReport: 'not_verified',
+          },
+        },
+      });
+      const conflictingSuccess = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: retained.replayRequest.replayId,
+            attestationId: randomUUID(),
+            reportId: retainedRecoveryReport.reportId,
+          }),
+        },
+      );
+      expect(conflictingSuccess.status).toBe(409);
+      const currentStateAfterRecovery = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state/request`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: retained.replayRequest.replayId,
+            verificationId: randomUUID(),
+          }),
+        },
+      );
+      expect(currentStateAfterRecovery.status).toBe(409);
+
+      const rollbackPromptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '创建一个会在 Observation 失败后自动回退的 UV Sphere。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 2,
+          locale: 'zh-CN',
+        }),
+      });
+      const rollbackPacket = procedureAuthoringPromptPacketSchema.parse(
+        await rollbackPromptResponse.json(),
+      );
+      const rolledBack = await prepareReplay('rollback_step', rollbackPacket);
+      const rolledBackExecutionId = randomUUID();
+      const rolledBackPlanSha256 = computePlanContentSha256(rolledBack.proposal.plan);
+      const rolledBackOccurredAt = new Date().toISOString();
+      const rolledBackFailureReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: rolledBack.proposal.plan.id, revision: rolledBack.proposal.plan.revision },
+        planContentSha256: rolledBackPlanSha256,
+        executionId: rolledBackExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'step_observation_failed',
+        stepId: rolledBack.replayRequest.leafId,
+        observations: [
+          {
+            kind: 'uv_sphere_ready',
+            satisfied: false,
+            details: {
+              parameters: rolledBack.parameters,
+              supported: true,
+              contentIntact: false,
+            },
+          },
+        ],
+        observationGate: {
+          stepId: rolledBack.replayRequest.leafId,
+          status: 'failed_rolled_back',
+          failureStrategy: 'rollback_step',
+          message: 'The managed step failed and was rolled back.',
+        },
+        artifactAttestation: null,
+        error: null,
+        occurredAt: rolledBackOccurredAt,
+      } as const;
+      await postState(rolledBackFailureReport);
+      const rolledBackFinalizeResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: rolledBack.replayRequest.replayId,
+            attestationId: randomUUID(),
+            failureReportId: rolledBackFailureReport.reportId,
+          }),
+        },
+      );
+      expect(rolledBackFinalizeResponse.status).toBe(200);
+      const automaticallyRolledBack = procedureLeafReplayFailureRecoveryFinalizeResultSchema.parse(
+        await rolledBackFinalizeResponse.json(),
+      );
+      expect(automaticallyRolledBack).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          outcome: 'automatically_rolled_back',
+          recoveryReport: null,
+          verificationScope: {
+            rollbackOutcome: 'companion_reported_succeeded',
+            recoveryOutcome: 'not_required',
+            failureNativeUndoCheckpoint: 'not_verified_at_failure_report',
+            terminalNativeUndoCheckpoint: 'not_applicable_no_retained_step',
+          },
+        },
+      });
+      const duplicateRolledBack = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: rolledBack.replayRequest.replayId,
+            attestationId: automaticallyRolledBack.attestation.attestationId,
+            failureReportId: rolledBackFailureReport.reportId,
+          }),
+        },
+      );
+      expect(duplicateRolledBack.status).toBe(200);
+      await expect(duplicateRolledBack.json()).resolves.toMatchObject({ status: 'duplicate' });
+    } finally {
+      await runtime.stop();
     }
   });
 

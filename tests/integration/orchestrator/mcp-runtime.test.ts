@@ -337,6 +337,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.authoring.materialize' },
             { name: 'operatingline.procedure.replay.propose' },
             { name: 'operatingline.procedure.replay.finalize' },
+            { name: 'operatingline.procedure.replay.failure-recovery.finalize' },
             { name: 'operatingline.procedure.replay.current-state.request' },
             { name: 'operatingline.procedure.replay.current-state.get' },
             { name: 'operatingline.procedure.compile' },

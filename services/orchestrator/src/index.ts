@@ -71,6 +71,9 @@ import {
   procedureLeafReplayCurrentStateRequestResultSchema,
   procedureLeafReplayCurrentStateStatusRequestSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
+  procedureLeafReplayFailureRecoveryAttestationSchema,
+  procedureLeafReplayFailureRecoveryFinalizeRequestSchema,
+  procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -148,6 +151,7 @@ import { createProcedureLeafReplayCurrentStateCoordinator } from './procedure-re
 import {
   buildProcedureLeafReplayAttestation,
   buildProcedureLeafReplayBinding,
+  buildProcedureLeafReplayFailureRecoveryAttestation,
   prepareProcedureLeafReplay,
   ProcedureLeafReplayError,
   sameProcedureLeafReplayValue,
@@ -1386,30 +1390,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
-    const finalizeProcedureLeafReplay = (
-      request: ReturnType<typeof procedureLeafReplayFinalizeRequestSchema.parse>,
-    ) => {
-      const existingPayload = database.getProcedureLeafReplayAttestation(request.replayId);
-      if (existingPayload !== null) {
-        const existing = procedureLeafReplayAttestationSchema.parse(existingPayload);
-        if (
-          existing.attestationId !== request.attestationId ||
-          existing.report.reportId !== request.reportId
-        ) {
-          throw new ProcedureLeafReplayError(
-            `Replay ${request.replayId} already has a different attestation`,
-            409,
-          );
-        }
-        return procedureLeafReplayFinalizeResultSchema.parse({
-          status: 'duplicate',
-          attestation: existing,
-        });
-      }
-
-      const bindingPayload = database.getProcedureLeafReplay(request.replayId);
+    const loadProcedureLeafReplayEvidence = (replayId: string) => {
+      const bindingPayload = database.getProcedureLeafReplay(replayId);
       if (bindingPayload === null) {
-        throw new ProcedureLeafReplayError(`Unknown replay: ${request.replayId}`, 404);
+        throw new ProcedureLeafReplayError(`Unknown replay: ${replayId}`, 404);
       }
       const binding = procedureLeafReplayBindingSchema.parse(bindingPayload);
       const proposalPayload = database.getGuideProposal(binding.proposal.proposalId);
@@ -1434,14 +1418,6 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         );
       }
       const decision = guideProposalDecisionSchema.parse(decisionPayload);
-      const reportPayload = database.getCompanionStateReport(request.reportId);
-      if (reportPayload === null) {
-        throw new ProcedureLeafReplayError(
-          `Unknown companion state report: ${request.reportId}`,
-          404,
-        );
-      }
-      const report = companionStateReportSchema.parse(reportPayload);
       const proposalReceipt = database.getManagedReplayReceipt(
         'replay_proposal',
         binding.proposal.proposalId,
@@ -1450,13 +1426,60 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'guide_proposal_decision',
         decision.decisionId,
       );
+      if (proposalReceipt === null || decisionReceipt === null) {
+        throw new ProcedureLeafReplayError(
+          'Replay evidence lacks its proposal or decision receipt',
+          409,
+        );
+      }
+      return { binding, decision, proposalReceipt, decisionReceipt };
+    };
+
+    const finalizeProcedureLeafReplay = (
+      request: ReturnType<typeof procedureLeafReplayFinalizeRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplayAttestation(request.replayId);
+      if (existingPayload !== null) {
+        const parsedExisting = procedureLeafReplayAttestationSchema.safeParse(existingPayload);
+        if (!parsedExisting.success) {
+          throw new ProcedureLeafReplayError(
+            `Replay ${request.replayId} already has a failure/recovery attestation`,
+            409,
+          );
+        }
+        const existing = parsedExisting.data;
+        if (
+          existing.attestationId !== request.attestationId ||
+          existing.report.reportId !== request.reportId
+        ) {
+          throw new ProcedureLeafReplayError(
+            `Replay ${request.replayId} already has a different attestation`,
+            409,
+          );
+        }
+        return procedureLeafReplayFinalizeResultSchema.parse({
+          status: 'duplicate',
+          attestation: existing,
+        });
+      }
+
+      const { binding, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureLeafReplayEvidence(request.replayId);
+      const reportPayload = database.getCompanionStateReport(request.reportId);
+      if (reportPayload === null) {
+        throw new ProcedureLeafReplayError(
+          `Unknown companion state report: ${request.reportId}`,
+          404,
+        );
+      }
+      const report = companionStateReportSchema.parse(reportPayload);
       const reportReceipt = database.getManagedReplayReceipt(
         'companion_state_report',
         report.reportId,
       );
-      if (proposalReceipt === null || decisionReceipt === null || reportReceipt === null) {
+      if (reportReceipt === null) {
         throw new ProcedureLeafReplayError(
-          'Replay evidence lacks an authenticated server receipt chain',
+          'Replay evidence lacks its authenticated report receipt',
           409,
         );
       }
@@ -1486,6 +1509,114 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         );
       }
       return procedureLeafReplayFinalizeResultSchema.parse({
+        status: persistenceResult,
+        attestation,
+      });
+    };
+
+    const finalizeProcedureLeafReplayFailureRecovery = (
+      request: ReturnType<typeof procedureLeafReplayFailureRecoveryFinalizeRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplayAttestation(request.replayId);
+      if (existingPayload !== null) {
+        const parsedExisting =
+          procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(existingPayload);
+        if (!parsedExisting.success) {
+          throw new ProcedureLeafReplayError(
+            `Replay ${request.replayId} already has a successful attestation`,
+            409,
+          );
+        }
+        const existing = parsedExisting.data;
+        if (
+          existing.attestationId !== request.attestationId ||
+          existing.failureReport.reportId !== request.failureReportId ||
+          (existing.recoveryReport?.reportId ?? undefined) !== request.recoveryReportId
+        ) {
+          throw new ProcedureLeafReplayError(
+            `Replay ${request.replayId} already has a different failure/recovery attestation`,
+            409,
+          );
+        }
+        return procedureLeafReplayFailureRecoveryFinalizeResultSchema.parse({
+          status: 'duplicate',
+          attestation: existing,
+        });
+      }
+
+      const { binding, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureLeafReplayEvidence(request.replayId);
+      const failurePayload = database.getCompanionStateReport(request.failureReportId);
+      if (failurePayload === null) {
+        throw new ProcedureLeafReplayError(
+          `Unknown companion failure report: ${request.failureReportId}`,
+          404,
+        );
+      }
+      const failureReport = companionStateReportSchema.parse(failurePayload);
+      const recoveryReport =
+        request.recoveryReportId === undefined
+          ? null
+          : (() => {
+              const payload = database.getCompanionStateReport(request.recoveryReportId);
+              if (payload === null) {
+                throw new ProcedureLeafReplayError(
+                  `Unknown companion recovery report: ${request.recoveryReportId}`,
+                  404,
+                );
+              }
+              return companionStateReportSchema.parse(payload);
+            })();
+      const failureReportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        failureReport.reportId,
+      );
+      const recoveryReportReceipt =
+        recoveryReport === null
+          ? null
+          : database.getManagedReplayReceipt('companion_state_report', recoveryReport.reportId);
+      if (
+        failureReportReceipt === null ||
+        (recoveryReport !== null && recoveryReportReceipt === null)
+      ) {
+        throw new ProcedureLeafReplayError(
+          'Failure/recovery evidence lacks an authenticated report receipt',
+          409,
+        );
+      }
+      const attestation = buildProcedureLeafReplayFailureRecoveryAttestation({
+        binding,
+        decision,
+        failureReport,
+        recoveryReport,
+        proposalReceipt,
+        decisionReceipt,
+        failureReportReceipt,
+        recoveryReportReceipt,
+        attestationId: request.attestationId,
+        attestedAt: new Date().toISOString(),
+      });
+      const finalReport = attestation.recoveryReport ?? attestation.failureReport;
+      const persistenceResult = database.recordProcedureLeafReplayAttestation({
+        attestationId: attestation.attestationId,
+        replayId: attestation.replayId,
+        reportId: finalReport.reportId,
+        evidenceReportIds: [
+          attestation.failureReport.reportId,
+          ...(attestation.recoveryReport === null ? [] : [attestation.recoveryReport.reportId]),
+        ],
+        executionId: attestation.execution.execution.id,
+        contentSha256: attestation.integrity.contentSha256,
+        payload: attestation,
+        attestedAt: attestation.attestedAt,
+      });
+      if (persistenceResult === 'conflict') {
+        throw new ProcedureLeafReplayError(
+          'Failure/recovery attestation conflicts with existing append-only evidence',
+          409,
+        );
+      }
+      return procedureLeafReplayFailureRecoveryFinalizeResultSchema.parse({
         status: persistenceResult,
         attestation,
       });
@@ -1910,6 +2041,59 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                       error instanceof Error
                         ? error.message
                         : 'Procedure leaf replay finalization failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.replay.failure-recovery.finalize',
+        {
+          description:
+            'Append one mutually exclusive managed replay outcome attestation for either a successful automatic rollback after an Observation failure or a checkpointed blocked failure followed by a strong recovered Observation. It does not claim menu, shortcut, or action-level MCP execution.',
+          inputSchema: deferMcpInputValidation(
+            procedureLeafReplayFailureRecoveryFinalizeRequestSchema,
+          ),
+          outputSchema: procedureLeafReplayFailureRecoveryFinalizeResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureLeafReplayFailureRecoveryFinalizeRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_leaf_replay_failure_recovery_finalize_request',
+                    message: 'Replay failure/recovery finalization violates the strict contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = finalizeProcedureLeafReplayFailureRecovery(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_leaf_replay_failure_recovery_finalize_failed',
+                    message:
+                      error instanceof ProcedureLeafReplayError
+                        ? error.message
+                        : 'Replay failure/recovery finalization failed',
                   }),
                 },
               ],
@@ -2993,6 +3177,32 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post(
+      '/api/v1/procedure/replay/failure-recovery/finalize',
+      async (request, reply) => {
+        const parsedRequest = procedureLeafReplayFailureRecoveryFinalizeRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_leaf_replay_failure_recovery_finalize_request',
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          return finalizeProcedureLeafReplayFailureRecovery(parsedRequest.data);
+        } catch (error) {
+          const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 500;
+          return reply.code(statusCode).send({
+            error: 'procedure_leaf_replay_failure_recovery_finalize_failed',
+            message:
+              error instanceof ProcedureLeafReplayError
+                ? error.message
+                : 'Replay failure/recovery finalization failed',
+          });
+        }
+      },
+    );
     runtimeApp.post('/api/v1/procedure/replay/current-state/request', async (request, reply) => {
       const parsedRequest = procedureLeafReplayCurrentStateRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {

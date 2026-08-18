@@ -86,6 +86,7 @@ completed verification 保存原 request、完整 Companion report、协商 leas
 
 ## 后续
 
-该合同完成成功 replay 的按需当前状态复核。失败执行、自动回退、人工修复与恢复过程仍需要独立的 replay
-failure/recovery attestation；逐控件 UI、快捷键、action-level MCP 和七种 primitive 之外的 Action 覆盖也不在
-本切片内。
+该合同完成成功 replay 的按需当前状态复核。失败执行、自动回退、人工修复与恢复过程已由
+[ADR 0073](0073-managed-procedure-failure-recovery-attestation.md) 建立独立 outcome attestation，但 recovered
+outcome 的按需当前状态 challenge 尚未定义；逐控件 UI、快捷键、action-level MCP 和七种 primitive 之外的
+Action 覆盖也不在本切片内。

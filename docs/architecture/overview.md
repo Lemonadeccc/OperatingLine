@@ -463,8 +463,8 @@ grounding attestation。完整决策见
 
 首个可执行桥接使用独立的 `ProcedureLeafReplay 1.0.0` 合同。调用方把原始 authoring packet、候选树、
 目标实例和单一 leaf 提交给 MCP/HTTP `procedure.replay.propose`；Orchestrator 重新运行 packet-bound
-validation/materialization，只接受单一 UV Sphere、Icosphere、Cube、Plane、Torus、Cone 或 Cylinder action、`rollback_step`
-成功门、补偿回退和参数完全匹配的 `uv_sphere_ready`、`icosphere_ready`、`cube_ready`、
+validation/materialization，只接受单一 UV Sphere、Icosphere、Cube、Plane、Torus、Cone 或 Cylinder action、
+`rollback_step` 或 `retain_for_repair` 成功门、补偿回退和参数完全匹配的 `uv_sphere_ready`、`icosphere_ready`、`cube_ready`、
 `plane_ready`、`torus_ready`、`cone_ready` 或 `cylinder_ready`；Icosphere 验证细分级别对应的精确拓扑，
 Cube/Plane 验证尺寸对应的坐标与固定拓扑，Torus 验证 segments/radii 对应的逐顶点参数化坐标与动态拓扑；
 Cone/Cylinder 验证中点、方向 Quaternion、世界端点、32 段局部环坐标、面形以及普通/尖锥动态拓扑。完整 request、
@@ -482,14 +482,19 @@ step、host version 和强 Observation 任一不匹配都会 fail closed。最�
 action-level MCP 调用或报告之后的当前宿主状态。调用方可另行创建持久、唯一的 current-state challenge；只有
 精确目标协商 lease 会收到它，Blender 主线程只读复算强 Observation 与当前 Undo journal，Runtime 按
 session/step/observation/checkpoint mismatch 或 verified 保存 completed evidence。每次结果仍只覆盖其 response
-report 时刻，下一次“当前”查询必须使用新的 verification ID。见
+report 时刻，下一次“当前”查询必须使用新的 verification ID。
+失败执行走互斥的 `procedure.replay.failure-recovery.finalize`：自动回退以 `failed_rolled_back` 终结且不生成
+虚假 checkpoint；阻塞修复路径必须先有保留 receipt 的 `next` checkpoint，再由完整强 Observation 与
+`recheck` checkpoint 证明恢复。decision/failure 同 lease，recovery 允许同一 target 重连后的新 lease，并由
+服务端 receipt 序列连接；failure 与 recovery report 在同一事务中登记为全局不可复用的 attestation 证据。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
 [ADR 0068](../adr/0068-torus-managed-replay-attestation.md) 与
 [ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
 [ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md) 与
-[ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md)。
+[ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md) 与
+[ADR 0073](../adr/0073-managed-procedure-failure-recovery-attestation.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数

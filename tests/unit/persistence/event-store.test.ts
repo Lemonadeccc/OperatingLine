@@ -1978,8 +1978,11 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 16,
+        count: 17,
       });
+      expect(
+        inspected.prepare("PRAGMA table_list('procedure_leaf_replay_attestation_reports')").get(),
+      ).toMatchObject({ name: 'procedure_leaf_replay_attestation_reports', strict: 1 });
       expect(
         inspected
           .prepare(
@@ -2123,6 +2126,11 @@ describe('OperatingLine persistence', () => {
       const proposal = guideProposal('snowman-replay', 1);
       const replay = procedureLeafReplay(proposal.proposalId);
       const attestation = procedureLeafReplayAttestation(replay.replayId);
+      const failureReportId = randomUUID();
+      const attestationWithEvidence = {
+        ...attestation,
+        evidenceReportIds: [failureReportId, attestation.reportId],
+      };
       const report = {
         reportId: attestation.reportId,
         adapterId: replay.adapterId,
@@ -2134,8 +2142,11 @@ describe('OperatingLine persistence', () => {
       expect(first.recordProcedureLeafReplayProposal(proposal, replay)).toBe('accepted');
       expect(first.recordProcedureLeafReplayProposal(proposal, replay)).toBe('duplicate');
       expect(first.recordCompanionState(report)).toBe('accepted');
-      expect(first.recordProcedureLeafReplayAttestation(attestation)).toBe('accepted');
-      expect(first.recordProcedureLeafReplayAttestation(attestation)).toBe('duplicate');
+      expect(
+        first.recordCompanionState({ ...report, reportId: failureReportId, sequence: 2 }),
+      ).toBe('accepted');
+      expect(first.recordProcedureLeafReplayAttestation(attestationWithEvidence)).toBe('accepted');
+      expect(first.recordProcedureLeafReplayAttestation(attestationWithEvidence)).toBe('duplicate');
       expect(first.getGuideProposal(proposal.proposalId)).toEqual(proposal);
       expect(first.getCompanionStateReport(report.reportId)).toEqual(report);
       expect(first.getProcedureLeafReplay(replay.replayId)).toEqual(replay.payload);
@@ -2153,7 +2164,9 @@ describe('OperatingLine persistence', () => {
 
       const reopened = openOperatingLineDatabase(databasePath);
       expect(reopened.recordProcedureLeafReplayProposal(proposal, replay)).toBe('duplicate');
-      expect(reopened.recordProcedureLeafReplayAttestation(attestation)).toBe('duplicate');
+      expect(reopened.recordProcedureLeafReplayAttestation(attestationWithEvidence)).toBe(
+        'duplicate',
+      );
       expect(reopened.getProcedureLeafReplay(replay.replayId)).toEqual(replay.payload);
       expect(reopened.getProcedureLeafReplayAttestation(replay.replayId)).toEqual(
         attestation.payload,
@@ -2165,11 +2178,19 @@ describe('OperatingLine persistence', () => {
         inspected.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 15').get(),
       ).toEqual({ applied: 1 });
       expect(
+        inspected.prepare('SELECT 1 AS applied FROM schema_migrations WHERE version = 17').get(),
+      ).toEqual({ applied: 1 });
+      expect(
         inspected.prepare('SELECT COUNT(*) AS count FROM procedure_leaf_replays').get(),
       ).toEqual({ count: 1 });
       expect(
         inspected.prepare('SELECT COUNT(*) AS count FROM procedure_leaf_replay_attestations').get(),
       ).toEqual({ count: 1 });
+      expect(
+        inspected
+          .prepare('SELECT COUNT(*) AS count FROM procedure_leaf_replay_attestation_reports')
+          .get(),
+      ).toEqual({ count: 2 });
       expect(inspected.prepare("PRAGMA foreign_key_list('procedure_leaf_replays')").all()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2233,6 +2254,26 @@ describe('OperatingLine persistence', () => {
       }),
     ).toBe('accepted');
     expect(database.recordProcedureLeafReplayAttestation(attestation)).toBe('accepted');
+    const secondProposal = guideProposal('snowman-replay-conflicts-second', 1);
+    const secondReplay = procedureLeafReplay(secondProposal.proposalId);
+    const secondAttestation = procedureLeafReplayAttestation(secondReplay.replayId);
+    expect(database.recordProcedureLeafReplayProposal(secondProposal, secondReplay)).toBe(
+      'accepted',
+    );
+    expect(
+      database.recordCompanionState({
+        reportId: secondAttestation.reportId,
+        adapterId: secondReplay.adapterId,
+        instanceId: secondReplay.instanceId,
+        sequence: 1,
+      }),
+    ).toBe('accepted');
+    expect(
+      database.recordProcedureLeafReplayAttestation({
+        ...secondAttestation,
+        evidenceReportIds: [attestation.reportId, secondAttestation.reportId],
+      }),
+    ).toBe('conflict');
     const eventCount = database.countEvents();
     expect(
       database.recordProcedureLeafReplayAttestation({

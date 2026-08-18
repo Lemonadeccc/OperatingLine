@@ -69,6 +69,9 @@ import {
   procedureLeafReplayCurrentStateStatusRequestSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
+  procedureLeafReplayFailureRecoveryAttestationSchema,
+  procedureLeafReplayFailureRecoveryFinalizeRequestSchema,
+  procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -432,6 +435,21 @@ const schemas = [
     'procedure-leaf-replay-finalize-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-leaf-replay-finalize-result.json',
     procedureLeafReplayFinalizeResultSchema,
+  ],
+  [
+    'procedure-leaf-replay-failure-recovery-finalize-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-failure-recovery-finalize-request.json',
+    procedureLeafReplayFailureRecoveryFinalizeRequestSchema,
+  ],
+  [
+    'procedure-leaf-replay-failure-recovery-attestation.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-failure-recovery-attestation.json',
+    procedureLeafReplayFailureRecoveryAttestationSchema,
+  ],
+  [
+    'procedure-leaf-replay-failure-recovery-finalize-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-failure-recovery-finalize-result.json',
+    procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   ],
   [
     'procedure-leaf-replay-current-state-request.schema.json',

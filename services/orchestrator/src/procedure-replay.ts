@@ -3,6 +3,7 @@ import {
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
   computeProcedureLeafReplayCurrentStateVerificationContentSha256,
+  computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
   computeProcedureLeafReplayObservationContentSha256,
   protocolJsonValueCanonicalization,
   procedureLeafReplayActionNameSchema,
@@ -11,6 +12,7 @@ import {
   procedureLeafReplayFormatVersion,
   procedureLeafReplayObservationSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
+  procedureLeafReplayFailureRecoveryAttestationSchema,
   type ActionCatalog,
   type CompanionStateReport,
   type CompanionProcedureReplayCurrentStateRequest,
@@ -22,6 +24,7 @@ import {
   type ProcedureLeafReplayAttestation,
   type ProcedureLeafReplayBinding,
   type ProcedureLeafReplayCurrentStateVerification,
+  type ProcedureLeafReplayFailureRecoveryAttestation,
   type ProcedureLeafReplayProposalRequest,
 } from '@operatingline/protocol';
 import type { StoredManagedReplayReceipt } from '@operatingline/persistence';
@@ -336,11 +339,11 @@ export function prepareProcedureLeafReplay(
 
   if (
     leaf.observationPolicy?.mode !== 'success_gate' ||
-    leaf.observationPolicy.failureStrategy !== 'rollback_step' ||
+    !['rollback_step', 'retain_for_repair'].includes(leaf.observationPolicy.failureStrategy) ||
     leaf.rollback.mode !== 'compensating_action'
   ) {
     throw new ProcedureLeafReplayError(
-      'Managed leaf replay requires a rollback_step success gate and compensating action',
+      'Managed leaf replay requires a rollback_step or retain_for_repair success gate and compensating action',
     );
   }
   const expectedObservationParameters = actionContract.expectedParameters(leaf.action.arguments);
@@ -468,6 +471,93 @@ export function buildProcedureLeafReplayBinding(input: {
   });
 }
 
+function strongReplayObservation(
+  binding: ProcedureLeafReplayBinding,
+  report: CompanionStateReport,
+) {
+  const actionContract = replayActionContracts[binding.actionName];
+  const expectedStep = binding.proposal.plan.steps.find((step) => step.id === binding.leafId);
+  const expectedObservation = expectedStep?.expectedObservations[0];
+  const observation = report.observations[0];
+  const expectedParameters = expectedObservation?.parameters;
+  const expectedResourceId = expectedParameters?.['resourceId'];
+  const expectedObjectName = expectedParameters?.['objectName'];
+  const meshContentSha256 = observation?.details['meshContentSha256'];
+  const expectedTopology =
+    expectedParameters === undefined ? null : actionContract.expectedTopology(expectedParameters);
+  const strongBooleanDetailKeys = [
+    'parametersValid',
+    'objectOwned',
+    'meshOwned',
+    'collectionOwned',
+    'receiptMatches',
+    'objectDataMatches',
+    'collectionLinkMatches',
+    'nameMatches',
+    'locationMatches',
+    'rotationMatches',
+    'scaleMatches',
+    'transformIsolated',
+    'modifiersAbsent',
+    'shapeKeysAbsent',
+    'materialsAbsent',
+    'contentIntact',
+    'topologyMatches',
+    'finiteCoordinates',
+    ...actionContract.geometryMatchDetailKeys,
+  ] as const;
+  const strongDetailKeys = new Set<string>([
+    'parameters',
+    'supported',
+    'resourceId',
+    'objectName',
+    'meshId',
+    'collectionId',
+    ...strongBooleanDetailKeys,
+    'vertexCount',
+    'edgeCount',
+    'faceCount',
+    'meshContentSha256',
+  ]);
+  if (
+    expectedStep?.action?.name !== binding.actionName ||
+    expectedStep.expectedObservations.length !== 1 ||
+    expectedObservation?.kind !== actionContract.observationKind ||
+    report.observations.length !== 1 ||
+    observation?.kind !== actionContract.observationKind ||
+    observation.satisfied !== true ||
+    Object.keys(observation.details).length !== strongDetailKeys.size ||
+    Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+    observation.details['supported'] !== true ||
+    !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
+    expectedParameters === undefined ||
+    !actionContract.parametersValid(expectedParameters) ||
+    typeof expectedResourceId !== 'string' ||
+    typeof expectedObjectName !== 'string' ||
+    expectedTopology === null ||
+    observation.details['resourceId'] !== expectedResourceId ||
+    observation.details['objectName'] !== expectedObjectName ||
+    observation.details['meshId'] !== `${expectedResourceId}.mesh` ||
+    observation.details['collectionId'] !== 'snowman.collection' ||
+    strongBooleanDetailKeys.some((key) => observation.details[key] !== true) ||
+    observation.details['vertexCount'] !== expectedTopology.vertexCount ||
+    observation.details['edgeCount'] !== expectedTopology.edgeCount ||
+    observation.details['faceCount'] !== expectedTopology.faceCount ||
+    typeof meshContentSha256 !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(meshContentSha256)
+  ) {
+    throw new ProcedureLeafReplayError(
+      `Companion report lacks the exact satisfied ${actionContract.observationKind} observation`,
+      409,
+    );
+  }
+  return procedureLeafReplayObservationSchema.parse({
+    kind: actionContract.observationKind,
+    satisfied: true,
+    details: structuredClone(observation.details),
+  });
+}
+
 export function buildProcedureLeafReplayAttestation(input: {
   readonly binding: ProcedureLeafReplayBinding;
   readonly decision: GuideProposalDecision;
@@ -480,7 +570,6 @@ export function buildProcedureLeafReplayAttestation(input: {
 }): ProcedureLeafReplayAttestation {
   const { binding, decision, report } = input;
   const proposal = binding.proposal;
-  const actionContract = replayActionContracts[binding.actionName];
   if (
     decision.proposalId !== proposal.proposalId ||
     decision.decision !== 'accepted' ||
@@ -573,81 +662,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     );
   }
 
-  const expectedStep = proposal.plan.steps.find((step) => step.id === binding.leafId);
-  const expectedObservation = expectedStep?.expectedObservations[0];
-  const observation = report.observations[0];
-  const expectedParameters = expectedObservation?.parameters;
-  const expectedResourceId = expectedParameters?.['resourceId'];
-  const expectedObjectName = expectedParameters?.['objectName'];
-  const meshContentSha256 = observation?.details['meshContentSha256'];
-  const expectedTopology =
-    expectedParameters === undefined ? null : actionContract.expectedTopology(expectedParameters);
-  const strongBooleanDetailKeys = [
-    'parametersValid',
-    'objectOwned',
-    'meshOwned',
-    'collectionOwned',
-    'receiptMatches',
-    'objectDataMatches',
-    'collectionLinkMatches',
-    'nameMatches',
-    'locationMatches',
-    'rotationMatches',
-    'scaleMatches',
-    'transformIsolated',
-    'modifiersAbsent',
-    'shapeKeysAbsent',
-    'materialsAbsent',
-    'contentIntact',
-    'topologyMatches',
-    'finiteCoordinates',
-    ...actionContract.geometryMatchDetailKeys,
-  ] as const;
-  const strongDetailKeys = new Set<string>([
-    'parameters',
-    'supported',
-    'resourceId',
-    'objectName',
-    'meshId',
-    'collectionId',
-    ...strongBooleanDetailKeys,
-    'vertexCount',
-    'edgeCount',
-    'faceCount',
-    'meshContentSha256',
-  ]);
-  if (
-    expectedStep?.action?.name !== binding.actionName ||
-    expectedStep.expectedObservations.length !== 1 ||
-    expectedObservation?.kind !== actionContract.observationKind ||
-    report.observations.length !== 1 ||
-    observation?.kind !== actionContract.observationKind ||
-    observation.satisfied !== true ||
-    Object.keys(observation.details).length !== strongDetailKeys.size ||
-    Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
-    observation.details['supported'] !== true ||
-    !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
-    expectedParameters === undefined ||
-    !actionContract.parametersValid(expectedParameters) ||
-    typeof expectedResourceId !== 'string' ||
-    typeof expectedObjectName !== 'string' ||
-    expectedTopology === null ||
-    observation.details['resourceId'] !== expectedResourceId ||
-    observation.details['objectName'] !== expectedObjectName ||
-    observation.details['meshId'] !== `${expectedResourceId}.mesh` ||
-    observation.details['collectionId'] !== 'snowman.collection' ||
-    strongBooleanDetailKeys.some((key) => observation.details[key] !== true) ||
-    observation.details['vertexCount'] !== expectedTopology.vertexCount ||
-    observation.details['edgeCount'] !== expectedTopology.edgeCount ||
-    observation.details['faceCount'] !== expectedTopology.faceCount ||
-    typeof meshContentSha256 !== 'string' ||
-    !/^[0-9a-f]{64}$/.test(meshContentSha256)
-  ) {
-    throw new ProcedureLeafReplayError(
-      `Companion report lacks the exact satisfied ${actionContract.observationKind} observation`,
-      409,
-    );
-  }
+  const attestedObservation = strongReplayObservation(binding, report);
   if (
     Date.parse(report.occurredAt) > Date.parse(input.attestedAt) ||
     Date.parse(reportReceipt.receivedAt) > Date.parse(input.attestedAt)
@@ -664,11 +679,6 @@ export function buildProcedureLeafReplayAttestation(input: {
     adapterId: 'blender' as const,
     decision: 'accepted' as const,
   };
-  const attestedObservation = procedureLeafReplayObservationSchema.parse({
-    kind: actionContract.observationKind,
-    satisfied: true,
-    details: structuredClone(observation.details),
-  });
   const attestedReport = {
     ...report,
     adapterId: 'blender' as const,
@@ -749,6 +759,356 @@ export function buildProcedureLeafReplayAttestation(input: {
       algorithm: 'sha256',
       canonicalization: protocolJsonValueCanonicalization,
       contentSha256: computeProcedureLeafReplayAttestationContentSha256(content),
+    },
+  });
+}
+
+export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
+  readonly binding: ProcedureLeafReplayBinding;
+  readonly decision: GuideProposalDecision;
+  readonly failureReport: CompanionStateReport;
+  readonly recoveryReport: CompanionStateReport | null;
+  readonly proposalReceipt: StoredManagedReplayReceipt;
+  readonly decisionReceipt: StoredManagedReplayReceipt;
+  readonly failureReportReceipt: StoredManagedReplayReceipt;
+  readonly recoveryReportReceipt: StoredManagedReplayReceipt | null;
+  readonly attestationId: string;
+  readonly attestedAt: string;
+}): ProcedureLeafReplayFailureRecoveryAttestation {
+  const {
+    binding,
+    decision,
+    failureReport,
+    recoveryReport,
+    proposalReceipt,
+    decisionReceipt,
+    failureReportReceipt,
+    recoveryReportReceipt,
+  } = input;
+  const proposal = binding.proposal;
+  const leaf = binding.materialization.tree.nodes.find((node) => node.id === binding.leafId);
+  const observationPolicy = leaf?.kind === 'leaf' ? leaf.observationPolicy : undefined;
+  const failureStrategy =
+    observationPolicy?.mode === 'success_gate' ? observationPolicy.failureStrategy : undefined;
+  if (
+    decision.proposalId !== proposal.proposalId ||
+    decision.decision !== 'accepted' ||
+    decision.adapterId !== proposal.targetAdapterId ||
+    decision.instanceId !== binding.targetInstanceId ||
+    (failureStrategy !== 'rollback_step' && failureStrategy !== 'retain_for_repair')
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure/recovery attestation requires the exact accepted replay decision and gate policy',
+      409,
+    );
+  }
+  const executionFingerprint = decisionReceipt.sessionFingerprintSha256;
+  const recoveryFingerprint = recoveryReportReceipt?.sessionFingerprintSha256 ?? null;
+  const recoveryReceiptsMatch =
+    recoveryReport === null
+      ? recoveryReportReceipt === null
+      : recoveryReportReceipt !== null &&
+        recoveryReportReceipt.subjectType === 'companion_state_report' &&
+        recoveryReportReceipt.subjectId === recoveryReport.reportId &&
+        recoveryReportReceipt.authentication === 'negotiated_companion_lease' &&
+        recoveryReportReceipt.adapterId === proposal.targetAdapterId &&
+        recoveryReportReceipt.instanceId === binding.targetInstanceId &&
+        recoveryFingerprint !== null &&
+        failureReportReceipt.sequence < recoveryReportReceipt.sequence &&
+        Date.parse(failureReportReceipt.receivedAt) <= Date.parse(recoveryReportReceipt.receivedAt);
+  if (
+    proposalReceipt.subjectType !== 'replay_proposal' ||
+    proposalReceipt.subjectId !== proposal.proposalId ||
+    proposalReceipt.authentication !== 'orchestrator_internal' ||
+    proposalReceipt.adapterId !== proposal.targetAdapterId ||
+    proposalReceipt.instanceId !== binding.targetInstanceId ||
+    proposalReceipt.sessionFingerprintSha256 !== null ||
+    decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+    decisionReceipt.subjectId !== decision.decisionId ||
+    decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+    decisionReceipt.adapterId !== proposal.targetAdapterId ||
+    decisionReceipt.instanceId !== binding.targetInstanceId ||
+    executionFingerprint === null ||
+    failureReportReceipt.subjectType !== 'companion_state_report' ||
+    failureReportReceipt.subjectId !== failureReport.reportId ||
+    failureReportReceipt.authentication !== 'negotiated_companion_lease' ||
+    failureReportReceipt.adapterId !== proposal.targetAdapterId ||
+    failureReportReceipt.instanceId !== binding.targetInstanceId ||
+    failureReportReceipt.sessionFingerprintSha256 !== executionFingerprint ||
+    proposalReceipt.sequence >= decisionReceipt.sequence ||
+    decisionReceipt.sequence >= failureReportReceipt.sequence ||
+    Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
+    Date.parse(decisionReceipt.receivedAt) > Date.parse(failureReportReceipt.receivedAt) ||
+    !recoveryReceiptsMatch
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure/recovery attestation requires an ordered authenticated receipt chain',
+      409,
+    );
+  }
+  if (
+    failureReport.protocolVersion !== proposal.protocolVersion ||
+    failureReport.adapterId !== proposal.targetAdapterId ||
+    failureReport.instanceId !== binding.targetInstanceId ||
+    failureReport.plan?.id !== proposal.plan.id ||
+    failureReport.plan.revision !== proposal.plan.revision ||
+    failureReport.planContentSha256 !== binding.planContentSha256 ||
+    failureReport.executionId === null ||
+    failureReport.transition !== 'step_observation_failed' ||
+    failureReport.stepId !== binding.leafId ||
+    failureReport.completedStepIds.length !== 0 ||
+    failureReport.observationGate === undefined ||
+    failureReport.observationGate === null ||
+    failureReport.observationGate.status === 'recovered' ||
+    failureReport.observationGate.stepId !== binding.leafId ||
+    failureReport.observationGate.failureStrategy !== failureStrategy ||
+    failureReport.artifactAttestation !== null ||
+    failureReport.error !== null
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure report does not prove the exact managed replay observation failure',
+      409,
+    );
+  }
+  const expectedStep = proposal.plan.steps.find((step) => step.id === binding.leafId);
+  const expectedObservation = expectedStep?.expectedObservations[0];
+  const failedObservation = failureReport.observations[0];
+  const actionContract = replayActionContracts[binding.actionName];
+  if (
+    expectedStep?.action?.name !== binding.actionName ||
+    expectedStep.expectedObservations.length !== 1 ||
+    expectedObservation?.kind !== actionContract.observationKind ||
+    failureReport.observations.length !== 1 ||
+    failedObservation?.kind !== actionContract.observationKind ||
+    failedObservation.satisfied !== false ||
+    failedObservation.details['supported'] !== true ||
+    !sameCanonicalValue(failedObservation.details['parameters'], expectedObservation.parameters)
+  ) {
+    throw new ProcedureLeafReplayError(
+      `Failure report lacks the exact unsatisfied ${actionContract.observationKind} observation`,
+      409,
+    );
+  }
+  const failureGate = failureReport.observationGate;
+  const automaticRollback = failureGate.status === 'failed_rolled_back';
+  const failureCheckpoint = failureReport.nativeUndoCheckpoint;
+  if (
+    automaticRollback
+      ? failureStrategy !== 'rollback_step' ||
+        failureReport.phase !== 'running' ||
+        failureReport.activeStepId !== null ||
+        failureCheckpoint !== undefined ||
+        recoveryReport !== null
+      : failureReport.phase !== 'blocked' ||
+        failureReport.activeStepId !== binding.leafId ||
+        failureCheckpoint === undefined ||
+        failureCheckpoint.operation !== 'next' ||
+        failureCheckpoint.session.receiptStepIds.length !== 1 ||
+        failureCheckpoint.session.receiptStepIds[0] !== binding.leafId ||
+        recoveryReport === null
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure report does not match an automatic rollback or checkpointed repair path',
+      409,
+    );
+  }
+  if (
+    !satisfiesStableVersionRange(
+      failureReport.hostVersion,
+      binding.materialization.tree.hostVersionRange,
+      'Replay host version',
+    )
+  ) {
+    throw new ProcedureLeafReplayError(
+      `Host version ${failureReport.hostVersion} is outside the replay tree hostVersionRange`,
+      409,
+    );
+  }
+
+  let recoveredObservation: ReturnType<typeof strongReplayObservation> | null = null;
+  if (recoveryReport !== null) {
+    if (
+      recoveryReport.protocolVersion !== proposal.protocolVersion ||
+      recoveryReport.adapterId !== failureReport.adapterId ||
+      recoveryReport.instanceId !== failureReport.instanceId ||
+      recoveryReport.hostVersion !== failureReport.hostVersion ||
+      recoveryReport.companionVersion !== failureReport.companionVersion ||
+      recoveryReport.plan?.id !== proposal.plan.id ||
+      recoveryReport.plan.revision !== proposal.plan.revision ||
+      recoveryReport.planContentSha256 !== binding.planContentSha256 ||
+      recoveryReport.executionId !== failureReport.executionId ||
+      recoveryReport.phase !== 'completed' ||
+      recoveryReport.activeStepId !== binding.leafId ||
+      recoveryReport.completedStepIds.length !== 1 ||
+      recoveryReport.completedStepIds[0] !== binding.leafId ||
+      recoveryReport.transition !== 'observation_recovered' ||
+      recoveryReport.stepId !== binding.leafId ||
+      recoveryReport.observationGate === undefined ||
+      recoveryReport.observationGate === null ||
+      recoveryReport.observationGate.status !== 'recovered' ||
+      recoveryReport.observationGate.stepId !== binding.leafId ||
+      recoveryReport.observationGate.failureStrategy !== failureStrategy ||
+      recoveryReport.artifactAttestation !== null ||
+      recoveryReport.nativeUndoCheckpoint === undefined ||
+      recoveryReport.nativeUndoCheckpoint.operation !== 'recheck' ||
+      recoveryReport.nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
+      recoveryReport.nativeUndoCheckpoint.session.receiptStepIds[0] !== binding.leafId ||
+      recoveryReport.error !== null ||
+      Date.parse(recoveryReport.occurredAt) < Date.parse(failureReport.occurredAt)
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Recovery report does not prove the exact repaired replay execution',
+        409,
+      );
+    }
+    recoveredObservation = strongReplayObservation(binding, recoveryReport);
+  }
+  const finalReport = recoveryReport ?? failureReport;
+  const finalReceipt = recoveryReportReceipt ?? failureReportReceipt;
+  if (
+    Date.parse(decision.occurredAt) > Date.parse(failureReport.occurredAt) ||
+    Date.parse(finalReport.occurredAt) > Date.parse(input.attestedAt) ||
+    Date.parse(finalReceipt.receivedAt) > Date.parse(input.attestedAt)
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Failure/recovery attestation predates its companion evidence',
+      409,
+    );
+  }
+  const attestedDecision = {
+    ...decision,
+    adapterId: 'blender' as const,
+    decision: 'accepted' as const,
+  };
+  const attestedFailureReport = {
+    ...failureReport,
+    protocolVersion: '1.5.0' as const,
+    adapterId: 'blender' as const,
+    plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+    planContentSha256: binding.planContentSha256,
+    executionId: failureReport.executionId,
+    phase: failureReport.phase as 'running' | 'blocked',
+    completedStepIds: [] as [],
+    transition: 'step_observation_failed' as const,
+    stepId: binding.leafId,
+    observations: [
+      {
+        kind: failedObservation.kind,
+        satisfied: false as const,
+        details: structuredClone(failedObservation.details),
+      },
+    ],
+    observationGate: {
+      ...structuredClone(failureGate),
+      status: failureGate.status as 'failed_rolled_back' | 'repair_required' | 'rollback_failed',
+    },
+    artifactAttestation: null,
+    error: null,
+  };
+  const attestedRecoveryReport =
+    recoveryReport === null || recoveredObservation === null
+      ? null
+      : {
+          ...recoveryReport,
+          protocolVersion: '1.5.0' as const,
+          adapterId: 'blender' as const,
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256: binding.planContentSha256,
+          executionId: failureReport.executionId,
+          phase: 'completed' as const,
+          activeStepId: binding.leafId,
+          completedStepIds: [binding.leafId] as [string],
+          transition: 'observation_recovered' as const,
+          stepId: binding.leafId,
+          observations: [recoveredObservation] as [typeof recoveredObservation],
+          observationGate: {
+            ...structuredClone(recoveryReport.observationGate!),
+            status: 'recovered' as const,
+          },
+          artifactAttestation: null,
+          nativeUndoCheckpoint: recoveryReport.nativeUndoCheckpoint!,
+          error: null,
+        };
+  const content: Omit<ProcedureLeafReplayFailureRecoveryAttestation, 'integrity'> = {
+    formatVersion: procedureLeafReplayFormatVersion,
+    replayId: binding.replayId,
+    attestationId: input.attestationId,
+    decision: attestedDecision,
+    failureReport: attestedFailureReport,
+    recoveryReport: attestedRecoveryReport,
+    evidenceClass: 'companion_reported_managed_action_failure_recovery',
+    outcome: automaticRollback ? 'automatically_rolled_back' : 'recovered_after_repair',
+    provenance: {
+      authentication: 'negotiated_companion_lease',
+      executionSessionFingerprintSha256: executionFingerprint,
+      recoverySessionFingerprintSha256: recoveryFingerprint,
+      proposalReceipt: {
+        sequence: proposalReceipt.sequence,
+        receivedAt: proposalReceipt.receivedAt,
+      },
+      decisionReceipt: {
+        sequence: decisionReceipt.sequence,
+        receivedAt: decisionReceipt.receivedAt,
+      },
+      failureReportReceipt: {
+        sequence: failureReportReceipt.sequence,
+        receivedAt: failureReportReceipt.receivedAt,
+      },
+      recoveryReportReceipt:
+        recoveryReportReceipt === null
+          ? null
+          : {
+              sequence: recoveryReportReceipt.sequence,
+              receivedAt: recoveryReportReceipt.receivedAt,
+            },
+    },
+    bindingContentSha256: binding.integrity.contentSha256,
+    execution: {
+      host: {
+        adapterId: 'blender',
+        instanceId: failureReport.instanceId,
+        version: failureReport.hostVersion,
+      },
+      companion: { version: failureReport.companionVersion },
+      plan: {
+        id: failureReport.plan.id,
+        revision: failureReport.plan.revision,
+        contentSha256: failureReport.planContentSha256,
+      },
+      execution: { id: failureReport.executionId },
+      step: { id: binding.leafId },
+      action: { adapterId: 'blender', name: binding.actionName },
+      occurredAt: failureReport.occurredAt,
+    },
+    verificationScope: {
+      managedActionAttempt: 'observation_failed',
+      rollbackOutcome:
+        failureGate.status === 'failed_rolled_back'
+          ? 'companion_reported_succeeded'
+          : failureGate.status === 'rollback_failed'
+            ? 'companion_reported_failed'
+            : 'not_requested',
+      recoveryOutcome: automaticRollback ? 'not_required' : 'companion_reported_verified',
+      menuTrack: 'catalog_grounded_not_executed',
+      shortcutTrack: binding.claims.shortcutTrack,
+      mcpTrack: 'unavailable',
+      failureNativeUndoCheckpoint:
+        failureCheckpoint === undefined
+          ? 'not_verified_at_failure_report'
+          : 'companion_reported_current_at_failure_report',
+      terminalNativeUndoCheckpoint: automaticRollback
+        ? 'not_applicable_no_retained_step'
+        : 'companion_reported_current_at_recovery_report',
+      currentHostStateAfterReport: 'not_verified',
+    },
+    attestedAt: input.attestedAt,
+  };
+  return procedureLeafReplayFailureRecoveryAttestationSchema.parse({
+    ...content,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: protocolJsonValueCanonicalization,
+      contentSha256: computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(content),
     },
   });
 }

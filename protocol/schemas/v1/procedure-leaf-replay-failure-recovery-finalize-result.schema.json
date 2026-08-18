@@ -1,0 +1,3032 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "duplicate"
+      ]
+    },
+    "attestation": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "attestationId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "decision": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "enum": [
+                "1.0.0",
+                "1.1.0",
+                "1.2.0",
+                "1.3.0",
+                "1.4.0",
+                "1.5.0"
+              ]
+            },
+            "decisionId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "proposalId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "decision": {
+              "type": "string",
+              "const": "accepted"
+            },
+            "occurredAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "decisionId",
+            "proposalId",
+            "adapterId",
+            "instanceId",
+            "decision",
+            "occurredAt"
+          ],
+          "additionalProperties": false
+        },
+        "failureReport": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "string",
+              "const": "1.5.0"
+            },
+            "reportId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sequence": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "companionVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hostVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plan": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "revision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "id",
+                "revision"
+              ],
+              "additionalProperties": false
+            },
+            "planContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "executionId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "running",
+                "blocked"
+              ]
+            },
+            "activeStepId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completedStepIds": {
+              "minItems": 0,
+              "maxItems": 0,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              }
+            },
+            "transition": {
+              "type": "string",
+              "const": "step_observation_failed"
+            },
+            "stepId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "observations": {
+              "minItems": 1,
+              "maxItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "satisfied": {
+                    "type": "boolean",
+                    "const": false
+                  },
+                  "details": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "kind",
+                  "satisfied",
+                  "details"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "observationGate": {
+              "type": "object",
+              "properties": {
+                "stepId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "failed_rolled_back",
+                    "repair_required",
+                    "rollback_failed"
+                  ]
+                },
+                "failureStrategy": {
+                  "type": "string",
+                  "enum": [
+                    "rollback_step",
+                    "retain_for_repair"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "stepId",
+                "status",
+                "failureStrategy",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            "artifactAttestation": {
+              "type": "null"
+            },
+            "nativeUndoCheckpoint": {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "evidenceClass": {
+                  "type": "string",
+                  "const": "companion_reported_native_undo_checkpoint"
+                },
+                "checkpointId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "previousCheckpointId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "operation": {
+                  "type": "string",
+                  "enum": [
+                    "start",
+                    "next",
+                    "recheck",
+                    "back"
+                  ]
+                },
+                "committedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "marker": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "const": "_operating_line_native_history_v1"
+                    },
+                    "matched": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "matched"
+                  ],
+                  "additionalProperties": false
+                },
+                "journal": {
+                  "type": "object",
+                  "properties": {
+                    "entryPresent": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "snapshotMatchesSession": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "artifactsBackedUp": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "entryPresent",
+                    "snapshotMatchesSession",
+                    "artifactsBackedUp"
+                  ],
+                  "additionalProperties": false
+                },
+                "session": {
+                  "type": "object",
+                  "properties": {
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "planContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "activeStepId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    },
+                    "receiptStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "plan",
+                    "planContentSha256",
+                    "executionId",
+                    "activeStepId",
+                    "completedStepIds",
+                    "receiptStepIds"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "formatVersion",
+                "evidenceClass",
+                "checkpointId",
+                "previousCheckpointId",
+                "operation",
+                "committedAt",
+                "marker",
+                "journal",
+                "session"
+              ],
+              "additionalProperties": false
+            },
+            "procedureReplayCurrentStateRequest": {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "verificationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "replayId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "attestationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "attestationContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "target": {
+                  "type": "object",
+                  "properties": {
+                    "adapterId": {
+                      "type": "string",
+                      "const": "blender"
+                    },
+                    "instanceId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "adapterId",
+                    "instanceId"
+                  ],
+                  "additionalProperties": false
+                },
+                "plan": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                "planContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "executionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "stepId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "expectedObservation": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "contentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "contentSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                "requestedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "formatVersion",
+                "verificationId",
+                "replayId",
+                "attestationId",
+                "attestationContentSha256",
+                "target",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "stepId",
+                "expectedObservation",
+                "requestedAt"
+              ],
+              "additionalProperties": false
+            },
+            "error": {
+              "type": "null"
+            },
+            "occurredAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "reportId",
+            "sequence",
+            "adapterId",
+            "instanceId",
+            "companionVersion",
+            "hostVersion",
+            "plan",
+            "planContentSha256",
+            "executionId",
+            "phase",
+            "activeStepId",
+            "completedStepIds",
+            "transition",
+            "stepId",
+            "observations",
+            "observationGate",
+            "artifactAttestation",
+            "error",
+            "occurredAt"
+          ],
+          "additionalProperties": false
+        },
+        "recoveryReport": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "protocolVersion": {
+                  "type": "string",
+                  "const": "1.5.0"
+                },
+                "reportId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "adapterId": {
+                  "type": "string",
+                  "const": "blender"
+                },
+                "instanceId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "companionVersion": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "hostVersion": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "plan": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision"
+                  ],
+                  "additionalProperties": false
+                },
+                "planContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "executionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "phase": {
+                  "type": "string",
+                  "const": "completed"
+                },
+                "activeStepId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "completedStepIds": {
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  }
+                },
+                "transition": {
+                  "type": "string",
+                  "const": "observation_recovered"
+                },
+                "stepId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "observations": {
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "uv_sphere_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "radius": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "location": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "radius",
+                                  "location"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "radiusMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "number",
+                                "const": 482
+                              },
+                              "edgeCount": {
+                                "type": "number",
+                                "const": 992
+                              },
+                              "faceCount": {
+                                "type": "number",
+                                "const": 512
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "radiusMatches",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "icosphere_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "subdivisions": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 5
+                                  },
+                                  "radius": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "location": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "subdivisions",
+                                  "radius",
+                                  "location"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "radiusMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "edgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "faceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "radiusMatches",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "cube_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "location": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "size",
+                                  "location"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "sizeMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "number",
+                                "const": 8
+                              },
+                              "edgeCount": {
+                                "type": "number",
+                                "const": 12
+                              },
+                              "faceCount": {
+                                "type": "number",
+                                "const": 6
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "sizeMatches",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "plane_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "size": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "location": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "size",
+                                  "location"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "sizeMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "number",
+                                "const": 4
+                              },
+                              "edgeCount": {
+                                "type": "number",
+                                "const": 4
+                              },
+                              "faceCount": {
+                                "type": "number",
+                                "const": 1
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "sizeMatches",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "torus_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "majorSegments": {
+                                    "type": "integer",
+                                    "minimum": 3,
+                                    "maximum": 128
+                                  },
+                                  "minorSegments": {
+                                    "type": "integer",
+                                    "minimum": 3,
+                                    "maximum": 64
+                                  },
+                                  "majorRadius": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "minorRadius": {
+                                    "type": "number",
+                                    "exclusiveMinimum": 0
+                                  },
+                                  "location": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "majorSegments",
+                                  "minorSegments",
+                                  "majorRadius",
+                                  "minorRadius",
+                                  "location"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "geometryMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "edgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "faceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "geometryMatches",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "cone_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "radiusStart": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1000
+                                  },
+                                  "radiusEnd": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1000
+                                  },
+                                  "start": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number",
+                                      "minimum": -1000,
+                                      "maximum": 1000
+                                    }
+                                  },
+                                  "end": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number",
+                                      "minimum": -1000,
+                                      "maximum": 1000
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "radiusStart",
+                                  "radiusEnd",
+                                  "start",
+                                  "end"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "segmentGeometryMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "endpointsMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "edgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "faceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "segmentGeometryMatches",
+                              "endpointsMatch",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "cylinder_ready"
+                          },
+                          "satisfied": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "parameters": {
+                                "type": "object",
+                                "properties": {
+                                  "resourceId": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "radius": {
+                                    "type": "number",
+                                    "minimum": 0.0001,
+                                    "maximum": 1000
+                                  },
+                                  "start": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number",
+                                      "minimum": -1000,
+                                      "maximum": 1000
+                                    }
+                                  },
+                                  "end": {
+                                    "minItems": 3,
+                                    "maxItems": 3,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "number",
+                                      "minimum": -1000,
+                                      "maximum": 1000
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "resourceId",
+                                  "objectName",
+                                  "radius",
+                                  "start",
+                                  "end"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "supported": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "resourceId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "objectName": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "meshId": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "collectionId": {
+                                "type": "string",
+                                "const": "snowman.collection"
+                              },
+                              "parametersValid": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionOwned": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "receiptMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "objectDataMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "collectionLinkMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "nameMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "locationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "rotationMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "scaleMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "transformIsolated": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "modifiersAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "shapeKeysAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "materialsAbsent": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "contentIntact": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "topologyMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "finiteCoordinates": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "meshContentSha256": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{64}$"
+                              },
+                              "segmentGeometryMatches": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "endpointsMatch": {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              "vertexCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "edgeCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "faceCount": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "parameters",
+                              "supported",
+                              "resourceId",
+                              "objectName",
+                              "meshId",
+                              "collectionId",
+                              "parametersValid",
+                              "objectOwned",
+                              "meshOwned",
+                              "collectionOwned",
+                              "receiptMatches",
+                              "objectDataMatches",
+                              "collectionLinkMatches",
+                              "nameMatches",
+                              "locationMatches",
+                              "rotationMatches",
+                              "scaleMatches",
+                              "transformIsolated",
+                              "modifiersAbsent",
+                              "shapeKeysAbsent",
+                              "materialsAbsent",
+                              "contentIntact",
+                              "topologyMatches",
+                              "finiteCoordinates",
+                              "meshContentSha256",
+                              "segmentGeometryMatches",
+                              "endpointsMatch",
+                              "vertexCount",
+                              "edgeCount",
+                              "faceCount"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "satisfied",
+                          "details"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "observationGate": {
+                  "type": "object",
+                  "properties": {
+                    "stepId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "recovered"
+                    },
+                    "failureStrategy": {
+                      "type": "string",
+                      "enum": [
+                        "rollback_step",
+                        "retain_for_repair"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "stepId",
+                    "status",
+                    "failureStrategy",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                },
+                "artifactAttestation": {
+                  "type": "null"
+                },
+                "nativeUndoCheckpoint": {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "evidenceClass": {
+                      "type": "string",
+                      "const": "companion_reported_native_undo_checkpoint"
+                    },
+                    "checkpointId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "previousCheckpointId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "operation": {
+                      "type": "string",
+                      "enum": [
+                        "start",
+                        "next",
+                        "recheck",
+                        "back"
+                      ]
+                    },
+                    "committedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "marker": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "const": "_operating_line_native_history_v1"
+                        },
+                        "matched": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "matched"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "journal": {
+                      "type": "object",
+                      "properties": {
+                        "entryPresent": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "snapshotMatchesSession": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "artifactsBackedUp": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "entryPresent",
+                        "snapshotMatchesSession",
+                        "artifactsBackedUp"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "session": {
+                      "type": "object",
+                      "properties": {
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "planContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "executionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "activeStepId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "completedStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        },
+                        "receiptStepIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "plan",
+                        "planContentSha256",
+                        "executionId",
+                        "activeStepId",
+                        "completedStepIds",
+                        "receiptStepIds"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "evidenceClass",
+                    "checkpointId",
+                    "previousCheckpointId",
+                    "operation",
+                    "committedAt",
+                    "marker",
+                    "journal",
+                    "session"
+                  ],
+                  "additionalProperties": false
+                },
+                "procedureReplayCurrentStateRequest": {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "verificationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "attestationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "attestationContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "planContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "stepId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "expectedObservation": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "requestedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "formatVersion",
+                    "verificationId",
+                    "replayId",
+                    "attestationId",
+                    "attestationContentSha256",
+                    "target",
+                    "plan",
+                    "planContentSha256",
+                    "executionId",
+                    "stepId",
+                    "expectedObservation",
+                    "requestedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "error": {
+                  "type": "null"
+                },
+                "occurredAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "protocolVersion",
+                "reportId",
+                "sequence",
+                "adapterId",
+                "instanceId",
+                "companionVersion",
+                "hostVersion",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "phase",
+                "activeStepId",
+                "completedStepIds",
+                "transition",
+                "stepId",
+                "observations",
+                "observationGate",
+                "artifactAttestation",
+                "nativeUndoCheckpoint",
+                "error",
+                "occurredAt"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceClass": {
+          "type": "string",
+          "const": "companion_reported_managed_action_failure_recovery"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "automatically_rolled_back",
+            "recovered_after_repair"
+          ]
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "authentication": {
+              "type": "string",
+              "const": "negotiated_companion_lease"
+            },
+            "executionSessionFingerprintSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "recoverySessionFingerprintSha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "proposalReceipt": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "receivedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "sequence",
+                "receivedAt"
+              ],
+              "additionalProperties": false
+            },
+            "decisionReceipt": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "receivedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "sequence",
+                "receivedAt"
+              ],
+              "additionalProperties": false
+            },
+            "failureReportReceipt": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "receivedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "sequence",
+                "receivedAt"
+              ],
+              "additionalProperties": false
+            },
+            "recoveryReportReceipt": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "sequence": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "receivedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "sequence",
+                    "receivedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "authentication",
+            "executionSessionFingerprintSha256",
+            "recoverySessionFingerprintSha256",
+            "proposalReceipt",
+            "decisionReceipt",
+            "failureReportReceipt",
+            "recoveryReportReceipt"
+          ],
+          "additionalProperties": false
+        },
+        "bindingContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "object",
+              "properties": {
+                "adapterId": {
+                  "type": "string",
+                  "const": "blender"
+                },
+                "instanceId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "adapterId",
+                "instanceId",
+                "version"
+              ],
+              "additionalProperties": false
+            },
+            "companion": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "version"
+              ],
+              "additionalProperties": false
+            },
+            "plan": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "revision": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "contentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "id",
+                "revision",
+                "contentSha256"
+              ],
+              "additionalProperties": false
+            },
+            "execution": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "step": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            },
+            "action": {
+              "type": "object",
+              "properties": {
+                "adapterId": {
+                  "type": "string",
+                  "const": "blender"
+                },
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "blender.mesh.create_uv_sphere",
+                    "blender.mesh.create_icosphere",
+                    "blender.mesh.create_cube",
+                    "blender.mesh.create_plane",
+                    "blender.mesh.create_torus",
+                    "blender.mesh.create_cone",
+                    "blender.mesh.create_cylinder"
+                  ]
+                }
+              },
+              "required": [
+                "adapterId",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "occurredAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "host",
+            "companion",
+            "plan",
+            "execution",
+            "step",
+            "action",
+            "occurredAt"
+          ],
+          "additionalProperties": false
+        },
+        "verificationScope": {
+          "type": "object",
+          "properties": {
+            "managedActionAttempt": {
+              "type": "string",
+              "const": "observation_failed"
+            },
+            "rollbackOutcome": {
+              "type": "string",
+              "enum": [
+                "companion_reported_succeeded",
+                "companion_reported_failed",
+                "not_requested"
+              ]
+            },
+            "recoveryOutcome": {
+              "type": "string",
+              "enum": [
+                "not_required",
+                "companion_reported_verified"
+              ]
+            },
+            "menuTrack": {
+              "type": "string",
+              "const": "catalog_grounded_not_executed"
+            },
+            "shortcutTrack": {
+              "type": "string",
+              "enum": [
+                "candidate_not_executed",
+                "unavailable"
+              ]
+            },
+            "mcpTrack": {
+              "type": "string",
+              "const": "unavailable"
+            },
+            "failureNativeUndoCheckpoint": {
+              "type": "string",
+              "enum": [
+                "companion_reported_current_at_failure_report",
+                "not_verified_at_failure_report"
+              ]
+            },
+            "terminalNativeUndoCheckpoint": {
+              "type": "string",
+              "enum": [
+                "not_applicable_no_retained_step",
+                "companion_reported_current_at_recovery_report"
+              ]
+            },
+            "currentHostStateAfterReport": {
+              "type": "string",
+              "const": "not_verified"
+            }
+          },
+          "required": [
+            "managedActionAttempt",
+            "rollbackOutcome",
+            "recoveryOutcome",
+            "menuTrack",
+            "shortcutTrack",
+            "mcpTrack",
+            "failureNativeUndoCheckpoint",
+            "terminalNativeUndoCheckpoint",
+            "currentHostStateAfterReport"
+          ],
+          "additionalProperties": false
+        },
+        "attestedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "integrity": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "const": "sha256"
+            },
+            "canonicalization": {
+              "type": "string",
+              "const": "operatingline-json-value-v1"
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "algorithm",
+            "canonicalization",
+            "contentSha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "formatVersion",
+        "replayId",
+        "attestationId",
+        "decision",
+        "failureReport",
+        "recoveryReport",
+        "evidenceClass",
+        "outcome",
+        "provenance",
+        "bindingContentSha256",
+        "execution",
+        "verificationScope",
+        "attestedAt",
+        "integrity"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "automatically_rolled_back"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failureReport": {
+                "not": {
+                  "required": [
+                    "nativeUndoCheckpoint"
+                  ]
+                },
+                "properties": {
+                  "phase": {
+                    "const": "running"
+                  },
+                  "activeStepId": {
+                    "type": "null"
+                  },
+                  "observationGate": {
+                    "properties": {
+                      "status": {
+                        "const": "failed_rolled_back"
+                      }
+                    }
+                  }
+                }
+              },
+              "recoveryReport": {
+                "type": "null"
+              },
+              "provenance": {
+                "properties": {
+                  "recoverySessionFingerprintSha256": {
+                    "type": "null"
+                  },
+                  "recoveryReportReceipt": {
+                    "type": "null"
+                  }
+                }
+              },
+              "verificationScope": {
+                "properties": {
+                  "rollbackOutcome": {
+                    "const": "companion_reported_succeeded"
+                  },
+                  "recoveryOutcome": {
+                    "const": "not_required"
+                  },
+                  "failureNativeUndoCheckpoint": {
+                    "const": "not_verified_at_failure_report"
+                  },
+                  "terminalNativeUndoCheckpoint": {
+                    "const": "not_applicable_no_retained_step"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "recovered_after_repair"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "failureReport": {
+                "required": [
+                  "nativeUndoCheckpoint"
+                ],
+                "properties": {
+                  "phase": {
+                    "const": "blocked"
+                  },
+                  "activeStepId": {
+                    "type": "string"
+                  },
+                  "observationGate": {
+                    "properties": {
+                      "status": {
+                        "enum": [
+                          "repair_required",
+                          "rollback_failed"
+                        ]
+                      }
+                    }
+                  },
+                  "nativeUndoCheckpoint": {
+                    "properties": {
+                      "operation": {
+                        "const": "next"
+                      }
+                    }
+                  }
+                }
+              },
+              "recoveryReport": {
+                "type": "object"
+              },
+              "provenance": {
+                "properties": {
+                  "recoverySessionFingerprintSha256": {
+                    "type": "string"
+                  },
+                  "recoveryReportReceipt": {
+                    "type": "object"
+                  }
+                }
+              },
+              "verificationScope": {
+                "properties": {
+                  "recoveryOutcome": {
+                    "const": "companion_reported_verified"
+                  },
+                  "failureNativeUndoCheckpoint": {
+                    "const": "companion_reported_current_at_failure_report"
+                  },
+                  "terminalNativeUndoCheckpoint": {
+                    "const": "companion_reported_current_at_recovery_report"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "status",
+    "attestation"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-leaf-replay-failure-recovery-finalize-result.json"
+}

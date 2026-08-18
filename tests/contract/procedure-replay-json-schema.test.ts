@@ -12,6 +12,7 @@ import {
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
   computeProcedureLeafReplayCurrentStateVerificationContentSha256,
+  computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
   computeProcedureLeafReplayObservationContentSha256,
   procedureAuthoringCandidateTreeSchema,
   procedureLeafReplayAttestationSchema,
@@ -21,6 +22,9 @@ import {
   procedureLeafReplayCurrentStateStatusRequestSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
+  procedureLeafReplayFailureRecoveryAttestationSchema,
+  procedureLeafReplayFailureRecoveryFinalizeRequestSchema,
+  procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -651,6 +655,186 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         },
       }).success,
     ).toBe(true);
+
+    const retainedFailureCheckpoint = {
+      ...nativeUndoCheckpoint,
+      operation: 'next',
+      session: {
+        ...nativeUndoCheckpoint.session,
+        completedStepIds: [],
+        receiptStepIds: [leaf.id],
+      },
+    } as const;
+    const retainedFailureReport = {
+      ...checkpointContent.report,
+      reportId: 'a1af3ca0-31dd-464c-919e-1364d03c880d',
+      phase: 'blocked',
+      completedStepIds: [],
+      transition: 'step_observation_failed',
+      observations: [
+        {
+          ...observations[0],
+          satisfied: false,
+          details: {
+            parameters: observations[0].details.parameters,
+            supported: true,
+            contentIntact: false,
+          },
+        },
+      ],
+      observationGate: {
+        stepId: leaf.id,
+        status: 'repair_required',
+        failureStrategy: 'retain_for_repair',
+        message: 'Repair the retained managed step.',
+      },
+      nativeUndoCheckpoint: retainedFailureCheckpoint,
+    } as const;
+    const recoveredCheckpoint = {
+      ...nativeUndoCheckpoint,
+      checkpointId: '21fa8537-5482-423e-b940-3fb087244141',
+      operation: 'recheck',
+    } as const;
+    const recoveryReport = {
+      ...checkpointContent.report,
+      reportId: '5f42c16a-644e-4ec6-af8b-97065ac55ae0',
+      transition: 'observation_recovered',
+      observationGate: {
+        stepId: leaf.id,
+        status: 'recovered',
+        failureStrategy: 'retain_for_repair',
+        message: 'The repaired managed step passed its Observation.',
+      },
+      nativeUndoCheckpoint: recoveredCheckpoint,
+    } as const;
+    const failureRecoveryContent = {
+      formatVersion: '1.0.0',
+      replayId,
+      attestationId: 'c25e7e52-c4f0-413b-b03e-253177be6e04',
+      decision: content.decision,
+      failureReport: retainedFailureReport,
+      recoveryReport,
+      evidenceClass: 'companion_reported_managed_action_failure_recovery',
+      outcome: 'recovered_after_repair',
+      provenance: {
+        authentication: 'negotiated_companion_lease',
+        executionSessionFingerprintSha256: '9'.repeat(64),
+        recoverySessionFingerprintSha256: '8'.repeat(64),
+        proposalReceipt: { sequence: 1, receivedAt: occurredAt },
+        decisionReceipt: { sequence: 2, receivedAt: occurredAt },
+        failureReportReceipt: { sequence: 3, receivedAt: occurredAt },
+        recoveryReportReceipt: { sequence: 4, receivedAt: occurredAt },
+      },
+      bindingContentSha256: content.bindingContentSha256,
+      execution: content.execution,
+      verificationScope: {
+        managedActionAttempt: 'observation_failed',
+        rollbackOutcome: 'not_requested',
+        recoveryOutcome: 'companion_reported_verified',
+        menuTrack: 'catalog_grounded_not_executed',
+        shortcutTrack: 'candidate_not_executed',
+        mcpTrack: 'unavailable',
+        failureNativeUndoCheckpoint: 'companion_reported_current_at_failure_report',
+        terminalNativeUndoCheckpoint: 'companion_reported_current_at_recovery_report',
+        currentHostStateAfterReport: 'not_verified',
+      },
+      attestedAt: occurredAt,
+    } as const;
+    const failureRecoveryAttestation = {
+      ...failureRecoveryContent,
+      integrity: {
+        algorithm: 'sha256',
+        canonicalization: 'operatingline-json-value-v1',
+        contentSha256:
+          computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(failureRecoveryContent),
+      },
+    } as const;
+    expect(
+      procedureLeafReplayFailureRecoveryFinalizeRequestSchema.safeParse({
+        replayId,
+        attestationId: failureRecoveryContent.attestationId,
+        failureReportId: retainedFailureReport.reportId,
+        recoveryReportId: recoveryReport.reportId,
+      }).success,
+    ).toBe(true);
+    const parsedFailureRecovery = procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(
+      failureRecoveryAttestation,
+    );
+    expect(parsedFailureRecovery.success, parsedFailureRecovery.error?.message).toBe(true);
+    expect(
+      procedureLeafReplayFailureRecoveryFinalizeResultSchema.safeParse({
+        status: 'accepted',
+        attestation: failureRecoveryAttestation,
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse({
+        ...failureRecoveryAttestation,
+        recoveryReport: null,
+      }).success,
+    ).toBe(false);
+    const retainedWithoutCheckpointContent = {
+      ...failureRecoveryContent,
+      failureReport: withoutKey(retainedFailureReport, 'nativeUndoCheckpoint'),
+      verificationScope: {
+        ...failureRecoveryContent.verificationScope,
+        failureNativeUndoCheckpoint: 'not_verified_at_failure_report',
+      },
+    } as const;
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse({
+        ...retainedWithoutCheckpointContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256: computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(
+            retainedWithoutCheckpointContent,
+          ),
+        },
+      }).success,
+    ).toBe(false);
+
+    const rolledBackFailureReport = {
+      ...withoutKey(retainedFailureReport, 'nativeUndoCheckpoint'),
+      reportId: '79fa8fd5-a4fe-4f6d-8f4a-92406a835940',
+      phase: 'running',
+      activeStepId: null,
+      observationGate: {
+        ...retainedFailureReport.observationGate,
+        status: 'failed_rolled_back',
+        failureStrategy: 'rollback_step',
+      },
+    } as const;
+    const rolledBackContent = {
+      ...failureRecoveryContent,
+      attestationId: 'c7293796-0d76-4c1f-bfc0-0c25cebb3291',
+      failureReport: rolledBackFailureReport,
+      recoveryReport: null,
+      outcome: 'automatically_rolled_back',
+      provenance: {
+        ...failureRecoveryContent.provenance,
+        recoverySessionFingerprintSha256: null,
+        recoveryReportReceipt: null,
+      },
+      verificationScope: {
+        ...failureRecoveryContent.verificationScope,
+        rollbackOutcome: 'companion_reported_succeeded',
+        recoveryOutcome: 'not_required',
+        failureNativeUndoCheckpoint: 'not_verified_at_failure_report',
+        terminalNativeUndoCheckpoint: 'not_applicable_no_retained_step',
+      },
+    } as const;
+    expect(
+      procedureLeafReplayFailureRecoveryAttestationSchema.safeParse({
+        ...rolledBackContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256:
+            computeProcedureLeafReplayFailureRecoveryAttestationContentSha256(rolledBackContent),
+        },
+      }).success,
+    ).toBe(true);
     expect(
       procedureLeafReplayAttestationSchema.safeParse(
         attest({
@@ -1073,6 +1257,53 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-leaf-replay-finalize-result.schema.json'),
       resultCases,
+    );
+    const failureRecoveryFinalizeRequest = {
+      replayId,
+      attestationId: failureRecoveryAttestation.attestationId,
+      failureReportId: retainedFailureReport.reportId,
+      recoveryReportId: recoveryReport.reportId,
+    };
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-failure-recovery-finalize-request.schema.json'),
+      [
+        { value: failureRecoveryFinalizeRequest, accepted: true },
+        {
+          value: { ...failureRecoveryFinalizeRequest, recoveryReportId: 'bad' },
+          accepted: false,
+        },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-failure-recovery-attestation.schema.json'),
+      [
+        { value: failureRecoveryAttestation, accepted: true },
+        { value: withoutKey(failureRecoveryAttestation, 'integrity'), accepted: false },
+        {
+          value: {
+            ...failureRecoveryAttestation,
+            failureReport: withoutKey(retainedFailureReport, 'nativeUndoCheckpoint'),
+            verificationScope: {
+              ...failureRecoveryAttestation.verificationScope,
+              failureNativeUndoCheckpoint: 'not_verified_at_failure_report',
+            },
+          },
+          accepted: false,
+        },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-failure-recovery-finalize-result.schema.json'),
+      [
+        {
+          value: { status: 'accepted', attestation: failureRecoveryAttestation },
+          accepted: true,
+        },
+        {
+          value: { status: 'rejected', attestation: failureRecoveryAttestation },
+          accepted: false,
+        },
+      ],
     );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-leaf-replay-current-state-request.schema.json'),

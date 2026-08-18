@@ -2326,6 +2326,12 @@ class CompanionController:
         expected_checkpoint_operation = {
             "walkthrough_started": "start",
             "step_succeeded": "next",
+            "step_observation_failed": (
+                "next"
+                if gate is not None
+                and gate.status in {"repair_required", "rollback_failed"}
+                else None
+            ),
             "observation_recovered": "recheck",
             "step_rolled_back": "back",
         }.get(transition)
@@ -2343,6 +2349,25 @@ class CompanionController:
                 if transition != "current_state_rechecked":
                     raise
                 candidate_checkpoint = None
+            receipt_step_ids = (
+                set(candidate_checkpoint["session"]["receiptStepIds"])
+                if candidate_checkpoint is not None
+                else set()
+            )
+            completed_step_ids = (
+                set(candidate_checkpoint["session"]["completedStepIds"])
+                if candidate_checkpoint is not None
+                else set()
+            )
+            reported_step_id = getattr(step, "id", None)
+            retained_failure_receipts_match = (
+                transition == "step_observation_failed"
+                and isinstance(reported_step_id, str)
+                and reported_step_id in receipt_step_ids
+                and receipt_step_ids.issubset(
+                    completed_step_ids | {reported_step_id}
+                )
+            )
             if (
                 candidate_checkpoint is not None
                 and (
@@ -2350,8 +2375,12 @@ class CompanionController:
                     or candidate_checkpoint["operation"]
                     == expected_checkpoint_operation
                 )
-                and set(candidate_checkpoint["session"]["receiptStepIds"]).issubset(
-                    candidate_checkpoint["session"]["completedStepIds"]
+                and (
+                    retained_failure_receipts_match
+                    or (
+                        transition != "step_observation_failed"
+                        and receipt_step_ids.issubset(completed_step_ids)
+                    )
                 )
             ):
                 native_undo_checkpoint = candidate_checkpoint

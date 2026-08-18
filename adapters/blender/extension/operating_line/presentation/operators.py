@@ -83,6 +83,13 @@ def _execute_next(operator, context):
     try:
         step = session.next()
     except ObservationGateError as error:
+        if error.gate.blocking and prepared_native_history_changed(session):
+            if not _commit_history(operator, session):
+                return {"FINISHED"}
+            result = {"FINISHED"}
+        else:
+            cancel_native_history()
+            result = {"CANCELLED"}
         _companion().report(
             "step_observation_failed",
             step=error.step,
@@ -91,11 +98,7 @@ def _execute_next(operator, context):
         )
         operator.report({"WARNING"}, str(error))
         refresh_native_menu_guidance()
-        if error.gate.blocking and prepared_native_history_changed(session):
-            _commit_history(operator, session)
-            return {"FINISHED"}
-        cancel_native_history()
-        return {"CANCELLED"}
+        return result
     except (OSError, RuntimeError, ValueError) as error:
         refresh_native_menu_guidance()
         return _finish_failed_operation(operator, session, candidate, error)

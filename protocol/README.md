@@ -146,6 +146,14 @@ attestation hash、目标 instance、Plan/execution/leaf 和期望强 Observatio
 进入 Eval/replay。任何结果都只证明 response report 时刻，继续声明之后状态 `not_verified`。见
 `docs/adr/0072-challenged-procedure-current-state-verification.md`。
 
+`procedure-leaf-replay-failure-recovery-*` Schema 定义与直接成功互斥的 replay outcome。MCP
+`operatingline.procedure.replay.failure-recovery.finalize` 与对应 HTTP 接口接受精确 failure report，并在阻塞修复
+路径要求 recovery report。自动补偿成功必须为 `failed_rolled_back` 且没有保留 leaf/new checkpoint；
+`repair_required` 或 `rollback_failed` 必须携带保留 receipt 的 `next` checkpoint，随后以同一 execution 的完整
+强 Observation、`recovered` gate 和 `recheck` checkpoint 终结。审批/失败来自同一 lease；恢复可在同一 target
+的新 lease 上提交，所有阶段由服务端 receipt 严格排序。见
+`docs/adr/0073-managed-procedure-failure-recovery-attestation.md`。
+
 `action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
 `semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。

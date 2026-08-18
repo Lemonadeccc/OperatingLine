@@ -41,6 +41,7 @@ export interface ProcedureLeafReplayAttestationInput {
   attestationId: string;
   replayId: string;
   reportId: string;
+  evidenceReportIds?: readonly string[];
   executionId: string;
   contentSha256: string;
   payload: unknown;
@@ -1187,6 +1188,23 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     VALUES (16, datetime('now'));
   `);
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_leaf_replay_attestation_reports (
+      attestation_id TEXT NOT NULL,
+      report_id TEXT NOT NULL UNIQUE,
+      PRIMARY KEY (attestation_id, report_id),
+      FOREIGN KEY (attestation_id)
+        REFERENCES procedure_leaf_replay_attestations(attestation_id),
+      FOREIGN KEY (report_id) REFERENCES companion_state_reports(report_id)
+    ) STRICT;
+
+    INSERT OR IGNORE INTO procedure_leaf_replay_attestation_reports (attestation_id, report_id)
+    SELECT attestation_id, report_id FROM procedure_leaf_replay_attestations;
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (17, datetime('now'));
+  `);
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
@@ -1269,6 +1287,21 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       payload,
       attested_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const findProcedureLeafReplayAttestationReport = sqlite.prepare(`
+    SELECT attestation_id
+    FROM procedure_leaf_replay_attestation_reports
+    WHERE report_id = ?
+  `);
+  const listProcedureLeafReplayAttestationReports = sqlite.prepare(`
+    SELECT report_id
+    FROM procedure_leaf_replay_attestation_reports
+    WHERE attestation_id = ?
+    ORDER BY report_id
+  `);
+  const insertProcedureLeafReplayAttestationReport = sqlite.prepare(`
+    INSERT INTO procedure_leaf_replay_attestation_reports (attestation_id, report_id)
+    VALUES (?, ?)
   `);
   const insertProcedureTree = sqlite.prepare(`
     INSERT INTO procedure_trees (
@@ -4038,6 +4071,20 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     },
     recordProcedureLeafReplayAttestation(input) {
       const payload = canonicalJson(input.payload);
+      const evidenceReportIds = [...(input.evidenceReportIds ?? [input.reportId])];
+      if (
+        evidenceReportIds.length === 0 ||
+        !evidenceReportIds.includes(input.reportId) ||
+        evidenceReportIds.some(
+          (reportId) => typeof reportId !== 'string' || reportId.length === 0,
+        ) ||
+        new Set(evidenceReportIds).size !== evidenceReportIds.length
+      ) {
+        throw new Error(
+          'Procedure leaf replay attestation evidence reports must be unique and include reportId',
+        );
+      }
+      const sortedEvidenceReportIds = evidenceReportIds.toSorted();
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
         const existing = findProcedureLeafReplayAttestation.get(
@@ -4056,6 +4103,9 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             }
           | undefined;
         if (existing !== undefined) {
+          const storedEvidenceReportIds = listProcedureLeafReplayAttestationReports
+            .all(existing.attestation_id)
+            .map((row) => (row as { report_id: string }).report_id);
           sqlite.exec('COMMIT;');
           return existing.attestation_id === input.attestationId &&
             existing.replay_id === input.replayId &&
@@ -4063,9 +4113,23 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             existing.execution_id === input.executionId &&
             existing.content_sha256 === input.contentSha256 &&
             existing.payload === payload &&
-            existing.attested_at === input.attestedAt
+            existing.attested_at === input.attestedAt &&
+            storedEvidenceReportIds.length === sortedEvidenceReportIds.length &&
+            storedEvidenceReportIds.every(
+              (reportId, index) => reportId === sortedEvidenceReportIds[index],
+            )
             ? 'duplicate'
             : 'conflict';
+        }
+        if (
+          evidenceReportIds.some((reportId) => {
+            const owner = findProcedureLeafReplayAttestationReport.get(reportId) as
+              { attestation_id: string } | undefined;
+            return owner !== undefined && owner.attestation_id !== input.attestationId;
+          })
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
         }
         if (findProcedureLeafReplayById.get(input.replayId) === undefined) {
           throw new Error(`Unknown procedure leaf replay: ${input.replayId}`);
@@ -4079,6 +4143,9 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           payload,
           input.attestedAt,
         );
+        for (const reportId of evidenceReportIds) {
+          insertProcedureLeafReplayAttestationReport.run(input.attestationId, reportId);
+        }
         insertEvent.run(
           `procedure-leaf-replay:${input.replayId}:attested`,
           'procedure.leaf-replay.attested',
