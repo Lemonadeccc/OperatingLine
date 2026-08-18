@@ -482,7 +482,8 @@ step、host version 和强 Observation 任一不匹配都会 fail closed。最�
 action-level MCP 调用或报告之后的当前宿主状态。调用方可另行创建持久、唯一的 current-state challenge；只有
 精确目标协商 lease 会收到它，Blender 主线程只读复算强 Observation 与当前 Undo journal，Runtime 按
 session/step/observation/checkpoint mismatch 或 verified 保存 completed evidence。每次结果仍只覆盖其 response
-report 时刻，下一次“当前”查询必须使用新的 verification ID。
+report 时刻，下一次“当前”查询必须使用新的 verification ID。挑战可使用直接成功或
+`recovered_after_repair` 的 checkpoint-backed 强 Observation；自动回退没有保留 leaf，明确拒绝。
 失败执行走互斥的 `procedure.replay.failure-recovery.finalize`：自动回退以 `failed_rolled_back` 终结且不生成
 虚假 checkpoint；阻塞修复路径必须先有保留 receipt 的 `next` checkpoint，再由完整强 Observation 与
 `recheck` checkpoint 证明恢复。decision/failure 同 lease，recovery 允许同一 target 重连后的新 lease，并由

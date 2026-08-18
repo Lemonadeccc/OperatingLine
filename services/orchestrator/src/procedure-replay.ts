@@ -1114,14 +1114,24 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
 }
 
 export function buildProcedureLeafReplayCurrentStateRequest(input: {
-  readonly attestation: ProcedureLeafReplayAttestation;
+  readonly attestation:
+    ProcedureLeafReplayAttestation | ProcedureLeafReplayFailureRecoveryAttestation;
   readonly verificationId: string;
   readonly requestedAt: string;
 }): CompanionProcedureReplayCurrentStateRequest {
   const { attestation } = input;
-  const observation = attestation.successGate.observations[0];
+  const directSuccess = 'successGate' in attestation;
+  const observation = directSuccess
+    ? attestation.successGate.observations[0]
+    : attestation.recoveryReport?.observations[0];
+  const checkpointBacked = directSuccess
+    ? attestation.verificationScope.nativeUndoCheckpoint === 'companion_reported_current_at_report'
+    : attestation.outcome === 'recovered_after_repair' &&
+      attestation.recoveryReport !== null &&
+      attestation.verificationScope.terminalNativeUndoCheckpoint ===
+        'companion_reported_current_at_recovery_report';
   if (
-    attestation.verificationScope.nativeUndoCheckpoint !== 'companion_reported_current_at_report' ||
+    !checkpointBacked ||
     attestation.verificationScope.currentHostStateAfterReport !== 'not_verified' ||
     observation === undefined
   ) {
@@ -1156,13 +1166,18 @@ export function buildProcedureLeafReplayCurrentStateRequest(input: {
 }
 
 export function buildProcedureLeafReplayCurrentStateVerification(input: {
-  readonly attestation: ProcedureLeafReplayAttestation;
+  readonly attestation:
+    ProcedureLeafReplayAttestation | ProcedureLeafReplayFailureRecoveryAttestation;
   readonly request: CompanionProcedureReplayCurrentStateRequest;
   readonly report: CompanionStateReport;
   readonly reportReceipt: StoredManagedReplayReceipt;
   readonly recordedAt: string;
 }): ProcedureLeafReplayCurrentStateVerification {
   const { attestation, request, report, reportReceipt } = input;
+  const baselineObservation =
+    'successGate' in attestation
+      ? attestation.successGate.observations[0]
+      : attestation.recoveryReport?.observations[0];
   const expectedRequest = buildProcedureLeafReplayCurrentStateRequest({
     attestation,
     verificationId: request.verificationId,
@@ -1215,7 +1230,8 @@ export function buildProcedureLeafReplayCurrentStateVerification(input: {
     report.observations.length === 1 &&
     observation?.kind === request.expectedObservation.kind &&
     observation?.satisfied === true &&
-    sameCanonicalValue(observation, attestation.successGate.observations[0]);
+    baselineObservation !== undefined &&
+    sameCanonicalValue(observation, baselineObservation);
   const checkpoint = report.nativeUndoCheckpoint;
   const checkpointMatches =
     checkpoint !== undefined &&

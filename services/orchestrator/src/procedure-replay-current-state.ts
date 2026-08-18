@@ -1,6 +1,7 @@
 import {
   companionProcedureReplayCurrentStateRequestSchema,
   procedureLeafReplayAttestationSchema,
+  procedureLeafReplayFailureRecoveryAttestationSchema,
   procedureLeafReplayCurrentStateRequestResultSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayCurrentStateVerificationSchema,
@@ -10,6 +11,8 @@ import {
   type ProcedureLeafReplayCurrentStateRequestResult,
   type ProcedureLeafReplayCurrentStateStatusResult,
   type ProcedureLeafReplayCurrentStateVerification,
+  type ProcedureLeafReplayAttestation,
+  type ProcedureLeafReplayFailureRecoveryAttestation,
 } from '@operatingline/protocol';
 import type { OperatingLineDatabase, StoredManagedReplayReceipt } from '@operatingline/persistence';
 
@@ -35,6 +38,28 @@ function requestEventId(verificationId: string): string {
 
 function verificationEventId(verificationId: string): string {
   return `procedure-leaf-replay-current-state:${verificationId}:completed`;
+}
+
+type CurrentStateReplayAttestation =
+  ProcedureLeafReplayAttestation | ProcedureLeafReplayFailureRecoveryAttestation;
+
+function parseCurrentStateReplayAttestation(payload: unknown): CurrentStateReplayAttestation {
+  const directSuccess = procedureLeafReplayAttestationSchema.safeParse(payload);
+  if (directSuccess.success) return directSuccess.data;
+  const failureRecovery = procedureLeafReplayFailureRecoveryAttestationSchema.safeParse(payload);
+  if (!failureRecovery.success) {
+    throw new ProcedureLeafReplayError('Stored replay attestation is invalid', 409);
+  }
+  if (
+    failureRecovery.data.outcome !== 'recovered_after_repair' ||
+    failureRecovery.data.recoveryReport === null
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Current-state verification requires a retained successful or recovered replay state',
+      409,
+    );
+  }
+  return failureRecovery.data;
 }
 
 export interface ProcedureLeafReplayCurrentStateCoordinator {
@@ -122,14 +147,7 @@ export function createProcedureLeafReplayCurrentStateCoordinator(
           404,
         );
       }
-      const parsedAttestation = procedureLeafReplayAttestationSchema.safeParse(attestationPayload);
-      if (!parsedAttestation.success) {
-        throw new ProcedureLeafReplayError(
-          'Current-state verification currently requires a successful replay attestation',
-          409,
-        );
-      }
-      const attestation = parsedAttestation.data;
+      const attestation = parseCurrentStateReplayAttestation(attestationPayload);
       const request = companionProcedureReplayCurrentStateRequestSchema.parse(
         buildProcedureLeafReplayCurrentStateRequest({
           attestation,
@@ -224,15 +242,9 @@ export function createProcedureLeafReplayCurrentStateCoordinator(
           404,
         );
       }
-      const parsedAttestation = procedureLeafReplayAttestationSchema.safeParse(attestationPayload);
-      if (!parsedAttestation.success) {
-        throw new ProcedureLeafReplayError(
-          'Current-state verification no longer references a successful replay attestation',
-          409,
-        );
-      }
+      const attestation = parseCurrentStateReplayAttestation(attestationPayload);
       const verification = buildProcedureLeafReplayCurrentStateVerification({
-        attestation: parsedAttestation.data,
+        attestation,
         request,
         report,
         reportReceipt: receipt,

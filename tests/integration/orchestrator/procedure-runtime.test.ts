@@ -5100,7 +5100,52 @@ describe('procedure compilation runtime', () => {
           }),
         },
       );
-      expect(currentStateAfterRecovery.status).toBe(409);
+      expect(currentStateAfterRecovery.status).toBe(200);
+      const recoveredCurrentStateRequest = procedureLeafReplayCurrentStateRequestResultSchema.parse(
+        await currentStateAfterRecovery.json(),
+      );
+      expect(recoveredCurrentStateRequest).toMatchObject({
+        status: 'accepted',
+        request: {
+          replayId: retained.replayRequest.replayId,
+          attestationId: recovered.attestation.attestationId,
+          expectedObservation: { kind: 'uv_sphere_ready' },
+        },
+      });
+      const recoveredGuideUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      recoveredGuideUrl.searchParams.set('adapterId', 'blender');
+      recoveredGuideUrl.searchParams.set('instanceId', targetInstanceId);
+      const recoveredGuideResponse = await fetch(recoveredGuideUrl, { headers: leaseHeaders });
+      expect(recoveredGuideResponse.status).toBe(200);
+      const recoveredGuide = (await recoveredGuideResponse.json()) as {
+        procedureReplayCurrentStateRequest?: unknown;
+      };
+      expect(recoveredGuide.procedureReplayCurrentStateRequest).toEqual(
+        recoveredCurrentStateRequest.request,
+      );
+      const recoveredCurrentStateReport = {
+        ...retainedRecoveryReport,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        transition: 'current_state_rechecked',
+        observationGate: null,
+        procedureReplayCurrentStateRequest: recoveredCurrentStateRequest.request,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      await postState(recoveredCurrentStateReport);
+      const recoveredCurrentStateStatusResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state?verificationId=${recoveredCurrentStateRequest.request.verificationId}`,
+        { headers },
+      );
+      expect(recoveredCurrentStateStatusResponse.status).toBe(200);
+      expect(
+        procedureLeafReplayCurrentStateStatusResultSchema.parse(
+          await recoveredCurrentStateStatusResponse.json(),
+        ),
+      ).toMatchObject({
+        status: 'completed',
+        verification: { outcome: 'verified', reason: 'verified' },
+      });
 
       const rollbackPromptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
         method: 'POST',
@@ -5203,6 +5248,18 @@ describe('procedure compilation runtime', () => {
       );
       expect(duplicateRolledBack.status).toBe(200);
       await expect(duplicateRolledBack.json()).resolves.toMatchObject({ status: 'duplicate' });
+      const currentStateAfterRollback = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state/request`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: rolledBack.replayRequest.replayId,
+            verificationId: randomUUID(),
+          }),
+        },
+      );
+      expect(currentStateAfterRollback.status).toBe(409);
     } finally {
       await runtime.stop();
     }

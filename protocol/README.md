@@ -143,7 +143,9 @@ attestation hash、目标 instance、Plan/execution/leaf 和期望强 Observatio
 1.5 的精确协商 Companion lease 会在 Guide delivery 中收到它。Blender 主线程不执行 action 或 Undo，只重新
 评估当前 Observation 并读取当前 Undo journal，然后用 `current_state_rechecked` 回显完整 challenge。completed
 结果确定性区分 session、step、observation、checkpoint mismatch 与 verified，并随 requested/completed 事件
-进入 Eval/replay。任何结果都只证明 response report 时刻，继续声明之后状态 `not_verified`。见
+进入 Eval/replay。挑战既可基于 checkpoint-backed 的直接成功，也可基于 `recovered_after_repair` 的 recovery
+Observation；无保留 leaf 的 automatic rollback 会被拒绝。任何结果都只证明 response report 时刻，继续声明
+之后状态 `not_verified`。见
 `docs/adr/0072-challenged-procedure-current-state-verification.md`。
 
 `procedure-leaf-replay-failure-recovery-*` Schema 定义与直接成功互斥的 replay outcome。MCP

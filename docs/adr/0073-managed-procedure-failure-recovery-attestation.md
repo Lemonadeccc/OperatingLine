@@ -69,9 +69,9 @@ failure/recovery attestation 明确记录：
   unavailable；
 - `currentHostStateAfterReport: not_verified`。
 
-当前 nonce current-state challenge 仍只接受直接成功 attestation；failure/recovery outcome 不会被错误投影成
-原有成功 evidence。若要对 recovered outcome 做按需当前状态复核，需要后续定义以 recovery Observation/hash
-为基准的独立 challenge。
+nonce current-state challenge 接受 checkpoint-backed 的 `recovered_after_repair`，并以 recovery report 的强
+Observation/hash 和同一 attestation 内容哈希为基准；`automatically_rolled_back` 没有保留 managed leaf，仍
+明确拒绝挑战。failure/recovery outcome 不会被错误投影成原有直接成功 evidence。
 
 ## 兼容性与导出
 
@@ -88,13 +88,12 @@ failure/recovery attestation 明确记录：
 
 - 协议与公开 JSON Schema 测试覆盖 recovered、automatic rollback、错误 outcome/scope、checkpoint operation
   与互斥 report 形状。
-- Runtime 集成测试覆盖 MCP/HTTP finalization、同 lease receipt、强恢复 Observation、幂等、成功/失败终态互斥
-  以及 recovered outcome 暂不支持 current-state challenge。
+- Runtime 集成测试覆盖 MCP/HTTP finalization、同 lease receipt、强恢复 Observation、幂等、成功/失败终态
+  互斥、recovered current-state challenge，以及 automatic rollback challenge 拒绝。
 - Blender 集成回归验证自动回退不生成伪 checkpoint，retain failure 产生 `next` checkpoint，恢复产生
   `recheck` checkpoint。
 
 ## 后续
 
 该合同尚未证明逐控件菜单/快捷键执行或 action-level MCP，也未覆盖七种 primitive 之外的 Edit Mode、Modifier、
-Geometry Nodes、骨骼、动画、灯光、相机和渲染 Action。recovered outcome 的按需当前状态 challenge、失败自动诊断
-和策略化重试仍需后续切片。
+Geometry Nodes、骨骼、动画、灯光、相机和渲染 Action。失败自动诊断和策略化重试仍需后续切片。

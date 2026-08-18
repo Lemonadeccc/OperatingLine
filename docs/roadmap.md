@@ -499,14 +499,15 @@
           [ADR 0071](adr/0071-native-undo-replay-checkpoint-attestation.md)。
     - [x] 按需当前状态证明：Runtime 持久化 nonce-bound challenge 并只投递给精确目标 lease；Blender 主线程
           只读复算强 Observation 与 Undo journal，结果分类为 verified 或 session/step/observation/checkpoint
-          mismatch 并进入 Eval/replay。每条结果仍只证明 response report 时刻。见
+          mismatch 并进入 Eval/replay；直接成功与 `recovered_after_repair` 均可复核，自动回退因没有保留 leaf
+          明确拒绝。每条结果仍只证明 response report 时刻。见
           [ADR 0072](adr/0072-challenged-procedure-current-state-verification.md)。
     - [x] 失败/回退/修复恢复证明：互斥 finalizer 保存 `failed_rolled_back` 自动补偿终态，或把
           `repair_required`/`rollback_failed` 的保留 receipt `next` checkpoint 与后续强 Observation、
           `recovered` gate、`recheck` checkpoint 绑定；同 replay 不可再伪装成直接成功。见
           [ADR 0073](adr/0073-managed-procedure-failure-recovery-attestation.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
-          复合与编辑叶节点覆盖；recovered outcome 的按需当前状态复核、失败自动诊断和策略化重试仍未完成。
+          复合与编辑叶节点覆盖；失败自动诊断和策略化重试仍未完成。
   - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
         candidate；仍需经验证的语义召回、流式 Procedure 对话、自动局部树重规划与结果治理，使不会 Blender
         的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。

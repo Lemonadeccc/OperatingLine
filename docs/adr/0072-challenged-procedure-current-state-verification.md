@@ -22,7 +22,8 @@ Runtime 新增两组等价入口：
 - MCP `operatingline.procedure.replay.current-state.get` 与 HTTP
   `GET /api/v1/procedure/replay/current-state`。
 
-调用方提交已 finalize 的 `replayId` 和唯一 `verificationId`。Runtime 从不可变 attestation 构建挑战，绑定
+调用方提交已 finalize 的 `replayId` 和唯一 `verificationId`。Runtime 从 checkpoint-backed 的直接成功
+attestation，或 `recovered_after_repair` attestation 的 recovery report 构建挑战，绑定
 attestation ID/content hash、目标 instance、Plan/revision/content hash、execution、leaf 和期望强 Observation
 的规范内容 hash。requested 事件先追加持久化；相同 ID 幂等，ID 冲突、同一 replay 的并发未完成请求以及超过
 64 个全局 pending 请求均 fail closed。重启时由 requested/completed 事件恢复 pending 状态。
@@ -66,12 +67,15 @@ completed verification 保存原 request、完整 Companion report、协商 leas
 - 旧 Companion delivery 不出现新字段；只有存在 pending 挑战时才添加可选字段，旧响应形状保持不变。
 - `current_state_rechecked` 仅允许协议 1.5，并必须回显完整挑战；legacy presence 不能接收或提交该证明。
 - 历史 replay attestation 仍可读取，但缺少 ADR 0071 checkpoint 范围的旧 attestation 不能创建当前状态挑战。
+- `recovered_after_repair` 复用 recovery report 的强 Observation 与 `recheck` checkpoint；
+  `automatically_rolled_back` 没有保留 managed leaf，因此明确拒绝挑战。
 - 复核不授权场景修改、自动修复、自动恢复、菜单/快捷键执行或 action-level MCP 执行。
 
 ## 验证
 
 - 协议与公开 JSON Schema 测试覆盖 request、pending/completed result、完整性、错误 scope 和 drift 结果。
-- Runtime 集成测试覆盖 challenge delivery、幂等、verified、Observation drift、协商 receipt 和 Eval 导出。
+- Runtime 集成测试覆盖直接成功与恢复终态的 challenge delivery、幂等、verified、Observation drift、协商
+  receipt，以及自动回退拒绝和 Eval 导出。
 - Python 测试覆盖 Transport 单连接去重与 Session 只读 Observation。
 - Blender 4.5.3 与 5.1.1 前台回归证明复核前后 Session snapshot 相同，并复用同一真实 native Undo
   checkpoint；完整雪人、蒙皮动画和机器人基准继续通过。
@@ -86,7 +90,6 @@ completed verification 保存原 request、完整 Companion report、协商 leas
 
 ## 后续
 
-该合同完成成功 replay 的按需当前状态复核。失败执行、自动回退、人工修复与恢复过程已由
-[ADR 0073](0073-managed-procedure-failure-recovery-attestation.md) 建立独立 outcome attestation，但 recovered
-outcome 的按需当前状态 challenge 尚未定义；逐控件 UI、快捷键、action-level MCP 和七种 primitive 之外的
-Action 覆盖也不在本切片内。
+该合同完成直接成功与人工修复恢复 replay 的按需当前状态复核。失败执行、自动回退、人工修复与恢复过程由
+[ADR 0073](0073-managed-procedure-failure-recovery-attestation.md) 建立独立 outcome attestation；逐控件 UI、
+快捷键、action-level MCP 和七种 primitive 之外的 Action 覆盖仍不在本切片内。

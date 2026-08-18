@@ -185,7 +185,8 @@ attestation 明确声明 `currentHostStateAfterReport: not_verified`。该证明
 场景或具体 UI 执行入口。显式 current-state request 会作为持久唯一挑战随 Guide poll 只投递给精确协商
 lease；Companion 在主线程只读复算 request leaf 的强 Observation，读取当前 Scene marker/journal 后回报
 `current_state_rechecked`，不调用 action、rollback 或 Undo。Runtime 保存 verified 或确定性的
-session/step/observation/checkpoint mismatch；结果仍只覆盖 report 时刻。
+session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_repair` 可作为 checkpoint-backed 基线，
+自动回退没有保留 leaf 因而拒绝挑战；结果仍只覆盖 report 时刻。
 阻塞型 `step_observation_failed` 会先提交保留 leaf receipt 的 `next` checkpoint 再上报；恢复后的
 `observation_recovered` 携带 `recheck` checkpoint。`failure-recovery.finalize` 将这两条 report 与审批/receipt
 链绑定，并在同一事务中唯一占用所有组成 report；`failed_rolled_back` 自动补偿路径不保留 leaf，也不会伪造

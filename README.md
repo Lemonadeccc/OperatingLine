@@ -233,7 +233,8 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   不是逐控件 UI replay，也不声称报告之后的当前场景或具体 UI 执行入口。若需要更新鲜证据，
   `procedure.replay.current-state.request/get` 会持久化唯一挑战，只向精确目标 lease 投递，并让 Blender 主线程
   只读复算强 Observation 与当前 Undo journal；结果区分 verified、session/step/observation/checkpoint mismatch，
-  但仍只证明响应报告时状态。失败路径使用互斥的
+  可复核直接成功或 `recovered_after_repair`，自动回退因没有保留 leaf 而拒绝；结果仍只证明响应报告时状态。
+  失败路径使用互斥的
   `procedure.replay.failure-recovery.finalize`：自动补偿成功保存 `failed_rolled_back` 且不伪造新 checkpoint；
   `repair_required`/`rollback_failed` 则绑定保留 leaf receipt 的 `next` checkpoint、后续完整强 Observation 与
   `recheck` checkpoint，并原子唯一占用所有组成 report，区分自动回退、回退失败和人工修复恢复。见
