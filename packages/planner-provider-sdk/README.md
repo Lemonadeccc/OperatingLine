@@ -109,5 +109,6 @@ Provider 内部。Orchestrator 会在 Provider 调用和 requested event 落盘�
 公共协议和完整决策见
 [协议说明](../../protocol/README.md)与
 [ADR 0013](../../docs/adr/0013-explicit-planner-provider-boundary.md)。Procedure authoring 见
-[ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md)。目录约束目标覆盖见
+[ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md) 与
+[ADR 0075](../../docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)。目录约束目标覆盖见
 [ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。

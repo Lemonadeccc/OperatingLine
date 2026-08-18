@@ -63,4 +63,6 @@ Eval 合同。
 ## 后续
 
 该闭环完成“一句话 → 经严格验证的完整 candidate ProcedureTree”的显式 Provider 路径，但不包含语义 RAG、
-流式 Procedure 对话、自动局部树重规划、教学视频抽取、可视化编辑、训练集发布或 Blender 轨迹执行。
+流式 Procedure 对话、自动局部树重规划、教学视频抽取、可视化编辑、训练集发布或 Blender 轨迹执行。后续
+[ADR 0075](0075-evidence-bound-tutorial-transcript-authoring.md) 允许同一 coordinator 消费调用方已经提供的
+证据绑定字幕，但自动下载、转录与画面识别仍不在本决策内。

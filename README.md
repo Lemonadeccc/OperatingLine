@@ -90,9 +90,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md) 与
   [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md) 与
   [ADR 0063](docs/adr/0063-bounded-edit-mode-poke-faces.md)。
-- **自然语言 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
-  `POST /api/v1/procedure/prompt` 返回供应商无关的 `1.0.0` packet，精确绑定 ActionCatalog、
-  InteractionCatalog、tree identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
+- **目标/教程证据 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
+  `POST /api/v1/procedure/prompt` 返回供应商无关的 packet；普通目标保持 `1.0.0`，可选的教程模式使用
+  `1.1.0`，额外绑定权利状态明确的 HTTPS 视频与有序、非重叠的 `user_supplied` 字幕区间、原文和置信度。
+  教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
+  权利声明也不等于 released 训练许可。Packet 同时精确绑定 ActionCatalog、InteractionCatalog、tree
+  identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
   宿主模型按 packet 生成层级、语义 operation 和 Action 参数；模型输出中的菜单、快捷键与 MCP 轨迹必须保持
   unavailable，不能自行完成 grounding。精确检索目前只提供 grounding 候选，随后
   把原 packet 与候选提交给 `operatingline.procedure.authoring.validate`；服务端核对 canonical SHA-256、
@@ -102,8 +105,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `POST /api/v1/procedure/authoring/generate` 会把规范编码的完整 packet 交给 Provider，并立即执行同一
   identity/catalog/compile 门；requested/completed/failed 证据支持重启幂等，结果仍不保存、物化、提案或执行。
   当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。见
-  [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md) 与
-  [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md)。
+  [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
+  [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
+  [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

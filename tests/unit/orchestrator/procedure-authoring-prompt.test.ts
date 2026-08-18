@@ -10,6 +10,7 @@ import {
 import {
   canonicalizeProtocolJsonValue,
   parseProcedureTree,
+  procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
 } from '@operatingline/protocol';
 
@@ -17,6 +18,8 @@ import {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,
   procedureAuthoringPromptPacketContent,
+  procedureAuthoringTutorialInputFromPacket,
+  validateProcedureAuthoringCandidate,
   validateProcedureAuthoringPromptPacketIntegrity,
 } from '../../../services/orchestrator/src/procedure-authoring-prompt.js';
 import { validatePublicJsonSchemaCases } from '../../../services/orchestrator/test-support/public-json-schema-validator.js';
@@ -62,6 +65,38 @@ function forceInteractionTracksUnavailable(tree: Record<string, unknown>): void 
 }
 
 const goal = '制作雪人的头部，并创建、定位、缩放和命名左眼球体。';
+const tutorial = {
+  video: {
+    uri: 'https://www.youtube.com/watch?v=operatingline-eye',
+    title: 'Create and position a Blender eye',
+    durationMs: 90_000,
+    rightsStatus: 'permission_granted',
+  },
+  transcript: {
+    origin: 'user_supplied',
+    locale: 'en',
+    segments: [
+      {
+        startMs: 10_000,
+        endMs: 24_000,
+        text: 'Add a UV sphere and set its radius to 0.24.',
+        confidence: 0.98,
+      },
+      {
+        startMs: 24_000,
+        endMs: 42_000,
+        text: 'Move the sphere to the left eye position and scale it.',
+        confidence: 0.94,
+      },
+      {
+        startMs: 42_000,
+        endMs: 50_000,
+        text: 'Rename the object Eye.L.',
+        confidence: 1,
+      },
+    ],
+  },
+} as const;
 
 describe('procedure authoring prompt', () => {
   it('pins catalogs, identity, candidate validation, and side-effect boundaries', async () => {
@@ -219,6 +254,129 @@ describe('procedure authoring prompt', () => {
     );
 
     expect(packet.context.goalProvenance.source.text).toBe(exactGoal);
+  });
+
+  it('binds a rights-declared tutorial transcript to exact candidate evidence', async () => {
+    const packet = buildProcedureAuthoringPromptPacket(
+      {
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal,
+        treeId: 'snowman.eye.left.tutorial.procedure',
+        revision: 2,
+        locale: 'zh-CN',
+        tutorial,
+      },
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const tutorialProvenance = packet.context.tutorialProvenance;
+    if (tutorialProvenance === undefined) throw new Error('Expected tutorial provenance');
+    expect(packet.formatVersion).toBe('1.1.0');
+    expect(tutorialProvenance).toMatchObject({
+      source: {
+        id: 'source.snowman.eye.left.tutorial.procedure.revision.2.tutorial',
+        kind: 'tutorial_video',
+        uri: tutorial.video.uri,
+        durationMs: tutorial.video.durationMs,
+        rightsStatus: 'permission_granted',
+      },
+      transcript: {
+        origin: 'user_supplied',
+        locale: 'en',
+        segments: expect.arrayContaining([
+          {
+            id: 'evidence.snowman.eye.left.tutorial.procedure.revision.2.tutorial.segment.0001',
+            order: 1,
+            locator: { kind: 'video_segment', startMs: 10_000, endMs: 24_000 },
+            text: tutorial.transcript.segments[0].text,
+            confidence: 0.98,
+          },
+        ]),
+      },
+    });
+    expect(packet.context.constraints.allSemanticOperationsTutorialEvidenceBound).toBe(true);
+    expect(packet.workflow.instructions.join('\n')).toContain(
+      'Every semantic operation must cite at least one supplied tutorial transcript segment',
+    );
+    expect(procedureAuthoringTutorialInputFromPacket(packet)).toEqual(tutorial);
+
+    const candidate = fixture();
+    candidate['id'] = packet.context.requestedTreeId;
+    candidate['revision'] = packet.context.recommendedRevision;
+    candidate['adapterId'] = packet.context.catalogBinding.adapterId;
+    candidate['actionCatalogVersion'] = packet.context.catalogBinding.actionCatalog.catalogVersion;
+    candidate['interactionCatalogVersion'] =
+      packet.context.catalogBinding.interactionCatalog.catalogVersion;
+    candidate['hostVersionRange'] =
+      packet.context.catalogBinding.interactionCatalog.hostVersionRange;
+    forceInteractionTracksUnavailable(candidate);
+    const goalSource = packet.context.goalProvenance.source;
+    const goalEvidence = {
+      ...packet.context.goalProvenance.evidence,
+      sourceId: goalSource.id,
+    };
+    const tutorialEvidence = tutorialProvenance.transcript.segments.map((segment) => ({
+      id: segment.id,
+      sourceId: tutorialProvenance.source.id,
+      locator: segment.locator,
+      description: segment.text,
+      confidence: segment.confidence,
+    }));
+    candidate['sources'] = [goalSource, tutorialProvenance.source];
+    candidate['evidence'] = [goalEvidence, ...tutorialEvidence];
+    for (const node of candidate['nodes'] as Array<Record<string, unknown>>) {
+      if (node['kind'] !== 'leaf') continue;
+      for (const [index, operation] of (
+        node['semanticOperations'] as Array<Record<string, unknown>>
+      ).entries()) {
+        operation['evidenceRefs'] = [tutorialEvidence[index % tutorialEvidence.length]!.id];
+      }
+    }
+
+    const parsedCandidate = procedureAuthoringCandidateTreeSchema.parse(candidate);
+    expect(validateProcedureAuthoringCandidate(packet, parsedCandidate)).toEqual(parsedCandidate);
+    await validatePublicJsonSchemaCases(packet.responseContract.schema, [
+      { value: candidate, accepted: true },
+    ]);
+
+    const missingTutorialRef = structuredClone(candidate);
+    const firstLeaf = (missingTutorialRef['nodes'] as Array<Record<string, unknown>>).find(
+      (node) => node['kind'] === 'leaf',
+    );
+    if (firstLeaf === undefined) throw new Error('Expected tutorial candidate leaf');
+    (firstLeaf['semanticOperations'] as Array<Record<string, unknown>>)[0]!['evidenceRefs'] = [
+      goalEvidence.id,
+    ];
+    expect(() => validateProcedureAuthoringCandidate(packet, missingTutorialRef)).toThrow(
+      'tutorialEvidenceRefs',
+    );
+    await validatePublicJsonSchemaCases(packet.responseContract.schema, [
+      { value: missingTutorialRef, accepted: false },
+    ]);
+
+    const retimedEvidence = structuredClone(candidate);
+    const retimed = (retimedEvidence['evidence'] as Array<Record<string, unknown>>).find(
+      (item) => item['id'] === tutorialEvidence[0]!.id,
+    );
+    if (retimed === undefined) throw new Error('Expected tutorial evidence');
+    retimed['locator'] = { kind: 'video_segment', startMs: 9_000, endMs: 24_000 };
+    expect(() => validateProcedureAuthoringCandidate(packet, retimedEvidence)).toThrow(
+      'tutorialEvidence',
+    );
+
+    const inventedEvidence = structuredClone(candidate);
+    (inventedEvidence['evidence'] as Array<Record<string, unknown>>).push({
+      id: 'evidence.invented.video.segment',
+      sourceId: tutorialProvenance.source.id,
+      locator: { kind: 'video_segment', startMs: 51_000, endMs: 52_000 },
+      description: 'An unsupported inferred step.',
+      confidence: 0.5,
+    });
+    expect(() => validateProcedureAuthoringCandidate(packet, inventedEvidence)).toThrow(
+      'tutorialEvidence',
+    );
   });
 
   it('rejects mismatched ActionCatalog and InteractionCatalog identities', () => {

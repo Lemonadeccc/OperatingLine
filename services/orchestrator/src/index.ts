@@ -158,6 +158,7 @@ import {
 } from './procedure-replay.js';
 import {
   buildProcedureAuthoringPromptPacket,
+  procedureAuthoringTutorialInputFromPacket,
   validateProcedureAuthoringCandidate,
   validateProcedureAuthoringPromptPacketIntegrity,
 } from './procedure-authoring-prompt.js';
@@ -578,6 +579,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       request: ReturnType<typeof procedureAuthoringValidationRequestSchema.parse>,
     ) => {
       const packet = validateProcedureAuthoringPromptPacketIntegrity(request.packet);
+      const tutorial = procedureAuthoringTutorialInputFromPacket(packet);
       const expectedPacket = getProcedureAuthoringPrompt({
         targetAdapterId: packet.context.catalogBinding.adapterId,
         actionCatalogVersion: packet.context.catalogBinding.actionCatalog.catalogVersion,
@@ -588,6 +590,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ...(packet.context.goalProvenance.source.locale === undefined
           ? {}
           : { locale: packet.context.goalProvenance.source.locale }),
+        ...(tutorial === undefined ? {} : { tutorial }),
       });
       if (packet.integrity.contentSha256 !== expectedPacket.integrity.contentSha256) {
         throw new Error(
@@ -1744,7 +1747,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.prompt.get',
         {
           description:
-            'Build a deterministic, provider-neutral authoring packet for one natural-language goal. It pins exact normalized ActionCatalog and InteractionCatalog snapshots, requires a candidate-only ProcedureTree with unavailable interaction tracks, and does not call a model, store a tree, create a Proposal, or execute host work.',
+            'Build a deterministic, provider-neutral authoring packet for one natural-language goal and, optionally, a rights-declared HTTPS tutorial with ordered user-supplied transcript segments. It pins exact catalogs and provenance, requires a candidate-only ProcedureTree with unavailable interaction tracks, and does not download or transcribe video, call a model, store a tree, create a Proposal, or execute host work.',
           inputSchema: deferMcpInputValidation(procedureAuthoringPromptRequestSchema),
           outputSchema: procedureAuthoringPromptPacketSchema,
         },
@@ -1821,7 +1824,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.authoring.generate',
         {
           description:
-            'Explicitly invoke one configured Procedure authoring provider with the exact catalog-bound packet. This may transmit task data or incur provider cost according to the selected provider disclosure. The returned candidate is immediately validated and compiled, but is not stored, proposed, accepted, or executed.',
+            'Explicitly invoke one configured Procedure authoring provider with the exact catalog- and provenance-bound packet, including supplied tutorial transcript segments when present. This may transmit task data or incur provider cost according to the selected provider disclosure. The returned candidate is immediately validated and compiled, but is not stored, proposed, accepted, or executed.',
           inputSchema: procedureAuthoringGenerateRequestSchema,
           outputSchema: procedureAuthoringGenerationResultSchema,
         },
@@ -4067,6 +4070,7 @@ export {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,
   procedureAuthoringPromptPacketContent,
+  procedureAuthoringTutorialInputFromPacket,
   validateProcedureAuthoringCandidate,
   validateProcedureAuthoringPromptPacketIntegrity,
 } from './procedure-authoring-prompt.js';

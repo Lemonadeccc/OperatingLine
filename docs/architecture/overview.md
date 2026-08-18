@@ -34,6 +34,7 @@ Immutable Procedure Library
 
 ProcedureAuthoringPromptPacket
   ├─ natural-language goal + namespaced source/evidence
+  ├─ optional 1.1 rights-declared video + user-supplied transcript evidence
   ├─ normalized exact ActionCatalog + InteractionCatalog binding
   ├─ candidate-only response; all interaction tracks unavailable
   ├─ SHA-256 packet binding → authoring validate → structural compile
@@ -310,11 +311,14 @@ JSON Schema、coverage 要求和相同工作流规则作为确定性协议对象
 供应商密钥，也不依赖从 2026-07-28 起已弃用的 MCP Sampling；只有独立 opt-in composition root 会把
 显式配置的 provider 注入同一核心 runtime。
 
-自然语言 Procedure 编写使用独立的 `ProcedureAuthoringPromptPacket 1.0.0`。MCP
-`operatingline.procedure.prompt.get` 与 HTTP `POST /api/v1/procedure/prompt` 把 goal、固定来源证据、
-tree identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema
-放进同一 packet。当前 MCP 客户端的宿主模型消费该 packet，可用 `operatingline.procedure.search` 获取精确
-grounding 候选，再生成层级、语义 operation 和 Action 参数。
+Procedure 编写使用独立的 `ProcedureAuthoringPromptPacket`：普通自然语言目标保持 `1.0.0`；可选的
+`1.1.0` 教程模式还绑定权利状态明确的 HTTPS 视频，以及调用方提供的有序非重叠字幕区间、原文和置信度。
+MCP `operatingline.procedure.prompt.get` 与 HTTP `POST /api/v1/procedure/prompt` 把 goal、固定来源证据、tree
+identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema 放进
+同一 packet。教程模式要求每个 semantic operation 至少引用一个给定视频 evidence，且拒绝缺失、改时、
+改文或对同一视频 source 添加新证据。Runtime 不下载或转录视频；层级与 Action 仍是待审 candidate。当前
+MCP 客户端的宿主模型消费该 packet，可用 `operatingline.procedure.search` 获取精确 grounding 候选，再生成
+层级、语义 operation 和 Action 参数。
 所有生成 leaf 仍为 candidate，菜单、快捷键和 MCP 轨迹必须为 unavailable；模型不能自行把目录配方或
 检索结果物化为 available。实际 authoring 候选必须连同原 packet 提交给
 `operatingline.procedure.authoring.validate`；服务端重算 canonical SHA-256、按精确版本从 registry 重建 packet、
@@ -328,9 +332,11 @@ authoring 验证。Packet 不再复制 rendered prompt，并以 256 KiB canonica
 candidate Schema 和 packet identity，再执行同一 installed-catalog validation/compile；持久化的
 requested/completed/failed evidence 支持重启后幂等恢复。成功结果明确为 `modelCalled: true`，但 tree 仍不
 自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
-既有 initial-plan/local-replan Eval。当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。
-完整边界见 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md) 与
-[ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md)。
+既有 initial-plan/local-replan Eval。当前仍没有自动视频获取/转录/画面识别、向量/语义 RAG、流式
+Procedure 对话、可视化编辑器或训练导出。完整边界见
+[ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
+[ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
+[ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
@@ -519,8 +525,8 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
 [ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
-shortcut/MCP recipe、真实
-Blender 轨迹回放、语义 RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
+shortcut/MCP recipe、真实 Blender 轨迹回放、语义 RAG、自动教学视频获取/转录/画面识别、可视化编辑器和
+训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

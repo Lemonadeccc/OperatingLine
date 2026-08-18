@@ -43,6 +43,39 @@ const request = {
   locale: 'zh-CN',
 } as const;
 
+const tutorialRequest = {
+  ...request,
+  requestId: 'ac86838b-ff7d-4285-ae80-aed076048ca1',
+  treeId: 'snowman.eye.left.tutorial.procedure',
+  revision: 2,
+  tutorial: {
+    video: {
+      uri: 'https://www.youtube.com/watch?v=operatingline-eye',
+      title: 'Create and position a Blender eye',
+      durationMs: 60_000,
+      rightsStatus: 'permission_granted',
+    },
+    transcript: {
+      origin: 'user_supplied',
+      locale: 'en',
+      segments: [
+        {
+          startMs: 5_000,
+          endMs: 20_000,
+          text: 'Add a UV sphere and set its size.',
+          confidence: 0.98,
+        },
+        {
+          startMs: 20_000,
+          endMs: 35_000,
+          text: 'Move, scale, and rename the eye.',
+          confidence: 0.95,
+        },
+      ],
+    },
+  },
+} as const;
+
 function buildPacket(): ProcedureAuthoringPromptPacket {
   return buildProcedureAuthoringPromptPacket(
     {
@@ -74,6 +107,21 @@ function candidate(packet = buildPacket()): ProcedureAuthoringCandidateTree {
   const evidence = { ...packet.context.goalProvenance.evidence, sourceId: source.id };
   tree['sources'] = [...(tree['sources'] as unknown[]), source];
   tree['evidence'] = [...(tree['evidence'] as unknown[]), evidence];
+  const tutorial = packet.context.tutorialProvenance;
+  const tutorialEvidence =
+    tutorial === undefined
+      ? []
+      : tutorial.transcript.segments.map((segment) => ({
+          id: segment.id,
+          sourceId: tutorial.source.id,
+          locator: segment.locator,
+          description: segment.text,
+          confidence: segment.confidence,
+        }));
+  if (tutorial !== undefined) {
+    tree['sources'] = [...(tree['sources'] as unknown[]), tutorial.source];
+    tree['evidence'] = [...(tree['evidence'] as unknown[]), ...tutorialEvidence];
+  }
   for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
     if (node['kind'] !== 'leaf') continue;
     const leafId = String(node['id']);
@@ -104,11 +152,20 @@ function candidate(packet = buildPacket()): ProcedureAuthoringCandidateTree {
         modality: 'mcp',
       },
     ];
+    for (const [index, operation] of (
+      node['semanticOperations'] as Array<Record<string, unknown>>
+    ).entries()) {
+      if (tutorialEvidence.length === 0) continue;
+      operation['evidenceRefs'] = [
+        ...(operation['evidenceRefs'] as string[]),
+        tutorialEvidence[index % tutorialEvidence.length]!.id,
+      ];
+    }
   }
   return procedureAuthoringCandidateTreeSchema.parse(tree);
 }
 
-function provider(output: () => unknown): PlannerProvider {
+function provider(output: (packet: ProcedureAuthoringPromptPacket) => unknown): PlannerProvider {
   const descriptor = plannerProviderDescriptorSchema.parse({
     contractVersion: plannerProviderContractVersion,
     id: request.providerId,
@@ -156,7 +213,7 @@ function provider(output: () => unknown): PlannerProvider {
       expect(renderedPrompt).toBe(
         Buffer.from(canonicalizeProtocolJsonValue(packet)).toString('utf8'),
       );
-      return output();
+      return output(packet);
     }),
   };
 }
@@ -305,6 +362,58 @@ describe('Procedure authoring provider generation', () => {
       'procedure.authoring.provider.generation.requested',
       'procedure.authoring.provider.generation.failed',
     ]);
+    await coordinator.close();
+  });
+
+  it('carries exact tutorial transcript provenance through explicit Provider generation', async () => {
+    const events: ExecutionEventInput[] = [];
+    const selectedProvider = provider((packet) => candidate(packet));
+    const coordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([selectedProvider]),
+      existingEvents: [],
+      buildPacket: (promptRequest) =>
+        buildProcedureAuthoringPromptPacket(
+          promptRequest,
+          blenderActionCatalog,
+          blenderInteractionCatalog,
+        ),
+      validateCandidate,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const result = await coordinator.generate(tutorialRequest);
+    expect(result.packet.formatVersion).toBe('1.1.0');
+    expect(result.packet.context).toMatchObject({
+      requestedTreeId: tutorialRequest.treeId,
+      recommendedRevision: tutorialRequest.revision,
+      tutorialProvenance: {
+        source: {
+          uri: tutorialRequest.tutorial.video.uri,
+          rightsStatus: 'permission_granted',
+        },
+        transcript: {
+          origin: 'user_supplied',
+        },
+      },
+      constraints: { allSemanticOperationsTutorialEvidenceBound: true },
+    });
+    expect(result.packet.context.tutorialProvenance?.transcript.segments).toHaveLength(2);
+    expect(result.packet.context.tutorialProvenance?.transcript.segments[0]).toMatchObject({
+      locator: { kind: 'video_segment', startMs: 5_000, endMs: 20_000 },
+      text: tutorialRequest.tutorial.transcript.segments[0].text,
+    });
+    expect(events.at(-1)?.payload).toMatchObject({
+      request: { tutorial: tutorialRequest.tutorial },
+      result: {
+        packet: {
+          context: {
+            tutorialProvenance: {
+              source: { uri: tutorialRequest.tutorial.video.uri },
+            },
+          },
+        },
+      },
+    });
     await coordinator.close();
   });
 

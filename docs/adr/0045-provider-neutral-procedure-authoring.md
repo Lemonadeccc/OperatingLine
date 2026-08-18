@@ -55,3 +55,6 @@ ProcedureTree 可视化编辑器、确定性交互 grounding/materialization、�
 Packet 当前仍是自包含目录快照，虽已消除 rendered prompt 副本并设置硬上限，体积仍会随 Blender 覆盖面
 线性增长。后续 coordinator 应以目录 version + digest 锁定快照，并只把确定性选择的 action/recipe 子集
 物化进模型上下文，同时保留显式获取完整目录的接口；该变更需要新的 packet 版本，不能静默改变 v1 digest。
+
+后续 [ADR 0075](0075-evidence-bound-tutorial-transcript-authoring.md) 保留本决策的目标专用 `1.0.0`，并用
+`1.1.0` 单独增加权利状态明确、调用方提供字幕分段的教程 provenance；它仍不下载或自动识别视频。

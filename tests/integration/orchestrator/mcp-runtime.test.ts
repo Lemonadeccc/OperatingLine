@@ -112,6 +112,21 @@ function generatedProcedureCandidate(
   const evidence = { ...packet.context.goalProvenance.evidence, sourceId: source.id };
   tree['sources'] = [...(tree['sources'] as unknown[]), source];
   tree['evidence'] = [...(tree['evidence'] as unknown[]), evidence];
+  const tutorial = packet.context.tutorialProvenance;
+  const tutorialEvidence =
+    tutorial === undefined
+      ? []
+      : tutorial.transcript.segments.map((segment) => ({
+          id: segment.id,
+          sourceId: tutorial.source.id,
+          locator: segment.locator,
+          description: segment.text,
+          confidence: segment.confidence,
+        }));
+  if (tutorial !== undefined) {
+    tree['sources'] = [...(tree['sources'] as unknown[]), tutorial.source];
+    tree['evidence'] = [...(tree['evidence'] as unknown[]), ...tutorialEvidence];
+  }
   for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
     if (node['kind'] !== 'leaf') continue;
     const leafId = String(node['id']);
@@ -128,6 +143,15 @@ function generatedProcedureCandidate(
           reason: 'Provider candidates cannot assert interaction grounding.',
           modality,
         },
+      ];
+    }
+    for (const [index, operation] of (
+      node['semanticOperations'] as Array<Record<string, unknown>>
+    ).entries()) {
+      if (tutorialEvidence.length === 0) continue;
+      operation['evidenceRefs'] = [
+        ...(operation['evidenceRefs'] as string[]),
+        tutorialEvidence[index % tutorialEvidence.length]!.id,
       ];
     }
   }
@@ -709,6 +733,32 @@ describe('OperatingLine runtime', () => {
         treeId: 'snowman.eye.left.procedure',
         revision: 1,
         locale: 'zh-CN',
+        tutorial: {
+          video: {
+            uri: 'https://www.youtube.com/watch?v=operatingline-eye',
+            title: 'Create and position a Blender eye',
+            durationMs: 60_000,
+            rightsStatus: 'permission_granted',
+          },
+          transcript: {
+            origin: 'user_supplied',
+            locale: 'en',
+            segments: [
+              {
+                startMs: 5_000,
+                endMs: 20_000,
+                text: 'Add a UV sphere and set its size.',
+                confidence: 0.98,
+              },
+              {
+                startMs: 20_000,
+                endMs: 35_000,
+                text: 'Move, scale, and rename the eye.',
+                confidence: 0.95,
+              },
+            ],
+          },
+        },
       };
       const headers = {
         authorization: `Bearer ${accessToken}`,
@@ -742,9 +792,20 @@ describe('OperatingLine runtime', () => {
           requestId: generationRequest.requestId,
           provider: { id: provider.descriptor.id, version: provider.descriptor.version },
           packet: {
+            formatVersion: '1.1.0',
             context: {
               requestedTreeId: generationRequest.treeId,
               recommendedRevision: generationRequest.revision,
+              tutorialProvenance: {
+                source: {
+                  uri: generationRequest.tutorial.video.uri,
+                  rightsStatus: 'permission_granted',
+                },
+                transcript: {
+                  origin: 'user_supplied',
+                },
+              },
+              constraints: { allSemanticOperationsTutorialEvidenceBound: true },
             },
           },
           tree: { id: generationRequest.treeId, revision: generationRequest.revision },
@@ -762,6 +823,17 @@ describe('OperatingLine runtime', () => {
             proposalCreated: false,
             hostExecutionStarted: false,
           },
+        });
+        const resultPacket = result['packet'] as {
+          context: {
+            tutorialProvenance: {
+              transcript: { segments: Array<Record<string, unknown>> };
+            };
+          };
+        };
+        expect(resultPacket.context.tutorialProvenance.transcript.segments).toHaveLength(2);
+        expect(resultPacket.context.tutorialProvenance.transcript.segments[0]).toMatchObject({
+          locator: { kind: 'video_segment', startMs: 5_000, endMs: 20_000 },
         });
         expect(generated.result?.structuredContent).toEqual(result);
 

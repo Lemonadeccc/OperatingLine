@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { canonicalizeProtocolJsonValue } from './canonical-json-value.js';
 import { evalContentSha256Schema } from './eval-common.js';
 import {
   plannerGenerationErrorCodeSchema,
@@ -9,7 +10,6 @@ import {
 } from './provider.js';
 import {
   procedureAuthoringCandidateTreeSchema,
-  procedureAuthoringPromptFormatVersion,
   procedureAuthoringPromptFormatVersionSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
@@ -63,10 +63,7 @@ export const procedureAuthoringGenerationResultSchema = z
         message: 'Procedure generation validation must bind the exact returned packet',
       });
     }
-    if (
-      result.packet.formatVersion !== result.validation.formatVersion ||
-      result.packet.formatVersion !== procedureAuthoringPromptFormatVersion
-    ) {
+    if (result.packet.formatVersion !== result.validation.formatVersion) {
       context.addIssue({
         code: 'custom',
         path: ['validation', 'formatVersion'],
@@ -157,6 +154,41 @@ export type ProcedureAuthoringGenerationRequestedEvent = z.infer<
   typeof procedureAuthoringGenerationRequestedEventSchema
 >;
 
+function tutorialRequestMatchesPacket(
+  request: z.infer<typeof procedureAuthoringGenerateRequestSchema>,
+  packet: z.infer<typeof procedureAuthoringPromptPacketSchema>,
+): boolean {
+  const tutorial = packet.context.tutorialProvenance;
+  if (request.tutorial === undefined || tutorial === undefined) {
+    return request.tutorial === undefined && tutorial === undefined;
+  }
+  const normalizedPacketTutorial = {
+    video: {
+      uri: tutorial.source.uri,
+      title: tutorial.source.title,
+      durationMs: tutorial.source.durationMs,
+      rightsStatus: tutorial.source.rightsStatus,
+      ...(tutorial.source.license === undefined ? {} : { license: tutorial.source.license }),
+    },
+    transcript: {
+      origin: tutorial.transcript.origin,
+      ...(tutorial.transcript.locale === undefined ? {} : { locale: tutorial.transcript.locale }),
+      segments: tutorial.transcript.segments.map((segment) => ({
+        startMs: segment.locator.startMs,
+        endMs: segment.locator.endMs,
+        text: segment.text,
+        confidence: segment.confidence,
+      })),
+    },
+  };
+  const packetBytes = canonicalizeProtocolJsonValue(normalizedPacketTutorial);
+  const requestBytes = canonicalizeProtocolJsonValue(request.tutorial);
+  return (
+    packetBytes.byteLength === requestBytes.byteLength &&
+    packetBytes.every((byte, index) => byte === requestBytes[index])
+  );
+}
+
 export const procedureAuthoringGenerationCompletedEventSchema = z
   .strictObject({
     request: procedureAuthoringGenerateRequestSchema,
@@ -173,6 +205,7 @@ export const procedureAuthoringGenerationCompletedEventSchema = z
       packetContext.recommendedRevision !== event.request.revision ||
       packetContext.catalogBinding.adapterId !== event.request.targetAdapterId ||
       packetContext.goalProvenance.source.text !== event.request.goal ||
+      !tutorialRequestMatchesPacket(event.request, event.result.packet) ||
       (event.request.actionCatalogVersion !== undefined &&
         packetContext.catalogBinding.actionCatalog.catalogVersion !==
           event.request.actionCatalogVersion) ||

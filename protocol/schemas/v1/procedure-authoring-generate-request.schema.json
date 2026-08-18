@@ -37,6 +37,196 @@
       "maxLength": 64,
       "pattern": "^\\S+$"
     },
+    "tutorial": {
+      "type": "object",
+      "properties": {
+        "video": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^https:\\/\\/[^\\s]+$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "pattern": "\\S"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "rightsStatus": {
+                  "type": "string",
+                  "const": "permission_granted"
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "uri",
+                "title",
+                "durationMs",
+                "rightsStatus"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^https:\\/\\/[^\\s]+$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "pattern": "\\S"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "rightsStatus": {
+                  "type": "string",
+                  "const": "license_verified"
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "uri",
+                "title",
+                "durationMs",
+                "rightsStatus",
+                "license"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "pattern": "^https:\\/\\/[^\\s]+$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "pattern": "\\S"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "rightsStatus": {
+                  "type": "string",
+                  "const": "public_domain"
+                },
+                "license": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "uri",
+                "title",
+                "durationMs",
+                "rightsStatus"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "transcript": {
+          "type": "object",
+          "properties": {
+            "origin": {
+              "type": "string",
+              "const": "user_supplied"
+            },
+            "locale": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^\\S+$"
+            },
+            "segments": {
+              "minItems": 1,
+              "maxItems": 2000,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "startMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "pattern": "\\S"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "startMs",
+                  "endMs",
+                  "text",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "origin",
+            "segments"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "video",
+        "transcript"
+      ],
+      "additionalProperties": false
+    },
     "requestId": {
       "type": "string",
       "format": "uuid",

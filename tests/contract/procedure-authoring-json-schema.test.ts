@@ -198,6 +198,62 @@ const packet = {
   },
 } as const;
 
+const tutorialInput = {
+  video: {
+    uri: 'https://www.youtube.com/watch?v=example-tutorial',
+    title: 'Example tutorial',
+    durationMs: 60_000,
+    rightsStatus: 'license_verified',
+    license: 'CC-BY-4.0',
+  },
+  transcript: {
+    origin: 'user_supplied',
+    locale: 'en',
+    segments: [
+      {
+        startMs: 1_000,
+        endMs: 5_000,
+        text: 'Create the example resource.',
+        confidence: 0.95,
+      },
+    ],
+  },
+} as const;
+
+const tutorialContext = {
+  ...packet.context,
+  tutorialProvenance: {
+    source: {
+      id: 'source.example.create.procedure.revision.1.tutorial',
+      kind: 'tutorial_video',
+      ...tutorialInput.video,
+    },
+    transcript: {
+      origin: tutorialInput.transcript.origin,
+      locale: tutorialInput.transcript.locale,
+      segments: [
+        {
+          id: 'evidence.example.create.procedure.revision.1.tutorial.segment.0001',
+          order: 1,
+          locator: { kind: 'video_segment', startMs: 1_000, endMs: 5_000 },
+          text: tutorialInput.transcript.segments[0].text,
+          confidence: tutorialInput.transcript.segments[0].confidence,
+        },
+      ],
+    },
+  },
+  constraints: {
+    ...packet.context.constraints,
+    allSemanticOperationsTutorialEvidenceBound: true,
+  },
+} as const;
+
+const tutorialPacket = {
+  ...packet,
+  formatVersion: '1.1.0',
+  context: tutorialContext,
+} as const;
+
 describe('public procedure authoring JSON Schemas', () => {
   it('matches strict request and packet literals in Zod and public JSON Schema', async () => {
     const requestCases = [
@@ -209,6 +265,47 @@ describe('public procedure authoring JSON Schemas', () => {
           revision: 1,
         },
         accepted: true,
+      },
+      {
+        value: {
+          targetAdapterId: 'example',
+          goal: 'Create the example resource from the tutorial.',
+          treeId: 'example.create.tutorial.procedure',
+          revision: 1,
+          tutorial: tutorialInput,
+        },
+        accepted: true,
+      },
+      {
+        value: {
+          targetAdapterId: 'example',
+          goal: 'Create the example resource from the tutorial.',
+          treeId: 'example.create.tutorial.procedure',
+          revision: 1,
+          tutorial: {
+            ...tutorialInput,
+            video: {
+              uri: tutorialInput.video.uri,
+              title: tutorialInput.video.title,
+              durationMs: tutorialInput.video.durationMs,
+              rightsStatus: 'license_verified',
+            },
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          targetAdapterId: 'example',
+          goal: 'Create the example resource from the tutorial.',
+          treeId: 'example.create.tutorial.procedure',
+          revision: 1,
+          tutorial: {
+            ...tutorialInput,
+            video: { ...tutorialInput.video, uri: 'http://example.com/tutorial' },
+          },
+        },
+        accepted: false,
       },
       {
         value: {
@@ -257,9 +354,41 @@ describe('public procedure authoring JSON Schemas', () => {
       publicSchema('procedure-authoring-prompt-request.schema.json'),
       requestCases,
     );
+    expect(
+      procedureAuthoringPromptRequestSchema.safeParse({
+        targetAdapterId: 'example',
+        goal: 'Create the example resource from the tutorial.',
+        treeId: 'example.create.tutorial.procedure',
+        revision: 1,
+        tutorial: {
+          ...tutorialInput,
+          transcript: {
+            ...tutorialInput.transcript,
+            segments: [
+              tutorialInput.transcript.segments[0],
+              {
+                startMs: 4_000,
+                endMs: 6_000,
+                text: 'This overlaps the previous segment.',
+                confidence: 0.9,
+              },
+            ],
+          },
+        },
+      }).success,
+    ).toBe(false);
 
     const packetCases = [
       { value: packet, accepted: true },
+      { value: tutorialPacket, accepted: true },
+      {
+        value: { ...tutorialPacket, formatVersion: '1.0.0' },
+        accepted: false,
+      },
+      {
+        value: { ...packet, formatVersion: '1.1.0' },
+        accepted: false,
+      },
       {
         value: {
           ...packet,
@@ -345,6 +474,14 @@ describe('public procedure authoring JSON Schemas', () => {
     const context = packet.context;
     const cases = [
       { value: context, accepted: true },
+      { value: tutorialContext, accepted: true },
+      {
+        value: {
+          ...tutorialContext,
+          constraints: packet.context.constraints,
+        },
+        accepted: false,
+      },
       {
         value: { ...context, goal: 'A duplicated goal.' },
         accepted: false,

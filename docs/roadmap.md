@@ -274,7 +274,13 @@
 
 - [ ] 教学来源到可编辑执行树的完整闭环：把 ProcedureTree 基础推进为真实的知识采集、检索、可视化
       调整与 Blender 回放系统，而不是把 YouTube 下载或模型猜测直接当成训练真值。
-  - [ ] 教学视频导入、字幕/画面/按键分段、大步骤与小步骤抽取，以及时间区间、证据帧和置信度绑定。
+  - [x] 首个证据绑定字幕切片：现有 authoring MCP/HTTP/Provider 请求可附带权利状态明确的 HTTPS 教学
+        视频和 `user_supplied` 字幕分段；Runtime 校验时长内有序非重叠区间，把原文、时间与置信度规范化
+        为 packet-bound source/evidence，并要求候选的每个 semantic operation 至少引用一段。普通目标继续
+        使用 packet `1.0.0`，教程模式使用 `1.1.0`；两者都不自动保存、提案或执行。见
+        [ADR 0075](adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
+  - [ ] 经授权的 YouTube 获取、字幕抓取/语音转录、画面与按键识别、自动分段、证据帧，以及大步骤/小
+        步骤质量校准；当前 Runtime 不下载或转录视频，也不把调用方权利声明当成 released 训练许可。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

@@ -112,6 +112,7 @@ function requestToPrompt(
     treeId: request.treeId,
     revision: request.revision,
     ...(request.locale === undefined ? {} : { locale: request.locale }),
+    ...(request.tutorial === undefined ? {} : { tutorial: structuredClone(request.tutorial) }),
   };
 }
 

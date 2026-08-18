@@ -46,7 +46,8 @@ pnpm dev:openai
 1. 调用 `operatingline.procedure.authoring.providers.list` 检查相同 Provider 披露；可先调用不触发模型的
    `operatingline.procedure.prompt.get` 查看精确 packet。
 2. 用新 UUID `requestId`、Provider ID、tree ID/revision、目标与可选目录版本调用
-   `operatingline.procedure.authoring.generate`。
+   `operatingline.procedure.authoring.generate`。也可附带权利状态明确的 HTTPS 教程视频和已由调用方提供的
+   有序字幕分段；这会生成 packet `1.1.0`，Runtime 不下载或转录视频。
 3. Runtime 将完整 packet 规范编码后发送，返回 candidate 立即经过 identity、installed catalog 与 compile
    门。成功也不自动 store、materialize、propose 或执行；用户审阅后必须分别显式调用后续入口。
 
@@ -86,5 +87,5 @@ Token。
 不产生语义分数，不自动选择 provider，也不证明 OpenAI 已正确理解任意目标或修订消息。Proposal 审批和
 `Start`/`Next` 场景执行边界保持不变。完整决策见
 [ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。
-Procedure authoring 边界见
-[ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md)。
+Procedure authoring 边界见 [ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md) 与
+[ADR 0075](../../docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)。

@@ -29,7 +29,10 @@
       "properties": {
         "formatVersion": {
           "type": "string",
-          "const": "1.0.0"
+          "enum": [
+            "1.0.0",
+            "1.1.0"
+          ]
         },
         "context": {
           "type": "object",
@@ -118,6 +121,251 @@
               "required": [
                 "source",
                 "evidence"
+              ],
+              "additionalProperties": false
+            },
+            "tutorialProvenance": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "tutorial_video"
+                        },
+                        "uri": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^https:\\/\\/[^\\s]+$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500,
+                          "pattern": "\\S"
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "rightsStatus": {
+                          "type": "string",
+                          "const": "permission_granted"
+                        },
+                        "license": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "uri",
+                        "title",
+                        "durationMs",
+                        "rightsStatus"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "tutorial_video"
+                        },
+                        "uri": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^https:\\/\\/[^\\s]+$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500,
+                          "pattern": "\\S"
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "rightsStatus": {
+                          "type": "string",
+                          "const": "license_verified"
+                        },
+                        "license": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "uri",
+                        "title",
+                        "durationMs",
+                        "rightsStatus",
+                        "license"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "tutorial_video"
+                        },
+                        "uri": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048,
+                          "pattern": "^https:\\/\\/[^\\s]+$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500,
+                          "pattern": "\\S"
+                        },
+                        "durationMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "rightsStatus": {
+                          "type": "string",
+                          "const": "public_domain"
+                        },
+                        "license": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "uri",
+                        "title",
+                        "durationMs",
+                        "rightsStatus"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "transcript": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "const": "user_supplied"
+                    },
+                    "locale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^\\S+$"
+                    },
+                    "segments": {
+                      "minItems": 1,
+                      "maxItems": 2000,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "order": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "locator": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "video_segment"
+                              },
+                              "startMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "endMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "startMs",
+                              "endMs"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000,
+                            "pattern": "\\S"
+                          },
+                          "confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "order",
+                          "locator",
+                          "text",
+                          "confidence"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "origin",
+                    "segments"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "source",
+                "transcript"
               ],
               "additionalProperties": false
             },
@@ -1870,6 +2118,10 @@
                 "persistenceRequiresExplicitStore": {
                   "type": "boolean",
                   "const": true
+                },
+                "allSemanticOperationsTutorialEvidenceBound": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "required": [
@@ -1889,7 +2141,36 @@
             "catalogBinding",
             "constraints"
           ],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "tutorialProvenance"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "constraints": {
+                    "required": [
+                      "allSemanticOperationsTutorialEvidenceBound"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "constraints": {
+                    "not": {
+                      "required": [
+                        "allSemanticOperationsTutorialEvidenceBound"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
         },
         "retrieval": {
           "type": "object",
@@ -2039,7 +2320,41 @@
         "sideEffects",
         "integrity"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "formatVersion": {
+                "const": "1.1.0"
+              }
+            },
+            "required": [
+              "formatVersion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "context": {
+                "required": [
+                  "tutorialProvenance"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "context": {
+                "not": {
+                  "required": [
+                    "tutorialProvenance"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "tree": {
       "type": "object",
