@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "trackListRequestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "videoId": {
+      "type": "string",
+      "minLength": 11,
+      "maxLength": 11,
+      "pattern": "^[A-Za-z0-9_-]{11}$"
+    },
+    "captionTrackId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^\\S+$"
+    },
+    "confirmation": {
+      "type": "object",
+      "properties": {
+        "explicitlyConfirmedByUser": {
+          "type": "boolean",
+          "const": true
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "reasonCode": {
+                  "type": "string",
+                  "enum": [
+                    "recommended_candidate",
+                    "language_preference",
+                    "caption_quality_review",
+                    "accessibility_requirement",
+                    "workflow_requirement"
+                  ]
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "reasonCode"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "reasonCode": {
+                  "type": "string",
+                  "const": "other"
+                },
+                "note": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "reasonCode",
+                "note"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "explicitlyConfirmedByUser",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "recommendationPreferences": {
+      "type": "object",
+      "properties": {
+        "preferredLanguages": {
+          "minItems": 1,
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^\\S+$"
+          }
+        },
+        "languageMatching": {
+          "type": "string",
+          "enum": [
+            "exact_only",
+            "primary_subtag_fallback"
+          ]
+        },
+        "allowUnlistedLanguages": {
+          "type": "boolean"
+        },
+        "trackKindPriority": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "ASR",
+              "forced",
+              "standard"
+            ]
+          }
+        },
+        "audioTrackTypePriority": {
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "commentary",
+              "descriptive",
+              "primary",
+              "unknown"
+            ]
+          }
+        },
+        "allowDraftTracks": {
+          "type": "boolean"
+        },
+        "preferClosedCaptions": {
+          "type": "boolean"
+        },
+        "preferManualSync": {
+          "type": "boolean"
+        },
+        "explicitSelectionRequired": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "preferredLanguages",
+        "languageMatching",
+        "allowUnlistedLanguages",
+        "trackKindPriority",
+        "audioTrackTypePriority",
+        "allowDraftTracks",
+        "preferClosedCaptions",
+        "preferManualSync",
+        "explicitSelectionRequired"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "formatVersion",
+    "requestId",
+    "trackListRequestId",
+    "videoId",
+    "captionTrackId",
+    "confirmation"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-selection-request.json"
+}

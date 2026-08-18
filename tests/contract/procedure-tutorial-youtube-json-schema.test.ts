@@ -14,10 +14,13 @@ import {
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationRequestSchema,
   procedureTutorialYoutubeTrackRecommendationResultSchema,
+  procedureTutorialYoutubeTrackSelectionRequestSchema,
+  procedureTutorialYoutubeTrackSelectionResultSchema,
 } from '@operatingline/protocol';
 
 import { buildProcedureTutorialYoutubePromptPacket } from '../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
 import { recommendProcedureTutorialYoutubeCaptionTracks } from '../../services/orchestrator/src/procedure-tutorial-youtube-track-recommendation.js';
+import { buildProcedureTutorialYoutubeTrackSelection } from '../../services/orchestrator/src/procedure-tutorial-youtube-track-selection.js';
 import type { ProcedureTutorialYoutubeCaptionAcquisitionResult } from '../../services/orchestrator/src/youtube-caption-source.js';
 import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-support/public-json-schema-validator.js';
 
@@ -148,6 +151,25 @@ const trackRecommendationResult = recommendProcedureTutorialYoutubeCaptionTracks
   procedureTutorialYoutubeTrackListResultSchema.parse(trackListResult),
 );
 
+const trackSelectionRequest = {
+  formatVersion: '1.0.0',
+  requestId: '7ab52d8f-f169-42a7-8f7c-7309b77ee06a',
+  trackListRequestId: trackListRequest.requestId,
+  videoId: trackListRequest.youtube.videoId,
+  captionTrackId: 'caption-track-en',
+  confirmation: {
+    explicitlyConfirmedByUser: true,
+    reason: { reasonCode: 'recommended_candidate' },
+  },
+  recommendationPreferences: trackRecommendationRequest.preferences,
+} as const;
+
+const trackSelectionResult = buildProcedureTutorialYoutubeTrackSelection(
+  procedureTutorialYoutubeTrackSelectionRequestSchema.parse(trackSelectionRequest),
+  procedureTutorialYoutubeTrackListResultSchema.parse(trackListResult),
+  '2026-08-18T10:00:00Z',
+);
+
 describe('public authorized YouTube caption import JSON Schema', () => {
   it('publishes strict caption-track list request and metadata-only result contracts', async () => {
     const requestCases = [
@@ -257,6 +279,71 @@ describe('public authorized YouTube caption import JSON Schema', () => {
     );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-youtube-track-recommendation-result.schema.json'),
+      resultCases,
+    );
+  });
+
+  it('publishes strict explicit selection and locally persisted receipt contracts', async () => {
+    const requestCases = [
+      { value: trackSelectionRequest, accepted: true },
+      {
+        value: {
+          ...trackSelectionRequest,
+          confirmation: {
+            ...trackSelectionRequest.confirmation,
+            explicitlyConfirmedByUser: false,
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...trackSelectionRequest,
+          confirmation: {
+            explicitlyConfirmedByUser: true,
+            reason: { reasonCode: 'other' },
+          },
+        },
+        accepted: false,
+      },
+      { value: { ...trackSelectionRequest, oauthAccessToken: 'forbidden' }, accepted: false },
+    ] as const;
+    const resultCases = [
+      { value: trackSelectionResult, accepted: true },
+      {
+        value: {
+          ...trackSelectionResult,
+          sideEffects: {
+            ...trackSelectionResult.sideEffects,
+            captionTrackSelectionRecorded: false,
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...trackSelectionResult,
+          sideEffects: { ...trackSelectionResult.sideEffects, networkFetched: true },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of requestCases) {
+      expect(
+        procedureTutorialYoutubeTrackSelectionRequestSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    for (const contractCase of resultCases) {
+      expect(
+        procedureTutorialYoutubeTrackSelectionResultSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-selection-request.schema.json'),
+      requestCases,
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-selection-result.schema.json'),
       resultCases,
     );
   });

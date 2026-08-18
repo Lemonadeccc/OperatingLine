@@ -363,6 +363,14 @@ Runtime 不自动选择字幕轨。
 quota、不下载内容、不调用 Provider，也不写 recommendation evidence；输出固定为未选择状态，调用方仍须在
 后续 import 中明确提交一个精确 track ID。这样算法第一名不会被误当成人工标签或自动下载授权。
 
+用户确认后，MCP `operatingline.procedure.tutorial.youtube.tracks.select` 与 HTTP
+`POST /api/v1/procedure/tutorial/youtube/tracks/select` 可把一个精确 serving track 写成不可变选择收据。请求保存
+受限 reason code、可选的最长 1,000 字符备注，以及可选的完整推荐偏好；Runtime 重算推荐后记录用户采用还是
+覆盖第一候选及所选候选 rank。相同 requestId/输入可重启幂等恢复，不同输入冲突。该本地操作只写一条
+completed evidence，不联网、不增加 quota、不下载内容或调用 Provider；备注会进入本地 evidence ledger，
+调用前必须披露。当前 import 尚未把 selection requestId 作为强制前置门，只由调用工作流保证使用同一精确
+video/track identity。
+
 MCP `operatingline.procedure.tutorial.youtube.import` 与 HTTP
 `POST /api/v1/procedure/tutorial/youtube/import` 再要求调用方选择的 caption track ID、输出格式和权利声明。
 Coordinator 先持久化不含 token 和字幕
@@ -383,8 +391,9 @@ Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0076](../adr/0076-user-supplied-caption-document-import.md) 与
 [ADR 0077](../adr/0077-caption-document-provider-generation.md)、
 [ADR 0078](../adr/0078-authorized-youtube-caption-acquisition.md)、
-[ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md) 与
-[ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md)。
+[ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md)、
+[ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md) 与
+[ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

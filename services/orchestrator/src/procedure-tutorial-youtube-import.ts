@@ -22,6 +22,7 @@ import {
 
 import { plannerProviderRequestFingerprint } from './planner-provider-invocation.js';
 import { buildProcedureAuthoringPromptPacket } from './procedure-authoring-prompt.js';
+import { procedureTutorialYoutubeTrackSelectionEvidenceEventTypes } from './procedure-tutorial-youtube-track-selection.js';
 import { parseProcedureTutorialTranscriptImport } from './procedure-tutorial-transcript-import.js';
 import {
   ProcedureTutorialYoutubeSourceError,
@@ -42,6 +43,7 @@ export const procedureTutorialYoutubeTrackListEvidenceEventTypes = [
 export const procedureTutorialYoutubeEvidenceEventTypes = [
   ...procedureTutorialYoutubeImportEvidenceEventTypes,
   ...procedureTutorialYoutubeTrackListEvidenceEventTypes,
+  ...procedureTutorialYoutubeTrackSelectionEvidenceEventTypes,
 ] as const;
 
 export type ProcedureTutorialYoutubeRetryMode = 'same_request_id' | 'new_request_id' | 'never';

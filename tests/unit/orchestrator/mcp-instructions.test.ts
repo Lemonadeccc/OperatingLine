@@ -26,10 +26,19 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain(
       'operatingline.procedure.tutorial.youtube.tracks.recommend',
     );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.procedure.tutorial.youtube.tracks.select',
+    );
     expect(operatingLineMcpInstructions).toContain('documented 50-unit captions.list cost');
     expect(operatingLineMcpInstructions).toContain('neither listing nor recommendation selects');
     expect(operatingLineMcpInstructions).toContain(
       'without another network request, quota charge, caption download, or model call',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'whether it accepted or overrode the recomputed recommendation',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'reason note is retained in the local evidence ledger',
     );
     expect(operatingLineMcpInstructions).toContain('cannot fetch arbitrary public-video captions');
     expect(operatingLineMcpInstructions).toContain(

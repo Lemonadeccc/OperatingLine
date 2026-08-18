@@ -26,4 +26,8 @@ track id is unknown, call `operatingline.procedure.tutorial.youtube.tracks.list`
 network/quota approval. It spends the documented 50-unit `captions.list` cost and returns metadata
 only. `operatingline.procedure.tutorial.youtube.tracks.recommend` can then rank that completed list
 locally from explicit preferences without another network request, quota charge, download, or model
-call. The result never selects a track; the caller must still confirm an exact track id before import.
+call. The result never selects a track. After confirmation,
+`operatingline.procedure.tutorial.youtube.tracks.select` can persist the exact serving track, a
+bounded reason, and whether the user accepted or overrode the recomputed recommendation. Optional
+reason notes are retained in the local evidence ledger. Selection downloads nothing; the caller must
+still pass the same exact track id to import.

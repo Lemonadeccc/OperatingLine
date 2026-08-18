@@ -44,16 +44,17 @@ type，再依次比较语言匹配类别、语言偏好位置、track-kind 位�
   宿主。
 
 推荐本身不写入事件账本，因为它是对不可变 completed list 的无副作用确定性投影，不是人工选择标签。后续
-import 仍必须由调用方提交精确 caption track ID；该 import request 才记录实际选择与获取 provenance。
+[ADR 0081](0081-persisted-youtube-caption-track-selection.md) 使用独立显式入口记录实际选择与理由；import 仍由
+调用方提交精确 caption track ID。
 
 ## 结果
 
 用户可以先付出一次明确披露的枚举配额，再用自己的偏好获得稳定、可解释的候选顺序。Runtime 重启后可直接
 引用恢复的 track-list evidence 重新计算，不产生第二次网络请求或 quota 消耗。客户端必须展示推荐和排除
-原因，并在 import 前取得显式选择；未来 UI 可以记录选择理由，但不能把算法第一名静默转换为下载操作。
+原因，并在 import 前取得显式选择；ADR 0081 已提供选择理由收据，但不能把算法第一名静默转换为下载操作。
 
-仍需 OAuth 登录/refresh、选择确认 UI 与选择理由证据、视频媒体/ASR fallback、画面和按键识别、自动语义
-分段，以及把已选字幕获取与 Provider ProcedureTree 生成组合成逐阶段授权工作流。
+仍需 OAuth 登录/refresh、选择确认 UI、选择收据与 import 的强制绑定、视频媒体/ASR fallback、画面和按键
+识别、自动语义分段，以及把已选字幕获取与 Provider ProcedureTree 生成组合成逐阶段授权工作流。
 
 ## 参考
 

@@ -67,6 +67,8 @@ import {
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationRequestSchema,
   procedureTutorialYoutubeTrackRecommendationResultSchema,
+  procedureTutorialYoutubeTrackSelectionRequestSchema,
+  procedureTutorialYoutubeTrackSelectionResultSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
@@ -186,6 +188,12 @@ import {
   procedureTutorialYoutubeTrackRecommendationHttpStatus,
   recommendProcedureTutorialYoutubeCaptionTracks,
 } from './procedure-tutorial-youtube-track-recommendation.js';
+import {
+  createProcedureTutorialYoutubeTrackSelectionCoordinator,
+  procedureTutorialYoutubeTrackSelectionErrorResponse,
+  procedureTutorialYoutubeTrackSelectionHttpStatus,
+  type ProcedureTutorialYoutubeTrackSelectionCoordinator,
+} from './procedure-tutorial-youtube-track-selection.js';
 import {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
@@ -334,6 +342,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
   let procedureTutorialYoutubeImportCoordinator:
     ProcedureTutorialYoutubeImportCoordinator | undefined;
+  let procedureTutorialYoutubeTrackSelectionCoordinator:
+    ProcedureTutorialYoutubeTrackSelectionCoordinator | undefined;
   let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
@@ -1232,6 +1242,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       },
       appendEvent: (event) => database.appendEvent(event),
     });
+    procedureTutorialYoutubeTrackSelectionCoordinator =
+      createProcedureTutorialYoutubeTrackSelectionCoordinator({
+        existingEvents: existingProcedureTutorialYoutubeEvents,
+        completedTrackList: (requestId) =>
+          procedureTutorialYoutubeImportCoordinator!.completedTrackList(requestId),
+        appendEvent: (event) => database.appendEvent(event),
+      });
     const plannerProviderInvocationManager = createPlannerProviderInvocationManager({
       registry: plannerProviderRegistry,
       ...(options.plannerProviderTimeoutMs === undefined
@@ -2047,6 +2064,82 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                   type: 'text' as const,
                   text: JSON.stringify(
                     procedureTutorialYoutubeTrackRecommendationErrorResponse(
+                      error,
+                      parsedRequest.data.requestId,
+                    ),
+                  ),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.youtube.tracks.select',
+        {
+          description:
+            'Persist one explicit user-confirmed caption-track choice from a previously completed authorized YouTube track list. The request records a bounded reason and may include the exact recommendation preferences so the runtime can attest whether the user accepted or overrode the recomputed first candidate. Reason notes are retained in the local evidence ledger and may enter evidence exports. This performs no network request, spends no additional API quota, downloads no content, calls no model, and does not import captions, store a Procedure, create a Proposal, or execute the host.',
+          inputSchema: deferMcpInputValidation(procedureTutorialYoutubeTrackSelectionRequestSchema),
+          outputSchema: procedureTutorialYoutubeTrackSelectionResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialYoutubeTrackSelectionRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            const requestIdInput =
+              requestInput !== null &&
+              typeof requestInput === 'object' &&
+              !Array.isArray(requestInput)
+                ? (requestInput as Record<string, unknown>)['requestId']
+                : null;
+            const parsedRequestId = z.uuid().safeParse(requestIdInput);
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'youtube_track_selection_invalid',
+                    requestId: parsedRequestId.success ? parsedRequestId.data : null,
+                    message:
+                      'YouTube caption track selection request violates the strict public contract',
+                    retryMode: 'never',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = procedureTutorialYoutubeTrackSelectionCoordinator!.select(
+              parsedRequest.data,
+            );
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: result.formatVersion,
+                    videoId: result.sourceTrackList.videoId,
+                    captionTrackId: result.selectedTrack.captionTrackId,
+                    selectedTrackWasRecommended:
+                      result.recommendation?.selectedTrackWasRecommended ?? null,
+                    selectionEvidenceStored: true,
+                    message:
+                      'The explicit caption-track selection receipt is in structuredContent; no caption content was downloaded.',
+                  }),
+                },
+              ],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(
+                    procedureTutorialYoutubeTrackSelectionErrorResponse(
                       error,
                       parsedRequest.data.requestId,
                     ),
@@ -3577,6 +3670,36 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         }
       },
     );
+    runtimeApp.post('/api/v1/procedure/tutorial/youtube/tracks/select', async (request, reply) => {
+      const parsedRequest = procedureTutorialYoutubeTrackSelectionRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send({
+          error: 'youtube_track_selection_invalid',
+          requestId: parsedRequestId.success ? parsedRequestId.data : null,
+          message: 'YouTube caption track selection request violates the strict public contract',
+          retryMode: 'never',
+        });
+      }
+      try {
+        return procedureTutorialYoutubeTrackSelectionCoordinator!.select(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialYoutubeTrackSelectionHttpStatus(error))
+          .send(
+            procedureTutorialYoutubeTrackSelectionErrorResponse(
+              error,
+              parsedRequest.data.requestId,
+            ),
+          );
+      }
+    });
     runtimeApp.post('/api/v1/procedure/tutorial/youtube/import', async (request, reply) => {
       const parsedRequest = procedureTutorialYoutubeImportRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -4661,6 +4784,18 @@ export {
   recommendProcedureTutorialYoutubeCaptionTracks,
   type ProcedureTutorialYoutubeTrackRecommendationRetryMode,
 } from './procedure-tutorial-youtube-track-recommendation.js';
+export {
+  buildProcedureTutorialYoutubeTrackSelection,
+  createProcedureTutorialYoutubeTrackSelectionCoordinator,
+  procedureTutorialYoutubeTrackSelectionErrorResponse,
+  procedureTutorialYoutubeTrackSelectionEvidenceEventTypes,
+  procedureTutorialYoutubeTrackSelectionHttpStatus,
+  restoreProcedureTutorialYoutubeTrackSelections,
+  ProcedureTutorialYoutubeTrackSelectionError,
+  type ProcedureTutorialYoutubeTrackSelectionCoordinator,
+  type ProcedureTutorialYoutubeTrackSelectionCoordinatorOptions,
+  type ProcedureTutorialYoutubeTrackSelectionRetryMode,
+} from './procedure-tutorial-youtube-track-selection.js';
 export {
   createYouTubeDataApiCaptionSource,
   parseYouTubeDurationMs,

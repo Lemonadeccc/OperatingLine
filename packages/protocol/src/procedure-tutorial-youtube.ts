@@ -22,6 +22,10 @@ export const procedureTutorialYoutubeTrackRecommendationFormatVersion = '1.0.0' 
 export const procedureTutorialYoutubeTrackRecommendationFormatVersionSchema = z.literal(
   procedureTutorialYoutubeTrackRecommendationFormatVersion,
 );
+export const procedureTutorialYoutubeTrackSelectionFormatVersion = '1.0.0' as const;
+export const procedureTutorialYoutubeTrackSelectionFormatVersionSchema = z.literal(
+  procedureTutorialYoutubeTrackSelectionFormatVersion,
+);
 export const procedureTutorialYoutubeCaptionTrackMaxCount = 2_000 as const;
 export const procedureTutorialYoutubePreferredLanguageMaxCount = 32 as const;
 
@@ -361,6 +365,171 @@ export const procedureTutorialYoutubeTrackRecommendationErrorCodeSchema = z.enum
 ]);
 export type ProcedureTutorialYoutubeTrackRecommendationErrorCode = z.infer<
   typeof procedureTutorialYoutubeTrackRecommendationErrorCodeSchema
+>;
+
+const procedureTutorialYoutubeTrackSelectionStandardReasonCodeSchema = z.enum([
+  'recommended_candidate',
+  'language_preference',
+  'caption_quality_review',
+  'accessibility_requirement',
+  'workflow_requirement',
+]);
+
+export const procedureTutorialYoutubeTrackSelectionReasonSchema = z.union([
+  z.strictObject({
+    reasonCode: procedureTutorialYoutubeTrackSelectionStandardReasonCodeSchema,
+    note: z.string().min(1).max(1_000).regex(/\S/).optional(),
+  }),
+  z.strictObject({
+    reasonCode: z.literal('other'),
+    note: z.string().min(1).max(1_000).regex(/\S/),
+  }),
+]);
+export type ProcedureTutorialYoutubeTrackSelectionReason = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionReasonSchema
+>;
+
+export const procedureTutorialYoutubeTrackSelectionRequestSchema = z.strictObject({
+  formatVersion: procedureTutorialYoutubeTrackSelectionFormatVersionSchema,
+  requestId: z.uuid(),
+  trackListRequestId: z.uuid(),
+  videoId: procedureAuthoringYoutubeVideoIdSchema,
+  captionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema,
+  confirmation: z.strictObject({
+    explicitlyConfirmedByUser: z.literal(true),
+    reason: procedureTutorialYoutubeTrackSelectionReasonSchema,
+  }),
+  recommendationPreferences:
+    procedureTutorialYoutubeTrackRecommendationPreferencesSchema.optional(),
+});
+export type ProcedureTutorialYoutubeTrackSelectionRequest = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionRequestSchema
+>;
+
+export const procedureTutorialYoutubeTrackSelectionResultSchema = z
+  .strictObject({
+    formatVersion: procedureTutorialYoutubeTrackSelectionFormatVersionSchema,
+    requestId: z.uuid(),
+    sourceTrackList: z.strictObject({
+      requestId: z.uuid(),
+      videoId: procedureAuthoringYoutubeVideoIdSchema,
+      listedAt: z.iso.datetime({ offset: true }),
+    }),
+    selectedTrack: procedureTutorialYoutubeCaptionTrackSchema,
+    confirmation: procedureTutorialYoutubeTrackSelectionRequestSchema.shape.confirmation,
+    recommendation: z
+      .strictObject({
+        preferences: procedureTutorialYoutubeTrackRecommendationPreferencesSchema,
+        recommendedCaptionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema.nullable(),
+        selectedCandidateRank: z.number().int().positive().nullable(),
+        selectedTrackWasRecommended: z.boolean(),
+      })
+      .nullable(),
+    sideEffects: z.strictObject({
+      captionTrackSelectionRecorded: z.literal(true),
+      networkFetched: z.literal(false),
+      additionalQuotaUnits: z.literal(0),
+      captionContentDownloaded: z.literal(false),
+      videoMediaDownloaded: z.literal(false),
+      modelCalled: z.literal(false),
+      procedureStored: z.literal(false),
+      proposalCreated: z.literal(false),
+      hostExecutionStarted: z.literal(false),
+    }),
+    recordedAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((result, context) => {
+    if (result.selectedTrack.status !== 'serving') {
+      context.addIssue({
+        code: 'custom',
+        path: ['selectedTrack', 'status'],
+        message: 'Recorded YouTube caption track selection must be serving',
+      });
+    }
+    if (
+      result.recommendation !== null &&
+      result.recommendation.selectedTrackWasRecommended !==
+        (result.recommendation.recommendedCaptionTrackId === result.selectedTrack.captionTrackId)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation', 'selectedTrackWasRecommended'],
+        message: 'YouTube caption selection recommendation outcome is inconsistent',
+      });
+    }
+    if (
+      result.confirmation.reason.reasonCode === 'recommended_candidate' &&
+      (result.recommendation === null || !result.recommendation.selectedTrackWasRecommended)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['confirmation', 'reason', 'reasonCode'],
+        message: 'A recommended-candidate selection must attest the selected first candidate',
+      });
+    }
+    if (
+      result.recommendation?.selectedTrackWasRecommended === true &&
+      result.recommendation.selectedCandidateRank !== 1
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation', 'selectedCandidateRank'],
+        message: 'The recommended YouTube caption track must have rank 1',
+      });
+    }
+  });
+export type ProcedureTutorialYoutubeTrackSelectionResult = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionResultSchema
+>;
+
+export const procedureTutorialYoutubeTrackSelectionErrorCodeSchema = z.enum([
+  'youtube_track_selection_source_not_found',
+  'youtube_track_selection_source_mismatch',
+  'youtube_track_selection_track_not_found',
+  'youtube_track_selection_track_not_importable',
+  'youtube_track_selection_recommendation_mismatch',
+  'youtube_track_selection_conflict',
+  'youtube_track_selection_persistence_failed',
+  'youtube_track_selection_invalid',
+]);
+export type ProcedureTutorialYoutubeTrackSelectionErrorCode = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionErrorCodeSchema
+>;
+
+export const procedureTutorialYoutubeTrackSelectionCompletedEventSchema = z
+  .strictObject({
+    request: procedureTutorialYoutubeTrackSelectionRequestSchema,
+    requestFingerprint: evalContentSha256Schema,
+    result: procedureTutorialYoutubeTrackSelectionResultSchema,
+    occurredAt: z.iso.datetime({ offset: true }),
+  })
+  .superRefine((event, context) => {
+    if (
+      event.result.requestId !== event.request.requestId ||
+      event.result.sourceTrackList.requestId !== event.request.trackListRequestId ||
+      event.result.sourceTrackList.videoId !== event.request.videoId ||
+      event.result.selectedTrack.captionTrackId !== event.request.captionTrackId ||
+      event.result.recordedAt !== event.occurredAt ||
+      event.result.confirmation.explicitlyConfirmedByUser !==
+        event.request.confirmation.explicitlyConfirmedByUser ||
+      event.result.confirmation.reason.reasonCode !==
+        event.request.confirmation.reason.reasonCode ||
+      event.result.confirmation.reason.note !== event.request.confirmation.reason.note ||
+      (event.request.recommendationPreferences === undefined) !==
+        (event.result.recommendation === null) ||
+      (event.request.recommendationPreferences !== undefined &&
+        event.result.recommendation !== null &&
+        JSON.stringify(event.result.recommendation.preferences) !==
+          JSON.stringify(event.request.recommendationPreferences))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Completed YouTube caption track selection evidence must match its exact request',
+      });
+    }
+  });
+export type ProcedureTutorialYoutubeTrackSelectionCompletedEvent = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionCompletedEventSchema
 >;
 
 export const procedureTutorialYoutubeTrackListErrorCodeSchema = z.enum([

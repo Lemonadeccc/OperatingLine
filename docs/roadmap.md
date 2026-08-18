@@ -300,8 +300,13 @@
         track、draft、CC 与同步偏好返回稳定候选顺序、排序信号和逐轨排除原因。推荐不联网、不增加 quota、
         不下载内容、不调用 Provider、不持久化为训练标签，也不自动选择；import 仍要求精确 track ID。见
         [ADR 0080](adr/0080-explicit-youtube-caption-track-recommendation.md)。
-  - [ ] OAuth 登录/刷新、选择确认 UI 与选择理由证据、视频媒体下载/语音转录、画面与按键识别、自动语义
-        分段、证据帧，以及大步骤/小步骤质量校准；当前 Runtime 始终要求调用方显式选择授权字幕轨。
+  - [x] 字幕轨选择与理由证据：本地 MCP/HTTP 只接受明确确认的 serving track，保存受限 reason code、可选
+        备注，并在给出推荐偏好时重算用户采用/覆盖结果；completed receipt 可重启幂等恢复，不联网、下载或
+        调用 Provider。备注进入本地证据账本；当前收据还不是 import 的强制前置条件。见
+        [ADR 0081](adr/0081-persisted-youtube-caption-track-selection.md)。
+  - [ ] OAuth 登录/刷新、选择确认可视化 UI、选择收据与 import 的强制 identity 绑定、视频媒体下载/语音
+        转录、画面与按键识别、自动语义分段、证据帧，以及大步骤/小步骤质量校准；当前 Runtime 始终要求
+        调用方显式选择授权字幕轨。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

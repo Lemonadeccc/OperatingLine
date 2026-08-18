@@ -22,6 +22,7 @@ import {
   procedureAuthoringPromptPacketSchema,
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationResultSchema,
+  procedureTutorialYoutubeTrackSelectionResultSchema,
   type GuidePlan,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
@@ -363,6 +364,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.tutorial.import' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.list' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.recommend' },
+            { name: 'operatingline.procedure.tutorial.youtube.tracks.select' },
             { name: 'operatingline.procedure.tutorial.youtube.import' },
             { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
@@ -443,6 +445,22 @@ describe('OperatingLine runtime', () => {
       ).toMatchObject({
         type: 'object',
         required: ['formatVersion', 'requestId', 'trackListRequestId', 'videoId', 'preferences'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.tracks.select',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: [
+          'formatVersion',
+          'requestId',
+          'trackListRequestId',
+          'videoId',
+          'captionTrackId',
+          'confirmation',
+        ],
         additionalProperties: false,
       });
       expect(
@@ -999,6 +1017,21 @@ describe('OperatingLine runtime', () => {
         explicitSelectionRequired: true,
       },
     } as const;
+    const trackSelectionRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      trackListRequestId: trackListRequest.requestId,
+      videoId: trackListRequest.youtube.videoId,
+      captionTrackId: importRequest.youtube.captionTrackId,
+      confirmation: {
+        explicitlyConfirmedByUser: true,
+        reason: {
+          reasonCode: 'recommended_candidate',
+          note: 'Confirmed after reviewing the ranked authorized caption tracks.',
+        },
+      },
+      recommendationPreferences: trackRecommendationRequest.preferences,
+    } as const;
     const headers = {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
@@ -1106,9 +1139,52 @@ describe('OperatingLine runtime', () => {
           retryMode: 'same_request_id',
         });
 
-        const imported = await callMcpTool(
+        const selected = await callMcpTool(
           runtime,
           171,
+          'operatingline.procedure.tutorial.youtube.tracks.select',
+          trackSelectionRequest,
+        );
+        expect(selected.result?.isError).not.toBe(true);
+        const selection = procedureTutorialYoutubeTrackSelectionResultSchema.parse(
+          selected.result?.structuredContent,
+        );
+        expect(selection).toMatchObject({
+          requestId: trackSelectionRequest.requestId,
+          selectedTrack: {
+            captionTrackId: importRequest.youtube.captionTrackId,
+            status: 'serving',
+          },
+          confirmation: trackSelectionRequest.confirmation,
+          recommendation: {
+            recommendedCaptionTrackId: importRequest.youtube.captionTrackId,
+            selectedCandidateRank: 1,
+            selectedTrackWasRecommended: true,
+          },
+          sideEffects: {
+            captionTrackSelectionRecorded: true,
+            networkFetched: false,
+            additionalQuotaUnits: 0,
+            captionContentDownloaded: false,
+            modelCalled: false,
+          },
+        });
+        const repeatedSelection = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/tracks/select`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(trackSelectionRequest),
+          },
+        );
+        expect(repeatedSelection.status).toBe(200);
+        await expect(repeatedSelection.json()).resolves.toEqual(selection);
+        expect(trackListCalls).toBe(1);
+        expect(sourceCalls).toBe(0);
+
+        const imported = await callMcpTool(
+          runtime,
+          172,
           'operatingline.procedure.tutorial.youtube.import',
           importRequest,
         );
@@ -1158,7 +1234,7 @@ describe('OperatingLine runtime', () => {
 
         const validation = await callMcpTool(
           runtime,
-          172,
+          173,
           'operatingline.procedure.authoring.validate',
           { packet, tree: generatedProcedureCandidate(packet) },
         );
@@ -1210,6 +1286,7 @@ describe('OperatingLine runtime', () => {
           'procedure.tutorial.youtube.caption-tracks.requested',
           'procedure.tutorial.youtube.caption-tracks.completed',
           'procedure.tutorial.youtube.caption-tracks.failed',
+          'procedure.tutorial.youtube.caption-track-selection.completed',
           'procedure.tutorial.youtube.caption.requested',
           'procedure.tutorial.youtube.caption.completed',
           'procedure.tutorial.youtube.caption.failed',
@@ -1217,6 +1294,7 @@ describe('OperatingLine runtime', () => {
         expect(events.map((event) => event.eventType)).toEqual([
           'procedure.tutorial.youtube.caption-tracks.requested',
           'procedure.tutorial.youtube.caption-tracks.completed',
+          'procedure.tutorial.youtube.caption-track-selection.completed',
           'procedure.tutorial.youtube.caption.requested',
           'procedure.tutorial.youtube.caption.completed',
         ]);
@@ -1269,6 +1347,23 @@ describe('OperatingLine runtime', () => {
             requestId: trackRecommendationRequest.requestId,
             recommendedCaptionTrackId: importRequest.youtube.captionTrackId,
             selection: expect.objectContaining({ automaticallySelected: false }),
+          }),
+        );
+        const restoredSelection = await fetch(
+          `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/tracks/select`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(trackSelectionRequest),
+          },
+        );
+        expect(restoredSelection.status).toBe(200);
+        await expect(restoredSelection.json()).resolves.toEqual(
+          expect.objectContaining({
+            requestId: trackSelectionRequest.requestId,
+            selectedTrack: expect.objectContaining({
+              captionTrackId: importRequest.youtube.captionTrackId,
+            }),
           }),
         );
         const restored = await fetch(
