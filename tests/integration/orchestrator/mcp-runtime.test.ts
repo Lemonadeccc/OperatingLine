@@ -8,10 +8,21 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
-import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
+import {
+  blenderActionCatalog,
+  blenderInteractionCatalog,
+} from '@operatingline/blender-action-catalog';
 import { FakeBlenderAdapter, FakePlannerProvider } from '@operatingline/test-kit';
 import { openOperatingLineDatabase } from '@operatingline/persistence';
-import { guideProtocolVersion, type GuidePlan } from '@operatingline/protocol';
+import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
+import {
+  canonicalizeProtocolJsonValue,
+  guideProtocolVersion,
+  procedureAuthoringCandidateTreeSchema,
+  type GuidePlan,
+  type ProcedureAuthoringCandidateTree,
+  type ProcedureAuthoringPromptPacket,
+} from '@operatingline/protocol';
 
 import {
   computeEvalContentSha256,
@@ -83,6 +94,45 @@ const snowmanHeadCapabilityCoverage = {
     },
   ],
 };
+
+function generatedProcedureCandidate(
+  packet: ProcedureAuthoringPromptPacket,
+): ProcedureAuthoringCandidateTree {
+  const tree = JSON.parse(
+    readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
+  ) as Record<string, unknown>;
+  tree['id'] = packet.context.requestedTreeId;
+  tree['revision'] = packet.context.recommendedRevision;
+  tree['adapterId'] = packet.context.catalogBinding.adapterId;
+  tree['actionCatalogVersion'] = packet.context.catalogBinding.actionCatalog.catalogVersion;
+  tree['interactionCatalogVersion'] =
+    packet.context.catalogBinding.interactionCatalog.catalogVersion;
+  tree['hostVersionRange'] = packet.context.catalogBinding.interactionCatalog.hostVersionRange;
+  const source = packet.context.goalProvenance.source;
+  const evidence = { ...packet.context.goalProvenance.evidence, sourceId: source.id };
+  tree['sources'] = [...(tree['sources'] as unknown[]), source];
+  tree['evidence'] = [...(tree['evidence'] as unknown[]), evidence];
+  for (const node of tree['nodes'] as Array<Record<string, unknown>>) {
+    if (node['kind'] !== 'leaf') continue;
+    const leafId = String(node['id']);
+    for (const [field, modality] of [
+      ['menuTracks', 'menu'],
+      ['shortcutTracks', 'shortcut'],
+      ['mcpTracks', 'mcp'],
+    ] as const) {
+      node[field] = [
+        {
+          id: `${leafId}.${modality}.unavailable`,
+          availability: 'unavailable',
+          title: `${modality} grounding pending`,
+          reason: 'Provider candidates cannot assert interaction grounding.',
+          modality,
+        },
+      ];
+    }
+  }
+  return procedureAuthoringCandidateTreeSchema.parse(tree);
+}
 
 async function availablePort(): Promise<number> {
   const probe = createServer();
@@ -281,6 +331,8 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.procedure.prompt.get' },
+            { name: 'operatingline.procedure.authoring.providers.list' },
+            { name: 'operatingline.procedure.authoring.generate' },
             { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.authoring.materialize' },
             { name: 'operatingline.procedure.replay.propose' },
@@ -596,6 +648,195 @@ describe('OperatingLine runtime', () => {
       expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
     } finally {
       await runtime.stop();
+    }
+  });
+
+  it('invokes an explicit Procedure authoring provider without storing or proposing', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-provider-test-'));
+    const databasePath = join(directory, 'events.db');
+    const providerInputs: Array<{
+      packet: ProcedureAuthoringPromptPacket;
+      renderedPrompt: string;
+    }> = [];
+    let closeCalls = 0;
+    const provider: PlannerProvider = {
+      descriptor: {
+        contractVersion: '1.0.0',
+        id: 'fake-procedure-author',
+        version: '0.1.0',
+        displayName: 'Fake Procedure Author',
+        description: 'Deterministic Procedure authoring provider for runtime integration tests.',
+        availability: { available: true },
+        limits: { maxConcurrency: 1 },
+        dataHandling: {
+          executionLocation: 'local',
+          dataTransmission: 'none',
+          credentialManagement: 'provider_managed',
+        },
+      },
+      generate: async () => {
+        throw new Error('Initial-plan generation must not run in this test.');
+      },
+      authorProcedure: async ({ packet, renderedPrompt }) => {
+        providerInputs.push({ packet, renderedPrompt });
+        expect(renderedPrompt).toBe(
+          Buffer.from(canonicalizeProtocolJsonValue(packet)).toString('utf8'),
+        );
+        return generatedProcedureCandidate(packet);
+      },
+      close: () => {
+        closeCalls += 1;
+      },
+    };
+    try {
+      const runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+        plannerProviders: [provider],
+      });
+      const generationRequest = {
+        requestId: randomUUID(),
+        providerId: provider.descriptor.id,
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal: '制作雪人的头部，并创建、定位、缩放和命名左眼球体。',
+        treeId: 'snowman.eye.left.procedure',
+        revision: 1,
+        locale: 'zh-CN',
+      };
+      const headers = {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      };
+
+      try {
+        const providerList = await callMcpTool(
+          runtime,
+          180,
+          'operatingline.procedure.authoring.providers.list',
+          {},
+        );
+        expect(providerList.result?.structuredContent).toMatchObject({
+          generationAvailable: true,
+          providers: [{ id: provider.descriptor.id, availability: { available: true } }],
+        });
+
+        const generated = await callMcpTool(
+          runtime,
+          181,
+          'operatingline.procedure.authoring.generate',
+          generationRequest,
+        );
+        expect(generated.result?.isError).not.toBe(true);
+        const result = JSON.parse(generated.result?.content?.[0]?.text ?? '{}') as Record<
+          string,
+          unknown
+        >;
+        expect(result).toMatchObject({
+          requestId: generationRequest.requestId,
+          provider: { id: provider.descriptor.id, version: provider.descriptor.version },
+          packet: {
+            context: {
+              requestedTreeId: generationRequest.treeId,
+              recommendedRevision: generationRequest.revision,
+            },
+          },
+          tree: { id: generationRequest.treeId, revision: generationRequest.revision },
+          validation: {
+            validation: {
+              packetIntegrity: 'validated',
+              installedCatalogBinding: 'validated',
+              authoringCandidateContract: 'validated',
+              procedureCompilation: 'validated',
+            },
+          },
+          sideEffects: {
+            modelCalled: true,
+            procedureStored: false,
+            proposalCreated: false,
+            hostExecutionStarted: false,
+          },
+        });
+        expect(generated.result?.structuredContent).toEqual(result);
+
+        const httpProviderList = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/authoring/providers`,
+          { headers },
+        );
+        expect(httpProviderList.status).toBe(200);
+        await expect(httpProviderList.json()).resolves.toMatchObject({
+          generationAvailable: true,
+          providers: [{ id: provider.descriptor.id }],
+        });
+
+        const repeated = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/generate`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(generationRequest),
+        });
+        expect(repeated.status).toBe(200);
+        await expect(repeated.json()).resolves.toEqual(result);
+        expect(providerInputs).toHaveLength(1);
+
+        const storedProcedures = await callMcpTool(
+          runtime,
+          182,
+          'operatingline.procedure.list',
+          {},
+        );
+        expect(storedProcedures.result?.structuredContent).toEqual({
+          procedures: [],
+          nextAfterSequence: null,
+        });
+        const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
+        await expect(guide.json()).resolves.toEqual({ plan: null });
+
+        const invalidRequestId = randomUUID();
+        const invalid = await fetch(`${runtime.baseUrl}/api/v1/procedure/authoring/generate`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            ...generationRequest,
+            requestId: invalidRequestId,
+            apiKey: 'MUST_NOT_LEAK',
+          }),
+        });
+        expect(invalid.status).toBe(400);
+        const invalidBody = await invalid.json();
+        expect(invalidBody).toEqual({
+          error: 'planner_invalid_request',
+          requestId: invalidRequestId,
+          message: 'Procedure authoring generation request violates the strict public contract',
+          retryMode: 'never',
+        });
+        expect(JSON.stringify(invalidBody)).not.toContain('MUST_NOT_LEAK');
+      } finally {
+        await runtime.stop();
+      }
+
+      expect(closeCalls).toBe(1);
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database
+            .listExecutionEventsByTypes([
+              'procedure.authoring.provider.generation.requested',
+              'procedure.authoring.provider.generation.completed',
+              'procedure.authoring.provider.generation.failed',
+            ])
+            .map((event) => event.eventType),
+        ).toEqual([
+          'procedure.authoring.provider.generation.requested',
+          'procedure.authoring.provider.generation.completed',
+        ]);
+      } finally {
+        database.close();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 
 import type {
   PlanningPromptPacket,
+  ProcedureAuthoringPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/planner-provider-sdk';
 import { describe, expect, it, vi } from 'vitest';
@@ -22,6 +23,7 @@ const packet = {
 const replanPacket = {
   renderedPrompt: 'Return the revised subtree as JSON.',
 } as ReplanningPromptPacket;
+const procedurePacket = {} as ProcedureAuthoringPromptPacket;
 const successfulResult: CliProcessResult = { exitCode: 0, signal: null, stdout: '' };
 
 function generateInput(signal = new AbortController().signal) {
@@ -145,6 +147,33 @@ describe('local AI CLI planner providers', () => {
       }),
     ).resolves.toEqual({ requestId: 'revision-request' });
     expect(observedPrompt).toBe(replanPacket.renderedPrompt);
+  });
+
+  it('passes the exact canonical Procedure packet prompt to the local client', async () => {
+    let observedPrompt = '';
+    const runner: CliProcessRunner = async (request) => {
+      observedPrompt = request.input;
+      const outputPath = request.args[request.args.indexOf('--output-last-message') + 1];
+      if (outputPath === undefined) {
+        throw new Error('missing test output path');
+      }
+      await writeFile(outputPath, '{"id":"generated.procedure"}');
+      return successfulResult;
+    };
+    const provider = createCodexCliPlannerProvider({
+      executableProbe: () => true,
+      runner,
+    });
+
+    await expect(
+      provider.authorProcedure?.({
+        requestId: 'ca8148af-c9a1-46aa-9122-fdf006ed8259',
+        packet: procedurePacket,
+        renderedPrompt: '{"formatVersion":"1.0.0"}',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ id: 'generated.procedure' });
+    expect(observedPrompt).toBe('{"formatVersion":"1.0.0"}');
   });
 
   it('runs Claude with customizations and tools disabled, a budget cap, and no persistence', async () => {

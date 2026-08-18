@@ -56,6 +56,8 @@ import {
   canonicalizeProtocolJsonValue,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
+  procedureAuthoringGenerateRequestSchema,
+  procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
   procedureAuthoringValidationRequestSchema,
@@ -132,6 +134,12 @@ import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
+import {
+  createProcedureAuthoringGenerationCoordinator,
+  procedureAuthoringGenerationEvidenceEventTypes,
+  restoreProcedureAuthoringProviderInvocations,
+  type ProcedureAuthoringGenerationCoordinator,
+} from './procedure-authoring-generation.js';
 import {
   buildProcedureLeafReplayAttestation,
   buildProcedureLeafReplayBinding,
@@ -285,6 +293,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
+  let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
   let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
@@ -295,6 +304,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
         await plannerGenerationCoordinator.close();
+      } else if (procedureAuthoringGenerationCoordinator !== undefined) {
+        await procedureAuthoringGenerationCoordinator.close();
       } else {
         await plannerReplanGenerationCoordinator?.close();
       }
@@ -1105,6 +1116,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingPlannerReplanEvents = database.listExecutionEventsByTypes(
       plannerReplanGenerationEvidenceEventTypes,
     );
+    const existingProcedureAuthoringGenerationEvents = database.listExecutionEventsByTypes(
+      procedureAuthoringGenerationEvidenceEventTypes,
+    );
     const plannerProviderInvocationManager = createPlannerProviderInvocationManager({
       registry: plannerProviderRegistry,
       ...(options.plannerProviderTimeoutMs === undefined
@@ -1113,7 +1127,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       restoredInvocations: [
         ...restoreInitialPlannerProviderInvocations(existingPlannerGenerationEvents),
         ...restoreReplanPlannerProviderInvocations(existingPlannerReplanEvents),
+        ...restoreProcedureAuthoringProviderInvocations(existingProcedureAuthoringGenerationEvents),
       ],
+    });
+    procedureAuthoringGenerationCoordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      existingEvents: existingProcedureAuthoringGenerationEvents,
+      buildPacket: getProcedureAuthoringPrompt,
+      validateCandidate: (packet, tree) => validateProcedureAuthoring({ packet, tree }),
+      appendEvent: (event) => database.appendEvent(event),
     });
     plannerGenerationCoordinator = createPlannerGenerationCoordinator({
       registry: plannerProviderRegistry,
@@ -1632,6 +1655,53 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                         ? error.message
                         : 'Procedure authoring prompt is unavailable',
                   }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.providers.list',
+        {
+          description:
+            'List explicitly configured planner providers that support ProcedureTree authoring, including availability, concurrency, data-transmission, and credential-management disclosures. The list never contains credentials.',
+          inputSchema: z.strictObject({}),
+          outputSchema: plannerProviderListSchema,
+        },
+        async () => {
+          const providerList = plannerProviderRegistry.listProcedureAuthors();
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(providerList) }],
+            structuredContent: providerList,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.generate',
+        {
+          description:
+            'Explicitly invoke one configured Procedure authoring provider with the exact catalog-bound packet. This may transmit task data or incur provider cost according to the selected provider disclosure. The returned candidate is immediately validated and compiled, but is not stored, proposed, accepted, or executed.',
+          inputSchema: procedureAuthoringGenerateRequestSchema,
+          outputSchema: procedureAuthoringGenerationResultSchema,
+        },
+        async (requestInput) => {
+          const request = procedureAuthoringGenerateRequestSchema.parse(requestInput);
+          try {
+            const result = await procedureAuthoringGenerationCoordinator!.generate(request);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, request.requestId)),
                 },
               ],
             };
@@ -2716,6 +2786,34 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/procedure/authoring/providers', async () =>
+      plannerProviderRegistry.listProcedureAuthors(),
+    );
+    runtimeApp.post('/api/v1/procedure/authoring/generate', async (request, reply) => {
+      const parsedRequest = procedureAuthoringGenerateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: parsedRequestId.success ? parsedRequestId.data : null,
+            message: 'Procedure authoring generation request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return await procedureAuthoringGenerationCoordinator!.generate(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
     runtimeApp.post('/api/v1/procedure/authoring/validate', async (request, reply) => {
       const parsedRequest = procedureAuthoringValidationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -3547,6 +3645,11 @@ export {
 } from './local-replan-scope.js';
 export { buildPlanningPromptPacket } from './planning-prompt.js';
 export { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
+export {
+  createProcedureAuthoringGenerationCoordinator,
+  procedureAuthoringGenerationEvidenceEventTypes,
+  restoreProcedureAuthoringProviderInvocations,
+} from './procedure-authoring-generation.js';
 export {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,

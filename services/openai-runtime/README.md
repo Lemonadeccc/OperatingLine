@@ -35,11 +35,23 @@ pnpm dev:openai
 
 1. 调用 `operatingline.planner.providers.list`，检查远端传输、凭据管理、可用性和并发声明。
 2. 使用返回的 `providerId` 和一个新 UUID `requestId` 调用 `operatingline.planner.generate`。
-3. 检查 `status` 与 `planningQuality`。当前 Blender `1.12.0` 使用 Planning Packet `1.1.0` 和 quality baseline
+3. 检查 `status` 与 `planningQuality`。当前 Blender `1.22.0` 使用 Planning Packet `1.1.0` 和 quality baseline
    `1.1.0`；草案必须把每条具体需求通过 `planning.capabilityCoverage` 映射到 catalog capability 和
    action 匹配的可执行叶子。历史目录继续使用 packet/baseline `1.0.0`。该结果固定
    `proposalCreated: false`。
 4. 只有确定要送入宿主审查时，才把草案显式提交给 `operatingline.guide.propose`。
+
+自然语言 ProcedureTree 编写：
+
+1. 调用 `operatingline.procedure.authoring.providers.list` 检查相同 Provider 披露；可先调用不触发模型的
+   `operatingline.procedure.prompt.get` 查看精确 packet。
+2. 用新 UUID `requestId`、Provider ID、tree ID/revision、目标与可选目录版本调用
+   `operatingline.procedure.authoring.generate`。
+3. Runtime 将完整 packet 规范编码后发送，返回 candidate 立即经过 identity、installed catalog 与 compile
+   门。成功也不自动 store、materialize、propose 或执行；用户审阅后必须分别显式调用后续入口。
+
+HTTP 对应入口为 `GET /api/v1/procedure/authoring/providers` 与
+`POST /api/v1/procedure/authoring/generate`。
 
 节点局部重规划：
 
@@ -74,3 +86,5 @@ Token。
 不产生语义分数，不自动选择 provider，也不证明 OpenAI 已正确理解任意目标或修订消息。Proposal 审批和
 `Start`/`Next` 场景执行边界保持不变。完整决策见
 [ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。
+Procedure authoring 边界见
+[ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md)。

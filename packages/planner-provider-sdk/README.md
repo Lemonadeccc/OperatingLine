@@ -10,7 +10,11 @@ Orchestrator 的 composition root 显式注入规划器，同时把供应商客�
 ## 接口
 
 ```ts
-import type { PlannerProviderDescriptor, PlanningPromptPacket } from '@operatingline/protocol';
+import type {
+  PlannerProviderDescriptor,
+  PlanningPromptPacket,
+  ProcedureAuthoringPromptPacket,
+} from '@operatingline/protocol';
 
 export interface PlannerProviderGenerateInput {
   readonly requestId: string;
@@ -21,13 +25,19 @@ export interface PlannerProviderGenerateInput {
 export interface PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
   generate(input: PlannerProviderGenerateInput): Promise<unknown>;
+  authorProcedure?(input: {
+    requestId: string;
+    packet: ProcedureAuthoringPromptPacket;
+    renderedPrompt: string;
+    signal: AbortSignal;
+  }): Promise<unknown>;
   close?(): void | Promise<void>;
 }
 ```
 
 `generate()` 返回 `unknown` 是有意的：provider 输出不被信任，Orchestrator 必须重新解析严格的
 `PlanningProposalDraft`，核对 packet identity、递归 ActionCatalog 参数、目录能力覆盖链和确定性规划质量。
-当前 Blender catalog `1.12.0` 的 packet 格式为 `1.1.0`；provider 必须在 `planning.capabilityCoverage` 中把
+当前 Blender catalog `1.22.0` 的 Planning packet 格式为 `1.1.0`；provider 必须在 `planning.capabilityCoverage` 中把
 每条具体需求映射到真实 catalog capability，再映射到 action 匹配的可执行叶子。历史无能力目录继续
 使用 packet `1.0.0`。插件不得把
 “生成完成”解释为 Proposal 已创建；公开结果的 `proposalCreated` 固定为 `false`。
@@ -55,6 +65,12 @@ const runtime = await startRuntime({
 版本。核心没有默认 provider，也不会自动提交返回草案。调用方检查 `status` 与
 `planningQuality` 后，仍须另行调用 `operatingline.guide.propose`；宿主内用户接受后才可执行。缺失、
 未知、不匹配或范围外的 coverage 会返回 `needs_revision`，不会生成 Proposal。
+
+实现可选 `authorProcedure()` 后，Provider 还会出现在
+`operatingline.procedure.authoring.providers.list`，并只能由显式
+`operatingline.procedure.authoring.generate` 调用。`renderedPrompt` 是完整 packet 的规范 JSON 编码；返回值
+必须是 candidate-only ProcedureTree。Runtime 会重新核对 identity、来源、目录和 compile；成功也不自动
+保存、物化、提案或执行。
 
 ## Descriptor 要求
 
@@ -92,5 +108,6 @@ Provider 内部。Orchestrator 会在 Provider 调用和 requested event 落盘�
 
 公共协议和完整决策见
 [协议说明](../../protocol/README.md)与
-[ADR 0013](../../docs/adr/0013-explicit-planner-provider-boundary.md)。目录约束目标覆盖见
+[ADR 0013](../../docs/adr/0013-explicit-planner-provider-boundary.md)。Procedure authoring 见
+[ADR 0070](../../docs/adr/0070-explicit-procedure-authoring-provider.md)。目录约束目标覆盖见
 [ADR 0017](../../docs/adr/0017-catalog-grounded-goal-coverage.md)。

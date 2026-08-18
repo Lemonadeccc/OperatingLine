@@ -4,10 +4,12 @@ import type {
   PlannerProviderDescriptor,
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
+  ProcedureAuthoringPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';
 
-export type PlannerProviderRuntimeOperation = 'initial_plan' | 'local_replan';
+export type PlannerProviderRuntimeOperation =
+  'initial_plan' | 'local_replan' | 'procedure_authoring';
 
 export interface PlannerProviderRuntimeTreatmentDescription {
   readonly profile: PlannerProviderRuntimeProfile;
@@ -30,6 +32,13 @@ export interface PlannerProviderReplanInput {
   readonly signal: AbortSignal;
 }
 
+export interface PlannerProviderProcedureAuthoringInput {
+  readonly requestId: string;
+  readonly packet: ProcedureAuthoringPromptPacket;
+  readonly renderedPrompt: string;
+  readonly signal: AbortSignal;
+}
+
 export interface PlannerProviderDialogueTextDelta {
   readonly type: 'assistant_text_delta';
   readonly delta: string;
@@ -48,6 +57,7 @@ export interface PlannerProvider {
     operation: PlannerProviderRuntimeOperation,
   ): PlannerProviderRuntimeTreatmentDescription;
   generate(input: PlannerProviderGenerateInput): Promise<unknown>;
+  authorProcedure?(input: PlannerProviderProcedureAuthoringInput): Promise<unknown>;
   replan?(input: PlannerProviderReplanInput): Promise<unknown>;
   dialogue?(input: PlannerProviderDialogueInput): Promise<PlannerDialogueProviderResult>;
   close?(): void | Promise<void>;
@@ -59,5 +69,6 @@ export type {
   PlannerProviderDescriptor,
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
+  ProcedureAuthoringPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';

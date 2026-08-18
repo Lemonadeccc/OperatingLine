@@ -70,6 +70,7 @@ export function plannerGenerationHttpStatus(error: unknown): number {
     case 'planner_identity_mismatch':
     case 'planner_catalog_invalid':
     case 'planner_dialogue_not_supported':
+    case 'planner_procedure_authoring_not_supported':
     case 'planner_replan_not_supported':
     case 'planner_replan_submission_invalid':
       return 422;

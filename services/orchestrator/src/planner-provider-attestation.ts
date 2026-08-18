@@ -8,9 +8,13 @@ import {
   plannerProviderRuntimeOutputAttestationSchema,
   plannerProviderRuntimeTreatmentAttestationSchema,
   plannerProviderRuntimeTreatmentSchema,
+  procedureAuthoringProviderRuntimeOutputAttestationSchema,
+  procedureAuthoringProviderRuntimeTreatmentAttestationSchema,
   type PlannerProviderDescriptor,
   type PlannerProviderRuntimeOutputAttestation,
   type PlannerProviderRuntimeTreatmentAttestation,
+  type ProcedureAuthoringProviderRuntimeOutputAttestation,
+  type ProcedureAuthoringProviderRuntimeTreatmentAttestation,
 } from '@operatingline/protocol';
 
 import { PlannerGenerationRuntimeError } from './planner-provider-errors.js';
@@ -61,8 +65,21 @@ export function computePlannerProviderAttestationSha256(value: unknown): string 
 export function snapshotPlannerProviderRuntimeTreatment(
   provider: PlannerProvider,
   descriptor: PlannerProviderDescriptor,
+  operation: 'initial_plan' | 'local_replan',
+): PlannerProviderRuntimeTreatmentAttestation | undefined;
+export function snapshotPlannerProviderRuntimeTreatment(
+  provider: PlannerProvider,
+  descriptor: PlannerProviderDescriptor,
+  operation: 'procedure_authoring',
+): ProcedureAuthoringProviderRuntimeTreatmentAttestation | undefined;
+export function snapshotPlannerProviderRuntimeTreatment(
+  provider: PlannerProvider,
+  descriptor: PlannerProviderDescriptor,
   operation: PlannerProviderRuntimeOperation,
-): PlannerProviderRuntimeTreatmentAttestation | undefined {
+):
+  | PlannerProviderRuntimeTreatmentAttestation
+  | ProcedureAuthoringProviderRuntimeTreatmentAttestation
+  | undefined {
   if (provider.describeRuntimeTreatment === undefined) return undefined;
   let described: ReturnType<NonNullable<PlannerProvider['describeRuntimeTreatment']>>;
   try {
@@ -94,26 +111,55 @@ export function snapshotPlannerProviderRuntimeTreatment(
       'same_request_id',
     );
   }
-  return plannerProviderRuntimeTreatmentAttestationSchema.parse({
+  const attestation = {
     formatVersion: '1.0.0',
     evidenceClass: 'runtime_attested_provider_treatment',
     operation,
     treatment: treatment.data,
     treatmentSha256: computePlannerProviderAttestationSha256(treatment.data),
-  });
+  };
+  return operation === 'procedure_authoring'
+    ? procedureAuthoringProviderRuntimeTreatmentAttestationSchema.parse(attestation)
+    : plannerProviderRuntimeTreatmentAttestationSchema.parse(attestation);
 }
 
-export function createPlannerProviderRuntimeOutputAttestation(input: {
-  readonly operation: PlannerProviderRuntimeOperation;
+interface RuntimeOutputAttestationInput<
+  TOperation extends PlannerProviderRuntimeOperation,
+  TTreatment,
+> {
+  readonly operation: TOperation;
   readonly requestId: string;
   readonly requestFingerprint: string;
   readonly packet: unknown;
   readonly output: unknown;
-  readonly treatment: PlannerProviderRuntimeTreatmentAttestation | undefined;
+  readonly treatment: TTreatment | undefined;
   readonly occurredAt: string;
-}): PlannerProviderRuntimeOutputAttestation | undefined {
+}
+
+export function createPlannerProviderRuntimeOutputAttestation(
+  input: RuntimeOutputAttestationInput<
+    'initial_plan' | 'local_replan',
+    PlannerProviderRuntimeTreatmentAttestation
+  >,
+): PlannerProviderRuntimeOutputAttestation | undefined;
+export function createPlannerProviderRuntimeOutputAttestation(
+  input: RuntimeOutputAttestationInput<
+    'procedure_authoring',
+    ProcedureAuthoringProviderRuntimeTreatmentAttestation
+  >,
+): ProcedureAuthoringProviderRuntimeOutputAttestation | undefined;
+export function createPlannerProviderRuntimeOutputAttestation(
+  input: RuntimeOutputAttestationInput<
+    PlannerProviderRuntimeOperation,
+    | PlannerProviderRuntimeTreatmentAttestation
+    | ProcedureAuthoringProviderRuntimeTreatmentAttestation
+  >,
+):
+  | PlannerProviderRuntimeOutputAttestation
+  | ProcedureAuthoringProviderRuntimeOutputAttestation
+  | undefined {
   if (input.treatment === undefined) return undefined;
-  return plannerProviderRuntimeOutputAttestationSchema.parse({
+  const attestation = {
     formatVersion: '1.0.0',
     evidenceClass: 'runtime_attested_provider_output',
     operation: input.operation,
@@ -123,5 +169,8 @@ export function createPlannerProviderRuntimeOutputAttestation(input: {
     outputSha256: computePlannerProviderAttestationSha256(input.output),
     treatment: input.treatment,
     occurredAt: input.occurredAt,
-  });
+  };
+  return input.operation === 'procedure_authoring'
+    ? procedureAuthoringProviderRuntimeOutputAttestationSchema.parse(attestation)
+    : plannerProviderRuntimeOutputAttestationSchema.parse(attestation);
 }

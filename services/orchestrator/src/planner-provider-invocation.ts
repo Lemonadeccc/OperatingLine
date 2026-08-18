@@ -16,7 +16,8 @@ const maximumProviderTimeoutMs = 120_000;
 const maximumProviderOutputBytes = 2 * 1024 * 1024;
 const maximumGlobalConcurrency = 4;
 
-export type PlannerProviderOperation = 'initial_plan' | 'local_replan' | 'semantic_dialogue';
+export type PlannerProviderOperation =
+  'initial_plan' | 'local_replan' | 'semantic_dialogue' | 'procedure_authoring';
 
 interface InvocationIdentity {
   readonly operation: PlannerProviderOperation;
@@ -52,6 +53,7 @@ export interface PlannerProviderInvocationRequest<TResult> extends InvocationIde
     | (() => readonly [targetAdapterId: string, planId: string]);
   readonly requiresReplan: boolean;
   readonly requiresDialogue?: boolean;
+  readonly requiresProcedureAuthoring?: boolean;
   readonly attempt: (context: PlannerProviderAttemptContext) => Promise<TResult>;
 }
 
@@ -275,6 +277,16 @@ export function createPlannerProviderInvocationManager(
         throw new PlannerGenerationRuntimeError(
           'planner_dialogue_not_supported',
           `Planner provider ${request.providerId} does not support streamed semantic dialogue`,
+          'same_request_id',
+        );
+      }
+      if (
+        request.requiresProcedureAuthoring &&
+        typeof registered.provider.authorProcedure !== 'function'
+      ) {
+        throw new PlannerGenerationRuntimeError(
+          'planner_procedure_authoring_not_supported',
+          `Planner provider ${request.providerId} does not support Procedure authoring`,
           'same_request_id',
         );
       }

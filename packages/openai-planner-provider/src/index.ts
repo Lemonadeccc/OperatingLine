@@ -2,6 +2,7 @@ import type {
   PlannerProvider,
   PlannerProviderDialogueInput,
   PlannerProviderGenerateInput,
+  PlannerProviderProcedureAuthoringInput,
   PlannerProviderReplanInput,
   PlannerProviderRuntimeOperation,
   PlannerProviderRuntimeTreatmentDescription,
@@ -182,6 +183,10 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
 
   async generate(input: PlannerProviderGenerateInput): Promise<unknown> {
     return this.requestJson(input.packet.renderedPrompt, input.signal);
+  }
+
+  async authorProcedure(input: PlannerProviderProcedureAuthoringInput): Promise<unknown> {
+    return this.requestJson(input.renderedPrompt, input.signal);
   }
 
   describeRuntimeTreatment(

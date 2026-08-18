@@ -320,9 +320,17 @@ grounding 候选，再生成层级、语义 operation 和 Action 参数。
 `operatingline.procedure.authoring.validate`；服务端重算 canonical SHA-256、按精确版本从 registry 重建 packet、
 检查固定 identity/provenance 与 candidate-only 契约，再调用通用 compile。通用 compile 单独调用不构成
 authoring 验证。Packet 不再复制 rendered prompt，并以 256 KiB canonical 大小 fail closed。packet 构建和
-验证都不会调用 Provider、自动保存树、创建 Proposal 或执行宿主。当前没有向量/语义 RAG、完整 Procedure
-Provider coordinator、可视化编辑器或训练导出。完整边界见
-[ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)。
+验证都不会调用 Provider、自动保存树、创建 Proposal 或执行宿主。
+
+调用方也可先通过 `operatingline.procedure.authoring.providers.list` 审阅 Provider 的传输/凭据披露，再显式
+调用 MCP `operatingline.procedure.authoring.generate` 或 HTTP
+`POST /api/v1/procedure/authoring/generate`。Runtime 把完整 packet 规范编码为唯一 Provider 输入，输出先通过
+candidate Schema 和 packet identity，再执行同一 installed-catalog validation/compile；持久化的
+requested/completed/failed evidence 支持重启后幂等恢复。成功结果明确为 `modelCalled: true`，但 tree 仍不
+自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
+既有 initial-plan/local-replan Eval。当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。
+完整边界见 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md) 与
+[ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
@@ -497,7 +505,7 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
 [ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实
-Blender 回放、Provider/RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
+Blender 轨迹回放、语义 RAG、教学视频、可视化编辑器和训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

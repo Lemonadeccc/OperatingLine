@@ -297,6 +297,11 @@
         重复 rendered prompt，并有 256 KiB canonical 上限。该流程不调用模型、不自动保存、创建 Proposal 或
         执行宿主，也不声称已经实现语义 RAG。见
         [ADR 0045](adr/0045-provider-neutral-procedure-authoring.md)。
+  - [x] 显式 Procedure Provider coordinator：MCP/HTTP 先公开支持 authoring 的已配置 Provider 与传输/凭据
+        披露；显式 generate 才把规范编码的完整 packet 交给 Provider。返回 candidate 立即经过严格 Schema、
+        packet identity、installed catalog 与 compile 门；requested/completed/failed evidence 支持重启幂等，
+        成功也不自动 store、materialize、propose 或执行。Procedure runtime attestation 与既有 Plan Eval
+        operation 隔离。见 [ADR 0070](adr/0070-explicit-procedure-authoring-provider.md)。
   - [ ] 确定性交互 grounding/materialization：给 operation 增加可验证的 InteractionCatalog recipe/step
         或 verified Procedure operation provenance，将候选物化成包含精确菜单、快捷键、MCP 参数的 available
         轨迹；通用 compile 在此之前继续明确标记 interaction tracks 为 structural-only。
@@ -490,9 +495,9 @@
           [ADR 0069](adr/0069-segment-primitives-managed-replay-attestation.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor、原生 Undo checkpoint attestation，
           以及七种已证明 primitive 之外的复合与编辑叶节点覆盖。
-  - [ ] 句子到完整 ProcedureTree 的完整 Provider/RAG 路径：在已有供应商无关 authoring packet 之上，
-        增加显式 Provider coordinator、经验证的语义召回与结果治理，使不会 Blender 的用户能先审阅结构
-        和参数，再对局部效果评论与精修；输入不依赖教学视频。
+  - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
+        candidate；仍需经验证的语义召回、流式 Procedure 对话、自动局部树重规划与结果治理，使不会 Blender
+        的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

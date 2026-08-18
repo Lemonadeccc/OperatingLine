@@ -1,5 +1,6 @@
 import type {
   PlanningPromptPacket,
+  ProcedureAuthoringPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/planner-provider-sdk';
 import { describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,7 @@ const packet = {
 const replanPacket = {
   renderedPrompt: 'Return a complete local replan as JSON.',
 } as ReplanningPromptPacket;
+const procedurePacket = {} as ProcedureAuthoringPromptPacket;
 const dialoguePacket = {
   renderedPrompt: 'Answer and call request_replan only for a clear Plan change.',
 } as Parameters<
@@ -145,6 +147,38 @@ describe('OpenAI Responses planner provider', () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         input: replanPacket.renderedPrompt,
+        store: false,
+        stream: false,
+        text: { format: { type: 'json_object' } },
+      }),
+      { signal },
+    );
+  });
+
+  it('uses the exact canonical Procedure packet prompt for explicit authoring', async () => {
+    const { client, create } = makeClient({
+      status: 'completed',
+      output_text: '{"id":"generated.procedure"}',
+    });
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+    const signal = new AbortController().signal;
+
+    expect(provider.authorProcedure).toBeDefined();
+    await expect(
+      provider.authorProcedure?.({
+        requestId: 'ca8148af-c9a1-46aa-9122-fdf006ed8259',
+        packet: procedurePacket,
+        renderedPrompt: '{"formatVersion":"1.0.0"}',
+        signal,
+      }),
+    ).resolves.toEqual({ id: 'generated.procedure' });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: '{"formatVersion":"1.0.0"}',
         store: false,
         stream: false,
         text: { format: { type: 'json_object' } },

@@ -98,8 +98,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   把原 packet 与候选提交给 `operatingline.procedure.authoring.validate`；服务端核对 canonical SHA-256、
   已安装目录快照、candidate-only 契约和固定 provenance，并复用既有 compile。Packet 不再重复内嵌 rendered
   prompt，且以 256 KiB canonical 大小 fail closed。该入口不调用模型、不自动保存树、创建 Proposal 或执行
-  宿主；当前也没有向量/语义 RAG、完整 Procedure Provider coordinator、可视化编辑器或训练导出。见
-  [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)。
+  宿主。显式选择已配置 Provider 后，MCP `operatingline.procedure.authoring.generate` 或 HTTP
+  `POST /api/v1/procedure/authoring/generate` 会把规范编码的完整 packet 交给 Provider，并立即执行同一
+  identity/catalog/compile 门；requested/completed/failed 证据支持重启幂等，结果仍不保存、物化、提案或执行。
+  当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。见
+  [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md) 与
+  [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

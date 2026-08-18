@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   compileProcedureTreeToGuidePlan,
   procedureAuthoringPromptContextSchema,
+  procedureAuthoringGenerateRequestSchema,
+  procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptRequestSchema,
@@ -460,6 +462,116 @@ describe('public procedure authoring JSON Schemas', () => {
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-authoring-validation-result.schema.json'),
       validationResultCases,
+    );
+  });
+
+  it('publishes strict explicit Provider generation request and result contracts', async () => {
+    const candidate = readCandidateProcedureTree();
+    const generationPacket = structuredClone(packet);
+    generationPacket.context.requestedTreeId = candidate.id;
+    generationPacket.context.recommendedRevision = candidate.revision;
+    generationPacket.context.catalogBinding.adapterId = candidate.adapterId;
+    generationPacket.context.catalogBinding.actionCatalog.catalogVersion =
+      candidate.actionCatalogVersion;
+    generationPacket.context.catalogBinding.interactionCatalog.catalogVersion =
+      candidate.interactionCatalogVersion;
+    generationPacket.context.catalogBinding.interactionCatalog.hostVersionRange =
+      candidate.hostVersionRange;
+
+    const generationRequest = {
+      requestId: 'bc5ee4ab-cfda-4d78-9628-068544065522',
+      providerId: 'procedure-author',
+      targetAdapterId: candidate.adapterId,
+      actionCatalogVersion: candidate.actionCatalogVersion,
+      interactionCatalogVersion: candidate.interactionCatalogVersion,
+      goal: generationPacket.context.goalProvenance.source.text,
+      treeId: candidate.id,
+      revision: candidate.revision,
+      locale: 'en',
+    } as const;
+    const requestCases = [
+      { value: generationRequest, accepted: true },
+      { value: { ...generationRequest, requestId: 'not-a-uuid' }, accepted: false },
+      { value: { ...generationRequest, providerId: '' }, accepted: false },
+      { value: { ...generationRequest, apiKey: 'forbidden' }, accepted: false },
+    ] as const;
+    for (const contractCase of requestCases) {
+      expect(procedureAuthoringGenerateRequestSchema.safeParse(contractCase.value).success).toBe(
+        contractCase.accepted,
+      );
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-authoring-generate-request.schema.json'),
+      requestCases,
+    );
+
+    const validation = {
+      formatVersion: '1.0.0',
+      packetContentSha256: generationPacket.integrity.contentSha256,
+      validation: {
+        packetIntegrity: 'validated',
+        installedCatalogBinding: 'validated',
+        authoringCandidateContract: 'validated',
+        procedureCompilation: 'validated',
+      },
+      compilation: {
+        formatVersion: candidate.formatVersion,
+        procedureTreeId: candidate.id,
+        procedureTreeRevision: candidate.revision,
+        adapterId: candidate.adapterId,
+        actionCatalogVersion: candidate.actionCatalogVersion,
+        interactionCatalogVersion: candidate.interactionCatalogVersion,
+        validation: {
+          procedureStructure: 'validated',
+          actionCatalogBinding: 'validated',
+          hostVersionRange: 'validated_against_action_catalog',
+          interactionTracks: 'structural_only',
+        },
+        plan: compileProcedureTreeToGuidePlan(candidate),
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      },
+      procedureStored: false,
+      proposalCreated: false,
+      hostExecutionStarted: false,
+    } as const;
+    const result = {
+      formatVersion: '1.0.0',
+      generationId: 'a884189c-f4f9-42b0-8f7f-c50a25ad3d98',
+      requestId: generationRequest.requestId,
+      provider: { id: generationRequest.providerId, version: '1.0.0' },
+      packet: generationPacket,
+      tree: candidate,
+      validation,
+      sideEffects: {
+        modelCalled: true,
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      },
+      generatedAt: '2026-08-18T00:00:00.000Z',
+      durationMs: 25,
+    } as const;
+    const resultCases = [
+      { value: result, accepted: true },
+      {
+        value: { ...result, sideEffects: { ...result.sideEffects, procedureStored: true } },
+        accepted: false,
+      },
+      {
+        value: { ...result, sideEffects: { ...result.sideEffects, modelCalled: false } },
+        accepted: false,
+      },
+      { value: { ...result, generatedAt: 'not-an-instant' }, accepted: false },
+    ] as const;
+    for (const contractCase of resultCases) {
+      expect(procedureAuthoringGenerationResultSchema.safeParse(contractCase.value).success).toBe(
+        contractCase.accepted,
+      );
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-authoring-generation-result.schema.json'),
+      resultCases,
     );
   });
 });

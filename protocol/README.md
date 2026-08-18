@@ -53,6 +53,16 @@ provenance 和 candidate-only 契约，再复用既有 compile。Packet 不含�
 canonical 大小为上限。该入口不调用模型、保存树、创建 Proposal 或执行宿主，也没有向量或语义 RAG。见
 `docs/adr/0045-provider-neutral-procedure-authoring.md`。
 
+`procedure-authoring-generate-request.schema.json` 与
+`procedure-authoring-generation-result.schema.json` 定义显式 Provider authoring 调用。调用方先通过 MCP
+`operatingline.procedure.authoring.providers.list` 或 HTTP
+`GET /api/v1/procedure/authoring/providers` 查看传输/凭据披露，再以 provider ID 和 UUID request ID 调用 MCP
+`operatingline.procedure.authoring.generate` 或 HTTP
+`POST /api/v1/procedure/authoring/generate`。Provider 收到完整 packet 的规范 JSON 编码；返回 candidate 立即
+执行上述 packet identity、installed catalog 与 compile 门。结果固定声明模型已调用，但 tree 未保存、Proposal
+未创建、宿主未执行；requested/completed/failed evidence 支持重启幂等。见
+`docs/adr/0070-explicit-procedure-authoring-provider.md`。
+
 `procedure-authoring-materialization-request.schema.json` 与
 `procedure-authoring-materialization-result.schema.json` 定义后续第一个目录绑定菜单 grounding 切片。MCP
 `operatingline.procedure.authoring.materialize` 与 HTTP

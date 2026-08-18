@@ -56,6 +56,8 @@ import {
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringGenerateRequestSchema,
+  procedureAuthoringGenerationResultSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureAuthoringMaterializationRequestSchema,
@@ -375,6 +377,16 @@ const schemas = [
     'procedure-authoring-validation-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-authoring-validation-result.json',
     procedureAuthoringValidationResultSchema,
+  ],
+  [
+    'procedure-authoring-generate-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-authoring-generate-request.json',
+    procedureAuthoringGenerateRequestSchema,
+  ],
+  [
+    'procedure-authoring-generation-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-authoring-generation-result.json',
+    procedureAuthoringGenerationResultSchema,
   ],
   [
     'procedure-authoring-materialization-request.schema.json',
