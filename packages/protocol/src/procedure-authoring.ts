@@ -14,13 +14,16 @@ import {
 import { catalogVersionSchema } from './version.js';
 
 export const procedureAuthoringPromptLegacyFormatVersion = '1.0.0' as const;
-export const procedureAuthoringPromptFormatVersion = '1.1.0' as const;
+export const procedureAuthoringPromptTutorialFormatVersion = '1.1.0' as const;
+export const procedureAuthoringPromptFormatVersion = '1.2.0' as const;
 export const supportedProcedureAuthoringPromptFormatVersions = [
   procedureAuthoringPromptLegacyFormatVersion,
+  procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringPromptFormatVersion,
 ] as const;
 export const procedureAuthoringPromptPacketMaxCanonicalBytes = 262_144 as const;
 export const procedureAuthoringTutorialSegmentMaxCount = 2_000 as const;
+export const procedureAuthoringTutorialTranscriptDocumentMaxBytes = 262_144 as const;
 export const procedureAuthoringPromptFormatVersionSchema = z.enum(
   supportedProcedureAuthoringPromptFormatVersions,
 );
@@ -39,7 +42,7 @@ const procedureAuthoringTutorialDurationSchema = z
   .max(Number.MAX_SAFE_INTEGER);
 const procedureAuthoringTutorialLicenseSchema = z.string().min(1).max(1_000).regex(/\S/);
 
-const procedureAuthoringTutorialVideoInputSchema = z.discriminatedUnion('rightsStatus', [
+export const procedureAuthoringTutorialVideoInputSchema = z.discriminatedUnion('rightsStatus', [
   z.strictObject({
     uri: procedureAuthoringTutorialUriSchema,
     title: procedureAuthoringTutorialTitleSchema,
@@ -74,6 +77,25 @@ export const procedureAuthoringTutorialTranscriptSegmentSchema = z.strictObject(
 });
 export type ProcedureAuthoringTutorialTranscriptSegment = z.infer<
   typeof procedureAuthoringTutorialTranscriptSegmentSchema
+>;
+
+export const procedureAuthoringTutorialTranscriptDocumentSchema = z.strictObject({
+  format: z.enum(['webvtt', 'srt']),
+  contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  contentBytes: z
+    .number()
+    .int()
+    .positive()
+    .max(procedureAuthoringTutorialTranscriptDocumentMaxBytes),
+  cueCount: z.number().int().positive().max(procedureAuthoringTutorialSegmentMaxCount),
+  normalization: z.literal('operatingline-caption-cues-v1'),
+  confidence: z.strictObject({
+    origin: z.literal('user_declared_default'),
+    value: procedureAuthoringTutorialTranscriptSegmentSchema.shape.confidence,
+  }),
+});
+export type ProcedureAuthoringTutorialTranscriptDocument = z.infer<
+  typeof procedureAuthoringTutorialTranscriptDocumentSchema
 >;
 
 export const procedureAuthoringTutorialInputSchema = z
@@ -232,6 +254,7 @@ const procedureAuthoringTutorialProvenanceSchema = z
     transcript: z.strictObject({
       origin: z.literal('user_supplied'),
       locale: procedureAuthoringLocaleSchema.optional(),
+      document: procedureAuthoringTutorialTranscriptDocumentSchema.optional(),
       segments: z
         .array(
           z.strictObject({
@@ -251,6 +274,25 @@ const procedureAuthoringTutorialProvenanceSchema = z
     }),
   })
   .superRefine((tutorial, context) => {
+    const document = tutorial.transcript.document;
+    if (document !== undefined) {
+      if (document.cueCount !== tutorial.transcript.segments.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'document', 'cueCount'],
+          message: 'Tutorial transcript document cue count must match normalized segments',
+        });
+      }
+      for (const [index, segment] of tutorial.transcript.segments.entries()) {
+        if (segment.confidence !== document.confidence.value) {
+          context.addIssue({
+            code: 'custom',
+            path: ['transcript', 'segments', index, 'confidence'],
+            message: 'Tutorial transcript segment confidence must match the document default',
+          });
+        }
+      }
+    }
     const ids = new Set<string>();
     let previousEndMs = -1;
     for (const [index, segment] of tutorial.transcript.segments.entries()) {
@@ -323,6 +365,7 @@ export const procedureAuthoringPromptContextSchema = z
       allInteractionTracksUnavailable: z.literal(true),
       persistenceRequiresExplicitStore: z.literal(true),
       allSemanticOperationsTutorialEvidenceBound: z.literal(true).optional(),
+      tutorialTranscriptDocumentBound: z.literal(true).optional(),
     }),
   })
   .superRefine((context, refinement) => {
@@ -334,6 +377,15 @@ export const procedureAuthoringPromptContextSchema = z
         code: 'custom',
         path: ['constraints', 'allSemanticOperationsTutorialEvidenceBound'],
         message: 'Tutorial provenance and tutorial evidence binding must be declared together',
+      });
+    }
+    const documentPresent = context.tutorialProvenance?.transcript.document !== undefined;
+    const documentBindingRequired = context.constraints.tutorialTranscriptDocumentBound === true;
+    if (documentPresent !== documentBindingRequired) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['constraints', 'tutorialTranscriptDocumentBound'],
+        message: 'Tutorial transcript document provenance and binding must be declared together',
       });
     }
   })
@@ -354,6 +406,27 @@ export const procedureAuthoringPromptContextSchema = z
           },
         },
       },
+      {
+        if: {
+          properties: {
+            tutorialProvenance: {
+              properties: { transcript: { required: ['document'] } },
+              required: ['transcript'],
+            },
+          },
+          required: ['tutorialProvenance'],
+        },
+        then: {
+          properties: {
+            constraints: { required: ['tutorialTranscriptDocumentBound'] },
+          },
+        },
+        else: {
+          properties: {
+            constraints: { not: { required: ['tutorialTranscriptDocumentBound'] } },
+          },
+        },
+      },
     ],
   });
 export type ProcedureAuthoringPromptContext = z.infer<typeof procedureAuthoringPromptContextSchema>;
@@ -362,14 +435,49 @@ const procedureAuthoringPromptVersionJsonSchemaMetadata = {
   allOf: [
     {
       if: {
+        properties: { formatVersion: { const: procedureAuthoringPromptLegacyFormatVersion } },
+        required: ['formatVersion'],
+      },
+      then: {
+        properties: { context: { not: { required: ['tutorialProvenance'] } } },
+      },
+    },
+    {
+      if: {
+        properties: { formatVersion: { const: procedureAuthoringPromptTutorialFormatVersion } },
+        required: ['formatVersion'],
+      },
+      then: {
+        properties: {
+          context: {
+            properties: {
+              tutorialProvenance: {
+                properties: { transcript: { not: { required: ['document'] } } },
+                required: ['transcript'],
+              },
+            },
+            required: ['tutorialProvenance'],
+          },
+        },
+      },
+    },
+    {
+      if: {
         properties: { formatVersion: { const: procedureAuthoringPromptFormatVersion } },
         required: ['formatVersion'],
       },
       then: {
-        properties: { context: { required: ['tutorialProvenance'] } },
-      },
-      else: {
-        properties: { context: { not: { required: ['tutorialProvenance'] } } },
+        properties: {
+          context: {
+            properties: {
+              tutorialProvenance: {
+                properties: { transcript: { required: ['document'] } },
+                required: ['transcript'],
+              },
+            },
+            required: ['tutorialProvenance'],
+          },
+        },
       },
     },
   ],
@@ -404,13 +512,18 @@ export const procedureAuthoringPromptPacketContentSchema = z
     }),
   })
   .superRefine((packet, context) => {
-    const tutorialPresent = packet.context.tutorialProvenance !== undefined;
-    const tutorialFormat = packet.formatVersion === procedureAuthoringPromptFormatVersion;
-    if (tutorialPresent !== tutorialFormat) {
+    const tutorial = packet.context.tutorialProvenance;
+    const expectedFormat =
+      tutorial === undefined
+        ? procedureAuthoringPromptLegacyFormatVersion
+        : tutorial.transcript.document === undefined
+          ? procedureAuthoringPromptTutorialFormatVersion
+          : procedureAuthoringPromptFormatVersion;
+    if (packet.formatVersion !== expectedFormat) {
       context.addIssue({
         code: 'custom',
         path: ['formatVersion'],
-        message: 'Procedure authoring tutorial provenance requires packet format 1.1.0',
+        message: 'Procedure authoring packet format does not match its tutorial provenance',
       });
     }
   })

@@ -10,11 +10,13 @@ import {
   procedureAuthoringPromptLegacyFormatVersion,
   procedureAuthoringPromptContextSchema,
   procedureAuthoringPromptFormatVersion,
+  procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringPromptPacketContentSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
   procedureAuthoringTutorialInputSchema,
+  procedureAuthoringTutorialTranscriptDocumentSchema,
   protocolJsonValueCanonicalization,
   validateActionCatalog,
   validateInteractionCatalog,
@@ -24,6 +26,7 @@ import {
   type ProcedureAuthoringPromptPacketContent,
   type ProcedureAuthoringPromptRequest,
   type ProcedureAuthoringTutorialInput,
+  type ProcedureAuthoringTutorialTranscriptDocument,
   type ProcedureAuthoringCandidateTree,
 } from '@operatingline/protocol';
 
@@ -49,6 +52,14 @@ const tutorialWorkflowInstructions = [
   'Preserve the exact tutorial video source and every supplied transcript segment as packet-bound evidence. Never invent, split, merge, extend, or retime video evidence.',
   'Every semantic operation must cite at least one supplied tutorial transcript segment. A hierarchy inferred from those segments remains candidate data until separately reviewed and validated.',
 ] as const;
+
+const tutorialDocumentWorkflowInstructions = [
+  'The transcript segments were deterministically parsed from the exact caption document digest in tutorial provenance. Preserve that document metadata and do not reinterpret caption display settings as Blender actions.',
+] as const;
+
+export interface ProcedureAuthoringPromptPacketBuildOptions {
+  readonly tutorialTranscriptDocument?: ProcedureAuthoringTutorialTranscriptDocument;
+}
 
 function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
@@ -284,8 +295,30 @@ export function buildProcedureAuthoringPromptPacket(
   requestInput: ProcedureAuthoringPromptRequest,
   actionCatalogInput: ActionCatalog,
   interactionCatalogInput: InteractionCatalog,
+  options: ProcedureAuthoringPromptPacketBuildOptions = {},
 ): ProcedureAuthoringPromptPacket {
   const request = procedureAuthoringPromptRequestSchema.parse(requestInput);
+  const tutorialTranscriptDocument =
+    options.tutorialTranscriptDocument === undefined
+      ? undefined
+      : procedureAuthoringTutorialTranscriptDocumentSchema.parse(
+          options.tutorialTranscriptDocument,
+        );
+  if (tutorialTranscriptDocument !== undefined) {
+    if (request.tutorial === undefined) {
+      throw new Error('Tutorial transcript document provenance requires tutorial input');
+    }
+    if (tutorialTranscriptDocument.cueCount !== request.tutorial.transcript.segments.length) {
+      throw new Error('Tutorial transcript document cue count does not match normalized segments');
+    }
+    if (
+      request.tutorial.transcript.segments.some(
+        (segment) => segment.confidence !== tutorialTranscriptDocument.confidence.value,
+      )
+    ) {
+      throw new Error('Tutorial transcript segment confidence does not match the document default');
+    }
+  }
   const actionCatalog = actionCatalogSchema.parse(actionCatalogInput);
   const interactionCatalog = interactionCatalogSchema.parse(interactionCatalogInput);
   validateActionCatalog(actionCatalog);
@@ -385,6 +418,9 @@ export function buildProcedureAuthoringPromptPacket(
               ...(request.tutorial.transcript.locale === undefined
                 ? {}
                 : { locale: request.tutorial.transcript.locale }),
+              ...(tutorialTranscriptDocument === undefined
+                ? {}
+                : { document: tutorialTranscriptDocument }),
               segments: tutorialSegments,
             },
           },
@@ -409,6 +445,9 @@ export function buildProcedureAuthoringPromptPacket(
       ...(request.tutorial === undefined
         ? {}
         : { allSemanticOperationsTutorialEvidenceBound: true }),
+      ...(tutorialTranscriptDocument === undefined
+        ? {}
+        : { tutorialTranscriptDocumentBound: true }),
     },
   });
   const baseResponseSchema = z.toJSONSchema(procedureAuthoringCandidateTreeSchema, {
@@ -440,7 +479,9 @@ export function buildProcedureAuthoringPromptPacket(
     formatVersion:
       request.tutorial === undefined
         ? procedureAuthoringPromptLegacyFormatVersion
-        : procedureAuthoringPromptFormatVersion,
+        : tutorialTranscriptDocument === undefined
+          ? procedureAuthoringPromptTutorialFormatVersion
+          : procedureAuthoringPromptFormatVersion,
     context,
     retrieval: {
       toolName: 'operatingline.procedure.search',
@@ -457,7 +498,13 @@ export function buildProcedureAuthoringPromptPacket(
       instructions:
         request.tutorial === undefined
           ? workflowInstructions
-          : [...workflowInstructions, ...tutorialWorkflowInstructions],
+          : [
+              ...workflowInstructions,
+              ...tutorialWorkflowInstructions,
+              ...(tutorialTranscriptDocument === undefined
+                ? []
+                : tutorialDocumentWorkflowInstructions),
+            ],
     },
     limits: {
       maxCanonicalBytes: procedureAuthoringPromptPacketMaxCanonicalBytes,

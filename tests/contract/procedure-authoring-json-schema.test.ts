@@ -689,8 +689,42 @@ describe('public procedure authoring JSON Schemas', () => {
       generatedAt: '2026-08-18T00:00:00.000Z',
       durationMs: 25,
     } as const;
+    const documentPacket = {
+      ...generationPacket,
+      formatVersion: '1.2.0',
+      context: {
+        ...generationPacket.context,
+        tutorialProvenance: {
+          ...tutorialContext.tutorialProvenance,
+          transcript: {
+            ...tutorialContext.tutorialProvenance.transcript,
+            document: {
+              format: 'srt',
+              contentSha256: 'b'.repeat(64),
+              contentBytes: 64,
+              cueCount: 1,
+              normalization: 'operatingline-caption-cues-v1',
+              confidence: { origin: 'user_declared_default', value: 0.95 },
+            },
+          },
+        },
+        constraints: {
+          ...generationPacket.context.constraints,
+          allSemanticOperationsTutorialEvidenceBound: true,
+          tutorialTranscriptDocumentBound: true,
+        },
+      },
+    } as const;
     const resultCases = [
       { value: result, accepted: true },
+      {
+        value: {
+          ...result,
+          packet: documentPacket,
+          validation: { ...result.validation, formatVersion: '1.2.0' },
+        },
+        accepted: false,
+      },
       {
         value: { ...result, sideEffects: { ...result.sideEffects, procedureStored: true } },
         accepted: false,

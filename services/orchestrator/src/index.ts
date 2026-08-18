@@ -60,6 +60,7 @@ import {
   procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
+  procedureTutorialTranscriptImportRequestSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
@@ -161,7 +162,9 @@ import {
   procedureAuthoringTutorialInputFromPacket,
   validateProcedureAuthoringCandidate,
   validateProcedureAuthoringPromptPacketIntegrity,
+  type ProcedureAuthoringPromptPacketBuildOptions,
 } from './procedure-authoring-prompt.js';
+import { buildProcedureTutorialTranscriptPromptPacket } from './procedure-tutorial-transcript-import.js';
 import {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
@@ -486,6 +489,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
 
     const getProcedureAuthoringPrompt = (
       request: ReturnType<typeof procedureAuthoringPromptRequestSchema.parse>,
+      options: ProcedureAuthoringPromptPacketBuildOptions = {},
     ) => {
       const actionCatalog = actionCatalogRegistry.get({
         targetAdapterId: request.targetAdapterId,
@@ -500,7 +504,35 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           ? {}
           : { interactionCatalogVersion: request.interactionCatalogVersion }),
       });
-      return buildProcedureAuthoringPromptPacket(request, actionCatalog, interactionCatalog);
+      return buildProcedureAuthoringPromptPacket(
+        request,
+        actionCatalog,
+        interactionCatalog,
+        options,
+      );
+    };
+
+    const importProcedureTutorialTranscript = (
+      request: ReturnType<typeof procedureTutorialTranscriptImportRequestSchema.parse>,
+    ) => {
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: request.targetAdapterId,
+        ...(request.actionCatalogVersion === undefined
+          ? {}
+          : { catalogVersion: request.actionCatalogVersion }),
+      });
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: request.targetAdapterId,
+        actionCatalogVersion: actionCatalog.catalogVersion,
+        ...(request.interactionCatalogVersion === undefined
+          ? {}
+          : { interactionCatalogVersion: request.interactionCatalogVersion }),
+      });
+      return buildProcedureTutorialTranscriptPromptPacket(
+        request,
+        actionCatalog,
+        interactionCatalog,
+      );
     };
 
     const getGuideGoalRequest = (requestId: string): GuideGoalRequest => {
@@ -580,18 +612,25 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ) => {
       const packet = validateProcedureAuthoringPromptPacketIntegrity(request.packet);
       const tutorial = procedureAuthoringTutorialInputFromPacket(packet);
-      const expectedPacket = getProcedureAuthoringPrompt({
-        targetAdapterId: packet.context.catalogBinding.adapterId,
-        actionCatalogVersion: packet.context.catalogBinding.actionCatalog.catalogVersion,
-        interactionCatalogVersion: packet.context.catalogBinding.interactionCatalog.catalogVersion,
-        goal: packet.context.goalProvenance.source.text,
-        treeId: packet.context.requestedTreeId,
-        revision: packet.context.recommendedRevision,
-        ...(packet.context.goalProvenance.source.locale === undefined
-          ? {}
-          : { locale: packet.context.goalProvenance.source.locale }),
-        ...(tutorial === undefined ? {} : { tutorial }),
-      });
+      const tutorialTranscriptDocument = packet.context.tutorialProvenance?.transcript.document;
+      const expectedPacket = getProcedureAuthoringPrompt(
+        {
+          targetAdapterId: packet.context.catalogBinding.adapterId,
+          actionCatalogVersion: packet.context.catalogBinding.actionCatalog.catalogVersion,
+          interactionCatalogVersion:
+            packet.context.catalogBinding.interactionCatalog.catalogVersion,
+          goal: packet.context.goalProvenance.source.text,
+          treeId: packet.context.requestedTreeId,
+          revision: packet.context.recommendedRevision,
+          ...(packet.context.goalProvenance.source.locale === undefined
+            ? {}
+            : { locale: packet.context.goalProvenance.source.locale }),
+          ...(tutorial === undefined ? {} : { tutorial }),
+        },
+        {
+          ...(tutorialTranscriptDocument === undefined ? {} : { tutorialTranscriptDocument }),
+        },
+      );
       if (packet.integrity.contentSha256 !== expectedPacket.integrity.contentSha256) {
         throw new Error(
           'Procedure authoring packet does not match the installed catalog snapshots',
@@ -1740,6 +1779,67 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
           };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.import',
+        {
+          description:
+            'Strictly parse one user-provided WebVTT or SRT caption document, bind its exact digest and normalized cues to a rights-declared HTTPS tutorial, and return a deterministic Procedure authoring packet. This performs no network fetch, transcription, model call, storage, proposal, or host execution.',
+          inputSchema: deferMcpInputValidation(procedureTutorialTranscriptImportRequestSchema),
+          outputSchema: procedureAuthoringPromptPacketSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialTranscriptImportRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_tutorial_transcript_import_request',
+                    message:
+                      'Procedure tutorial transcript import request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const packet = importProcedureTutorialTranscript(parsedRequest.data);
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: packet.formatVersion,
+                    packetContentSha256: packet.integrity.contentSha256,
+                    message: 'The complete authoring packet is in structuredContent.',
+                  }),
+                },
+              ],
+              structuredContent: packet,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_tutorial_transcript_import_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Procedure tutorial transcript import failed',
+                  }),
+                },
+              ],
+            };
+          }
         },
       );
 
@@ -3080,6 +3180,24 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/tutorial/import', async (request, reply) => {
+      const parsedRequest = procedureTutorialTranscriptImportRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_transcript_import_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return importProcedureTutorialTranscript(parsedRequest.data);
+      } catch (error) {
+        return reply.code(422).send({
+          error: 'procedure_tutorial_transcript_import_failed',
+          message:
+            error instanceof Error ? error.message : 'Procedure tutorial transcript import failed',
+        });
+      }
+    });
     runtimeApp.get('/api/v1/procedure/authoring/providers', async () =>
       plannerProviderRegistry.listProcedureAuthors(),
     );
@@ -4073,7 +4191,13 @@ export {
   procedureAuthoringTutorialInputFromPacket,
   validateProcedureAuthoringCandidate,
   validateProcedureAuthoringPromptPacketIntegrity,
+  type ProcedureAuthoringPromptPacketBuildOptions,
 } from './procedure-authoring-prompt.js';
+export {
+  buildProcedureTutorialTranscriptPromptPacket,
+  parseProcedureTutorialTranscriptImport,
+  type ParsedProcedureTutorialTranscriptImport,
+} from './procedure-tutorial-transcript-import.js';
 export {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,

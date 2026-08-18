@@ -93,6 +93,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目标/教程证据 Procedure 编写 Packet**：MCP `operatingline.procedure.prompt.get` 与 HTTP
   `POST /api/v1/procedure/prompt` 返回供应商无关的 packet；普通目标保持 `1.0.0`，可选的教程模式使用
   `1.1.0`，额外绑定权利状态明确的 HTTPS 视频与有序、非重叠的 `user_supplied` 字幕区间、原文和置信度。
+  若调用方已有 SRT/WebVTT 文档，可改用版本化 MCP `operatingline.procedure.tutorial.import` 或 HTTP
+  `POST /api/v1/procedure/tutorial/import`：Runtime 严格解析文档，以原始 UTF-8 内容的 SHA-256、字节数、
+  cue 数和统一置信度绑定 `1.2.0` packet，再把规范化 cue 作为同一视频证据。导入不联网、不下载视频、
+  不调用转录或模型；显式 Provider `authoring.generate` 当前仍只消费 `1.0.0/1.1.0` 请求。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
   权利声明也不等于 released 训练许可。Packet 同时精确绑定 ActionCatalog、InteractionCatalog、tree
   identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
@@ -107,7 +111,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
-  [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
+  [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
+  [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

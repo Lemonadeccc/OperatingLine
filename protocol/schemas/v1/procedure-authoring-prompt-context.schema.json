@@ -257,6 +257,64 @@
               "maxLength": 64,
               "pattern": "^\\S+$"
             },
+            "document": {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "webvtt",
+                    "srt"
+                  ]
+                },
+                "contentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "contentBytes": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 262144
+                },
+                "cueCount": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2000
+                },
+                "normalization": {
+                  "type": "string",
+                  "const": "operatingline-caption-cues-v1"
+                },
+                "confidence": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "const": "user_declared_default"
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "origin",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "format",
+                "contentSha256",
+                "contentBytes",
+                "cueCount",
+                "normalization",
+                "confidence"
+              ],
+              "additionalProperties": false
+            },
             "segments": {
               "minItems": 1,
               "maxItems": 2000,
@@ -2087,6 +2145,10 @@
         "allSemanticOperationsTutorialEvidenceBound": {
           "type": "boolean",
           "const": true
+        },
+        "tutorialTranscriptDocumentBound": {
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -2129,6 +2191,47 @@
             "not": {
               "required": [
                 "allSemanticOperationsTutorialEvidenceBound"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "tutorialProvenance": {
+            "properties": {
+              "transcript": {
+                "required": [
+                  "document"
+                ]
+              }
+            },
+            "required": [
+              "transcript"
+            ]
+          }
+        },
+        "required": [
+          "tutorialProvenance"
+        ]
+      },
+      "then": {
+        "properties": {
+          "constraints": {
+            "required": [
+              "tutorialTranscriptDocumentBound"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "constraints": {
+            "not": {
+              "required": [
+                "tutorialTranscriptDocumentBound"
               ]
             }
           }

@@ -15,5 +15,9 @@ describe('OperatingLine MCP instructions', () => {
     expect(firstClientPreview).toContain('Never send model output to operatingline.guide.publish');
     expect(firstClientPreview).toContain('only enters Blender review');
     expect(firstClientPreview).toContain('never permits host execution');
+    expect(operatingLineMcpInstructions).toContain('operatingline.procedure.tutorial.import');
+    expect(operatingLineMcpInstructions).toContain(
+      'currently accepts only goal or caller-segmented requests',
+    );
   });
 });

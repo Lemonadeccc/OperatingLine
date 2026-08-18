@@ -19,6 +19,7 @@ import {
   canonicalizeProtocolJsonValue,
   guideProtocolVersion,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringPromptPacketSchema,
   type GuidePlan,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
@@ -303,6 +304,8 @@ describe('OperatingLine runtime', () => {
       databasePath: ':memory:',
       accessToken,
       adapters: [new FakeBlenderAdapter()],
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
     });
 
     try {
@@ -354,6 +357,7 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.procedure.tutorial.import' },
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.providers.list' },
             { name: 'operatingline.procedure.authoring.generate' },
@@ -391,6 +395,15 @@ describe('OperatingLine runtime', () => {
       });
       expect(
         toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.import',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'targetAdapterId', 'goal', 'treeId', 'revision', 'tutorial'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
           (tool) => tool.name === 'operatingline.procedure.authoring.validate',
         )?.inputSchema,
       ).toMatchObject({
@@ -414,6 +427,135 @@ describe('OperatingLine runtime', () => {
         type: 'object',
         required: ['requestId', 'catalogVersion', 'plan'],
         additionalProperties: false,
+      });
+
+      const captionDocument =
+        'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove it into position.\n';
+      const tutorialImportRequest = {
+        formatVersion: '1.0.0',
+        targetAdapterId: 'blender',
+        goal: 'Create and position an eye from tutorial captions.',
+        treeId: 'runtime.tutorial.caption.eye',
+        revision: 1,
+        tutorial: {
+          video: {
+            uri: 'https://www.youtube.com/watch?v=runtime-caption-eye',
+            title: 'Runtime caption import fixture',
+            durationMs: 10_000,
+            rightsStatus: 'permission_granted',
+          },
+          captionDocument: {
+            origin: 'user_supplied',
+            format: 'webvtt',
+            content: captionDocument,
+            locale: 'en',
+            defaultConfidence: 0.9,
+          },
+        },
+      } as const;
+      const importedMcp = await callMcpTool(
+        runtime,
+        101,
+        'operatingline.procedure.tutorial.import',
+        tutorialImportRequest,
+      );
+      if (importedMcp.result?.isError === true) {
+        throw new Error(importedMcp.result.content?.[0]?.text ?? 'Tutorial import MCP call failed');
+      }
+      expect(importedMcp.result?.isError).not.toBe(true);
+      const importedPacket = procedureAuthoringPromptPacketSchema.parse(
+        importedMcp.result?.structuredContent,
+      );
+      expect(importedPacket).toMatchObject({
+        formatVersion: '1.2.0',
+        context: {
+          tutorialProvenance: {
+            transcript: {
+              document: {
+                format: 'webvtt',
+                cueCount: 2,
+                confidence: { origin: 'user_declared_default', value: 0.9 },
+              },
+            },
+          },
+          constraints: { tutorialTranscriptDocumentBound: true },
+        },
+        sideEffects: {
+          modelCalled: false,
+          procedureStored: false,
+          proposalCreated: false,
+          hostExecutionStarted: false,
+        },
+      });
+      const importedHttp = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/import`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(tutorialImportRequest),
+      });
+      expect(importedHttp.status).toBe(200);
+      await expect(importedHttp.json()).resolves.toEqual(importedPacket);
+
+      const importedCandidate = generatedProcedureCandidate(importedPacket);
+      const importedValidation = await callMcpTool(
+        runtime,
+        103,
+        'operatingline.procedure.authoring.validate',
+        { packet: importedPacket, tree: importedCandidate },
+      );
+      expect(importedValidation.result?.isError).not.toBe(true);
+      expect(importedValidation.result?.structuredContent).toMatchObject({
+        formatVersion: '1.2.0',
+        packetContentSha256: importedPacket.integrity.contentSha256,
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+        },
+      });
+      const importedMaterialization = await callMcpTool(
+        runtime,
+        104,
+        'operatingline.procedure.authoring.materialize',
+        { packet: importedPacket, tree: importedCandidate },
+      );
+      expect(importedMaterialization.result?.isError).not.toBe(true);
+      expect(importedMaterialization.result?.structuredContent).toMatchObject({
+        packetContentSha256: importedPacket.integrity.contentSha256,
+        validation: {
+          packetIntegrity: 'validated',
+          installedCatalogBinding: 'validated',
+          authoringCandidateContract: 'validated',
+          procedureCompilation: 'validated',
+          interactionGrounding: 'validated_against_installed_interaction_catalog',
+        },
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+
+      const invalidImport = await callMcpTool(
+        runtime,
+        102,
+        'operatingline.procedure.tutorial.import',
+        {
+          ...tutorialImportRequest,
+          tutorial: {
+            ...tutorialImportRequest.tutorial,
+            captionDocument: {
+              ...tutorialImportRequest.tutorial.captionDocument,
+              content:
+                'WEBVTT\n\n00:01.000 --> 00:05.000\nFirst.\n\n00:04.000 --> 00:06.000\nOverlap.\n',
+            },
+          },
+        },
+      );
+      expect(invalidImport.result?.isError).toBe(true);
+      expect(JSON.parse(invalidImport.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        error: 'procedure_tutorial_transcript_import_failed',
       });
 
       const plan = JSON.parse(

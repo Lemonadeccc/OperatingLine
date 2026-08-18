@@ -60,6 +60,7 @@ import {
   procedureAuthoringGenerationResultSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
+  procedureTutorialTranscriptImportRequestSchema,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureLeafReplayAttestationSchema,
@@ -395,6 +396,11 @@ const schemas = [
     'procedure-authoring-generation-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-authoring-generation-result.json',
     procedureAuthoringGenerationResultSchema,
+  ],
+  [
+    'procedure-tutorial-transcript-import-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-transcript-import-request.json',
+    procedureTutorialTranscriptImportRequestSchema,
   ],
   [
     'procedure-authoring-materialization-request.schema.json',

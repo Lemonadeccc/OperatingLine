@@ -279,6 +279,11 @@
         为 packet-bound source/evidence，并要求候选的每个 semantic operation 至少引用一段。普通目标继续
         使用 packet `1.0.0`，教程模式使用 `1.1.0`；两者都不自动保存、提案或执行。见
         [ADR 0075](adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
+  - [x] 用户提供字幕文档的确定性导入：版本化 MCP/HTTP 请求接受权利状态明确的视频和完整 SRT/WebVTT，
+        严格解析 cue、时间与文本，对原始 UTF-8 内容保存 SHA-256/字节数/cue 数，并把规范化版本与统一
+        置信度绑定到 authoring packet `1.2.0`。普通 `1.0.0` 和手填分段 `1.1.0` 保持不变；入口不联网、
+        不转录、不调用模型、保存、提案或执行。显式 Provider generate 尚未消费该文档导入请求。见
+        [ADR 0076](adr/0076-user-supplied-caption-document-import.md)。
   - [ ] 经授权的 YouTube 获取、字幕抓取/语音转录、画面与按键识别、自动分段、证据帧，以及大步骤/小
         步骤质量校准；当前 Runtime 不下载或转录视频，也不把调用方权利声明当成 released 训练许可。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的

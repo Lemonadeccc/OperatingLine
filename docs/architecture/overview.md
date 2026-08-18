@@ -35,6 +35,7 @@ Immutable Procedure Library
 ProcedureAuthoringPromptPacket
   ├─ natural-language goal + namespaced source/evidence
   ├─ optional 1.1 rights-declared video + user-supplied transcript evidence
+  ├─ optional 1.2 exact SRT/WebVTT digest + deterministically normalized cues
   ├─ normalized exact ActionCatalog + InteractionCatalog binding
   ├─ candidate-only response; all interaction tracks unavailable
   ├─ SHA-256 packet binding → authoring validate → structural compile
@@ -313,6 +314,14 @@ JSON Schema、coverage 要求和相同工作流规则作为确定性协议对象
 
 Procedure 编写使用独立的 `ProcedureAuthoringPromptPacket`：普通自然语言目标保持 `1.0.0`；可选的
 `1.1.0` 教程模式还绑定权利状态明确的 HTTPS 视频，以及调用方提供的有序非重叠字幕区间、原文和置信度。
+调用方已有完整 SRT/WebVTT 时，可通过 MCP `operatingline.procedure.tutorial.import` 或 HTTP
+`POST /api/v1/procedure/tutorial/import` 提交版本化 `1.0.0` 导入请求。Runtime 对原始 UTF-8 字符串计算
+SHA-256 与字节数，严格解析时间轴、cue 顺序和文本，随后生成 `1.2.0` authoring packet；document format、
+digest、byte/cue count、规范化版本和调用方统一声明的置信度与规范化 segments 一起进入 provenance。
+`1.2.0` validator 会从同一 packet 重建 catalog-bound 内容，拒绝 document/segment 数量或置信度漂移。
+导入入口不访问 URI、不转录、不调用模型、不保存树、不创建 Proposal，也不执行宿主；原始字幕全文不进入
+packet，只有 digest/统计量和规范化 cue。显式 Provider `procedure.authoring.generate` 暂未接收 caption document
+请求，因此 `1.2.0` packet 目前由 MCP 宿主模型或其他明确授权的客户端消费。
 MCP `operatingline.procedure.prompt.get` 与 HTTP `POST /api/v1/procedure/prompt` 把 goal、固定来源证据、tree
 identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema 放进
 同一 packet。教程模式要求每个 semantic operation 至少引用一个给定视频 evidence，且拒绝缺失、改时、
@@ -336,7 +345,8 @@ requested/completed/failed evidence 支持重启后幂等恢复。成功结果�
 Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
-[ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)。
+[ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
+[ADR 0076](../adr/0076-user-supplied-caption-document-import.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
