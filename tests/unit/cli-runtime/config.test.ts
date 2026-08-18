@@ -113,4 +113,30 @@ describe('local AI client runtime configuration', () => {
       ).toThrow('OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN');
     }
   });
+
+  it('loads one Desktop YouTube OAuth client id and rejects ambiguous credentials', () => {
+    expect(
+      loadCliRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID: 'desktop-client-id.apps.googleusercontent.com',
+      }),
+    ).toMatchObject({
+      youtubeOAuthClientId: 'desktop-client-id.apps.googleusercontent.com',
+    });
+    expect(() =>
+      loadCliRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID: 'desktop-client-id.apps.googleusercontent.com',
+        OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN: 'youtube-oauth-token',
+      }),
+    ).toThrow('Set only one');
+    for (const clientId of ['short', ' desktop-client-id ', 'desktop\nclient-id']) {
+      expect(() =>
+        loadCliRuntimeConfig({
+          ...requiredEnvironment,
+          OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID: clientId,
+        }),
+      ).toThrow('OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID');
+    }
+  });
 });

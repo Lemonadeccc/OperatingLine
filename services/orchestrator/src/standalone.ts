@@ -8,7 +8,10 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 
-import { createYouTubeDataApiCaptionSource, startRuntime } from './index.js';
+import { startRuntime } from './index.js';
+import { createYouTubeDataApiCaptionSource } from './youtube-caption-source.js';
+import { createDefaultYouTubeOAuthCredentialStore } from './youtube-oauth-credential-store.js';
+import { createYouTubeOAuthAccessTokenProvider } from './youtube-oauth.js';
 
 const logger = pino({ name: 'operating-line-runtime' });
 const databasePath = resolve(process.env.OPERATINGLINE_DATABASE_PATH ?? '.data/operating-line.db');
@@ -22,10 +25,25 @@ const allowLegacyCompanions = strictBoolean(
   true,
 );
 const youtubeAccessToken = process.env.OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN;
-const youtubeCaptionSource =
-  youtubeAccessToken === undefined || youtubeAccessToken === ''
+const youtubeOAuthClientId = process.env.OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID;
+if (youtubeAccessToken && youtubeOAuthClientId) {
+  throw new Error(
+    'Set only one of OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID or OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
+  );
+}
+const youtubeOAuthAccessTokenProvider =
+  youtubeOAuthClientId === undefined || youtubeOAuthClientId === ''
     ? undefined
-    : createYouTubeDataApiCaptionSource({ accessToken: youtubeAccessToken });
+    : createYouTubeOAuthAccessTokenProvider({
+        clientId: youtubeOAuthClientId,
+        credentialStore: createDefaultYouTubeOAuthCredentialStore(),
+      });
+const youtubeCaptionSource =
+  youtubeOAuthAccessTokenProvider === undefined
+    ? youtubeAccessToken === undefined || youtubeAccessToken === ''
+      ? undefined
+      : createYouTubeDataApiCaptionSource({ accessToken: youtubeAccessToken })
+    : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const runtime = await startRuntime({

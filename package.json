@@ -16,6 +16,7 @@
     "dev": "pnpm --dir services/orchestrator dev",
     "dev:clients": "pnpm --dir services/cli-runtime dev",
     "dev:openai": "pnpm --dir services/openai-runtime dev",
+    "youtube:auth": "tsx --env-file-if-exists=.env services/orchestrator/src/youtube-oauth-cli.ts",
     "setup:ai-clients": "tsx packages/client-setup/src/cli.ts --client all",
     "setup:codex": "tsx packages/client-setup/src/cli.ts --client codex",
     "setup:claude": "tsx packages/client-setup/src/cli.ts --client claude",

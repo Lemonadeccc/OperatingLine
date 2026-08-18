@@ -11,7 +11,12 @@ import {
   createClaudeCodeCliPlannerProvider,
   createCodexCliPlannerProvider,
 } from '@operatingline/cli-planner-provider';
-import { createYouTubeDataApiCaptionSource, startRuntime } from '@operatingline/orchestrator';
+import {
+  createDefaultYouTubeOAuthCredentialStore,
+  createYouTubeDataApiCaptionSource,
+  createYouTubeOAuthAccessTokenProvider,
+  startRuntime,
+} from '@operatingline/orchestrator';
 
 import { loadCliRuntimeConfig } from './config.js';
 
@@ -23,10 +28,19 @@ const plannerProviders = [
   createCodexCliPlannerProvider(config.codex),
   createClaudeCodeCliPlannerProvider(config.claude),
 ];
-const youtubeCaptionSource =
-  config.youtubeAccessToken === undefined
+const youtubeOAuthAccessTokenProvider =
+  config.youtubeOAuthClientId === undefined
     ? undefined
-    : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken });
+    : createYouTubeOAuthAccessTokenProvider({
+        clientId: config.youtubeOAuthClientId,
+        credentialStore: createDefaultYouTubeOAuthCredentialStore(),
+      });
+const youtubeCaptionSource =
+  youtubeOAuthAccessTokenProvider === undefined
+    ? config.youtubeAccessToken === undefined
+      ? undefined
+      : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken })
+    : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,

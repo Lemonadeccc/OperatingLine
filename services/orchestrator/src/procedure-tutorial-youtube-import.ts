@@ -195,8 +195,17 @@ function assertMatchingTrackListIdentity(
 function safeTrackListError(error: unknown): ProcedureTutorialYoutubeTrackListError {
   if (error instanceof ProcedureTutorialYoutubeTrackListError) return error;
   if (error instanceof ProcedureTutorialYoutubeSourceError) {
+    if (error.code === 'youtube_source_unavailable') {
+      return new ProcedureTutorialYoutubeTrackListError(
+        'youtube_track_list_unavailable',
+        error.message,
+        'new_request_id',
+      );
+    }
     if (
+      error.code === 'youtube_authentication_required' ||
       error.code === 'youtube_source_unauthorized' ||
+      error.code === 'youtube_source_quota_exceeded' ||
       error.code === 'youtube_video_not_found' ||
       error.code === 'youtube_source_failed'
     ) {
@@ -217,6 +226,50 @@ function safeTrackListError(error: unknown): ProcedureTutorialYoutubeTrackListEr
     'Authorized YouTube caption track metadata violates the strict result contract',
     'new_request_id',
   );
+}
+
+async function prepareImportAuthorization(
+  source: ProcedureTutorialYoutubeCaptionSource,
+): Promise<void> {
+  try {
+    await source.prepareAuthorization?.();
+  } catch (error) {
+    if (
+      error instanceof ProcedureTutorialYoutubeSourceError &&
+      error.code === 'youtube_authentication_required'
+    ) {
+      throw new ProcedureTutorialYoutubeImportError(error.code, error.message, 'same_request_id');
+    }
+    throw new ProcedureTutorialYoutubeImportError(
+      'youtube_source_unavailable',
+      'YouTube authorization could not be prepared before caption acquisition',
+      'same_request_id',
+    );
+  }
+}
+
+async function prepareTrackListAuthorization(
+  source: ProcedureTutorialYoutubeCaptionSource,
+): Promise<void> {
+  try {
+    await source.prepareAuthorization?.();
+  } catch (error) {
+    if (
+      error instanceof ProcedureTutorialYoutubeSourceError &&
+      error.code === 'youtube_authentication_required'
+    ) {
+      throw new ProcedureTutorialYoutubeTrackListError(
+        error.code,
+        error.message,
+        'same_request_id',
+      );
+    }
+    throw new ProcedureTutorialYoutubeTrackListError(
+      'youtube_track_list_unavailable',
+      'YouTube authorization could not be prepared before caption track listing',
+      'same_request_id',
+    );
+  }
 }
 
 export function buildProcedureTutorialYoutubePromptPacket(
@@ -394,11 +447,21 @@ export function createProcedureTutorialYoutubeImportCoordinator(
     string,
     ImportIdentity & { readonly promise: Promise<ProcedureTutorialYoutubeTrackListResult> }
   >();
+  const authorizationPreflights = new Set<Promise<void>>();
   let closing = false;
   let closePromise: Promise<void> | undefined;
 
   const beginClose = () => {
     closing = true;
+  };
+
+  const trackAuthorizationPreflight = async (preflight: Promise<void>): Promise<void> => {
+    authorizationPreflights.add(preflight);
+    try {
+      await preflight;
+    } finally {
+      authorizationPreflights.delete(preflight);
+    }
   };
 
   const appendEvidence = (
@@ -466,6 +529,33 @@ export function createProcedureTutorialYoutubeImportCoordinator(
           'youtube_track_list_unavailable',
           'No authorized YouTube Data API caption source is configured',
           'same_request_id',
+        );
+      }
+      await trackAuthorizationPreflight(prepareTrackListAuthorization(options.source));
+      if (closing) {
+        throw new ProcedureTutorialYoutubeTrackListError(
+          'youtube_track_list_unavailable',
+          'YouTube caption track listing is stopping',
+          'same_request_id',
+        );
+      }
+      const runningAfterAuthorization = trackListsInFlight.get(request.requestId);
+      if (runningAfterAuthorization !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, runningAfterAuthorization, identity);
+        return structuredClone(await runningAfterAuthorization.promise);
+      }
+      const completedAfterAuthorization = completedTrackLists.get(request.requestId);
+      if (completedAfterAuthorization !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, completedAfterAuthorization, identity);
+        return structuredClone(completedAfterAuthorization.result);
+      }
+      const attemptedAfterAuthorization = trackListsAttempted.get(request.requestId);
+      if (attemptedAfterAuthorization !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, attemptedAfterAuthorization, identity);
+        throw new ProcedureTutorialYoutubeTrackListError(
+          'youtube_track_list_already_attempted',
+          `YouTube caption track list ${request.requestId} already reached a terminal or uncertain state`,
+          'new_request_id',
         );
       }
 
@@ -590,6 +680,33 @@ export function createProcedureTutorialYoutubeImportCoordinator(
           'same_request_id',
         );
       }
+      await trackAuthorizationPreflight(prepareImportAuthorization(options.source));
+      if (closing) {
+        throw new ProcedureTutorialYoutubeImportError(
+          'youtube_source_unavailable',
+          'YouTube caption import is stopping',
+          'same_request_id',
+        );
+      }
+      const runningAfterAuthorization = inFlight.get(request.requestId);
+      if (runningAfterAuthorization !== undefined) {
+        assertMatchingIdentity(request.requestId, runningAfterAuthorization, identity);
+        return structuredClone(await runningAfterAuthorization.promise);
+      }
+      const completedAfterAuthorization = completed.get(request.requestId);
+      if (completedAfterAuthorization !== undefined) {
+        assertMatchingIdentity(request.requestId, completedAfterAuthorization, identity);
+        return structuredClone(completedAfterAuthorization.packet);
+      }
+      const attemptedAfterAuthorization = attempted.get(request.requestId);
+      if (attemptedAfterAuthorization !== undefined) {
+        assertMatchingIdentity(request.requestId, attemptedAfterAuthorization, identity);
+        throw new ProcedureTutorialYoutubeImportError(
+          'youtube_import_already_attempted',
+          `YouTube caption import ${request.requestId} already reached a terminal or uncertain state`,
+          'new_request_id',
+        );
+      }
 
       const requestedPayload = procedureTutorialYoutubeImportRequestedEventSchema.parse({
         requestId: request.requestId,
@@ -680,6 +797,7 @@ export function createProcedureTutorialYoutubeImportCoordinator(
       beginClose();
       closePromise ??= (async () => {
         await Promise.allSettled([
+          ...authorizationPreflights,
           ...[...inFlight.values()].map(({ promise }) => promise),
           ...[...trackListsInFlight.values()].map(({ promise }) => promise),
         ]);
@@ -692,7 +810,7 @@ export function createProcedureTutorialYoutubeImportCoordinator(
 
 export function procedureTutorialYoutubeImportHttpStatus(
   error: unknown,
-): 400 | 404 | 409 | 413 | 422 | 500 | 502 | 503 {
+): 400 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503 {
   const code = safeImportError(error).code;
   switch (code) {
     case 'youtube_import_legacy_request_unsupported':
@@ -701,8 +819,12 @@ export function procedureTutorialYoutubeImportHttpStatus(
       return 404;
     case 'youtube_import_selection_mismatch':
       return 409;
+    case 'youtube_authentication_required':
+      return 503;
     case 'youtube_source_unauthorized':
       return 502;
+    case 'youtube_source_quota_exceeded':
+      return 429;
     case 'youtube_video_not_found':
     case 'youtube_caption_not_found':
       return 404;
@@ -742,11 +864,15 @@ export function procedureTutorialYoutubeImportErrorResponse(
 
 export function procedureTutorialYoutubeTrackListHttpStatus(
   error: unknown,
-): 404 | 409 | 422 | 500 | 502 | 503 {
+): 404 | 409 | 422 | 429 | 500 | 502 | 503 {
   const code = safeTrackListError(error).code;
   switch (code) {
+    case 'youtube_authentication_required':
+      return 503;
     case 'youtube_source_unauthorized':
       return 502;
+    case 'youtube_source_quota_exceeded':
+      return 429;
     case 'youtube_video_not_found':
       return 404;
     case 'youtube_track_list_conflict':

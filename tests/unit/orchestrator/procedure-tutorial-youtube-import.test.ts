@@ -17,6 +17,7 @@ import {
   createProcedureTutorialYoutubeImportCoordinator,
   procedureTutorialYoutubeImportErrorResponse,
   procedureTutorialYoutubeImportHttpStatus,
+  procedureTutorialYoutubeTrackListHttpStatus,
 } from '../../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
 import { plannerProviderRequestFingerprint } from '../../../services/orchestrator/src/planner-provider-invocation.js';
 import {
@@ -256,8 +257,8 @@ describe('authorized YouTube caption import coordinator', () => {
       async () => acquisition,
       async () => {
         throw new ProcedureTutorialYoutubeSourceError(
-          'youtube_source_unauthorized',
-          'YouTube Data API authorization is invalid or lacks permission to edit this video',
+          'youtube_source_quota_exceeded',
+          'YouTube Data API quota or rate limit rejected the request',
         );
       },
     );
@@ -268,10 +269,12 @@ describe('authorized YouTube caption import coordinator', () => {
       appendEvent: (event) => events.push(event),
     });
 
-    await expect(coordinator.listTracks(trackListRequest)).rejects.toMatchObject({
-      code: 'youtube_source_unauthorized',
+    const failure = await coordinator.listTracks(trackListRequest).catch((error) => error);
+    expect(failure).toMatchObject({
+      code: 'youtube_source_quota_exceeded',
       retryMode: 'new_request_id',
     });
+    expect(procedureTutorialYoutubeTrackListHttpStatus(failure)).toBe(429);
     expect(events.map((event) => event.eventType)).toEqual([
       'procedure.tutorial.youtube.caption-tracks.requested',
       'procedure.tutorial.youtube.caption-tracks.failed',
@@ -282,6 +285,111 @@ describe('authorized YouTube caption import coordinator', () => {
     });
     expect(selectedSource.listTracks).toHaveBeenCalledTimes(1);
     await coordinator.close();
+  });
+
+  it('keeps authorization preflight outside track-list evidence and permits same-id recovery', async () => {
+    let authorized = false;
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = {
+      ...source(),
+      prepareAuthorization: vi.fn(async () => {
+        if (!authorized) {
+          throw new ProcedureTutorialYoutubeSourceError(
+            'youtube_authentication_required',
+            'YouTube authorization is required; run the local login command',
+          );
+        }
+      }),
+    };
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    await expect(coordinator.listTracks(trackListRequest)).rejects.toMatchObject({
+      code: 'youtube_authentication_required',
+      retryMode: 'same_request_id',
+    });
+    expect(events).toEqual([]);
+    expect(selectedSource.listTracks).not.toHaveBeenCalled();
+
+    authorized = true;
+    await expect(coordinator.listTracks(trackListRequest)).resolves.toMatchObject({
+      requestId: trackListRequest.requestId,
+    });
+    expect(selectedSource.listTracks).toHaveBeenCalledOnce();
+    await coordinator.close();
+  });
+
+  it('coalesces a same-id track list after asynchronous authorization preflight', async () => {
+    let releaseAuthorization: (() => void) | undefined;
+    const authorizationGate = new Promise<void>((resolve) => {
+      releaseAuthorization = resolve;
+    });
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = {
+      ...source(),
+      prepareAuthorization: vi.fn(() => authorizationGate),
+    };
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const first = coordinator.listTracks(trackListRequest);
+    const second = coordinator.listTracks(trackListRequest);
+    releaseAuthorization?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ requestId: trackListRequest.requestId }),
+      expect.objectContaining({ requestId: trackListRequest.requestId }),
+    ]);
+
+    expect(selectedSource.prepareAuthorization).toHaveBeenCalledTimes(2);
+    expect(selectedSource.listTracks).toHaveBeenCalledOnce();
+    expect(events.map((event) => event.eventType)).toEqual([
+      'procedure.tutorial.youtube.caption-tracks.requested',
+      'procedure.tutorial.youtube.caption-tracks.completed',
+    ]);
+    await coordinator.close();
+  });
+
+  it('waits for track-list authorization preflight during close without writing evidence', async () => {
+    let releaseAuthorization: (() => void) | undefined;
+    const authorizationGate = new Promise<void>((resolve) => {
+      releaseAuthorization = resolve;
+    });
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = {
+      ...source(),
+      prepareAuthorization: vi.fn(() => authorizationGate),
+      close: vi.fn(),
+    };
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const listing = coordinator.listTracks(trackListRequest);
+    await vi.waitFor(() => expect(selectedSource.prepareAuthorization).toHaveBeenCalledOnce());
+    const closing = coordinator.close();
+    await Promise.resolve();
+    expect(selectedSource.close).not.toHaveBeenCalled();
+
+    releaseAuthorization?.();
+    await expect(listing).rejects.toMatchObject({
+      code: 'youtube_track_list_unavailable',
+      retryMode: 'same_request_id',
+    });
+    await closing;
+    expect(events).toEqual([]);
+    expect(selectedSource.listTracks).not.toHaveBeenCalled();
+    expect(selectedSource.close).toHaveBeenCalledOnce();
   });
 
   it('builds packet 1.3.0 for legacy evidence, rejects fresh legacy imports, and restores history', async () => {
@@ -587,12 +695,87 @@ describe('authorized YouTube caption import coordinator', () => {
     await coordinator.close();
   });
 
+  it('keeps authorization preflight outside import evidence and permits same-id relogin', async () => {
+    let authorized = false;
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = {
+      ...source(),
+      prepareAuthorization: vi.fn(async () => {
+        if (!authorized) {
+          throw new ProcedureTutorialYoutubeSourceError(
+            'youtube_authentication_required',
+            'Stored YouTube authorization is no longer valid; run the local login command again',
+          );
+        }
+      }),
+    };
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      completedTrackSelection: () => selection,
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const error = await coordinator.importCaption(boundRequest).catch((reason: unknown) => reason);
+    expect(error).toMatchObject({
+      code: 'youtube_authentication_required',
+      retryMode: 'same_request_id',
+    });
+    expect(procedureTutorialYoutubeImportHttpStatus(error)).toBe(503);
+    expect(events).toEqual([]);
+    expect(selectedSource.acquire).not.toHaveBeenCalled();
+
+    authorized = true;
+    await expect(coordinator.importCaption(boundRequest)).resolves.toMatchObject({
+      formatVersion: '1.4.0',
+    });
+    expect(selectedSource.acquire).toHaveBeenCalledOnce();
+    await coordinator.close();
+  });
+
+  it('waits for import authorization preflight during close without writing evidence', async () => {
+    let releaseAuthorization: (() => void) | undefined;
+    const authorizationGate = new Promise<void>((resolve) => {
+      releaseAuthorization = resolve;
+    });
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = {
+      ...source(),
+      prepareAuthorization: vi.fn(() => authorizationGate),
+      close: vi.fn(),
+    };
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      completedTrackSelection: () => selection,
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const importing = coordinator.importCaption(boundRequest);
+    await vi.waitFor(() => expect(selectedSource.prepareAuthorization).toHaveBeenCalledOnce());
+    const closing = coordinator.close();
+    await Promise.resolve();
+    expect(selectedSource.close).not.toHaveBeenCalled();
+
+    releaseAuthorization?.();
+    await expect(importing).rejects.toMatchObject({
+      code: 'youtube_source_unavailable',
+      retryMode: 'same_request_id',
+    });
+    await closing;
+    expect(events).toEqual([]);
+    expect(selectedSource.acquire).not.toHaveBeenCalled();
+    expect(selectedSource.close).toHaveBeenCalledOnce();
+  });
+
   it('records a safe terminal failure and refuses hidden same-id quota retries', async () => {
     const events: ExecutionEventInput[] = [];
     const selectedSource = source(async () => {
       throw new ProcedureTutorialYoutubeSourceError(
-        'youtube_source_unauthorized',
-        'YouTube Data API authorization is invalid or lacks permission to edit this video',
+        'youtube_source_quota_exceeded',
+        'YouTube Data API quota or rate limit rejected the request',
       );
     });
     const coordinator = createProcedureTutorialYoutubeImportCoordinator({
@@ -603,10 +786,12 @@ describe('authorized YouTube caption import coordinator', () => {
       appendEvent: (event) => events.push(event),
     });
 
-    await expect(coordinator.importCaption(boundRequest)).rejects.toMatchObject({
-      code: 'youtube_source_unauthorized',
+    const failure = await coordinator.importCaption(boundRequest).catch((error) => error);
+    expect(failure).toMatchObject({
+      code: 'youtube_source_quota_exceeded',
       retryMode: 'new_request_id',
     });
+    expect(procedureTutorialYoutubeImportHttpStatus(failure)).toBe(429);
     expect(events.map((event) => event.eventType)).toEqual([
       'procedure.tutorial.youtube.caption.requested',
       'procedure.tutorial.youtube.caption.failed',

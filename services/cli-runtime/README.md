@@ -17,11 +17,22 @@ Legacy companions that do not establish a renewable session remain allowed by de
 migration window. Set `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS=false` to require session leases. The
 setting accepts only the exact values `true` or `false`.
 
-Optionally set `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` to a short-lived token obtained outside the
-runtime. Then `operatingline.procedure.tutorial.youtube.import` can use the official YouTube Data API
-to read metadata and one exact caption track for a video the authenticated account can edit. The
-token is never accepted in MCP/HTTP payloads, persisted, or logged; this runtime does not implement
-OAuth redirects or token refresh and cannot retrieve arbitrary public-video captions. If the exact
+For managed authorization, create a Google OAuth client of type **Desktop app**, set
+`OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID`, and run `pnpm youtube:auth login`. The command opens the
+system browser, listens only on a temporary `127.0.0.1` callback, requests only
+`youtube.force-ssl`, and saves the refresh token in the operating-system credential vault. Use
+`pnpm youtube:auth status` to validate the stored grant and `pnpm youtube:auth logout` to revoke it
+and always remove the local credential. There is no plaintext fallback. Google projects whose
+consent screen remains in Testing may issue refresh tokens that expire after seven days.
+
+As a legacy alternative, set `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` to a short-lived token
+obtained outside the runtime. Never set it together with the client ID; startup fails before the
+Runtime is created. Then `operatingline.procedure.tutorial.youtube.import` can use the official
+YouTube Data API to read metadata and one exact caption track for a video the authenticated account
+can edit. OAuth secrets are never accepted in MCP/HTTP payloads or written to logs/events. Managed
+access tokens are refreshed before requests; if an API request itself returns 401, that request is
+not replayed. The caller must retry explicitly after checking `youtube:auth status` or logging in
+again. The source cannot retrieve arbitrary public-video captions. If the exact
 track id is unknown, call `operatingline.procedure.tutorial.youtube.tracks.list` first with explicit
 network/quota approval. It spends the documented 50-unit `captions.list` cost and returns metadata
 only. `operatingline.procedure.tutorial.youtube.tracks.recommend` can then rank that completed list

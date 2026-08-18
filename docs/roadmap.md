@@ -308,8 +308,11 @@
         `selectionRequestId`，并在任何 API 调用前核对选择收据、video ID 与 caption track ID。历史 `1.0.0`
         仅保留兼容读取；成功导入生成携带非自由文本选择 provenance 的 authoring packet `1.4.0`，选择备注
         不进入 packet 或 Provider 输入。见 [ADR 0082](adr/0082-selection-bound-youtube-caption-import.md)。
-  - [ ] OAuth 登录与 token refresh：用显式授权流程替代 Runtime 外预先取得的短期 access token；当前 Runtime
-        仍只接受 composition root 注入的 token，并要求调用方显式选择授权字幕轨。
+  - [x] OAuth 登录、刷新与失效恢复：本地 operator CLI 使用 Google Desktop app client、临时 loopback
+        callback、PKCE 与固定 `youtube.force-ssl` scope；refresh token 只保存到 OS credential vault，Runtime
+        在请求前刷新，invalid grant 按凭据摘要在进程内阻断并要求重新登录，避免旧刷新删除并发写入的新授权。Logout 总是删除本地凭据并报告远端撤销
+        confirmed/uncertain；API 请求后的 401 不自动重放。兼容短期 token 保留但不能与 client ID 同时设置。
+        见 [ADR 0083](adr/0083-managed-youtube-oauth.md)。
   - [ ] 选择确认可视化 UI、视频媒体下载/语音转录、画面与按键识别、自动语义分段、证据帧，以及大步骤/
         小步骤质量校准。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的

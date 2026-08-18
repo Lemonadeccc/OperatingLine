@@ -8,7 +8,12 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import { createOpenAIResponsesPlannerProvider } from '@operatingline/openai-planner-provider';
-import { createYouTubeDataApiCaptionSource, startRuntime } from '@operatingline/orchestrator';
+import {
+  createDefaultYouTubeOAuthCredentialStore,
+  createYouTubeDataApiCaptionSource,
+  createYouTubeOAuthAccessTokenProvider,
+  startRuntime,
+} from '@operatingline/orchestrator';
 
 import { loadOpenAIRuntimeConfig } from './config.js';
 
@@ -20,10 +25,19 @@ const plannerProvider = createOpenAIResponsesPlannerProvider({
   apiKey: config.apiKey,
   model: config.model,
 });
-const youtubeCaptionSource =
-  config.youtubeAccessToken === undefined
+const youtubeOAuthAccessTokenProvider =
+  config.youtubeOAuthClientId === undefined
     ? undefined
-    : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken });
+    : createYouTubeOAuthAccessTokenProvider({
+        clientId: config.youtubeOAuthClientId,
+        credentialStore: createDefaultYouTubeOAuthCredentialStore(),
+      });
+const youtubeCaptionSource =
+  youtubeOAuthAccessTokenProvider === undefined
+    ? config.youtubeAccessToken === undefined
+      ? undefined
+      : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken })
+    : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,

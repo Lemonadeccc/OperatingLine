@@ -8,6 +8,7 @@ export interface OpenAIRuntimeConfig {
   readonly model: string;
   readonly port: number;
   readonly youtubeAccessToken?: string;
+  readonly youtubeOAuthClientId?: string;
 }
 
 function requiredValue(
@@ -37,6 +38,10 @@ export function loadOpenAIRuntimeConfig(
     environment['OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN'],
     'OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
   );
+  const youtubeOAuthClientId = optionalYouTubeOAuthClientId(
+    environment['OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID'],
+  );
+  rejectAmbiguousYouTubeOAuthConfiguration(youtubeAccessToken, youtubeOAuthClientId);
   return {
     accessToken: requiredValue(environment, 'OPERATINGLINE_ACCESS_TOKEN'),
     allowLegacyCompanions: strictBoolean(
@@ -51,7 +56,34 @@ export function loadOpenAIRuntimeConfig(
     model: requiredValue(environment, 'OPERATINGLINE_OPENAI_MODEL'),
     port,
     ...(youtubeAccessToken === undefined ? {} : { youtubeAccessToken }),
+    ...(youtubeOAuthClientId === undefined ? {} : { youtubeOAuthClientId }),
   };
+}
+
+function optionalYouTubeOAuthClientId(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (
+    value.length < 10 ||
+    value.length > 1_024 ||
+    value.trim() !== value ||
+    containsWhitespaceOrControl(value)
+  ) {
+    throw new Error(
+      'OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID must be 10-1024 characters without whitespace or controls',
+    );
+  }
+  return value;
+}
+
+function rejectAmbiguousYouTubeOAuthConfiguration(
+  accessToken: string | undefined,
+  clientId: string | undefined,
+): void {
+  if (accessToken !== undefined && clientId !== undefined) {
+    throw new Error(
+      'Set only one of OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID or OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
+    );
+  }
 }
 
 function optionalSecret(value: string | undefined, name: string): string | undefined {

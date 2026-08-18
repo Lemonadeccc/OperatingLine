@@ -346,8 +346,13 @@ evidence 只保存规范化 segments 与 packet 中的 digest/统计量，不保
 `modelCalled: true`，但 tree 仍不自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
 既有 initial-plan/local-replan Eval。
 
-可选的授权 YouTube caption source 由 composition root 从
-`OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` 注入；OAuth token 不是公开协议字段，也不进入日志或事件。
+可选的授权 YouTube caption source 由 composition root 注入。推荐配置
+`OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID`（Google Desktop app client）：operator 通过
+`pnpm youtube:auth login|status|logout` 执行 loopback+PKCE 授权、验证刷新或撤销。Refresh token 只进入
+操作系统凭据库；不写数据库、`.env`、日志、事件或公开协议，也没有明文回退。Runtime 在 Data API 请求前
+通过 provider 获取/刷新 access token；请求返回 401 时使缓存失效但不重放已发送请求，403 不刷新凭据，保留现有显式
+request ID、配额与失败恢复边界。兼容的 `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` 仍可单独注入，但与
+client ID 同时设置会在 composition root 启动前失败。
 MCP `operatingline.procedure.tutorial.youtube.tracks.list` 与 HTTP
 `POST /api/v1/procedure/tutorial/youtube/tracks` 接受 UUID request、精确的 11 字符 video ID，以及三个值为
 `true` 的网络/配额/编辑权限确认。Coordinator 先持久化 requested evidence，再调用一次官方
@@ -384,7 +389,8 @@ identity、track kind、draft/auto-sync/status/last-updated、请求格式，以
 失败证据只保存安全错误码；相同 requestId 同输入幂等恢复，不同输入冲突，已发出 API 请求的失败不会用同一
 requestId 自动重试，从而避免隐式重复配额消耗。该入口不下载视频媒体、不调用 Provider、不保存树、不创建
 Proposal 或执行宿主。官方字幕下载需要 OAuth 身份具备目标视频编辑权限，因此它不是任意公开视频字幕抓取
-器；当前也不实现 OAuth 跳转/刷新或自动选轨。
+器；当前也不自动选轨。OAuth scope 固定为 `youtube.force-ssl`。Consent screen 为 Testing 的 Google 项目
+可能产生七天后过期的 refresh token，此时 status 返回需重新授权，Runtime 也会 fail closed。
 
 当前仍没有视频媒体下载/语音转录/画面识别、向量/语义 RAG、流式
 Procedure 对话、可视化编辑器或训练导出。完整边界见
@@ -397,7 +403,8 @@ Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md)、
 [ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md) 与
 [ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)、
-[ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md)。
+[ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md) 与
+[ADR 0083](../adr/0083-managed-youtube-oauth.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

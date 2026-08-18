@@ -67,8 +67,32 @@ const youtubeCaptionTrackListResponseSchema = z.object({
     .max(procedureTutorialYoutubeCaptionTrackMaxCount),
 });
 
+const youtubeApiErrorResponseSchema = z.object({
+  error: z.object({
+    errors: z
+      .array(
+        z.object({
+          reason: z.string().min(1).max(128),
+        }),
+      )
+      .max(64)
+      .optional(),
+  }),
+});
+
+const youtubeQuotaErrorReasons = new Set([
+  'dailyLimitExceeded',
+  'dailyLimitExceededUnreg',
+  'quotaExceeded',
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+]);
+
 export type ProcedureTutorialYoutubeSourceErrorCode =
+  | 'youtube_authentication_required'
+  | 'youtube_source_unavailable'
   | 'youtube_source_unauthorized'
+  | 'youtube_source_quota_exceeded'
   | 'youtube_video_not_found'
   | 'youtube_caption_not_found'
   | 'youtube_caption_not_ready'
@@ -106,6 +130,7 @@ export interface ProcedureTutorialYoutubeCaptionTrackListSourceResult {
 
 export interface ProcedureTutorialYoutubeCaptionSource {
   readonly id: 'youtube_data_api_v3';
+  prepareAuthorization?(): Promise<void>;
   listTracks(
     request: ProcedureTutorialYoutubeTrackListRequest['youtube'],
   ): Promise<ProcedureTutorialYoutubeCaptionTrackListSourceResult>;
@@ -116,9 +141,16 @@ export interface ProcedureTutorialYoutubeCaptionSource {
 }
 
 export interface YouTubeDataApiCaptionSourceOptions {
-  readonly accessToken: string;
+  readonly accessToken?: string;
+  readonly accessTokenProvider?: YouTubeOAuthAccessTokenProvider;
   readonly fetch?: typeof globalThis.fetch;
   readonly timeoutMs?: number;
+}
+
+export interface YouTubeOAuthAccessTokenProvider {
+  getAccessToken(): Promise<string>;
+  invalidateAccessToken(accessToken: string): Promise<void> | void;
+  close?(): Promise<void> | void;
 }
 
 function safeSourceError(error: unknown): ProcedureTutorialYoutubeSourceError {
@@ -130,14 +162,27 @@ function safeSourceError(error: unknown): ProcedureTutorialYoutubeSourceError {
       );
 }
 
-function responseError(
+async function responseError(
   response: Response,
   notFoundCode: 'youtube_video_not_found' | 'youtube_caption_not_found',
-): ProcedureTutorialYoutubeSourceError {
-  if (response.status === 401 || response.status === 403) {
+): Promise<ProcedureTutorialYoutubeSourceError> {
+  if (response.status === 401) {
     return new ProcedureTutorialYoutubeSourceError(
       'youtube_source_unauthorized',
-      'YouTube Data API authorization is invalid or lacks permission to edit this video',
+      'YouTube Data API authorization is invalid',
+    );
+  }
+  if (response.status === 403 || response.status === 429) {
+    const reasons = await readYouTubeApiErrorReasons(response);
+    if (response.status === 429 || reasons.some((reason) => youtubeQuotaErrorReasons.has(reason))) {
+      return new ProcedureTutorialYoutubeSourceError(
+        'youtube_source_quota_exceeded',
+        'YouTube Data API quota or rate limit rejected the request',
+      );
+    }
+    return new ProcedureTutorialYoutubeSourceError(
+      'youtube_source_unauthorized',
+      'YouTube Data API authorization or resource policy rejected the request',
     );
   }
   if (response.status === 404) {
@@ -152,6 +197,15 @@ function responseError(
     'youtube_source_failed',
     `YouTube Data API request failed with HTTP ${response.status}`,
   );
+}
+
+async function readYouTubeApiErrorReasons(response: Response): Promise<readonly string[]> {
+  try {
+    const parsed = youtubeApiErrorResponseSchema.safeParse(await readJson(response));
+    return parsed.success ? (parsed.data.error.errors?.map(({ reason }) => reason) ?? []) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function readLimitedUtf8(
@@ -260,15 +314,24 @@ function containsWhitespaceOrControl(value: string): boolean {
   );
 }
 
+function isValidOAuthToken(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 8_192 &&
+    value.trim() === value &&
+    !containsWhitespaceOrControl(value)
+  );
+}
+
 export function createYouTubeDataApiCaptionSource(
   options: YouTubeDataApiCaptionSourceOptions,
 ): ProcedureTutorialYoutubeCaptionSource {
-  if (
-    options.accessToken.length === 0 ||
-    options.accessToken.length > 8_192 ||
-    options.accessToken.trim() !== options.accessToken ||
-    containsWhitespaceOrControl(options.accessToken)
-  ) {
+  if ((options.accessToken === undefined) === (options.accessTokenProvider === undefined)) {
+    throw new Error(
+      'YouTube caption source requires exactly one access token or access token provider',
+    );
+  }
+  if (options.accessToken !== undefined && !isValidOAuthToken(options.accessToken)) {
     throw new Error(
       'YouTube OAuth access token must be non-empty and contain no whitespace or control characters',
     );
@@ -284,21 +347,39 @@ export function createYouTubeDataApiCaptionSource(
     );
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const authorization = `Bearer ${options.accessToken}`;
+  const accessTokenProvider = options.accessTokenProvider;
+  const getAccessToken = async (): Promise<string> => {
+    const accessToken = options.accessToken ?? (await accessTokenProvider!.getAccessToken());
+    if (!isValidOAuthToken(accessToken)) {
+      throw new ProcedureTutorialYoutubeSourceError(
+        'youtube_source_unavailable',
+        'YouTube OAuth access token provider returned an invalid credential',
+      );
+    }
+    return accessToken;
+  };
 
   const runAuthorized = async <Result>(
     operation: (authorizedFetch: (url: URL) => Promise<Response>) => Promise<Result>,
   ): Promise<Result> => {
+    const accessToken = await getAccessToken();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const authorizedFetch = async (url: URL): Promise<Response> => {
       try {
-        return await fetchImpl(url, {
+        const response = await fetchImpl(url, {
           method: 'GET',
-          headers: { accept: 'application/json, application/octet-stream', authorization },
+          headers: {
+            accept: 'application/json, application/octet-stream',
+            authorization: `Bearer ${accessToken}`,
+          },
           redirect: 'error',
           signal: controller.signal,
         });
+        if (response.status === 401) {
+          await accessTokenProvider?.invalidateAccessToken(accessToken);
+        }
+        return response;
       } catch {
         throw new ProcedureTutorialYoutubeSourceError(
           'youtube_source_failed',
@@ -324,7 +405,7 @@ export function createYouTubeDataApiCaptionSource(
       captionsUrl.searchParams.set('videoId', request.videoId);
       const captionsResponse = await authorizedFetch(captionsUrl);
       if (!captionsResponse.ok) {
-        throw responseError(captionsResponse, 'youtube_video_not_found');
+        throw await responseError(captionsResponse, 'youtube_video_not_found');
       }
       const captionList = youtubeCaptionTrackListResponseSchema.safeParse(
         await readJson(captionsResponse),
@@ -378,7 +459,9 @@ export function createYouTubeDataApiCaptionSource(
       videoUrl.searchParams.set('part', 'snippet,contentDetails');
       videoUrl.searchParams.set('id', request.videoId);
       const videoResponse = await authorizedFetch(videoUrl);
-      if (!videoResponse.ok) throw responseError(videoResponse, 'youtube_video_not_found');
+      if (!videoResponse.ok) {
+        throw await responseError(videoResponse, 'youtube_video_not_found');
+      }
       const videoList = youtubeVideoListResponseSchema.safeParse(await readJson(videoResponse));
       if (!videoList.success) {
         throw new ProcedureTutorialYoutubeSourceError(
@@ -400,7 +483,7 @@ export function createYouTubeDataApiCaptionSource(
       captionsUrl.searchParams.set('id', request.captionTrackId);
       const captionsResponse = await authorizedFetch(captionsUrl);
       if (!captionsResponse.ok) {
-        throw responseError(captionsResponse, 'youtube_caption_not_found');
+        throw await responseError(captionsResponse, 'youtube_caption_not_found');
       }
       const captionList = youtubeCaptionListResponseSchema.safeParse(
         await readJson(captionsResponse),
@@ -446,7 +529,7 @@ export function createYouTubeDataApiCaptionSource(
       downloadUrl.searchParams.set('tfmt', request.requestedFormat === 'webvtt' ? 'vtt' : 'srt');
       const downloadResponse = await authorizedFetch(downloadUrl);
       if (!downloadResponse.ok) {
-        throw responseError(downloadResponse, 'youtube_caption_not_found');
+        throw await responseError(downloadResponse, 'youtube_caption_not_found');
       }
       const content = await readLimitedUtf8(
         downloadResponse,
@@ -481,5 +564,15 @@ export function createYouTubeDataApiCaptionSource(
       };
     });
 
-  return { id: 'youtube_data_api_v3', listTracks, acquire };
+  return {
+    id: 'youtube_data_api_v3',
+    ...(accessTokenProvider === undefined
+      ? {}
+      : { prepareAuthorization: async () => void (await getAccessToken()) }),
+    listTracks,
+    acquire,
+    ...(accessTokenProvider?.close === undefined
+      ? {}
+      : { close: () => accessTokenProvider.close!() }),
+  };
 }

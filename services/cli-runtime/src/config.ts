@@ -9,6 +9,7 @@ export interface CliRuntimeConfig {
   readonly port: number;
   readonly plannerProviderTimeoutMs: number;
   readonly youtubeAccessToken?: string;
+  readonly youtubeOAuthClientId?: string;
   readonly codex: {
     readonly executable: string;
     readonly model?: string;
@@ -51,6 +52,10 @@ export function loadCliRuntimeConfig(
     environment['OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN'],
     'OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
   );
+  const youtubeOAuthClientId = optionalYouTubeOAuthClientId(
+    environment['OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID'],
+  );
+  rejectAmbiguousYouTubeOAuthConfiguration(youtubeAccessToken, youtubeOAuthClientId);
 
   return {
     accessToken,
@@ -65,6 +70,7 @@ export function loadCliRuntimeConfig(
     port,
     plannerProviderTimeoutMs,
     ...(youtubeAccessToken === undefined ? {} : { youtubeAccessToken }),
+    ...(youtubeOAuthClientId === undefined ? {} : { youtubeOAuthClientId }),
     codex: {
       executable: executableValue(environment['OPERATINGLINE_CODEX_BIN'], 'codex'),
       ...(codexModel === undefined ? {} : { model: codexModel }),
@@ -75,6 +81,32 @@ export function loadCliRuntimeConfig(
       maximumBudgetUsd,
     },
   };
+}
+
+function optionalYouTubeOAuthClientId(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (
+    value.length < 10 ||
+    value.length > 1_024 ||
+    value.trim() !== value ||
+    containsWhitespaceOrControl(value)
+  ) {
+    throw new Error(
+      'OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID must be 10-1024 characters without whitespace or controls',
+    );
+  }
+  return value;
+}
+
+function rejectAmbiguousYouTubeOAuthConfiguration(
+  accessToken: string | undefined,
+  clientId: string | undefined,
+): void {
+  if (accessToken !== undefined && clientId !== undefined) {
+    throw new Error(
+      'Set only one of OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID or OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
+    );
+  }
 }
 
 function optionalSecret(value: string | undefined, name: string): string | undefined {

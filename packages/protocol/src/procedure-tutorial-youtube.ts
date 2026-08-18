@@ -573,7 +573,9 @@ export type ProcedureTutorialYoutubeTrackSelectionCompletedEvent = z.infer<
 
 export const procedureTutorialYoutubeTrackListErrorCodeSchema = z.enum([
   'youtube_track_list_unavailable',
+  'youtube_authentication_required',
   'youtube_source_unauthorized',
+  'youtube_source_quota_exceeded',
   'youtube_video_not_found',
   'youtube_source_failed',
   'youtube_track_list_invalid',
@@ -633,7 +635,9 @@ export const procedureTutorialYoutubeImportErrorCodeSchema = z.enum([
   'youtube_import_selection_not_found',
   'youtube_import_selection_mismatch',
   'youtube_source_unavailable',
+  'youtube_authentication_required',
   'youtube_source_unauthorized',
+  'youtube_source_quota_exceeded',
   'youtube_video_not_found',
   'youtube_caption_not_found',
   'youtube_caption_not_ready',

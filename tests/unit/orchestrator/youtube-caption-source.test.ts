@@ -92,6 +92,110 @@ describe('YouTube Data API caption source', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('requires one unambiguous credential source', () => {
+    const accessTokenProvider = {
+      getAccessToken: vi.fn(async () => accessToken),
+      invalidateAccessToken: vi.fn(),
+    };
+
+    expect(() => createYouTubeDataApiCaptionSource({})).toThrow('exactly one');
+    expect(() => createYouTubeDataApiCaptionSource({ accessToken, accessTokenProvider })).toThrow(
+      'exactly one',
+    );
+  });
+
+  it('prepares managed authorization without YouTube API traffic and reads the current token per operation', async () => {
+    let currentToken = 'first-managed-access-token';
+    const accessTokenProvider = {
+      getAccessToken: vi.fn(async () => currentToken),
+      invalidateAccessToken: vi.fn(),
+      close: vi.fn(),
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ items: [] }));
+    const source = createYouTubeDataApiCaptionSource({ accessTokenProvider, fetch: fetchImpl });
+
+    await source.prepareAuthorization?.();
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    await source.listTracks(trackListRequest.youtube);
+    currentToken = 'second-managed-access-token';
+    await source.listTracks(trackListRequest.youtube);
+
+    expect(accessTokenProvider.getAccessToken).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls.map(([, init]) => init?.headers)).toEqual([
+      expect.objectContaining({ authorization: 'Bearer first-managed-access-token' }),
+      expect.objectContaining({ authorization: 'Bearer second-managed-access-token' }),
+    ]);
+    await source.close?.();
+    expect(accessTokenProvider.close).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates a rejected managed access token without replaying quota-bearing API calls', async () => {
+    const rejectedToken = 'rejected-managed-access-token';
+    const accessTokenProvider = {
+      getAccessToken: vi.fn(async () => rejectedToken),
+      invalidateAccessToken: vi.fn(),
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ error: 'unauthorized' }, 401));
+    const source = createYouTubeDataApiCaptionSource({ accessTokenProvider, fetch: fetchImpl });
+
+    await expect(source.listTracks(trackListRequest.youtube)).rejects.toMatchObject({
+      code: 'youtube_source_unauthorized',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(accessTokenProvider.invalidateAccessToken).toHaveBeenCalledOnce();
+    expect(accessTokenProvider.invalidateAccessToken).toHaveBeenCalledWith(rejectedToken);
+  });
+
+  it('does not invalidate or replay managed credentials for a forbidden resource', async () => {
+    const accessTokenProvider = {
+      getAccessToken: vi.fn(async () => accessToken),
+      invalidateAccessToken: vi.fn(),
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ error: 'forbidden' }, 403));
+    const source = createYouTubeDataApiCaptionSource({ accessTokenProvider, fetch: fetchImpl });
+
+    await expect(source.listTracks(trackListRequest.youtube)).rejects.toMatchObject({
+      code: 'youtube_source_unauthorized',
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(accessTokenProvider.invalidateAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('classifies quota failures without invalidating credentials or replaying requests', async () => {
+    const accessTokenProvider = {
+      getAccessToken: vi.fn(async () => accessToken),
+      invalidateAccessToken: vi.fn(),
+    };
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      jsonResponse(
+        {
+          error: {
+            errors: [
+              { reason: 'forbidden' },
+              { reason: 'quotaExceeded', message: `upstream-secret-${accessToken}` },
+            ],
+          },
+        },
+        403,
+      ),
+    );
+    const source = createYouTubeDataApiCaptionSource({ accessTokenProvider, fetch: fetchImpl });
+
+    const error = await source
+      .listTracks(trackListRequest.youtube)
+      .catch((reason: unknown) => reason);
+    expect(error).toMatchObject({
+      code: 'youtube_source_quota_exceeded',
+      message: 'YouTube Data API quota or rate limit rejected the request',
+    });
+    expect(JSON.stringify(error)).not.toContain(accessToken);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(accessTokenProvider.invalidateAccessToken).not.toHaveBeenCalled();
+  });
+
   it('fetches exact metadata, verifies the track, and downloads bounded WebVTT', async () => {
     const captionDocument =
       'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove it.\n';
@@ -250,7 +354,7 @@ describe('YouTube Data API caption source', () => {
     const error = await source.acquire(request.youtube).catch((reason: unknown) => reason);
     expect(error).toMatchObject({
       code: 'youtube_source_unauthorized',
-      message: 'YouTube Data API authorization is invalid or lacks permission to edit this video',
+      message: 'YouTube Data API authorization or resource policy rejected the request',
     });
     expect(JSON.stringify(error)).not.toContain(accessToken);
     expect(fetchImpl).toHaveBeenCalledTimes(1);

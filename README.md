@@ -96,7 +96,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   若调用方已有 SRT/WebVTT 文档，可改用版本化 MCP `operatingline.procedure.tutorial.import` 或 HTTP
   `POST /api/v1/procedure/tutorial/import`：Runtime 严格解析文档，以原始 UTF-8 内容的 SHA-256、字节数、
   cue 数和统一置信度绑定 `1.2.0` packet，再把规范化 cue 作为同一视频证据。导入不联网、不下载视频、
-  不调用转录或模型。若运行入口显式配置了短期 YouTube OAuth access token，用户还可在确认网络请求与
+  不调用转录或模型。若运行入口显式配置了 Desktop OAuth client ID 并通过本地 operator CLI 完成授权（或
+  使用兼容的短期 access token），用户还可在确认网络请求与
   API 配额消耗后，先通过 MCP `operatingline.procedure.tutorial.youtube.tracks.list` 或 HTTP
   `POST /api/v1/procedure/tutorial/youtube/tracks` 枚举该可编辑视频的字幕轨元数据；该操作固定披露当前官方
   `captions.list` 的 50-unit 成本，不下载字幕正文，也不会静默选轨。调用方可把已完成列表的 requestId 和
@@ -114,8 +115,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
   随后返回含获取 provenance 和结构化选择 provenance 的 `1.4.0` packet；选择理由的自由文本备注只留在
   本地证据账本，不进入 packet 或 Provider 输入。OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
-  持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕，也不负责
-  OAuth 登录/刷新、自动选轨、视频媒体下载或语音转录。显式审阅 Provider 披露后，可改用 MCP
+  持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕。Managed
+  OAuth 使用 `youtube.force-ssl`、loopback+PKCE 和操作系统凭据库完成登录/刷新/注销；API 请求本身返回
+  401 时不会自动重放。自动选轨、视频媒体下载或语音转录仍不在此入口范围。显式审阅 Provider 披露后，可改用 MCP
   `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
   解析文档、把只含摘要和规范化 cue 的 `1.2.0` packet 发送给所选 Provider，并立即执行候选校验与编译。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
@@ -141,7 +143,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md)、
   [ADR 0080](docs/adr/0080-explicit-youtube-caption-track-recommendation.md) 与
   [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)、
-  [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md)。
+  [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md) 与
+  [ADR 0083](docs/adr/0083-managed-youtube-oauth.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
@@ -665,9 +668,26 @@ pnpm dev:clients
 该入口会探测已安装的 `codex` 和 `claude`，但不会自动调用。若只想由 Codex/Claude 桌面端或 CLI 作为
 外部 MCP Host 发起任务，改用 provider-free 的 `pnpm dev`。
 
-如需启用上述官方 YouTube 字幕导入，可在启动 `pnpm dev`、`pnpm dev:clients` 或 `pnpm dev:openai` 前额外
-导出短期 `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`；未设置时相应工具保持可发现但返回 source
-unavailable。不要把真实 token 写入仓库或 MCP/HTTP 请求。
+如需启用上述官方 YouTube 字幕导入，先在 Google Cloud 创建类型为 **Desktop app** 的 OAuth client，启用
+YouTube Data API，并完成 consent screen 配置。然后执行：
+
+```bash
+export OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID='replace-with-your-desktop-client-id.apps.googleusercontent.com'
+pnpm youtube:auth login
+pnpm youtube:auth status
+```
+
+登录命令打开系统浏览器，并只在临时 `127.0.0.1` loopback 端口接收 PKCE callback；它仅请求
+`youtube.force-ssl` scope。Refresh token 只保存在 macOS Keychain、Linux Secret Service 或 Windows
+PasswordVault，不提供明文文件回退。`pnpm youtube:auth logout` 会尝试远端撤销，并无论远端结果如何都删除
+本地凭据。Consent screen 保持 Testing 的 Google 项目可能签发七天后过期的 refresh token。Runtime 会在
+Data API 请求前刷新 access token；已发送请求返回 401 时只使缓存失效，不自动重放，调用方检查 status 或
+重新登录后须用新的 request ID 显式重试。
+
+随后用同一个 client ID 启动 `pnpm dev`、`pnpm dev:clients` 或 `pnpm dev:openai`。兼容模式仍可只设置短期
+`OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`；client ID 与短期 token 不能同时设置，否则启动会直接失败。
+未设置任一方式时相应工具保持可发现但返回 source unavailable。不要把真实 token 写入仓库、`.env` 模板或
+MCP/HTTP 请求。
 
 一键配置当前机器上已安装的 Codex 和 Claude Code；缺少其中一个 CLI 时会跳过它：
 

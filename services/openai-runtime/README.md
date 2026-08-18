@@ -28,16 +28,21 @@ pnpm dev:openai
 - `OPERATINGLINE_PORT`：默认 `0`，由系统选择空闲回环端口。
 - `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS`：默认 `true`；设为严格的 `false` 后，拒绝未先建立可续租
   Session 的旧版 Companion。只接受精确值 `true` 或 `false`。
-- `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`：预先通过 OAuth 获得的短期 YouTube Data API token。
-  配置后可显式调用 `operatingline.procedure.tutorial.youtube.import`；授权账号必须能编辑目标视频，Runtime
+- `OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID`：Google Cloud 中类型为 **Desktop app** 的 OAuth client ID。
+  设置后先运行 `pnpm youtube:auth login`，系统浏览器通过临时 `127.0.0.1` loopback 回调完成授权；只请求
+  `youtube.force-ssl` scope，refresh token 只保存到操作系统凭据库，不提供明文文件回退。可用
+  `pnpm youtube:auth status` 验证 grant/刷新，用 `pnpm youtube:auth logout` 撤销并保证删除本地凭据。
+  Consent screen 仍为 Testing 的 Google 项目可能签发七天后过期的 refresh token。
+- `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`：兼容用的预授权短期 token。不能与上述 client ID 同时设置，
+  否则启动前直接失败。配置后可显式调用 `operatingline.procedure.tutorial.youtube.import`；授权账号必须能编辑目标视频，Runtime
   只读取元数据和指定字幕轨，不下载视频。若不知道 track ID，可先调用
   `operatingline.procedure.tutorial.youtube.tracks.list`，明确确认网络与当前官方 50-unit 配额后枚举元数据；
   再按明确偏好调用 `operatingline.procedure.tutorial.youtube.tracks.recommend` 做无网络、无额外 quota、无模型
   调用的本地排序。确认后调用 `operatingline.procedure.tutorial.youtube.tracks.select` 保存精确 serving track、
   选择理由及采用/覆盖推荐的结果；可选理由备注会进入本地证据账本。当前 import request `1.1.0` 必须引用该
   `selectionRequestId`，并在任何 API 调用前核对收据与 video/track identity；历史 `1.0.0` 仅保留兼容读取。
-  选择操作不下载内容。Token 不进入协议、
-  事件或日志，当前入口不负责 OAuth 跳转或刷新。
+  选择操作不下载内容。Token 不进入协议、事件或日志。Managed OAuth 在 API 请求前刷新；API 请求已经返回
+  401 时不会自动重放该请求，调用方须检查 status/重新登录后显式重试。
 
 ## 调用顺序
 

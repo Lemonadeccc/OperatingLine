@@ -4807,8 +4807,51 @@ export {
   type ProcedureTutorialYoutubeCaptionSource,
   type ProcedureTutorialYoutubeCaptionTrackListSourceResult,
   type ProcedureTutorialYoutubeSourceErrorCode,
+  type YouTubeOAuthAccessTokenProvider,
   type YouTubeDataApiCaptionSourceOptions,
 } from './youtube-caption-source.js';
+export {
+  createDefaultYouTubeOAuthCredentialStore,
+  YouTubeOAuthCredentialStoreError,
+  type YouTubeOAuthCredentialCommand,
+  type YouTubeOAuthCredentialCommandResult,
+  type YouTubeOAuthCredentialCommandRunner,
+  type YouTubeOAuthCredentialStore,
+  type YouTubeOAuthCredentialStoreErrorCode,
+} from './youtube-oauth-credential-store.js';
+export {
+  authorizeYouTubeOAuthInstalledApp,
+  createYouTubeOAuthAuthorizationUrl,
+  type YouTubeOAuthAuthorizationUrlOptions,
+  type YouTubeOAuthInstalledAppAuthorizationOptions,
+} from './youtube-oauth-flow.js';
+export {
+  createYouTubeOAuthOperationLock,
+  YouTubeOAuthOperationLockError,
+  type YouTubeOAuthOperationLock,
+  type YouTubeOAuthOperationLockOptions,
+} from './youtube-oauth-operation-lock.js';
+export {
+  createYouTubeOAuthAccessTokenProvider,
+  exchangeYouTubeOAuthAuthorizationCode,
+  getYouTubeOAuthAuthorizationStatus,
+  logoutYouTubeOAuth,
+  parseYouTubeOAuthClientId,
+  parseYouTubeOAuthLoopbackRedirectUri,
+  youtubeOAuthAuthorizationEndpoint,
+  youtubeOAuthCredentialAccountId,
+  youtubeOAuthRevocationEndpoint,
+  youtubeOAuthScope,
+  youtubeOAuthTokenEndpoint,
+  YouTubeOAuthOperationError,
+  type YouTubeOAuthAuthorizationCodeExchangeOptions,
+  type YouTubeOAuthAuthorizationCodeExchangeResult,
+  type YouTubeOAuthAuthorizationStatus,
+  type YouTubeOAuthLogoutOptions,
+  type YouTubeOAuthLogoutResult,
+  type YouTubeOAuthOperationErrorCode,
+  type YouTubeOAuthTokenProviderOptions,
+} from './youtube-oauth.js';
 export {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
