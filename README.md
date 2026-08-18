@@ -96,7 +96,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   若调用方已有 SRT/WebVTT 文档，可改用版本化 MCP `operatingline.procedure.tutorial.import` 或 HTTP
   `POST /api/v1/procedure/tutorial/import`：Runtime 严格解析文档，以原始 UTF-8 内容的 SHA-256、字节数、
   cue 数和统一置信度绑定 `1.2.0` packet，再把规范化 cue 作为同一视频证据。导入不联网、不下载视频、
-  不调用转录或模型；显式 Provider `authoring.generate` 当前仍只消费 `1.0.0/1.1.0` 请求。
+  不调用转录或模型。显式审阅 Provider 披露后，可改用 MCP
+  `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
+  解析文档、把只含摘要和规范化 cue 的 `1.2.0` packet 发送给所选 Provider，并立即执行候选校验与编译。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
   权利声明也不等于 released 训练许可。Packet 同时精确绑定 ActionCatalog、InteractionCatalog、tree
   identity、goal source/evidence 和 candidate-only 响应 Schema。当前 MCP
@@ -105,14 +107,17 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   把原 packet 与候选提交给 `operatingline.procedure.authoring.validate`；服务端核对 canonical SHA-256、
   已安装目录快照、candidate-only 契约和固定 provenance，并复用既有 compile。Packet 不再重复内嵌 rendered
   prompt，且以 256 KiB canonical 大小 fail closed。该入口不调用模型、不自动保存树、创建 Proposal 或执行
-  宿主。显式选择已配置 Provider 后，MCP `operatingline.procedure.authoring.generate` 或 HTTP
-  `POST /api/v1/procedure/authoring/generate` 会把规范编码的完整 packet 交给 Provider，并立即执行同一
-  identity/catalog/compile 门；requested/completed/failed 证据支持重启幂等，结果仍不保存、物化、提案或执行。
+  宿主。显式选择已配置 Provider 后，普通目标/手填分段使用 MCP
+  `operatingline.procedure.authoring.generate` 或 HTTP `POST /api/v1/procedure/authoring/generate`，字幕文档使用
+  上述 `procedure.tutorial.generate`；两者都把规范编码的完整 packet 交给 Provider，并立即执行同一
+  identity/catalog/compile 门。requested/completed/failed 证据支持重启幂等，且不持久化原始字幕文档；
+  结果仍不保存、物化、提案或执行。
   当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
-  [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md)。
+  [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md) 与
+  [ADR 0077](docs/adr/0077-caption-document-provider-generation.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

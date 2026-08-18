@@ -9,6 +9,7 @@ import {
 } from '@operatingline/blender-action-catalog';
 import {
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
 } from '@operatingline/protocol';
 
@@ -117,6 +118,31 @@ describe('public procedure tutorial transcript import JSON Schema', () => {
     }
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-transcript-import-request.schema.json'),
+      cases,
+    );
+  });
+
+  it('adds only explicit Provider invocation identity to caption generation requests', async () => {
+    const generationRequest = {
+      ...request,
+      requestId: 'c73fb72f-762b-431b-b2e4-c1112f1690e0',
+      providerId: 'procedure-author',
+    } as const;
+    const cases = [
+      { value: generationRequest, accepted: true },
+      { value: { ...generationRequest, requestId: 'not-a-uuid' }, accepted: false },
+      { value: { ...generationRequest, providerId: '' }, accepted: false },
+      { value: { ...generationRequest, formatVersion: '2.0.0' }, accepted: false },
+      { value: { ...generationRequest, apiKey: 'forbidden' }, accepted: false },
+    ] as const;
+
+    for (const contractCase of cases) {
+      expect(
+        procedureTutorialTranscriptGenerateRequestSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-transcript-generate-request.schema.json'),
       cases,
     );
   });

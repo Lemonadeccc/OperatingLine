@@ -61,6 +61,7 @@ import {
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureTutorialTranscriptImportRequestSchema,
+  procedureTutorialTranscriptGenerateRequestSchema,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureLeafReplayAttestationSchema,
@@ -401,6 +402,11 @@ const schemas = [
     'procedure-tutorial-transcript-import-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-transcript-import-request.json',
     procedureTutorialTranscriptImportRequestSchema,
+  ],
+  [
+    'procedure-tutorial-transcript-generate-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-transcript-generate-request.json',
+    procedureTutorialTranscriptGenerateRequestSchema,
   ],
   [
     'procedure-authoring-materialization-request.schema.json',

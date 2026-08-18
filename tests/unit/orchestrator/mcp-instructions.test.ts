@@ -16,8 +16,12 @@ describe('OperatingLine MCP instructions', () => {
     expect(firstClientPreview).toContain('only enters Blender review');
     expect(firstClientPreview).toContain('never permits host execution');
     expect(operatingLineMcpInstructions).toContain('operatingline.procedure.tutorial.import');
+    expect(operatingLineMcpInstructions).toContain('operatingline.procedure.tutorial.generate');
     expect(operatingLineMcpInstructions).toContain(
-      'currently accepts only goal or caller-segmented requests',
+      'send its normalized cues and task context to that Provider',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'neither stores the tree, creates a Proposal, or executes the host',
     );
   });
 });

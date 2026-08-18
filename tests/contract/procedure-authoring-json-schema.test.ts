@@ -723,7 +723,7 @@ describe('public procedure authoring JSON Schemas', () => {
           packet: documentPacket,
           validation: { ...result.validation, formatVersion: '1.2.0' },
         },
-        accepted: false,
+        accepted: true,
       },
       {
         value: { ...result, sideEffects: { ...result.sideEffects, procedureStored: true } },

@@ -47,10 +47,11 @@ packet schema 和服务端 authoring validator 都按版本区分三条兼容路
   一个可由客户端重新封装的 packet 当成独立提交真实性证明。
 - 接口不自动存储 ProcedureTree、创建/接受 Proposal 或执行 Blender。
 - 字幕文本仍是不可信任务数据，不得解释为系统工作流指令。
-- 显式 `procedure.authoring.generate` 当前仍使用 ADR 0075 的分段请求，不直接接收 document import；`1.2.0`
-  packet 由当前 MCP 宿主模型或另一个明确授权客户端消费。
+- 本 ADR 的 `procedure.tutorial.import` 保持只读且不调用 Provider；后续
+  [ADR 0077](0077-caption-document-provider-generation.md) 通过独立显式入口协调 document packet 与 Provider，
+  没有改变导入入口或既有 `procedure.authoring.generate` 请求合同。
 
 ## 后续
 
 仍需实现授权来源获取与字幕轨选择、语音转录、画面/按键/OCR 证据、镜头和语义自动分段、局部置信度、
-document packet 的显式 Provider 协调、树形可视化编辑，以及双人盲审和训练/RAG 数据集发布治理。
+树形可视化编辑，以及双人盲审和训练/RAG 数据集发布治理。

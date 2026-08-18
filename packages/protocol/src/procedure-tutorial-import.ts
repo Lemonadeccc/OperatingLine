@@ -6,6 +6,7 @@ import {
   procedureAuthoringTutorialTranscriptDocumentSchema,
   procedureAuthoringTutorialVideoInputSchema,
 } from './procedure-authoring.js';
+import { plannerProviderIdSchema } from './provider.js';
 
 export const procedureTutorialTranscriptImportFormatVersion = '1.0.0' as const;
 export const procedureTutorialTranscriptImportFormatVersionSchema = z.literal(
@@ -37,4 +38,13 @@ export const procedureTutorialTranscriptImportRequestSchema = z.strictObject({
 });
 export type ProcedureTutorialTranscriptImportRequest = z.infer<
   typeof procedureTutorialTranscriptImportRequestSchema
+>;
+
+export const procedureTutorialTranscriptGenerateRequestSchema =
+  procedureTutorialTranscriptImportRequestSchema.extend({
+    requestId: z.uuid(),
+    providerId: plannerProviderIdSchema,
+  });
+export type ProcedureTutorialTranscriptGenerateRequest = z.infer<
+  typeof procedureTutorialTranscriptGenerateRequestSchema
 >;

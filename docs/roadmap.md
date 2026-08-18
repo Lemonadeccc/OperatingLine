@@ -282,8 +282,12 @@
   - [x] 用户提供字幕文档的确定性导入：版本化 MCP/HTTP 请求接受权利状态明确的视频和完整 SRT/WebVTT，
         严格解析 cue、时间与文本，对原始 UTF-8 内容保存 SHA-256/字节数/cue 数，并把规范化版本与统一
         置信度绑定到 authoring packet `1.2.0`。普通 `1.0.0` 和手填分段 `1.1.0` 保持不变；入口不联网、
-        不转录、不调用模型、保存、提案或执行。显式 Provider generate 尚未消费该文档导入请求。见
+        不转录、不调用模型、保存、提案或执行。见
         [ADR 0076](adr/0076-user-supplied-caption-document-import.md)。
+  - [x] 字幕文档到显式 Provider candidate：独立 MCP/HTTP generate 请求在确定性导入后把 `1.2.0` packet
+        交给调用方明确选择的 Provider，复用 request fingerprint、重启幂等、candidate identity、安装目录、
+        authoring validator 与 compile 门。审计不保存原始字幕文档，结果不自动 store、materialize、propose
+        或 execute。见 [ADR 0077](adr/0077-caption-document-provider-generation.md)。
   - [ ] 经授权的 YouTube 获取、字幕抓取/语音转录、画面与按键识别、自动分段、证据帧，以及大步骤/小
         步骤质量校准；当前 Runtime 不下载或转录视频，也不把调用方权利声明当成 released 训练许可。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的

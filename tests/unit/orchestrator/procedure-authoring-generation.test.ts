@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -18,6 +19,8 @@ import {
   procedureAuthoringValidationResultSchema,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
+  type ProcedureTutorialTranscriptGenerateRequest,
+  type ProcedureTutorialTranscriptImportRequest,
 } from '@operatingline/protocol';
 
 import {
@@ -25,7 +28,9 @@ import {
   restoreProcedureAuthoringProviderInvocations,
 } from '../../../services/orchestrator/src/procedure-authoring-generation.js';
 import { buildProcedureAuthoringPromptPacket } from '../../../services/orchestrator/src/procedure-authoring-prompt.js';
+import { plannerProviderRequestFingerprint } from '../../../services/orchestrator/src/planner-provider-invocation.js';
 import { createPlannerProviderRegistry } from '../../../services/orchestrator/src/planner-provider-registry.js';
+import { buildProcedureTutorialTranscriptPromptPacket } from '../../../services/orchestrator/src/procedure-tutorial-transcript-import.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuidePlanStructure,
@@ -76,6 +81,37 @@ const tutorialRequest = {
   },
 } as const;
 
+const captionDocumentContent =
+  '1\n00:00:05,000 --> 00:00:20,000\nAdd a <b>UV sphere</b> and set its size.\n\n2\n00:00:20,000 --> 00:00:35,000\nMove, scale, and rename the eye.\n';
+
+const tutorialTranscriptGenerateRequest: ProcedureTutorialTranscriptGenerateRequest = {
+  formatVersion: '1.0.0',
+  requestId: 'e5f9a1b9-aa1e-41e0-b3e8-b0d8d38be6ca',
+  providerId: request.providerId,
+  targetAdapterId: request.targetAdapterId,
+  actionCatalogVersion: request.actionCatalogVersion,
+  interactionCatalogVersion: request.interactionCatalogVersion,
+  goal: request.goal,
+  treeId: 'snowman.eye.left.caption-document.procedure',
+  revision: 3,
+  locale: request.locale,
+  tutorial: {
+    video: {
+      uri: 'https://www.youtube.com/watch?v=operatingline-caption-eye',
+      title: 'Create and position a Blender eye from captions',
+      durationMs: 60_000,
+      rightsStatus: 'permission_granted',
+    },
+    captionDocument: {
+      origin: 'user_supplied',
+      format: 'srt',
+      content: captionDocumentContent,
+      locale: 'en',
+      defaultConfidence: 0.93,
+    },
+  },
+};
+
 function buildPacket(): ProcedureAuthoringPromptPacket {
   return buildProcedureAuthoringPromptPacket(
     {
@@ -87,6 +123,16 @@ function buildPacket(): ProcedureAuthoringPromptPacket {
       revision: request.revision,
       locale: request.locale,
     },
+    blenderActionCatalog,
+    blenderInteractionCatalog,
+  );
+}
+
+function buildTutorialTranscriptPacket(
+  importRequest: ProcedureTutorialTranscriptImportRequest,
+): ProcedureAuthoringPromptPacket {
+  return buildProcedureTutorialTranscriptPromptPacket(
+    importRequest,
     blenderActionCatalog,
     blenderInteractionCatalog,
   );
@@ -277,6 +323,7 @@ describe('Procedure authoring provider generation', () => {
       registry,
       existingEvents: [],
       buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
       validateCandidate,
       appendEvent: (event) => events.push(event),
     });
@@ -328,6 +375,7 @@ describe('Procedure authoring provider generation', () => {
       registry: createPlannerProviderRegistry([restartedProvider]),
       existingEvents: stored(events),
       buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
       validateCandidate,
       appendEvent: () => {
         throw new Error('A restored completed generation must not append duplicate evidence.');
@@ -347,6 +395,7 @@ describe('Procedure authoring provider generation', () => {
       registry: createPlannerProviderRegistry([selectedProvider]),
       existingEvents: [],
       buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
       validateCandidate,
       appendEvent: (event) => events.push(event),
     });
@@ -377,6 +426,7 @@ describe('Procedure authoring provider generation', () => {
           blenderActionCatalog,
           blenderInteractionCatalog,
         ),
+      buildTutorialTranscriptPacket,
       validateCandidate,
       appendEvent: (event) => events.push(event),
     });
@@ -417,6 +467,117 @@ describe('Procedure authoring provider generation', () => {
     await coordinator.close();
   });
 
+  it('generates from a caption document once and restores without persisting raw document syntax', async () => {
+    const events: ExecutionEventInput[] = [];
+    const selectedProvider = provider((packet) => candidate(packet));
+    const coordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([selectedProvider]),
+      existingEvents: [],
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const first = await coordinator.generateTutorialTranscript(tutorialTranscriptGenerateRequest);
+    const second = await coordinator.generateTutorialTranscript(tutorialTranscriptGenerateRequest);
+
+    expect(second).toEqual(first);
+    expect(selectedProvider.authorProcedure).toHaveBeenCalledTimes(1);
+    await expect(
+      coordinator.generateTutorialTranscript({
+        ...tutorialTranscriptGenerateRequest,
+        tutorial: {
+          ...tutorialTranscriptGenerateRequest.tutorial,
+          captionDocument: {
+            ...tutorialTranscriptGenerateRequest.tutorial.captionDocument,
+            content: `${captionDocumentContent}\n`,
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'planner_generation_conflict',
+      retryMode: 'new_request_id',
+    });
+    expect(selectedProvider.authorProcedure).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      requestId: tutorialTranscriptGenerateRequest.requestId,
+      packet: {
+        formatVersion: '1.2.0',
+        context: {
+          requestedTreeId: tutorialTranscriptGenerateRequest.treeId,
+          tutorialProvenance: {
+            transcript: {
+              document: {
+                format: 'srt',
+                contentSha256: createHash('sha256')
+                  .update(captionDocumentContent, 'utf8')
+                  .digest('hex'),
+                contentBytes: Buffer.byteLength(captionDocumentContent, 'utf8'),
+                cueCount: 2,
+                confidence: { origin: 'user_declared_default', value: 0.93 },
+              },
+              segments: [
+                { order: 1, text: 'Add a UV sphere and set its size.' },
+                { order: 2, text: 'Move, scale, and rename the eye.' },
+              ],
+            },
+          },
+          constraints: { tutorialTranscriptDocumentBound: true },
+        },
+      },
+      tree: { id: tutorialTranscriptGenerateRequest.treeId, revision: 3 },
+      sideEffects: {
+        modelCalled: true,
+        procedureStored: false,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      },
+    });
+    expect(events.map((event) => event.eventType)).toEqual([
+      'procedure.authoring.provider.generation.requested',
+      'procedure.authoring.provider.generation.completed',
+    ]);
+    expect(events[1]?.payload).toMatchObject({
+      requestFingerprint: plannerProviderRequestFingerprint(tutorialTranscriptGenerateRequest),
+      request: {
+        requestId: tutorialTranscriptGenerateRequest.requestId,
+        tutorial: {
+          transcript: {
+            origin: 'user_supplied',
+            segments: [
+              { startMs: 5_000, endMs: 20_000 },
+              { startMs: 20_000, endMs: 35_000 },
+            ],
+          },
+        },
+      },
+    });
+    const serializedEvidence = JSON.stringify(events);
+    expect(serializedEvidence).not.toContain('captionDocument');
+    expect(serializedEvidence).not.toContain(captionDocumentContent);
+    await coordinator.close();
+
+    const restartedProvider = provider(() => {
+      throw new Error('Restored caption generation must not call the Provider again.');
+    });
+    const restarted = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([restartedProvider]),
+      existingEvents: stored(events),
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: () => {
+        throw new Error('Restored caption generation must not append duplicate evidence.');
+      },
+    });
+    await expect(
+      restarted.generateTutorialTranscript(tutorialTranscriptGenerateRequest),
+    ).resolves.toEqual(first);
+    expect(restartedProvider.authorProcedure).not.toHaveBeenCalled();
+    await restarted.close();
+  });
+
   it('rejects providers without the explicit Procedure authoring method before any call', async () => {
     const selectedProvider = provider(() => candidate());
     delete (selectedProvider as { authorProcedure?: unknown }).authorProcedure;
@@ -426,6 +587,7 @@ describe('Procedure authoring provider generation', () => {
       registry,
       existingEvents: [],
       buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
       validateCandidate,
       appendEvent: (event) => events.push(event),
     });

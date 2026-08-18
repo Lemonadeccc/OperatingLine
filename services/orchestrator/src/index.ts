@@ -60,6 +60,7 @@ import {
   procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
+  procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
@@ -1188,6 +1189,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       invocationManager: plannerProviderInvocationManager,
       existingEvents: existingProcedureAuthoringGenerationEvents,
       buildPacket: getProcedureAuthoringPrompt,
+      buildTutorialTranscriptPacket: importProcedureTutorialTranscript,
       validateCandidate: (packet, tree) => validateProcedureAuthoring({ packet, tree }),
       appendEvent: (event) => database.appendEvent(event),
     });
@@ -1836,6 +1838,37 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                         ? error.message
                         : 'Procedure tutorial transcript import failed',
                   }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.generate',
+        {
+          description:
+            'Explicitly parse one user-provided WebVTT or SRT caption document into a document-bound Procedure authoring packet, then invoke one configured Procedure authoring provider. This may transmit normalized caption text and task data or incur provider cost according to the selected provider disclosure. The candidate is immediately validated and compiled, but is not stored, proposed, accepted, or executed; no video or caption URL is fetched.',
+          inputSchema: procedureTutorialTranscriptGenerateRequestSchema,
+          outputSchema: procedureAuthoringGenerationResultSchema,
+        },
+        async (requestInput) => {
+          const request = procedureTutorialTranscriptGenerateRequestSchema.parse(requestInput);
+          try {
+            const result =
+              await procedureAuthoringGenerationCoordinator!.generateTutorialTranscript(request);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(plannerGenerationErrorResponse(error, request.requestId)),
                 },
               ],
             };
@@ -3196,6 +3229,36 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           message:
             error instanceof Error ? error.message : 'Procedure tutorial transcript import failed',
         });
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/generate', async (request, reply) => {
+      const parsedRequest = procedureTutorialTranscriptGenerateRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: parsedRequestId.success ? parsedRequestId.data : null,
+            message:
+              'Procedure tutorial transcript generation request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return await procedureAuthoringGenerationCoordinator!.generateTutorialTranscript(
+          parsedRequest.data,
+        );
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
       }
     });
     runtimeApp.get('/api/v1/procedure/authoring/providers', async () =>

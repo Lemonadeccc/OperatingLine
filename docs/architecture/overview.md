@@ -320,8 +320,9 @@ SHA-256 与字节数，严格解析时间轴、cue 顺序和文本，随后生�
 digest、byte/cue count、规范化版本和调用方统一声明的置信度与规范化 segments 一起进入 provenance。
 `1.2.0` validator 会从同一 packet 重建 catalog-bound 内容，拒绝 document/segment 数量或置信度漂移。
 导入入口不访问 URI、不转录、不调用模型、不保存树、不创建 Proposal，也不执行宿主；原始字幕全文不进入
-packet，只有 digest/统计量和规范化 cue。显式 Provider `procedure.authoring.generate` 暂未接收 caption document
-请求，因此 `1.2.0` packet 目前由 MCP 宿主模型或其他明确授权的客户端消费。
+packet，只有 digest/统计量和规范化 cue。调用方审阅已配置 Provider 的传输与费用披露后，也可通过 MCP
+`operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate` 提交同一文档；
+Runtime 先确定性构建 `1.2.0` packet，再只把该 packet 的规范化 cue、摘要和任务上下文发送给 Provider。
 MCP `operatingline.procedure.prompt.get` 与 HTTP `POST /api/v1/procedure/prompt` 把 goal、固定来源证据、tree
 identity、无重复身份字段的 ActionCatalog/InteractionCatalog binding 和 candidate-only 响应 Schema 放进
 同一 packet。教程模式要求每个 semantic operation 至少引用一个给定视频 evidence，且拒绝缺失、改时、
@@ -336,17 +337,20 @@ authoring 验证。Packet 不再复制 rendered prompt，并以 256 KiB canonica
 验证都不会调用 Provider、自动保存树、创建 Proposal 或执行宿主。
 
 调用方也可先通过 `operatingline.procedure.authoring.providers.list` 审阅 Provider 的传输/凭据披露，再显式
-调用 MCP `operatingline.procedure.authoring.generate` 或 HTTP
-`POST /api/v1/procedure/authoring/generate`。Runtime 把完整 packet 规范编码为唯一 Provider 输入，输出先通过
+调用普通目标/手填分段入口 `operatingline.procedure.authoring.generate`，或字幕文档入口
+`operatingline.procedure.tutorial.generate`；二者都有对应 HTTP POST 入口。Runtime 把完整 packet 规范编码为
+唯一 Provider 输入，输出先通过
 candidate Schema 和 packet identity，再执行同一 installed-catalog validation/compile；持久化的
-requested/completed/failed evidence 支持重启后幂等恢复。成功结果明确为 `modelCalled: true`，但 tree 仍不
-自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
+requested/completed/failed evidence 支持重启后幂等恢复。文档请求 fingerprint 覆盖精确原文，但 completed
+evidence 只保存规范化 segments 与 packet 中的 digest/统计量，不保存原始 SRT/WebVTT 语法。成功结果明确为
+`modelCalled: true`，但 tree 仍不自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
 既有 initial-plan/local-replan Eval。当前仍没有自动视频获取/转录/画面识别、向量/语义 RAG、流式
 Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
-[ADR 0076](../adr/0076-user-supplied-caption-document-import.md)。
+[ADR 0076](../adr/0076-user-supplied-caption-document-import.md) 与
+[ADR 0077](../adr/0077-caption-document-provider-generation.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

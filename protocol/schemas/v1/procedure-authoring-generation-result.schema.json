@@ -4080,28 +4080,6 @@
     "durationMs"
   ],
   "additionalProperties": false,
-  "allOf": [
-    {
-      "properties": {
-        "packet": {
-          "properties": {
-            "formatVersion": {
-              "enum": [
-                "1.0.0",
-                "1.1.0"
-              ]
-            }
-          },
-          "required": [
-            "formatVersion"
-          ]
-        }
-      },
-      "required": [
-        "packet"
-      ]
-    }
-  ],
   "$defs": {
     "__schema0": {
       "anyOf": [

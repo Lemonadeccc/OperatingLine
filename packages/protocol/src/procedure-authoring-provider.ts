@@ -10,10 +10,9 @@ import {
 } from './provider.js';
 import {
   procedureAuthoringCandidateTreeSchema,
-  procedureAuthoringPromptLegacyFormatVersion,
+  procedureAuthoringPromptFormatVersionSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
-  procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringValidationResultSchema,
 } from './procedure-authoring.js';
 import { catalogVersionSchema } from './version.js';
@@ -22,10 +21,6 @@ export const procedureAuthoringGenerationFormatVersion = '1.0.0' as const;
 export const procedureAuthoringGenerationFormatVersionSchema = z.literal(
   procedureAuthoringGenerationFormatVersion,
 );
-const procedureAuthoringProviderPacketFormatVersionSchema = z.enum([
-  procedureAuthoringPromptLegacyFormatVersion,
-  procedureAuthoringPromptTutorialFormatVersion,
-]);
 
 export const procedureAuthoringGenerateRequestSchema = procedureAuthoringPromptRequestSchema.extend(
   {
@@ -76,16 +71,6 @@ export const procedureAuthoringGenerationResultSchema = z
       });
     }
     if (
-      !procedureAuthoringProviderPacketFormatVersionSchema.safeParse(result.packet.formatVersion)
-        .success
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['packet', 'formatVersion'],
-        message: 'Procedure generation does not accept document-import authoring packets',
-      });
-    }
-    if (
       result.tree.id !== packetContext.requestedTreeId ||
       result.tree.revision !== packetContext.recommendedRevision ||
       result.tree.adapterId !== packetContext.catalogBinding.adapterId ||
@@ -105,26 +90,6 @@ export const procedureAuthoringGenerationResultSchema = z
         message: 'Procedure generation result identities must match packet and compilation',
       });
     }
-  })
-  .meta({
-    allOf: [
-      {
-        properties: {
-          packet: {
-            properties: {
-              formatVersion: {
-                enum: [
-                  procedureAuthoringPromptLegacyFormatVersion,
-                  procedureAuthoringPromptTutorialFormatVersion,
-                ],
-              },
-            },
-            required: ['formatVersion'],
-          },
-        },
-        required: ['packet'],
-      },
-    ],
   });
 export type ProcedureAuthoringGenerationResult = z.infer<
   typeof procedureAuthoringGenerationResultSchema
@@ -181,7 +146,7 @@ const procedureAuthoringGenerationEventScopeSchema = z.strictObject({
 
 export const procedureAuthoringGenerationRequestedEventSchema =
   procedureAuthoringGenerationEventScopeSchema.extend({
-    packetFormatVersion: procedureAuthoringProviderPacketFormatVersionSchema,
+    packetFormatVersion: procedureAuthoringPromptFormatVersionSchema,
     runtimeTreatment: procedureAuthoringProviderRuntimeTreatmentAttestationSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
   });

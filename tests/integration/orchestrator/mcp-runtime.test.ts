@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -358,6 +358,7 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.procedure.tutorial.import' },
+            { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.providers.list' },
             { name: 'operatingline.procedure.authoring.generate' },
@@ -400,6 +401,24 @@ describe('OperatingLine runtime', () => {
       ).toMatchObject({
         type: 'object',
         required: ['formatVersion', 'targetAdapterId', 'goal', 'treeId', 'revision', 'tutorial'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.generate',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: [
+          'formatVersion',
+          'targetAdapterId',
+          'goal',
+          'treeId',
+          'revision',
+          'tutorial',
+          'requestId',
+          'providerId',
+        ],
         additionalProperties: false,
       });
       expect(
@@ -902,6 +921,35 @@ describe('OperatingLine runtime', () => {
           },
         },
       };
+      const captionDocument =
+        'WEBVTT\n\n00:05.000 --> 00:20.000\nAdd a <b>UV sphere</b> and set its size.\n\n00:20.000 --> 00:35.000\nMove, scale, and rename the eye.\n';
+      const captionGenerationRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        providerId: provider.descriptor.id,
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal: 'Generate the eye procedure directly from a supplied caption document.',
+        treeId: 'snowman.eye.left.caption.procedure',
+        revision: 2,
+        locale: 'en',
+        tutorial: {
+          video: {
+            uri: 'https://www.youtube.com/watch?v=operatingline-caption-eye',
+            title: 'Create and position a Blender eye from captions',
+            durationMs: 60_000,
+            rightsStatus: 'permission_granted',
+          },
+          captionDocument: {
+            origin: 'user_supplied',
+            format: 'webvtt',
+            content: captionDocument,
+            locale: 'en',
+            defaultConfidence: 0.92,
+          },
+        },
+      };
       const headers = {
         authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
@@ -998,9 +1046,92 @@ describe('OperatingLine runtime', () => {
         await expect(repeated.json()).resolves.toEqual(result);
         expect(providerInputs).toHaveLength(1);
 
-        const storedProcedures = await callMcpTool(
+        const generatedFromCaptions = await callMcpTool(
           runtime,
           182,
+          'operatingline.procedure.tutorial.generate',
+          captionGenerationRequest,
+        );
+        expect(generatedFromCaptions.result?.isError).not.toBe(true);
+        const captionResult = JSON.parse(
+          generatedFromCaptions.result?.content?.[0]?.text ?? '{}',
+        ) as Record<string, unknown>;
+        expect(captionResult).toMatchObject({
+          requestId: captionGenerationRequest.requestId,
+          provider: { id: provider.descriptor.id, version: provider.descriptor.version },
+          packet: {
+            formatVersion: '1.2.0',
+            context: {
+              requestedTreeId: captionGenerationRequest.treeId,
+              recommendedRevision: captionGenerationRequest.revision,
+              tutorialProvenance: {
+                source: {
+                  uri: captionGenerationRequest.tutorial.video.uri,
+                  rightsStatus: 'permission_granted',
+                },
+                transcript: {
+                  origin: 'user_supplied',
+                  document: {
+                    format: 'webvtt',
+                    contentSha256: createHash('sha256')
+                      .update(captionDocument, 'utf8')
+                      .digest('hex'),
+                    contentBytes: Buffer.byteLength(captionDocument, 'utf8'),
+                    cueCount: 2,
+                    confidence: { origin: 'user_declared_default', value: 0.92 },
+                  },
+                  segments: [
+                    { order: 1, text: 'Add a UV sphere and set its size.' },
+                    { order: 2, text: 'Move, scale, and rename the eye.' },
+                  ],
+                },
+              },
+              constraints: {
+                allSemanticOperationsTutorialEvidenceBound: true,
+                tutorialTranscriptDocumentBound: true,
+              },
+            },
+          },
+          tree: {
+            id: captionGenerationRequest.treeId,
+            revision: captionGenerationRequest.revision,
+          },
+          validation: {
+            validation: {
+              packetIntegrity: 'validated',
+              installedCatalogBinding: 'validated',
+              authoringCandidateContract: 'validated',
+              procedureCompilation: 'validated',
+            },
+          },
+          sideEffects: {
+            modelCalled: true,
+            procedureStored: false,
+            proposalCreated: false,
+            hostExecutionStarted: false,
+          },
+        });
+        expect(generatedFromCaptions.result?.structuredContent).toEqual(captionResult);
+        expect(providerInputs).toHaveLength(2);
+        expect(providerInputs[1]?.packet).toEqual(captionResult['packet']);
+        expect(JSON.stringify(providerInputs[1])).not.toContain('captionDocument');
+        expect(JSON.stringify(providerInputs[1])).not.toContain(captionDocument);
+
+        const repeatedCaptionGeneration = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/generate`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(captionGenerationRequest),
+          },
+        );
+        expect(repeatedCaptionGeneration.status).toBe(200);
+        await expect(repeatedCaptionGeneration.json()).resolves.toEqual(captionResult);
+        expect(providerInputs).toHaveLength(2);
+
+        const storedProcedures = await callMcpTool(
+          runtime,
+          183,
           'operatingline.procedure.list',
           {},
         );
@@ -1030,6 +1161,30 @@ describe('OperatingLine runtime', () => {
           retryMode: 'never',
         });
         expect(JSON.stringify(invalidBody)).not.toContain('MUST_NOT_LEAK');
+
+        const invalidCaptionRequestId = randomUUID();
+        const invalidCaptionGeneration = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/generate`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...captionGenerationRequest,
+              requestId: invalidCaptionRequestId,
+              apiKey: 'MUST_NOT_LEAK',
+            }),
+          },
+        );
+        expect(invalidCaptionGeneration.status).toBe(400);
+        const invalidCaptionBody = await invalidCaptionGeneration.json();
+        expect(invalidCaptionBody).toEqual({
+          error: 'planner_invalid_request',
+          requestId: invalidCaptionRequestId,
+          message:
+            'Procedure tutorial transcript generation request violates the strict public contract',
+          retryMode: 'never',
+        });
+        expect(JSON.stringify(invalidCaptionBody)).not.toContain('MUST_NOT_LEAK');
       } finally {
         await runtime.stop();
       }
@@ -1037,18 +1192,19 @@ describe('OperatingLine runtime', () => {
       expect(closeCalls).toBe(1);
       const database = openOperatingLineDatabase(databasePath);
       try {
-        expect(
-          database
-            .listExecutionEventsByTypes([
-              'procedure.authoring.provider.generation.requested',
-              'procedure.authoring.provider.generation.completed',
-              'procedure.authoring.provider.generation.failed',
-            ])
-            .map((event) => event.eventType),
-        ).toEqual([
+        const generationEvents = database.listExecutionEventsByTypes([
+          'procedure.authoring.provider.generation.requested',
+          'procedure.authoring.provider.generation.completed',
+          'procedure.authoring.provider.generation.failed',
+        ]);
+        expect(generationEvents.map((event) => event.eventType)).toEqual([
+          'procedure.authoring.provider.generation.requested',
+          'procedure.authoring.provider.generation.completed',
           'procedure.authoring.provider.generation.requested',
           'procedure.authoring.provider.generation.completed',
         ]);
+        expect(JSON.stringify(generationEvents)).not.toContain('captionDocument');
+        expect(JSON.stringify(generationEvents)).not.toContain(captionDocument);
       } finally {
         database.close();
       }

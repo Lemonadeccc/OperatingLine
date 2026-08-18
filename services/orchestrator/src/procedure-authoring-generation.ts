@@ -11,12 +11,16 @@ import {
   procedureAuthoringGenerationRequestedEventSchema,
   procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialTranscriptGenerateRequestSchema,
+  procedureTutorialTranscriptImportRequestSchema,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringGenerateRequest,
   type ProcedureAuthoringGenerationResult,
   type ProcedureAuthoringPromptPacket,
   type ProcedureAuthoringPromptRequest,
   type ProcedureAuthoringValidationResult,
+  type ProcedureTutorialTranscriptGenerateRequest,
+  type ProcedureTutorialTranscriptImportRequest,
 } from '@operatingline/protocol';
 
 import {
@@ -36,7 +40,10 @@ import {
   safePlannerRuntimeError,
 } from './planner-provider-errors.js';
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
-import { validateProcedureAuthoringCandidate } from './procedure-authoring-prompt.js';
+import {
+  procedureAuthoringTutorialInputFromPacket,
+  validateProcedureAuthoringCandidate,
+} from './procedure-authoring-prompt.js';
 
 export const procedureAuthoringGenerationEvidenceEventTypes = [
   'procedure.authoring.provider.generation.requested',
@@ -52,6 +59,9 @@ export interface ProcedureAuthoringGenerationCoordinatorOptions {
   readonly buildPacket: (
     request: ProcedureAuthoringPromptRequest,
   ) => ProcedureAuthoringPromptPacket;
+  readonly buildTutorialTranscriptPacket: (
+    request: ProcedureTutorialTranscriptImportRequest,
+  ) => ProcedureAuthoringPromptPacket;
   readonly validateCandidate: (
     packet: ProcedureAuthoringPromptPacket,
     tree: ProcedureAuthoringCandidateTree,
@@ -61,6 +71,9 @@ export interface ProcedureAuthoringGenerationCoordinatorOptions {
 
 export interface ProcedureAuthoringGenerationCoordinator {
   generate(request: ProcedureAuthoringGenerateRequest): Promise<ProcedureAuthoringGenerationResult>;
+  generateTutorialTranscript(
+    request: ProcedureTutorialTranscriptGenerateRequest,
+  ): Promise<ProcedureAuthoringGenerationResult>;
   completedResult(requestId: string): ProcedureAuthoringGenerationResult | null;
   close(): Promise<void>;
 }
@@ -116,6 +129,41 @@ function requestToPrompt(
   };
 }
 
+function tutorialTranscriptGenerateToImport(
+  request: ProcedureTutorialTranscriptGenerateRequest,
+): ProcedureTutorialTranscriptImportRequest {
+  const { requestId, providerId, ...importRequest } = request;
+  void requestId;
+  void providerId;
+  return procedureTutorialTranscriptImportRequestSchema.parse(importRequest);
+}
+
+function tutorialTranscriptEvidenceRequest(
+  request: ProcedureTutorialTranscriptGenerateRequest,
+  packet: ProcedureAuthoringPromptPacket,
+): ProcedureAuthoringGenerateRequest {
+  const tutorial = procedureAuthoringTutorialInputFromPacket(packet);
+  if (tutorial === undefined) {
+    throw new Error('Tutorial transcript generation packet is missing tutorial provenance');
+  }
+  return procedureAuthoringGenerateRequestSchema.parse({
+    requestId: request.requestId,
+    providerId: request.providerId,
+    targetAdapterId: request.targetAdapterId,
+    ...(request.actionCatalogVersion === undefined
+      ? {}
+      : { actionCatalogVersion: request.actionCatalogVersion }),
+    ...(request.interactionCatalogVersion === undefined
+      ? {}
+      : { interactionCatalogVersion: request.interactionCatalogVersion }),
+    goal: request.goal,
+    treeId: request.treeId,
+    revision: request.revision,
+    ...(request.locale === undefined ? {} : { locale: request.locale }),
+    tutorial,
+  });
+}
+
 function parseProviderOutput(output: unknown): ProcedureAuthoringCandidateTree {
   const parsed = procedureAuthoringCandidateTreeSchema.safeParse(
     sanitizePlannerProviderOutput(output),
@@ -161,18 +209,23 @@ export function createProcedureAuthoringGenerationCoordinator(
   };
 
   const generateAttempt = async (
-    request: ProcedureAuthoringGenerateRequest,
+    request: Pick<
+      ProcedureAuthoringGenerateRequest,
+      'requestId' | 'providerId' | 'targetAdapterId' | 'treeId'
+    >,
     requestFingerprint: string,
     attemptContext: PlannerProviderAttemptContext,
+    buildPacket: () => ProcedureAuthoringPromptPacket,
+    evidenceRequest: (packet: ProcedureAuthoringPromptPacket) => ProcedureAuthoringGenerateRequest,
   ): Promise<ProcedureAuthoringGenerationResult> => {
     let packet: ProcedureAuthoringPromptPacket | null = null;
+    let recordedRequest: ProcedureAuthoringGenerateRequest;
     const startedAt = Date.now();
     let requestRecorded = false;
     try {
       try {
-        packet = procedureAuthoringPromptPacketSchema.parse(
-          options.buildPacket(requestToPrompt(request)),
-        );
+        packet = procedureAuthoringPromptPacketSchema.parse(buildPacket());
+        recordedRequest = evidenceRequest(packet);
       } catch {
         throw new PlannerGenerationRuntimeError(
           'planner_catalog_invalid',
@@ -281,7 +334,7 @@ export function createProcedureAuthoringGenerationCoordinator(
         occurredAt: generatedAt,
       });
       const completedPayload = procedureAuthoringGenerationCompletedEventSchema.parse({
-        request,
+        request: recordedRequest,
         requestFingerprint,
         result,
         ...(runtimeAttestation === undefined ? {} : { runtimeAttestation }),
@@ -339,7 +392,37 @@ export function createProcedureAuthoringGenerationCoordinator(
         planKey: [request.targetAdapterId, request.treeId],
         requiresReplan: false,
         requiresProcedureAuthoring: true,
-        attempt: (attemptContext) => generateAttempt(request, requestFingerprint, attemptContext),
+        attempt: (attemptContext) =>
+          generateAttempt(
+            request,
+            requestFingerprint,
+            attemptContext,
+            () => options.buildPacket(requestToPrompt(request)),
+            () => request,
+          ),
+      });
+      return procedureAuthoringGenerationResultSchema.parse(result);
+    },
+    generateTutorialTranscript: async (requestInput) => {
+      const request = procedureTutorialTranscriptGenerateRequestSchema.parse(requestInput);
+      const requestFingerprint = plannerProviderRequestFingerprint(request);
+      const result = await invocationManager.execute({
+        requestId: request.requestId,
+        operation: 'procedure_authoring',
+        fingerprint: requestFingerprint,
+        providerId: request.providerId,
+        planKey: [request.targetAdapterId, request.treeId],
+        requiresReplan: false,
+        requiresProcedureAuthoring: true,
+        attempt: (attemptContext) =>
+          generateAttempt(
+            request,
+            requestFingerprint,
+            attemptContext,
+            () =>
+              options.buildTutorialTranscriptPacket(tutorialTranscriptGenerateToImport(request)),
+            (packet) => tutorialTranscriptEvidenceRequest(request, packet),
+          ),
       });
       return procedureAuthoringGenerationResultSchema.parse(result);
     },
