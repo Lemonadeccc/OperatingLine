@@ -63,6 +63,49 @@ describe('guide plan protocol fixture', () => {
     expect(guidePlanSchema.safeParse(gated).success).toBe(false);
   });
 
+  it('bounds automatic Observation retries and requires rollback between attempts', () => {
+    const retrying = readFixture() as {
+      protocolVersion: string;
+      steps: Array<Record<string, unknown>>;
+    };
+    retrying.protocolVersion = '1.5.0';
+    const executable = retrying.steps.find((step) => step.action !== null);
+    expect(executable).toBeDefined();
+    executable!.observationPolicy = {
+      mode: 'success_gate',
+      failureStrategy: 'rollback_step',
+      retryPolicy: { mode: 'automatic_bounded', maxAttempts: 2 },
+    };
+
+    expect(guidePlanSchema.safeParse(retrying).success).toBe(true);
+    executable!.observationPolicy = {
+      mode: 'success_gate',
+      failureStrategy: 'rollback_step',
+      retryPolicy: { mode: 'automatic_bounded', maxAttempts: 3 },
+    };
+    expect(guidePlanSchema.safeParse(retrying).success).toBe(true);
+
+    retrying.protocolVersion = '1.4.0';
+    expect(guidePlanSchema.safeParse(retrying).success).toBe(false);
+    retrying.protocolVersion = '1.5.0';
+
+    for (const maxAttempts of [1, 4]) {
+      executable!.observationPolicy = {
+        mode: 'success_gate',
+        failureStrategy: 'rollback_step',
+        retryPolicy: { mode: 'automatic_bounded', maxAttempts },
+      };
+      expect(guidePlanSchema.safeParse(retrying).success).toBe(false);
+    }
+
+    executable!.observationPolicy = {
+      mode: 'success_gate',
+      failureStrategy: 'retain_for_repair',
+      retryPolicy: { mode: 'automatic_bounded', maxAttempts: 2 },
+    };
+    expect(guidePlanSchema.safeParse(retrying).success).toBe(false);
+  });
+
   it('keeps Zod and the emitted JSON Schema aligned for 3D positions', () => {
     const extraCoordinate = readFixture() as { steps: Array<Record<string, unknown>> };
     const anchorStep = extraCoordinate.steps.find(

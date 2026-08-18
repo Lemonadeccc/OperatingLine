@@ -322,6 +322,7 @@ class ObservationGateSessionTests(unittest.TestCase):
         evaluator,
         *,
         rollback=None,
+        retry_max_attempts: int | None = None,
     ) -> tuple[DemoSession, list[str]]:
         step = TaskNode(
             id="step-gated",
@@ -335,6 +336,12 @@ class ObservationGateSessionTests(unittest.TestCase):
             observation_policy=ObservationPolicySpec(
                 "success_gate",
                 failure_strategy,
+                (
+                    "automatic_bounded"
+                    if retry_max_attempts is not None
+                    else None
+                ),
+                retry_max_attempts or 1,
             ),
         )
         root = TaskNode(
@@ -397,6 +404,88 @@ class ObservationGateSessionTests(unittest.TestCase):
             self.result(True),
         )
         self.assertEqual(calls, ["execute", "rollback", "execute"])
+
+    def test_bounded_retry_records_each_attempt_and_success_summary(self) -> None:
+        outcomes = iter((False, True))
+        session, calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(next(outcomes)),
+            retry_max_attempts=2,
+        )
+        session.start()
+
+        with self.assertRaisesRegex(ValueError, "Invalid Observation attempt"):
+            session.next(2)
+        self.assertEqual(calls, [])
+
+        with self.assertRaises(ObservationGateError) as caught:
+            session.next(1)
+
+        self.assertEqual(caught.exception.gate.status, "retry_scheduled")
+        self.assertEqual(
+            caught.exception.gate.retry,
+            {
+                "mode": "automatic_bounded",
+                "attempt": 1,
+                "maxAttempts": 2,
+                "remainingAttempts": 1,
+                "disposition": "scheduled",
+            },
+        )
+        self.assertFalse(session.observation_blocked)
+        with self.assertRaisesRegex(ValueError, "Invalid Observation attempt"):
+            session.next(1)
+        self.assertEqual(session.next(2).id, "step-gated")
+        self.assertEqual(
+            session.success_gate_retry_copy("step-gated"),
+            {
+                "mode": "automatic_bounded",
+                "attempts": 2,
+                "maxAttempts": 2,
+                "outcome": "succeeded_after_retry",
+            },
+        )
+        self.assertEqual(calls, ["execute", "rollback", "execute"])
+
+        snapshot = session.snapshot_state()
+        session.back()
+        self.assertIsNone(session.success_gate_retry_copy("step-gated"))
+        session.restore_state(snapshot)
+        self.assertEqual(
+            session.success_gate_retry_copy("step-gated"),
+            {
+                "mode": "automatic_bounded",
+                "attempts": 2,
+                "maxAttempts": 2,
+                "outcome": "succeeded_after_retry",
+            },
+        )
+
+    def test_bounded_retry_stops_after_the_declared_attempt_limit(self) -> None:
+        session, calls = self.gated_session(
+            "rollback_step",
+            lambda _expectations, _receipts: self.result(False),
+            retry_max_attempts=3,
+        )
+        session.start()
+
+        for attempt in (1, 2, 3):
+            with self.assertRaises(ObservationGateError) as caught:
+                session.next(attempt)
+            expected_status = "retry_scheduled" if attempt < 3 else "failed_rolled_back"
+            self.assertEqual(caught.exception.gate.status, expected_status)
+            self.assertEqual(caught.exception.gate.retry["attempt"], attempt)
+            self.assertEqual(
+                caught.exception.gate.retry["remainingAttempts"],
+                3 - attempt,
+            )
+
+        self.assertEqual(session.active_index, -1)
+        self.assertEqual(session.receipts, {})
+        self.assertIsNone(session.success_gate_retry_copy("step-gated"))
+        self.assertEqual(calls, ["execute", "rollback"] * 3)
+        with self.assertRaisesRegex(ValueError, "Invalid Observation attempt"):
+            session.next(4)
 
     def test_retain_for_repair_blocks_next_until_recheck_succeeds(self) -> None:
         ready = False
@@ -483,12 +572,14 @@ class ObservationGateSessionTests(unittest.TestCase):
             "rollback_step",
             lambda _expectations, _receipts: self.result(False),
             rollback=rollback,
+            retry_max_attempts=3,
         )
         session.start()
         with self.assertRaises(ObservationGateError) as caught:
             session.next()
 
         self.assertEqual(caught.exception.gate.status, "rollback_failed")
+        self.assertIsNone(caught.exception.gate.retry)
         self.assertTrue(session.observation_blocked)
         self.assertEqual(session.active_index, 0)
         self.assertIn("step-gated", session.receipts)
@@ -575,6 +666,65 @@ class ObservationGateSessionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Invalid observationPolicy"):
             domain.load_task_tree_data(plan)
+
+    def test_retry_policy_is_strict_bounded_and_rollback_only(self) -> None:
+        plan = {
+            "protocolVersion": "1.5.0",
+            "rootStepId": "step",
+            "steps": [
+                {
+                    "id": "step",
+                    "parentId": None,
+                    "order": 0,
+                    "dependsOn": [],
+                    "title": "Step",
+                    "action": {
+                        "adapterId": "test",
+                        "name": "test.step",
+                        "arguments": {},
+                    },
+                    "anchors": [],
+                    "expectedObservations": [
+                        {"kind": "test_ready", "parameters": {}}
+                    ],
+                    "observationPolicy": {
+                        "mode": "success_gate",
+                        "failureStrategy": "rollback_step",
+                        "retryPolicy": {
+                            "mode": "automatic_bounded",
+                            "maxAttempts": 2,
+                        },
+                    },
+                }
+            ],
+        }
+
+        parsed = domain.load_task_tree_data(plan)
+        self.assertEqual(parsed.observation_policy.retry_mode, "automatic_bounded")
+        self.assertEqual(parsed.observation_policy.max_attempts, 2)
+
+        legacy = deepcopy(plan)
+        legacy["protocolVersion"] = "1.4.0"
+        with self.assertRaisesRegex(ValueError, "Invalid observationPolicy"):
+            domain.load_task_tree_data(legacy)
+
+        for invalid_policy in (
+            {"mode": "automatic_bounded", "maxAttempts": 1},
+            {"mode": "automatic_bounded", "maxAttempts": 4},
+            {"mode": "automatic_bounded", "maxAttempts": True},
+            {"mode": "automatic_bounded", "maxAttempts": 2, "extra": True},
+        ):
+            invalid = deepcopy(plan)
+            invalid["steps"][0]["observationPolicy"]["retryPolicy"] = invalid_policy
+            with self.assertRaisesRegex(ValueError, "Invalid observationPolicy"):
+                domain.load_task_tree_data(invalid)
+
+        retained = deepcopy(plan)
+        retained["steps"][0]["observationPolicy"]["failureStrategy"] = (
+            "retain_for_repair"
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid observationPolicy"):
+            domain.load_task_tree_data(retained)
 
 
 class ProviderHandoffTests(unittest.TestCase):

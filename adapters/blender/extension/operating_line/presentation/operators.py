@@ -80,28 +80,41 @@ def _execute_next(operator, context):
     candidate = session.steps[next_index] if next_index < len(session.steps) else None
     if not _prepare_history(operator, context, session, "next"):
         return {"CANCELLED"}
-    try:
-        step = session.next()
-    except ObservationGateError as error:
-        if error.gate.blocking and prepared_native_history_changed(session):
-            if not _commit_history(operator, session):
-                return {"FINISHED"}
-            result = {"FINISHED"}
-        else:
-            cancel_native_history()
-            result = {"CANCELLED"}
-        _companion().report(
-            "step_observation_failed",
-            step=error.step,
-            observations_override=error.gate.observation_copy(),
-            observation_gate_override=error.gate,
-        )
-        operator.report({"WARNING"}, str(error))
-        refresh_native_menu_guidance()
-        return result
-    except (OSError, RuntimeError, ValueError) as error:
-        refresh_native_menu_guidance()
-        return _finish_failed_operation(operator, session, candidate, error)
+    observation_attempt = 1
+    while True:
+        try:
+            step = session.next(observation_attempt)
+            break
+        except ObservationGateError as error:
+            if error.gate.status == "retry_scheduled":
+                _companion().report(
+                    "step_observation_failed",
+                    step=error.step,
+                    observations_override=error.gate.observation_copy(),
+                    observation_gate_override=error.gate,
+                )
+                operator.report({"INFO"}, str(error))
+                observation_attempt += 1
+                continue
+            if error.gate.blocking and prepared_native_history_changed(session):
+                if not _commit_history(operator, session):
+                    return {"FINISHED"}
+                result = {"FINISHED"}
+            else:
+                cancel_native_history()
+                result = {"CANCELLED"}
+            _companion().report(
+                "step_observation_failed",
+                step=error.step,
+                observations_override=error.gate.observation_copy(),
+                observation_gate_override=error.gate,
+            )
+            operator.report({"WARNING"}, str(error))
+            refresh_native_menu_guidance()
+            return result
+        except (OSError, RuntimeError, ValueError) as error:
+            refresh_native_menu_guidance()
+            return _finish_failed_operation(operator, session, candidate, error)
     if step is None:
         cancel_native_history()
         operator.report({"INFO"}, "All demo steps are complete")

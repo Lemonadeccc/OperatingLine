@@ -96,4 +96,6 @@ Observation/hash 和同一 attestation 内容哈希为基准；`automatically_ro
 ## 后续
 
 该合同尚未证明逐控件菜单/快捷键执行或 action-level MCP，也未覆盖七种 primitive 之外的 Edit Mode、Modifier、
-Geometry Nodes、骨骼、动画、灯光、相机和渲染 Action。失败自动诊断和策略化重试仍需后续切片。
+Geometry Nodes、骨骼、动画、灯光、相机和渲染 Action。同 Action 的有界 Observation 重试由
+[ADR 0074](0074-bounded-observation-retries.md) 补充；根据失败分类改参数、切换执行策略或语义局部重规划仍需
+后续切片。

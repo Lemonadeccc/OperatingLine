@@ -637,6 +637,23 @@ export function buildProcedureLeafReplayAttestation(input: {
       409,
     );
   }
+  const replayStep = proposal.plan.steps.find((step) => step.id === binding.leafId);
+  const retryPolicy =
+    replayStep?.observationPolicy?.mode === 'success_gate'
+      ? replayStep.observationPolicy.retryPolicy
+      : undefined;
+  const retryEvidence = report.observationRetry;
+  if (
+    retryEvidence !== undefined &&
+    (retryPolicy?.mode !== 'automatic_bounded' ||
+      retryEvidence.mode !== retryPolicy.mode ||
+      retryEvidence.maxAttempts !== retryPolicy.maxAttempts)
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Companion retry success evidence does not match the accepted replay policy',
+      409,
+    );
+  }
   const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
   if (
     nativeUndoCheckpoint === undefined ||
@@ -790,6 +807,8 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   const observationPolicy = leaf?.kind === 'leaf' ? leaf.observationPolicy : undefined;
   const failureStrategy =
     observationPolicy?.mode === 'success_gate' ? observationPolicy.failureStrategy : undefined;
+  const retryPolicy =
+    observationPolicy?.mode === 'success_gate' ? observationPolicy.retryPolicy : undefined;
   if (
     decision.proposalId !== proposal.proposalId ||
     decision.decision !== 'accepted' ||
@@ -891,6 +910,22 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
   }
   const failureGate = failureReport.observationGate;
   const automaticRollback = failureGate.status === 'failed_rolled_back';
+  const retryEvidence = failureGate.retry;
+  if (
+    automaticRollback &&
+    (retryPolicy === undefined
+      ? retryEvidence !== undefined
+      : retryEvidence?.mode !== 'automatic_bounded' ||
+        retryEvidence.disposition !== 'exhausted' ||
+        retryEvidence.attempt !== retryPolicy.maxAttempts ||
+        retryEvidence.maxAttempts !== retryPolicy.maxAttempts ||
+        retryEvidence.remainingAttempts !== 0)
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Terminal rollback retry evidence does not match the accepted replay policy',
+      409,
+    );
+  }
   const failureCheckpoint = failureReport.nativeUndoCheckpoint;
   if (
     automaticRollback

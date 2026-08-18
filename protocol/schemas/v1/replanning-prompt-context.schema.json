@@ -322,13 +322,48 @@
                               "rollback_step",
                               "retain_for_repair"
                             ]
+                          },
+                          "retryPolicy": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "automatic_bounded"
+                              },
+                              "maxAttempts": {
+                                "type": "integer",
+                                "minimum": 2,
+                                "maximum": 3
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "maxAttempts"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "mode",
                           "failureStrategy"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "required": [
+                                "retryPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "failureStrategy": {
+                                  "const": "rollback_step"
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
@@ -449,6 +484,41 @@
                         "required": [
                           "observationPolicy"
                         ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0",
+                      "1.2.0",
+                      "1.3.0",
+                      "1.4.0"
+                    ]
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "steps": {
+                    "items": {
+                      "properties": {
+                        "observationPolicy": {
+                          "not": {
+                            "required": [
+                              "retryPolicy"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -1326,6 +1396,7 @@
                     "status": {
                       "type": "string",
                       "enum": [
+                        "retry_scheduled",
                         "failed_rolled_back",
                         "repair_required",
                         "rollback_failed",
@@ -1342,6 +1413,45 @@
                     "message": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "retry": {
+                      "type": "object",
+                      "properties": {
+                        "mode": {
+                          "type": "string",
+                          "const": "automatic_bounded"
+                        },
+                        "attempt": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 3
+                        },
+                        "maxAttempts": {
+                          "type": "integer",
+                          "minimum": 2,
+                          "maximum": 3
+                        },
+                        "remainingAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2
+                        },
+                        "disposition": {
+                          "type": "string",
+                          "enum": [
+                            "scheduled",
+                            "exhausted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "mode",
+                        "attempt",
+                        "maxAttempts",
+                        "remainingAttempts",
+                        "disposition"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -1357,6 +1467,7 @@
                         "properties": {
                           "status": {
                             "enum": [
+                              "retry_scheduled",
                               "failed_rolled_back",
                               "rollback_failed"
                             ]
@@ -1372,6 +1483,23 @@
                             "const": "rollback_step"
                           }
                         }
+                      }
+                    },
+                    {
+                      "if": {
+                        "properties": {
+                          "status": {
+                            "const": "retry_scheduled"
+                          }
+                        },
+                        "required": [
+                          "status"
+                        ]
+                      },
+                      "then": {
+                        "required": [
+                          "retry"
+                        ]
                       }
                     },
                     {
@@ -1399,6 +1527,36 @@
                   "type": "null"
                 }
               ]
+            },
+            "observationRetry": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "automatic_bounded"
+                },
+                "attempts": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3
+                },
+                "outcome": {
+                  "type": "string",
+                  "const": "succeeded_after_retry"
+                }
+              },
+              "required": [
+                "mode",
+                "attempts",
+                "maxAttempts",
+                "outcome"
+              ],
+              "additionalProperties": false
             },
             "artifactAttestation": {
               "anyOf": [
@@ -1879,6 +2037,77 @@
                   "required": [
                     "procedureReplayCurrentStateRequest"
                   ]
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "observationRetry"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "protocolVersion": {
+                    "const": "1.5.0"
+                  },
+                  "transition": {
+                    "const": "step_succeeded"
+                  },
+                  "observationGate": {
+                    "type": "null"
+                  },
+                  "observations": {
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "satisfied": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "satisfied"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0",
+                      "1.2.0",
+                      "1.3.0",
+                      "1.4.0"
+                    ]
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "observationGate": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "not": {
+                          "required": [
+                            "retry"
+                          ]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             },
@@ -2664,13 +2893,48 @@
                               "rollback_step",
                               "retain_for_repair"
                             ]
+                          },
+                          "retryPolicy": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "automatic_bounded"
+                              },
+                              "maxAttempts": {
+                                "type": "integer",
+                                "minimum": 2,
+                                "maximum": 3
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "maxAttempts"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "mode",
                           "failureStrategy"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "required": [
+                                "retryPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "failureStrategy": {
+                                  "const": "rollback_step"
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
@@ -2791,6 +3055,41 @@
                         "required": [
                           "observationPolicy"
                         ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0",
+                      "1.2.0",
+                      "1.3.0",
+                      "1.4.0"
+                    ]
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "steps": {
+                    "items": {
+                      "properties": {
+                        "observationPolicy": {
+                          "not": {
+                            "required": [
+                              "retryPolicy"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -3087,13 +3386,48 @@
                               "rollback_step",
                               "retain_for_repair"
                             ]
+                          },
+                          "retryPolicy": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "automatic_bounded"
+                              },
+                              "maxAttempts": {
+                                "type": "integer",
+                                "minimum": 2,
+                                "maximum": 3
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "maxAttempts"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "mode",
                           "failureStrategy"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "required": [
+                                "retryPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "failureStrategy": {
+                                  "const": "rollback_step"
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
@@ -3214,6 +3548,41 @@
                         "required": [
                           "observationPolicy"
                         ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0",
+                      "1.2.0",
+                      "1.3.0",
+                      "1.4.0"
+                    ]
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "steps": {
+                    "items": {
+                      "properties": {
+                        "observationPolicy": {
+                          "not": {
+                            "required": [
+                              "retryPolicy"
+                            ]
+                          }
+                        }
                       }
                     }
                   }
@@ -3510,13 +3879,48 @@
                               "rollback_step",
                               "retain_for_repair"
                             ]
+                          },
+                          "retryPolicy": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "automatic_bounded"
+                              },
+                              "maxAttempts": {
+                                "type": "integer",
+                                "minimum": 2,
+                                "maximum": 3
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "maxAttempts"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "mode",
                           "failureStrategy"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "required": [
+                                "retryPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "failureStrategy": {
+                                  "const": "rollback_step"
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   },
@@ -3637,6 +4041,41 @@
                         "required": [
                           "observationPolicy"
                         ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "protocolVersion": {
+                    "enum": [
+                      "1.0.0",
+                      "1.1.0",
+                      "1.2.0",
+                      "1.3.0",
+                      "1.4.0"
+                    ]
+                  }
+                },
+                "required": [
+                  "protocolVersion"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "steps": {
+                    "items": {
+                      "properties": {
+                        "observationPolicy": {
+                          "not": {
+                            "required": [
+                              "retryPolicy"
+                            ]
+                          }
+                        }
                       }
                     }
                   }

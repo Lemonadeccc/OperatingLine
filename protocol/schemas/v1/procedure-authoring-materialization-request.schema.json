@@ -2733,13 +2733,48 @@
                               "rollback_step",
                               "retain_for_repair"
                             ]
+                          },
+                          "retryPolicy": {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "automatic_bounded"
+                              },
+                              "maxAttempts": {
+                                "type": "integer",
+                                "minimum": 2,
+                                "maximum": 3
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "maxAttempts"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
                           "mode",
                           "failureStrategy"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "required": [
+                                "retryPolicy"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "failureStrategy": {
+                                  "const": "rollback_step"
+                                }
+                              }
+                            }
+                          }
+                        ]
                       }
                     ]
                   },

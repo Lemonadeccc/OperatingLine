@@ -937,6 +937,12 @@ revision 6 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 `retain_for_repair` 的外部计划会保留现场、锁住 Next，并提供 `Recheck Observations` 或 `Back`。
 旧 `1.0.0`/`1.1.0` Plan 仍保持 observation 遥测语义。
 
+Guide/Companion `1.5.0` 还允许 `rollback_step` 显式声明 `automatic_bounded`，总尝试次数只能为二或三。
+一次 `Next` 中每次失败都必须先成功补偿并报告 attempt/remaining；成功只提交一个最终原生 Undo
+checkpoint，全部耗尽则报告带 `exhausted` 证据的 `failed_rolled_back`。回退失败、保留现场和 Action
+异常不会自动重试；这也不是改参数或修改树的语义重规划。见
+[ADR 0074](docs/adr/0074-bounded-observation-retries.md)。
+
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
 自动回退场景。该受信任更新会显示为 pending，用户 Back 到起点后才会安装。`guide.propose`
 始终进入独立人工审批，不会自动安装；普通 Disconnect 保留人工审批状态，Extension 卸载/重载才
@@ -1127,7 +1133,8 @@ Changesets 版本 PR。Phase 0 不使用 PAT 或 registry credential。
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
 MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、显式蒙皮/权重与 pose transform 动画、
 Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单、显式 revision fork/merge，以及
-Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内自动语义重规划。
+Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内自动语义重规划，以及最多三次的
+同 Action Observation 有界自动重试。
 当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实

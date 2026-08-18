@@ -2416,6 +2416,13 @@ class CompanionController:
         }
         if report["protocolVersion"] in {"1.2.0", "1.3.0", "1.4.0", "1.5.0"}:
             report["observationGate"] = gate.report_data() if gate is not None else None
+            retry = (
+                session.success_gate_retry_copy(step.id)
+                if transition == "step_succeeded" and step is not None
+                else None
+            )
+            if retry is not None:
+                report["observationRetry"] = retry
         if report["protocolVersion"] == "1.5.0":
             report["artifactAttestation"] = (
                 deepcopy(self._artifact_attestation)

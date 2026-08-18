@@ -324,7 +324,17 @@ def _checkpoint(
         checkpoint_id=checkpoint_id,
         previous_id=None,
         operation="artifact-test",
-        snapshot=SessionSnapshot(None, None, -1, False, None, (), None, None),
+        snapshot=SessionSnapshot(
+            plan_id=None,
+            revision=None,
+            active_index=-1,
+            started=False,
+            execution_id=None,
+            receipts=(),
+            observation_gate=None,
+            last_success_gate_result=None,
+            last_success_gate_retry=None,
+        ),
         artifacts=artifacts,
     )
 

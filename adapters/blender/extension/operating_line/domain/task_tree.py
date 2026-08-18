@@ -24,6 +24,8 @@ class ActionSpec:
 class ObservationPolicySpec:
     mode: str
     failure_strategy: str | None = None
+    retry_mode: str | None = None
+    max_attempts: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,13 +187,29 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
             mode = observation_policy_raw.get("mode")
             if mode == "telemetry" and set(observation_policy_raw) == {"mode"}:
                 observation_policy = ObservationPolicySpec(mode="telemetry")
-            elif mode == "success_gate" and set(observation_policy_raw) == {
-                "mode",
-                "failureStrategy",
-            }:
+            elif mode == "success_gate" and set(observation_policy_raw) in (
+                {"mode", "failureStrategy"},
+                {"mode", "failureStrategy", "retryPolicy"},
+            ):
                 failure_strategy = observation_policy_raw.get("failureStrategy")
                 if failure_strategy not in {"rollback_step", "retain_for_repair"}:
                     raise ValueError(f"Invalid observationPolicy on step: {step_id}")
+                retry_mode = None
+                max_attempts = 1
+                if "retryPolicy" in observation_policy_raw:
+                    retry_policy = observation_policy_raw.get("retryPolicy")
+                    if (
+                        protocol_version != "1.5.0"
+                        or failure_strategy != "rollback_step"
+                        or not isinstance(retry_policy, dict)
+                        or set(retry_policy) != {"mode", "maxAttempts"}
+                        or retry_policy.get("mode") != "automatic_bounded"
+                        or isinstance(retry_policy.get("maxAttempts"), bool)
+                        or retry_policy.get("maxAttempts") not in {2, 3}
+                    ):
+                        raise ValueError(f"Invalid observationPolicy on step: {step_id}")
+                    retry_mode = "automatic_bounded"
+                    max_attempts = retry_policy["maxAttempts"]
                 if not expected_observations:
                     raise ValueError(
                         f"Success-gated step requires observations: {step_id}"
@@ -199,6 +217,8 @@ def load_task_tree_data(plan: dict[str, Any]) -> TaskNode:
                 observation_policy = ObservationPolicySpec(
                     mode="success_gate",
                     failure_strategy=failure_strategy,
+                    retry_mode=retry_mode,
+                    max_attempts=max_attempts,
                 )
             else:
                 raise ValueError(f"Invalid observationPolicy on step: {step_id}")

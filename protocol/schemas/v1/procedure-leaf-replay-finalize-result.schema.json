@@ -1665,6 +1665,36 @@
             "observationGate": {
               "type": "null"
             },
+            "observationRetry": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "automatic_bounded"
+                },
+                "attempts": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3
+                },
+                "maxAttempts": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3
+                },
+                "outcome": {
+                  "type": "string",
+                  "const": "succeeded_after_retry"
+                }
+              },
+              "required": [
+                "mode",
+                "attempts",
+                "maxAttempts",
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
             "artifactAttestation": {
               "type": "null"
             },

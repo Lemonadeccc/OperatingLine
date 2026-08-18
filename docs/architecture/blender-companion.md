@@ -190,7 +190,10 @@ session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_
 阻塞型 `step_observation_failed` 会先提交保留 leaf receipt 的 `next` checkpoint 再上报；恢复后的
 `observation_recovered` 携带 `recheck` checkpoint。`failure-recovery.finalize` 将这两条 report 与审批/receipt
 链绑定，并在同一事务中唯一占用所有组成 report；`failed_rolled_back` 自动补偿路径不保留 leaf，也不会伪造
-新 checkpoint。见
+新 checkpoint。Guide/Companion `1.5.0` 可把 `rollback_step` 限定为两次或三次总尝试：每次失败先补偿并
+发出 `retry_scheduled`，Session 只接受连续 attempt；最终成功才把整轮作为一个 `next` checkpoint 提交，
+耗尽则取消准备中的历史事务并报告 `failed_rolled_back + exhausted`。回退失败或保留现场不会进入自动循环。
+见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
@@ -198,7 +201,8 @@ session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_
 [ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
 [ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md) 与
 [ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md) 与
-[ADR 0073](../adr/0073-managed-procedure-failure-recovery-attestation.md)。
+[ADR 0073](../adr/0073-managed-procedure-failure-recovery-attestation.md) 与
+[ADR 0074](../adr/0074-bounded-observation-retries.md)。
 
 ## 视觉引导状态
 

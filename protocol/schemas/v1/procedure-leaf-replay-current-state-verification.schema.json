@@ -314,6 +314,7 @@
                 "status": {
                   "type": "string",
                   "enum": [
+                    "retry_scheduled",
                     "failed_rolled_back",
                     "repair_required",
                     "rollback_failed",
@@ -330,6 +331,45 @@
                 "message": {
                   "type": "string",
                   "minLength": 1
+                },
+                "retry": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "const": "automatic_bounded"
+                    },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 3
+                    },
+                    "maxAttempts": {
+                      "type": "integer",
+                      "minimum": 2,
+                      "maximum": 3
+                    },
+                    "remainingAttempts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 2
+                    },
+                    "disposition": {
+                      "type": "string",
+                      "enum": [
+                        "scheduled",
+                        "exhausted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "attempt",
+                    "maxAttempts",
+                    "remainingAttempts",
+                    "disposition"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -345,6 +385,7 @@
                     "properties": {
                       "status": {
                         "enum": [
+                          "retry_scheduled",
                           "failed_rolled_back",
                           "rollback_failed"
                         ]
@@ -360,6 +401,23 @@
                         "const": "rollback_step"
                       }
                     }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "retry_scheduled"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "retry"
+                    ]
                   }
                 },
                 {
@@ -387,6 +445,36 @@
               "type": "null"
             }
           ]
+        },
+        "observationRetry": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "automatic_bounded"
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 3
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 3
+            },
+            "outcome": {
+              "type": "string",
+              "const": "succeeded_after_retry"
+            }
+          },
+          "required": [
+            "mode",
+            "attempts",
+            "maxAttempts",
+            "outcome"
+          ],
+          "additionalProperties": false
         },
         "artifactAttestation": {
           "type": "null"

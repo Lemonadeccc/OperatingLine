@@ -311,6 +311,105 @@ describe('companion protocol', () => {
     expect(companionStateReportSchema.safeParse(rolledBack).success).toBe(false);
   });
 
+  it('reports bounded Observation retry attempts without treating an intermediate retry as success', () => {
+    const terminal = completedStateReport();
+    const stepId = terminal.stepId;
+    const retryScheduled = {
+      ...terminal,
+      phase: 'running',
+      activeStepId: null,
+      completedStepIds: [],
+      transition: 'step_observation_failed',
+      observations: [{ kind: 'render_ready', satisfied: false, details: {} }],
+      observationGate: {
+        stepId,
+        status: 'retry_scheduled',
+        failureStrategy: 'rollback_step',
+        message: 'The first attempt was rolled back; retry 2 of 2 is scheduled.',
+        retry: {
+          mode: 'automatic_bounded',
+          attempt: 1,
+          maxAttempts: 2,
+          remainingAttempts: 1,
+          disposition: 'scheduled',
+        },
+      },
+      artifactAttestation: null,
+    } as const;
+    expect(companionStateReportSchema.safeParse(retryScheduled).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...retryScheduled,
+        protocolVersion: '1.4.0',
+      }).success,
+    ).toBe(false);
+
+    const missingRetry = {
+      ...retryScheduled,
+      observationGate: { ...retryScheduled.observationGate },
+    } as Record<string, unknown> & { observationGate: Record<string, unknown> };
+    delete missingRetry.observationGate['retry'];
+    expect(companionStateReportSchema.safeParse(missingRetry).success).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...retryScheduled,
+        observationGate: {
+          ...retryScheduled.observationGate,
+          retry: {
+            ...retryScheduled.observationGate.retry,
+            remainingAttempts: 0,
+          },
+        },
+      }).success,
+    ).toBe(false);
+
+    const exhausted = {
+      ...retryScheduled,
+      observationGate: {
+        ...retryScheduled.observationGate,
+        status: 'failed_rolled_back',
+        message: 'Both attempts failed and were rolled back.',
+        retry: {
+          ...retryScheduled.observationGate.retry,
+          attempt: 2,
+          remainingAttempts: 0,
+          disposition: 'exhausted',
+        },
+      },
+    } as const;
+    expect(companionStateReportSchema.safeParse(exhausted).success).toBe(true);
+
+    const succeededAfterRetry = {
+      ...terminal,
+      observations: [{ kind: 'render_ready', satisfied: true, details: {} }],
+      observationRetry: {
+        mode: 'automatic_bounded',
+        attempts: 2,
+        maxAttempts: 3,
+        outcome: 'succeeded_after_retry',
+      },
+    } as const;
+    expect(companionStateReportSchema.safeParse(succeededAfterRetry).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...succeededAfterRetry,
+        observationGate: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...succeededAfterRetry,
+        observationRetry: { ...succeededAfterRetry.observationRetry, attempts: 4 },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...succeededAfterRetry,
+        protocolVersion: '1.1.0',
+      }).success,
+    ).toBe(false);
+  });
+
   it('binds nonce-based replay current-state requests to protocol 1.5 recheck reports', () => {
     const report = completedStateReport();
     const request = {
@@ -589,6 +688,7 @@ describe('companion protocol', () => {
       properties?: {
         completedStepIds?: { uniqueItems?: boolean };
         observationGate?: unknown;
+        observationRetry?: unknown;
       };
     };
 
@@ -600,6 +700,7 @@ describe('companion protocol', () => {
     expect(stateSchema.additionalProperties).toBe(false);
     expect(stateSchema.properties?.completedStepIds?.uniqueItems).toBe(true);
     expect(stateSchema.properties?.observationGate).toBeDefined();
+    expect(stateSchema.properties?.observationRetry).toBeDefined();
     expect(stateSchema.allOf?.length).toBeGreaterThanOrEqual(7);
     expect(stateSchema.allOf).toEqual(
       expect.arrayContaining([

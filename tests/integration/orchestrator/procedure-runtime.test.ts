@@ -4158,10 +4158,20 @@ describe('procedure compilation runtime', () => {
         message: expect.stringContaining('uv_sphere_ready'),
       });
 
+      const replayTree = replayAuthoringCandidateFixture(packet);
+      const retryLeaf = (replayTree['nodes'] as Array<Record<string, unknown>>).find(
+        (node) => node['id'] === weakRequest.leafId,
+      );
+      if (retryLeaf === undefined) throw new Error('Expected one retry replay leaf');
+      retryLeaf['observationPolicy'] = {
+        mode: 'success_gate',
+        failureStrategy: 'rollback_step',
+        retryPolicy: { mode: 'automatic_bounded', maxAttempts: 2 },
+      };
       const replayRequest = {
         ...weakRequest,
         replayId: randomUUID(),
-        tree: replayAuthoringCandidateFixture(packet),
+        tree: replayTree,
       };
       const proposedMcp = await callMcpTool(
         runtime,
@@ -4445,7 +4455,36 @@ describe('procedure compilation runtime', () => {
         error: 'companion_session_identity_mismatch',
       });
 
-      const missingCheckpointReport = report(5, '4.5.3 LTS');
+      const mismatchedRetryReport = {
+        ...report(5, '4.5.3 LTS'),
+        observationRetry: {
+          mode: 'automatic_bounded',
+          attempts: 2,
+          maxAttempts: 3,
+          outcome: 'succeeded_after_retry',
+        },
+      } as const;
+      const mismatchedRetryState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(mismatchedRetryReport),
+      });
+      expect(mismatchedRetryState.status).toBe(200);
+      const mismatchedRetryFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: replayRequest.replayId,
+            attestationId: randomUUID(),
+            reportId: mismatchedRetryReport.reportId,
+          }),
+        },
+      );
+      expect(mismatchedRetryFinalize.status).toBe(409);
+
+      const missingCheckpointReport = report(6, '4.5.3 LTS');
       delete (missingCheckpointReport as { nativeUndoCheckpoint?: unknown }).nativeUndoCheckpoint;
       const missingCheckpointState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
@@ -4467,7 +4506,15 @@ describe('procedure compilation runtime', () => {
       );
       expect(missingCheckpointFinalize.status).toBe(409);
 
-      const terminalReport = report(6, '4.5.3 LTS');
+      const terminalReport = {
+        ...report(7, '4.5.3 LTS'),
+        observationRetry: {
+          mode: 'automatic_bounded',
+          attempts: 2,
+          maxAttempts: 2,
+          outcome: 'succeeded_after_retry',
+        },
+      } as const;
       const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
         headers: leaseHeaders,
@@ -4647,8 +4694,9 @@ describe('procedure compilation runtime', () => {
       const currentStateReport = {
         ...terminalReport,
         reportId: randomUUID(),
-        sequence: 7,
+        sequence: 8,
         transition: 'current_state_rechecked',
+        observationRetry: undefined,
         procedureReplayCurrentStateRequest: currentStateRequested.request,
         occurredAt: new Date().toISOString(),
       } as const;
@@ -4698,8 +4746,9 @@ describe('procedure compilation runtime', () => {
       const driftReport = {
         ...terminalReport,
         reportId: randomUUID(),
-        sequence: 8,
+        sequence: 9,
         transition: 'current_state_rechecked',
+        observationRetry: undefined,
         observations: [
           {
             ...terminalReport.observations[0],
@@ -4855,6 +4904,7 @@ describe('procedure compilation runtime', () => {
       const prepareReplay = async (
         failureStrategy: 'rollback_step' | 'retain_for_repair',
         replayPacket: ProcedureAuthoringPromptPacket = packet,
+        retryMaxAttempts?: 2 | 3,
       ) => {
         const tree = replayAuthoringCandidateFixture(replayPacket);
         tree['id'] = replayPacket.context.requestedTreeId;
@@ -4863,7 +4913,18 @@ describe('procedure compilation runtime', () => {
           (node) => node['kind'] === 'leaf',
         );
         if (leaf === undefined) throw new Error('Expected one recovery replay leaf');
-        leaf['observationPolicy'] = { mode: 'success_gate', failureStrategy };
+        leaf['observationPolicy'] = {
+          mode: 'success_gate',
+          failureStrategy,
+          ...(retryMaxAttempts === undefined
+            ? {}
+            : {
+                retryPolicy: {
+                  mode: 'automatic_bounded',
+                  maxAttempts: retryMaxAttempts,
+                },
+              }),
+        };
         const replayRequest = {
           formatVersion: '1.0.0' as const,
           replayId: randomUUID(),
@@ -5260,6 +5321,171 @@ describe('procedure compilation runtime', () => {
         },
       );
       expect(currentStateAfterRollback.status).toBe(409);
+
+      const retryPromptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '最多尝试两次创建 UV Sphere，每次失败后先自动回退。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 3,
+          locale: 'zh-CN',
+        }),
+      });
+      const retryPacket = procedureAuthoringPromptPacketSchema.parse(
+        await retryPromptResponse.json(),
+      );
+      const retrying = await prepareReplay('rollback_step', retryPacket, 2);
+      const retryExecutionId = randomUUID();
+      const retryPlanSha256 = computePlanContentSha256(retrying.proposal.plan);
+      const retryFailureReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: retrying.proposal.plan.id, revision: retrying.proposal.plan.revision },
+        planContentSha256: retryPlanSha256,
+        executionId: retryExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'step_observation_failed',
+        stepId: retrying.replayRequest.leafId,
+        observations: [
+          {
+            kind: 'uv_sphere_ready',
+            satisfied: false,
+            details: {
+              parameters: retrying.parameters,
+              supported: true,
+              contentIntact: false,
+            },
+          },
+        ],
+        observationGate: {
+          stepId: retrying.replayRequest.leafId,
+          status: 'retry_scheduled',
+          failureStrategy: 'rollback_step',
+          message: 'Attempt one failed, rolled back, and scheduled attempt two.',
+          retry: {
+            mode: 'automatic_bounded',
+            attempt: 1,
+            maxAttempts: 2,
+            remainingAttempts: 1,
+            disposition: 'scheduled',
+          },
+        },
+        artifactAttestation: null,
+        error: null,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      await postState(retryFailureReport);
+      const intermediateFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: retrying.replayRequest.replayId,
+            attestationId: randomUUID(),
+            failureReportId: retryFailureReport.reportId,
+          }),
+        },
+      );
+      expect(intermediateFinalize.status).toBe(409);
+
+      const mismatchedExhaustedReport = {
+        ...retryFailureReport,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        observationGate: {
+          ...retryFailureReport.observationGate,
+          status: 'failed_rolled_back',
+          message: 'A report claimed three exhausted attempts.',
+          retry: {
+            mode: 'automatic_bounded',
+            attempt: 3,
+            maxAttempts: 3,
+            remainingAttempts: 0,
+            disposition: 'exhausted',
+          },
+        },
+        occurredAt: new Date().toISOString(),
+      } as const;
+      await postState(mismatchedExhaustedReport);
+      const mismatchedExhaustedFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: retrying.replayRequest.replayId,
+            attestationId: randomUUID(),
+            failureReportId: mismatchedExhaustedReport.reportId,
+          }),
+        },
+      );
+      expect(mismatchedExhaustedFinalize.status).toBe(409);
+
+      const exhaustedReport = {
+        ...retryFailureReport,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        observationGate: {
+          ...retryFailureReport.observationGate,
+          status: 'failed_rolled_back',
+          message: 'Both attempts failed and were rolled back.',
+          retry: {
+            mode: 'automatic_bounded',
+            attempt: 2,
+            maxAttempts: 2,
+            remainingAttempts: 0,
+            disposition: 'exhausted',
+          },
+        },
+        occurredAt: new Date().toISOString(),
+      } as const;
+      await postState(exhaustedReport);
+      const exhaustedFinalizeResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: retrying.replayRequest.replayId,
+            attestationId: randomUUID(),
+            failureReportId: exhaustedReport.reportId,
+          }),
+        },
+      );
+      expect(exhaustedFinalizeResponse.status).toBe(200);
+      expect(
+        procedureLeafReplayFailureRecoveryFinalizeResultSchema.parse(
+          await exhaustedFinalizeResponse.json(),
+        ),
+      ).toMatchObject({
+        status: 'accepted',
+        attestation: {
+          outcome: 'automatically_rolled_back',
+          failureReport: {
+            observationGate: {
+              status: 'failed_rolled_back',
+              retry: {
+                attempt: 2,
+                maxAttempts: 2,
+                remainingAttempts: 0,
+                disposition: 'exhausted',
+              },
+            },
+          },
+        },
+      });
     } finally {
       await runtime.stop();
     }

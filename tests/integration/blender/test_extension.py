@@ -7649,6 +7649,12 @@ def assert_companion_and_plan_semantics() -> None:
     original_one_shot_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
         "test_gate_one_shot"
     )
+    original_retry_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
+        "test_gate_retry"
+    )
+    original_exhaust_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
+        "test_gate_retry_exhaust"
+    )
     observation_module.OBSERVATION_EVALUATORS["test_gate_ready"] = (
         lambda _parameters, _receipts: (
             gate_ready["value"],
@@ -7665,6 +7671,24 @@ def assert_companion_and_plan_semantics() -> None:
 
     observation_module.OBSERVATION_EVALUATORS["test_gate_one_shot"] = (
         one_shot_gate
+    )
+    retry_gate_calls = {"count": 0}
+
+    def retry_gate(_parameters, _receipts):
+        retry_gate_calls["count"] += 1
+        return retry_gate_calls["count"] >= 2, {
+            "evaluationCount": retry_gate_calls["count"]
+        }
+
+    observation_module.OBSERVATION_EVALUATORS["test_gate_retry"] = retry_gate
+    exhausted_gate_calls = {"count": 0}
+
+    def exhausted_gate(_parameters, _receipts):
+        exhausted_gate_calls["count"] += 1
+        return False, {"evaluationCount": exhausted_gate_calls["count"]}
+
+    observation_module.OBSERVATION_EVALUATORS["test_gate_retry_exhaust"] = (
+        exhausted_gate
     )
     try:
         rollback_gate_plan = deepcopy(BUNDLED_PLAN)
@@ -7727,6 +7751,116 @@ def assert_companion_and_plan_semantics() -> None:
             }
         ]
         one_shot_session.back()
+
+        retry_plan = deepcopy(rollback_gate_plan)
+        retry_plan["protocolVersion"] = "1.5.0"
+        retry_plan["id"] = "observation-bounded-retry-plan"
+        retry_step_data = next(
+            item for item in retry_plan["steps"] if item["action"] is not None
+        )
+        retry_step_data["expectedObservations"] = [
+            {"kind": "test_gate_retry", "parameters": {}}
+        ]
+        retry_step_data["observationPolicy"]["retryPolicy"] = {
+            "mode": "automatic_bounded",
+            "maxAttempts": 2,
+        }
+        assert companion.install_plan(retry_plan) is True
+        retry_session = operating_line.get_session()
+        retry_session.start()
+        retry_reports = []
+        original_report = companion.report
+
+        def record_retry_report(*args, **kwargs):
+            report = original_report(*args, **kwargs)
+            retry_reports.append(deepcopy(report))
+            return report
+
+        companion.report = record_retry_report
+        try:
+            assert bpy.ops.operating_line.next() == {"FINISHED"}
+        finally:
+            companion.report = original_report
+        assert retry_gate_calls["count"] == 2
+        assert retry_session.active_index == 0
+        assert tuple(retry_session.receipts) == (retry_step_data["id"],)
+        assert bpy.data.objects.get(EXPECTED[0]) is not None
+        assert [report["transition"] for report in retry_reports] == [
+            "step_observation_failed",
+            "step_succeeded",
+        ]
+        assert retry_reports[0]["observationGate"] == {
+            "stepId": retry_step_data["id"],
+            "status": "retry_scheduled",
+            "failureStrategy": "rollback_step",
+            "message": (
+                "Observation gate failed for snowman.model.body_lower: "
+                "test_gate_retry; retry 2 of 2 scheduled"
+            ),
+            "retry": {
+                "mode": "automatic_bounded",
+                "attempt": 1,
+                "maxAttempts": 2,
+                "remainingAttempts": 1,
+                "disposition": "scheduled",
+            },
+        }
+        assert "nativeUndoCheckpoint" not in retry_reports[0]
+        assert retry_reports[1]["observationRetry"] == {
+            "mode": "automatic_bounded",
+            "attempts": 2,
+            "maxAttempts": 2,
+            "outcome": "succeeded_after_retry",
+        }
+        assert retry_reports[1]["nativeUndoCheckpoint"]["operation"] == "next"
+        assert retry_reports[1]["nativeUndoCheckpoint"]["session"][
+            "receiptStepIds"
+        ] == [retry_step_data["id"]]
+        retry_session.back()
+        assert bpy.data.objects.get(EXPECTED[0]) is None
+
+        exhausted_plan = deepcopy(retry_plan)
+        exhausted_plan["id"] = "observation-bounded-retry-exhausted-plan"
+        exhausted_step_data = next(
+            item for item in exhausted_plan["steps"] if item["action"] is not None
+        )
+        exhausted_step_data["expectedObservations"] = [
+            {"kind": "test_gate_retry_exhaust", "parameters": {}}
+        ]
+        assert companion.install_plan(exhausted_plan) is True
+        exhausted_session = operating_line.get_session()
+        exhausted_session.start()
+        exhausted_reports = []
+        original_report = companion.report
+
+        def record_exhausted_report(*args, **kwargs):
+            report = original_report(*args, **kwargs)
+            exhausted_reports.append(deepcopy(report))
+            return report
+
+        companion.report = record_exhausted_report
+        try:
+            assert bpy.ops.operating_line.next() == {"CANCELLED"}
+        finally:
+            companion.report = original_report
+        assert exhausted_gate_calls["count"] == 2
+        assert exhausted_session.active_index == -1
+        assert exhausted_session.receipts == {}
+        assert bpy.data.objects.get(EXPECTED[0]) is None
+        assert [report["observationGate"]["status"] for report in exhausted_reports] == [
+            "retry_scheduled",
+            "failed_rolled_back",
+        ]
+        assert exhausted_reports[-1]["observationGate"]["retry"] == {
+            "mode": "automatic_bounded",
+            "attempt": 2,
+            "maxAttempts": 2,
+            "remainingAttempts": 0,
+            "disposition": "exhausted",
+        }
+        assert all(
+            "nativeUndoCheckpoint" not in report for report in exhausted_reports
+        )
 
         retain_gate_plan = deepcopy(rollback_gate_plan)
         retain_gate_plan["id"] = "observation-retain-gate-plan"
@@ -7791,6 +7925,20 @@ def assert_companion_and_plan_semantics() -> None:
             observation_module.OBSERVATION_EVALUATORS["test_gate_one_shot"] = (
                 original_one_shot_evaluator
             )
+        if original_retry_evaluator is None:
+            del observation_module.OBSERVATION_EVALUATORS["test_gate_retry"]
+        else:
+            observation_module.OBSERVATION_EVALUATORS["test_gate_retry"] = (
+                original_retry_evaluator
+            )
+        if original_exhaust_evaluator is None:
+            del observation_module.OBSERVATION_EVALUATORS[
+                "test_gate_retry_exhaust"
+            ]
+        else:
+            observation_module.OBSERVATION_EVALUATORS[
+                "test_gate_retry_exhaust"
+            ] = original_exhaust_evaluator
 
     original_evaluator = observation_module.OBSERVATION_EVALUATORS.get(
         "test_evaluation_error"

@@ -246,6 +246,11 @@
       的单次 observation。内置雪人 revision 6 的 25 个叶节点全部启用自动回滚门，并在 Blender
       4.5.3/5.1.1 验证。旧 `1.0.0`/`1.1.0` 仍保持遥测。见
       [ADR 0030](adr/0030-observation-success-gates-and-recovery.md)。
+- [x] 有界 Observation 自动重试：Guide/Companion `1.5.0` 可为 `rollback_step` 声明总计两次或三次
+      尝试；每次失败必须先成功补偿并报告 attempt/remaining，成功只提交一个最终 `next` checkpoint，
+      耗尽则以 `failed_rolled_back` 终止。中间 `retry_scheduled` 不可 finalization，成功或耗尽证据必须与
+      accepted Plan 上限一致；回退失败和 `retain_for_repair` 不自动重试。见
+      [ADR 0074](adr/0074-bounded-observation-retries.md)。
 - [x] Blender 原生 Undo/Redo：Start、Next、Recheck、原生菜单动作与 Back 进入宿主历史；Scene
       checkpoint 同步进程内 Session，`session_uid` 重绑定 ID，Modifier 以精确 stack/property 状态
       重绑定，PNG 以哈希保护字节备份恢复。普通用户 Undo 只静默刷新 pointer，不伪造步骤事件；冲突
@@ -506,8 +511,11 @@
           `repair_required`/`rollback_failed` 的保留 receipt `next` checkpoint 与后续强 Observation、
           `recovered` gate、`recheck` checkpoint 绑定；同 replay 不可再伪装成直接成功。见
           [ADR 0073](adr/0073-managed-procedure-failure-recovery-attestation.md)。
+    - [x] 同 Action 有界重试证明：每次失败都先补偿并发出 `retry_scheduled`；成功摘要或最终
+          `exhausted` 证据与 accepted Plan 的两次/三次上限绑定，且只在最终成功时产生一个原生 Undo
+          checkpoint。见 [ADR 0074](adr/0074-bounded-observation-retries.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
-          复合与编辑叶节点覆盖；失败自动诊断和策略化重试仍未完成。
+          复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
         candidate；仍需经验证的语义召回、流式 Procedure 对话、自动局部树重规划与结果治理，使不会 Blender
         的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。

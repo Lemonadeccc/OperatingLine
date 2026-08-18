@@ -156,16 +156,64 @@ export const companionObservationSchema = z.strictObject({
 });
 export type CompanionObservation = z.infer<typeof companionObservationSchema>;
 
+const companionObservationRetryAttemptSchema = z
+  .strictObject({
+    mode: z.literal('automatic_bounded'),
+    attempt: z.number().int().min(1).max(3),
+    maxAttempts: z.number().int().min(2).max(3),
+    remainingAttempts: z.number().int().min(0).max(2),
+    disposition: z.enum(['scheduled', 'exhausted']),
+  })
+  .superRefine((retry, context) => {
+    if (
+      retry.attempt > retry.maxAttempts ||
+      retry.remainingAttempts !== retry.maxAttempts - retry.attempt ||
+      retry.disposition !== (retry.remainingAttempts > 0 ? 'scheduled' : 'exhausted')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['remainingAttempts'],
+        message: 'Observation retry evidence must match its bounded attempt count',
+      });
+    }
+  });
+
+const companionObservationRetrySuccessSchema = z
+  .strictObject({
+    mode: z.literal('automatic_bounded'),
+    attempts: z.number().int().min(2).max(3),
+    maxAttempts: z.number().int().min(2).max(3),
+    outcome: z.literal('succeeded_after_retry'),
+  })
+  .superRefine((retry, context) => {
+    if (retry.attempts > retry.maxAttempts) {
+      context.addIssue({
+        code: 'custom',
+        path: ['attempts'],
+        message: 'Successful Observation retry attempts cannot exceed the policy bound',
+      });
+    }
+  });
+
 export const companionObservationGateSchema = z
   .strictObject({
     stepId: guideStepIdSchema,
-    status: z.enum(['failed_rolled_back', 'repair_required', 'rollback_failed', 'recovered']),
+    status: z.enum([
+      'retry_scheduled',
+      'failed_rolled_back',
+      'repair_required',
+      'rollback_failed',
+      'recovered',
+    ]),
     failureStrategy: z.enum(['rollback_step', 'retain_for_repair']),
     message: z.string().min(1),
+    retry: companionObservationRetryAttemptSchema.optional(),
   })
   .superRefine((gate, context) => {
     if (
-      (gate.status === 'failed_rolled_back' || gate.status === 'rollback_failed') &&
+      (gate.status === 'retry_scheduled' ||
+        gate.status === 'failed_rolled_back' ||
+        gate.status === 'rollback_failed') &&
       gate.failureStrategy !== 'rollback_step'
     ) {
       context.addIssue({
@@ -181,17 +229,35 @@ export const companionObservationGateSchema = z
         message: 'repair_required requires the retain_for_repair failure strategy',
       });
     }
+    if (
+      (gate.status === 'retry_scheduled' && gate.retry?.disposition !== 'scheduled') ||
+      (gate.retry?.disposition === 'scheduled' && gate.status !== 'retry_scheduled') ||
+      (gate.retry?.disposition === 'exhausted' && gate.status !== 'failed_rolled_back')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['retry'],
+        message: 'Observation retry disposition must match the gate status',
+      });
+    }
   })
   .meta({
     allOf: [
       {
         if: {
           properties: {
-            status: { enum: ['failed_rolled_back', 'rollback_failed'] },
+            status: { enum: ['retry_scheduled', 'failed_rolled_back', 'rollback_failed'] },
           },
           required: ['status'],
         },
         then: { properties: { failureStrategy: { const: 'rollback_step' } } },
+      },
+      {
+        if: {
+          properties: { status: { const: 'retry_scheduled' } },
+          required: ['status'],
+        },
+        then: { required: ['retry'] },
       },
       {
         if: {
@@ -326,6 +392,7 @@ export const companionStateReportSchema = z
     stepId: guideStepIdSchema.nullable(),
     observations: z.array(companionObservationSchema),
     observationGate: companionObservationGateSchema.nullable().optional(),
+    observationRetry: companionObservationRetrySuccessSchema.optional(),
     artifactAttestation: companionArtifactAttestationSchema.nullable().optional(),
     nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
     procedureReplayCurrentStateRequest:
@@ -342,6 +409,39 @@ export const companionStateReportSchema = z
         },
         then: { required: ['procedureReplayCurrentStateRequest'] },
         else: { not: { required: ['procedureReplayCurrentStateRequest'] } },
+      },
+      {
+        if: { required: ['observationRetry'] },
+        then: {
+          properties: {
+            protocolVersion: { const: '1.5.0' },
+            transition: { const: 'step_succeeded' },
+            observationGate: { type: 'null' },
+            observations: {
+              minItems: 1,
+              items: {
+                type: 'object',
+                properties: { satisfied: { const: true } },
+                required: ['satisfied'],
+              },
+            },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            protocolVersion: { enum: ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0'] },
+          },
+          required: ['protocolVersion'],
+        },
+        then: {
+          properties: {
+            observationGate: {
+              anyOf: [{ type: 'null' }, { type: 'object', not: { required: ['retry'] } }],
+            },
+          },
+        },
       },
       {
         if: {
@@ -668,6 +768,28 @@ export const companionStateReportSchema = z
       }
     }
     const gate = report.observationGate;
+    if (report.observationRetry !== undefined) {
+      if (
+        report.protocolVersion !== '1.5.0' ||
+        report.transition !== 'step_succeeded' ||
+        gate !== null ||
+        report.observations.length === 0 ||
+        report.observations.some((observation) => !observation.satisfied)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['observationRetry'],
+          message: 'Observation retry success evidence requires a satisfied gated step',
+        });
+      }
+    }
+    if (gate?.retry !== undefined && report.protocolVersion !== '1.5.0') {
+      context.addIssue({
+        code: 'custom',
+        path: ['observationGate', 'retry'],
+        message: 'Observation retry attempts require Companion protocol 1.5',
+      });
+    }
     const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
     if (nativeUndoCheckpoint !== undefined) {
       let expectedOperation: 'start' | 'next' | 'recheck' | 'back' | undefined;
@@ -795,13 +917,25 @@ export const companionStateReportSchema = z
     if (
       gate !== undefined &&
       gate !== null &&
-      gate.status === 'failed_rolled_back' &&
+      (gate.status === 'retry_scheduled' || gate.status === 'failed_rolled_back') &&
       report.transition !== 'step_observation_failed'
     ) {
       context.addIssue({
         code: 'custom',
         path: ['transition'],
-        message: 'failed_rolled_back is only valid on step_observation_failed',
+        message: `${gate.status} is only valid on step_observation_failed`,
+      });
+    }
+    if (
+      gate !== undefined &&
+      gate !== null &&
+      (gate.status === 'retry_scheduled' || gate.status === 'failed_rolled_back') &&
+      report.phase !== 'running'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['phase'],
+        message: `${gate.status} requires the running phase`,
       });
     }
     if (

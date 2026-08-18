@@ -242,18 +242,22 @@ class ObservationGateState:
     failure_strategy: str
     message: str
     observations: tuple[dict[str, Any], ...]
+    retry: dict[str, Any] | None = None
 
     @property
     def blocking(self) -> bool:
         return self.status in {"repair_required", "rollback_failed"}
 
-    def report_data(self) -> dict[str, str]:
-        return {
+    def report_data(self) -> dict[str, Any]:
+        report = {
             "stepId": self.step_id,
             "status": self.status,
             "failureStrategy": self.failure_strategy,
             "message": self.message,
         }
+        if self.retry is not None:
+            report["retry"] = deepcopy(self.retry)
+        return report
 
     def observation_copy(self) -> list[dict[str, Any]]:
         return deepcopy(list(self.observations))
@@ -280,6 +284,7 @@ class SessionSnapshot:
     receipts: tuple[tuple[str, ActionReceipt], ...]
     observation_gate: ObservationGateState | None
     last_success_gate_result: tuple[str, tuple[dict[str, Any], ...]] | None
+    last_success_gate_retry: tuple[str, dict[str, Any]] | None
 
 
 class DemoSession:
@@ -337,6 +342,7 @@ class DemoSession:
         self._last_success_gate_result: (
             tuple[str, tuple[dict[str, Any], ...]] | None
         ) = None
+        self._last_success_gate_retry: tuple[str, dict[str, Any]] | None = None
         self._branch_node_ids = self._branch_ids(root)
         self.expanded_node_ids = set(self._branch_node_ids)
         self._nodes_by_id = self._index_nodes(root)
@@ -403,6 +409,12 @@ class DemoSession:
             return None
         return deepcopy(list(result[1]))
 
+    def success_gate_retry_copy(self, step_id: str) -> dict[str, Any] | None:
+        result = self._last_success_gate_retry
+        if result is None or result[0] != step_id:
+            return None
+        return deepcopy(result[1])
+
     def snapshot_state(self) -> SessionSnapshot:
         """Capture module state without copying Blender RNA values in receipts."""
         return SessionSnapshot(
@@ -414,6 +426,7 @@ class DemoSession:
             receipts=tuple(self.receipts.items()),
             observation_gate=deepcopy(self.observation_gate),
             last_success_gate_result=deepcopy(self._last_success_gate_result),
+            last_success_gate_retry=deepcopy(self._last_success_gate_retry),
         )
 
     def restore_state(
@@ -437,6 +450,7 @@ class DemoSession:
         self.receipts = restored_receipts
         self.observation_gate = deepcopy(snapshot.observation_gate)
         self._last_success_gate_result = deepcopy(snapshot.last_success_gate_result)
+        self._last_success_gate_retry = deepcopy(snapshot.last_success_gate_retry)
 
     def abandon_state(self) -> None:
         """Forget Python receipts when Blender replaces the entire loaded file."""
@@ -446,6 +460,7 @@ class DemoSession:
         self.execution_id = None
         self.observation_gate = None
         self._last_success_gate_result = None
+        self._last_success_gate_retry = None
 
     def start(self) -> None:
         self.reset()
@@ -519,6 +534,7 @@ class DemoSession:
         status: str,
         message: str,
         observations: list[dict[str, Any]],
+        retry: dict[str, Any] | None = None,
     ) -> ObservationGateState:
         policy = step.observation_policy
         if policy is None or policy.failure_strategy is None:
@@ -529,9 +545,10 @@ class DemoSession:
             failure_strategy=policy.failure_strategy,
             message=message,
             observations=tuple(deepcopy(observations)),
+            retry=deepcopy(retry),
         )
 
-    def next(self) -> TaskNode | None:
+    def next(self, observation_attempt: int = 1) -> TaskNode | None:
         if not self.started:
             self.start()
         if self.observation_blocked:
@@ -540,19 +557,45 @@ class DemoSession:
             if gate is None or step is None:
                 raise RuntimeError("Observation gate state is inconsistent")
             raise ObservationGateError(step, gate)
-        self.observation_gate = None
-        self._last_success_gate_result = None
+        previous_gate = self.observation_gate
         next_index = self.active_index + 1
         if next_index >= len(self.steps):
+            self.observation_gate = None
+            self._last_success_gate_result = None
+            self._last_success_gate_retry = None
             return None
         step = self.steps[next_index]
+        policy = step.observation_policy
+        max_attempts = (
+            policy.max_attempts
+            if policy is not None and policy.retry_mode == "automatic_bounded"
+            else 1
+        )
+        expected_attempt = 1
+        if (
+            previous_gate is not None
+            and previous_gate.step_id == step.id
+            and previous_gate.status == "retry_scheduled"
+            and previous_gate.retry is not None
+        ):
+            expected_attempt = previous_gate.retry["attempt"] + 1
+        if (
+            isinstance(observation_attempt, bool)
+            or not isinstance(observation_attempt, int)
+            or observation_attempt < 1
+            or observation_attempt > max_attempts
+            or observation_attempt != expected_attempt
+        ):
+            raise ValueError(f"Invalid Observation attempt for {step.id}")
+        self.observation_gate = None
+        self._last_success_gate_result = None
+        self._last_success_gate_retry = None
         execute, rollback = self._step_actions(step)
         receipt = execute(self.receipts)
         action_name = step.action.name if step.action else ""
         if receipt.step_id != step.id or receipt.action_name != action_name:
             raise RuntimeError(f"Action returned a receipt for the wrong step: {step.id}")
         self.receipts[step.id] = receipt
-        policy = step.observation_policy
         if policy is not None and policy.mode == "success_gate":
             observations = self._evaluate_step(step)
             if not observations or not all(
@@ -576,11 +619,38 @@ class DemoSession:
                         self.observation_gate = gate
                         raise ObservationGateError(step, gate) from rollback_error
                     del self.receipts[step.id]
+                    retry = None
+                    status = "failed_rolled_back"
+                    retry_message = "the step was rolled back"
+                    if policy.retry_mode == "automatic_bounded":
+                        remaining_attempts = policy.max_attempts - observation_attempt
+                        disposition = (
+                            "scheduled" if remaining_attempts > 0 else "exhausted"
+                        )
+                        status = (
+                            "retry_scheduled"
+                            if disposition == "scheduled"
+                            else "failed_rolled_back"
+                        )
+                        retry = {
+                            "mode": "automatic_bounded",
+                            "attempt": observation_attempt,
+                            "maxAttempts": policy.max_attempts,
+                            "remainingAttempts": remaining_attempts,
+                            "disposition": disposition,
+                        }
+                        retry_message = (
+                            f"retry {observation_attempt + 1} of "
+                            f"{policy.max_attempts} scheduled"
+                            if disposition == "scheduled"
+                            else f"all {policy.max_attempts} attempts exhausted"
+                        )
                     gate = self._gate_state(
                         step,
-                        status="failed_rolled_back",
-                        message=f"{message}; the step was rolled back",
+                        status=status,
+                        message=f"{message}; {retry_message}",
                         observations=observations,
+                        retry=retry,
                     )
                     self.observation_gate = gate
                     raise ObservationGateError(step, gate)
@@ -597,6 +667,16 @@ class DemoSession:
                 step.id,
                 tuple(deepcopy(observations)),
             )
+            if policy.retry_mode == "automatic_bounded" and observation_attempt > 1:
+                self._last_success_gate_retry = (
+                    step.id,
+                    {
+                        "mode": "automatic_bounded",
+                        "attempts": observation_attempt,
+                        "maxAttempts": policy.max_attempts,
+                        "outcome": "succeeded_after_retry",
+                    },
+                )
         self.active_index = next_index
         return step
 
@@ -619,6 +699,7 @@ class DemoSession:
                 step.id,
                 tuple(deepcopy(observations)),
             )
+            self._last_success_gate_retry = None
             return step
         self.observation_gate = self._gate_state(
             step,
@@ -653,6 +734,7 @@ class DemoSession:
         self.active_index -= 1
         self.observation_gate = None
         self._last_success_gate_result = None
+        self._last_success_gate_retry = None
         return step
 
     def is_expanded(self, node_id: str) -> bool:
@@ -675,3 +757,4 @@ class DemoSession:
         self.execution_id = None
         self.observation_gate = None
         self._last_success_gate_result = None
+        self._last_success_gate_retry = None

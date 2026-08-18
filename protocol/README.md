@@ -156,6 +156,14 @@ Observation；无保留 leaf 的 automatic rollback 会被拒绝。任何结果�
 的新 lease 上提交，所有阶段由服务端 receipt 严格排序。见
 `docs/adr/0073-managed-procedure-failure-recovery-attestation.md`。
 
+Guide/Companion `1.5.0` 的 `success_gate + rollback_step` 可选声明
+`retryPolicy: { mode: "automatic_bounded", maxAttempts: 2 | 3 }`。每次 Observation 失败只有在 receipt
+补偿成功后才可发出 `retry_scheduled`；报告必须给出 attempt、上限、剩余次数和 scheduled/exhausted
+disposition。成功报告用 `observationRetry` 说明实际总尝试次数，最终耗尽则保留
+`failed_rolled_back + exhausted`。中间 scheduled report 不能 finalization；成功与耗尽 finalizer 都把证据
+绑定到 accepted Plan。旧协议、回退失败和 `retain_for_repair` 不进入自动循环。见
+`docs/adr/0074-bounded-observation-retries.md`。
+
 `action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
 `semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。

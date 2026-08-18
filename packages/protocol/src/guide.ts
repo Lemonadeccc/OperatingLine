@@ -79,12 +79,37 @@ export type ObservationExpectation = z.infer<typeof observationExpectationSchema
 export const observationFailureStrategySchema = z.enum(['rollback_step', 'retain_for_repair']);
 export type ObservationFailureStrategy = z.infer<typeof observationFailureStrategySchema>;
 
+export const observationRetryPolicySchema = z.strictObject({
+  mode: z.literal('automatic_bounded'),
+  maxAttempts: z.number().int().min(2).max(3),
+});
+export type ObservationRetryPolicy = z.infer<typeof observationRetryPolicySchema>;
+
 export const observationPolicySchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.literal('telemetry') }),
-  z.strictObject({
-    mode: z.literal('success_gate'),
-    failureStrategy: observationFailureStrategySchema,
-  }),
+  z
+    .strictObject({
+      mode: z.literal('success_gate'),
+      failureStrategy: observationFailureStrategySchema,
+      retryPolicy: observationRetryPolicySchema.optional(),
+    })
+    .superRefine((policy, context) => {
+      if (policy.retryPolicy !== undefined && policy.failureStrategy !== 'rollback_step') {
+        context.addIssue({
+          code: 'custom',
+          path: ['retryPolicy'],
+          message: 'Automatic Observation retries require rollback_step',
+        });
+      }
+    })
+    .meta({
+      allOf: [
+        {
+          if: { required: ['retryPolicy'] },
+          then: { properties: { failureStrategy: { const: 'rollback_step' } } },
+        },
+      ],
+    }),
 ]);
 export type ObservationPolicy = z.infer<typeof observationPolicySchema>;
 
@@ -155,20 +180,29 @@ export const guidePlanSchema = z
     steps: z.array(guideStepSchema).min(1),
   })
   .superRefine((plan, context) => {
-    if (
+    const supportsObservationPolicies =
       plan.protocolVersion === '1.2.0' ||
       plan.protocolVersion === '1.3.0' ||
       plan.protocolVersion === '1.4.0' ||
-      plan.protocolVersion === '1.5.0'
-    ) {
-      return;
-    }
+      plan.protocolVersion === '1.5.0';
     for (const [index, step] of plan.steps.entries()) {
-      if (step.observationPolicy !== undefined) {
+      if (step.observationPolicy === undefined) continue;
+      if (!supportsObservationPolicies) {
         context.addIssue({
           code: 'custom',
           path: ['steps', index, 'observationPolicy'],
           message: 'Observation policies require guide protocol 1.2+',
+        });
+      }
+      if (
+        step.observationPolicy.mode === 'success_gate' &&
+        step.observationPolicy.retryPolicy !== undefined &&
+        plan.protocolVersion !== '1.5.0'
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['steps', index, 'observationPolicy', 'retryPolicy'],
+          message: 'Automatic Observation retries require guide protocol 1.5',
         });
       }
     }
@@ -185,6 +219,25 @@ export const guidePlanSchema = z
         else: {
           properties: {
             steps: { items: { not: { required: ['observationPolicy'] } } },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            protocolVersion: { enum: ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0'] },
+          },
+          required: ['protocolVersion'],
+        },
+        then: {
+          properties: {
+            steps: {
+              items: {
+                properties: {
+                  observationPolicy: { not: { required: ['retryPolicy'] } },
+                },
+              },
+            },
           },
         },
       },
