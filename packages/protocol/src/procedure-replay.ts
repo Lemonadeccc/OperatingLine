@@ -23,6 +23,8 @@ export const procedureLeafReplayActionNameSchema = z.enum([
   'blender.mesh.create_cube',
   'blender.mesh.create_plane',
   'blender.mesh.create_torus',
+  'blender.mesh.create_cone',
+  'blender.mesh.create_cylinder',
 ]);
 export type ProcedureLeafReplayActionName = z.infer<typeof procedureLeafReplayActionNameSchema>;
 
@@ -32,6 +34,8 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_cube': 'cube_ready',
   'blender.mesh.create_plane': 'plane_ready',
   'blender.mesh.create_torus': 'torus_ready',
+  'blender.mesh.create_cone': 'cone_ready',
+  'blender.mesh.create_cylinder': 'cylinder_ready',
 } as const satisfies Record<ProcedureLeafReplayActionName, string>;
 
 const replayIntegritySchema = z.strictObject({
@@ -380,6 +384,54 @@ const procedureLeafReplayTorusParametersSchema = z.strictObject({
   location: z.array(z.number().finite()).length(3),
 });
 
+const procedureLeafReplaySegmentPointSchema = z
+  .array(z.number().min(-1000).max(1000).finite())
+  .length(3);
+
+const procedureLeafReplayConeParametersSchema = z
+  .strictObject({
+    resourceId: guideStepIdSchema,
+    objectName: z.string().min(1),
+    radiusStart: z.number().min(0).max(1000).finite(),
+    radiusEnd: z.number().min(0).max(1000).finite(),
+    start: procedureLeafReplaySegmentPointSchema,
+    end: procedureLeafReplaySegmentPointSchema,
+  })
+  .superRefine((parameters, context) => {
+    if (parameters.radiusStart === 0 && parameters.radiusEnd === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['radiusStart'],
+        message: 'Cone replay radii cannot both be zero',
+      });
+    }
+    if (parameters.start.every((value, index) => value === parameters.end[index])) {
+      context.addIssue({
+        code: 'custom',
+        path: ['end'],
+        message: 'Cone replay start and end must differ',
+      });
+    }
+  });
+
+const procedureLeafReplayCylinderParametersSchema = z
+  .strictObject({
+    resourceId: guideStepIdSchema,
+    objectName: z.string().min(1),
+    radius: z.number().min(0.0001).max(1000).finite(),
+    start: procedureLeafReplaySegmentPointSchema,
+    end: procedureLeafReplaySegmentPointSchema,
+  })
+  .superRefine((parameters, context) => {
+    if (parameters.start.every((value, index) => value === parameters.end[index])) {
+      context.addIssue({
+        code: 'custom',
+        path: ['end'],
+        message: 'Cylinder replay start and end must differ',
+      });
+    }
+  });
+
 const procedureLeafReplayPrimitiveDetailsShape = {
   supported: z.literal(true),
   resourceId: guideStepIdSchema,
@@ -576,6 +628,87 @@ const procedureLeafReplayTorusDetailsSchema = z
     }
   });
 
+const procedureLeafReplaySegmentDetailsShape = {
+  ...procedureLeafReplayPrimitiveDetailsShape,
+  segmentGeometryMatches: z.literal(true),
+  endpointsMatch: z.literal(true),
+  vertexCount: z.number().int().positive(),
+  edgeCount: z.number().int().positive(),
+  faceCount: z.number().int().positive(),
+} as const;
+
+const procedureLeafReplayConeDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayConeParametersSchema,
+    ...procedureLeafReplaySegmentDetailsShape,
+  })
+  .superRefine((details, context) => {
+    if (
+      details.resourceId !== details.parameters.resourceId ||
+      details.objectName !== details.parameters.objectName
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Cone replay details must match their evaluated parameters',
+      });
+    }
+    if (details.meshId !== `${details.resourceId}.mesh`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['meshId'],
+        message: 'Cone replay meshId must derive from resourceId',
+      });
+    }
+    const expectedTopology =
+      details.parameters.radiusStart === 0 || details.parameters.radiusEnd === 0
+        ? { vertexCount: 33, edgeCount: 64, faceCount: 33 }
+        : { vertexCount: 64, edgeCount: 96, faceCount: 34 };
+    if (
+      details.vertexCount !== expectedTopology.vertexCount ||
+      details.edgeCount !== expectedTopology.edgeCount ||
+      details.faceCount !== expectedTopology.faceCount
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vertexCount'],
+        message: 'Cone replay topology must match its accepted endpoint radii',
+      });
+    }
+  });
+
+const procedureLeafReplayCylinderDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayCylinderParametersSchema,
+    ...procedureLeafReplaySegmentDetailsShape,
+  })
+  .superRefine((details, context) => {
+    if (
+      details.resourceId !== details.parameters.resourceId ||
+      details.objectName !== details.parameters.objectName
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Cylinder replay details must match their evaluated parameters',
+      });
+    }
+    if (details.meshId !== `${details.resourceId}.mesh`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['meshId'],
+        message: 'Cylinder replay meshId must derive from resourceId',
+      });
+    }
+    if (details.vertexCount !== 64 || details.edgeCount !== 96 || details.faceCount !== 34) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vertexCount'],
+        message: 'Cylinder replay topology must match the fixed 32-segment executor',
+      });
+    }
+  });
+
 const procedureLeafReplayUvSphereObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('uv_sphere_ready'),
   satisfied: z.literal(true),
@@ -606,12 +739,26 @@ const procedureLeafReplayTorusObservationSchema = companionObservationSchema.saf
   details: procedureLeafReplayTorusDetailsSchema,
 });
 
+const procedureLeafReplayConeObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('cone_ready'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplayConeDetailsSchema,
+});
+
+const procedureLeafReplayCylinderObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('cylinder_ready'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplayCylinderDetailsSchema,
+});
+
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
   procedureLeafReplayUvSphereObservationSchema,
   procedureLeafReplayIcosphereObservationSchema,
   procedureLeafReplayCubeObservationSchema,
   procedureLeafReplayPlaneObservationSchema,
   procedureLeafReplayTorusObservationSchema,
+  procedureLeafReplayConeObservationSchema,
+  procedureLeafReplayCylinderObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 

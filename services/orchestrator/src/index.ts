@@ -1746,7 +1746,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.replay.propose',
         {
           description:
-            'Revalidate and materialize one bounded UV Sphere, Icosphere, Cube, Plane, or Torus leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted or explicitly unavailable provenance.',
+            'Revalidate and materialize one bounded UV Sphere, Icosphere, Cube, Plane, Torus, Cone, or Cylinder leaf, create a human-reviewable instance-bound GuideProposal, and atomically store the complete replay binding. This does not accept or execute the proposal; menu and shortcut tracks remain unexecuted or explicitly unavailable provenance.',
           inputSchema: deferMcpInputValidation(procedureLeafReplayProposalRequestSchema),
           outputSchema: procedureLeafReplayProposalResultSchema,
         },

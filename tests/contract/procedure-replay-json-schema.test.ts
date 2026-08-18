@@ -626,6 +626,97 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         }),
       ).success,
     ).toBe(false);
+    const segmentPrimitiveDetails = Object.fromEntries(
+      Object.entries(observations[0].details).filter(([key]) => key !== 'radiusMatches'),
+    );
+    const segmentAttestations = [
+      {
+        actionName: 'blender.mesh.create_cone',
+        observationKind: 'cone_ready',
+        parameters: {
+          resourceId,
+          objectName,
+          radiusStart: 1.25,
+          radiusEnd: 0.25,
+          start: [1, 2, 3],
+          end: [4, 6, 3],
+        },
+        topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
+      },
+      {
+        actionName: 'blender.mesh.create_cone',
+        observationKind: 'cone_ready',
+        parameters: {
+          resourceId,
+          objectName,
+          radiusStart: 0,
+          radiusEnd: 0.25,
+          start: [1, 2, 3],
+          end: [4, 6, 3],
+        },
+        topology: { vertexCount: 33, edgeCount: 64, faceCount: 33 },
+      },
+      {
+        actionName: 'blender.mesh.create_cylinder',
+        observationKind: 'cylinder_ready',
+        parameters: {
+          resourceId,
+          objectName,
+          radius: 0.75,
+          start: [1, 2, 3],
+          end: [4, 6, 3],
+        },
+        topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
+      },
+    ].map(({ actionName, observationKind, parameters, topology }) => {
+      const segmentObservation = {
+        kind: observationKind,
+        satisfied: true,
+        details: {
+          ...segmentPrimitiveDetails,
+          parameters,
+          segmentGeometryMatches: true,
+          endpointsMatch: true,
+          ...topology,
+        },
+      };
+      const segmentContent = {
+        ...content,
+        report: { ...content.report, observations: [segmentObservation] },
+        execution: {
+          ...content.execution,
+          action: { adapterId: 'blender', name: actionName },
+        },
+        successGate: { observations: [segmentObservation], allSatisfied: true },
+        verificationScope: { ...content.verificationScope, shortcutTrack: 'unavailable' },
+      };
+      const segmentAttestation = attest(segmentContent);
+      expect(procedureLeafReplayAttestationSchema.safeParse(segmentAttestation).success).toBe(true);
+      return segmentAttestation;
+    });
+    const pointedCone = segmentAttestations[1]!;
+    const pointedConeContent = withoutKey(pointedCone, 'integrity');
+    const wrongPointedObservation = {
+      ...pointedCone.report.observations[0],
+      details: {
+        ...pointedCone.report.observations[0]!.details,
+        vertexCount: 64,
+        edgeCount: 96,
+        faceCount: 34,
+      },
+    };
+    expect(
+      procedureLeafReplayAttestationSchema.safeParse(
+        attest({
+          ...pointedConeContent,
+          report: { ...pointedCone.report, observations: [wrongPointedObservation] },
+          successGate: {
+            observations: [wrongPointedObservation],
+            allSatisfied: true,
+          },
+        }),
+      ).success,
+    ).toBe(false);
     expect(
       procedureLeafReplayAttestationSchema.safeParse({
         ...attestation,
@@ -735,6 +826,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         { value: icosphereAttestation, accepted: true },
         ...sizedPrimitiveAttestations.map((value) => ({ value, accepted: true as const })),
         { value: torusAttestation, accepted: true },
+        ...segmentAttestations.map((value) => ({ value, accepted: true as const })),
         {
           value: {
             ...attestation,
@@ -747,7 +839,10 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
             ...attestation,
             execution: {
               ...attestation.execution,
-              action: { ...attestation.execution.action, name: 'blender.mesh.create_cone' },
+              action: {
+                ...attestation.execution.action,
+                name: 'blender.mesh.create_primitive_batch',
+              },
             },
           },
           accepted: false,

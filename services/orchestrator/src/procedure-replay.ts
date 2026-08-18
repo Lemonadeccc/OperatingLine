@@ -23,21 +23,60 @@ import type { StoredManagedReplayReceipt } from '@operatingline/persistence';
 
 import { satisfiesStableVersionRange } from './stable-version-ranges.js';
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isFiniteVector3(value: unknown, bounded = false): value is [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every(
+      (component) =>
+        isFiniteNumber(component) && (!bounded || (component >= -1000 && component <= 1000)),
+    )
+  );
+}
+
+function hasReplayIdentity(parameters: Record<string, unknown>): boolean {
+  return (
+    typeof parameters['resourceId'] === 'string' &&
+    parameters['resourceId'].length > 0 &&
+    typeof parameters['objectName'] === 'string' &&
+    parameters['objectName'].length > 0
+  );
+}
+
+function segmentEndpointsDiffer(parameters: Record<string, unknown>): boolean {
+  const start = parameters['start'];
+  const end = parameters['end'];
+  return (
+    isFiniteVector3(start, true) &&
+    isFiniteVector3(end, true) &&
+    start.some((component, index) => component !== end[index])
+  );
+}
+
 const replayActionContracts = {
   'blender.mesh.create_uv_sphere': {
     observationKind: 'uv_sphere_ready',
-    dimensionMatchDetailKey: 'radiusMatches',
+    geometryMatchDetailKeys: ['radiusMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
       radius: actionArguments['radius'],
       location: actionArguments['location'],
     }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['radius']) &&
+      parameters['radius'] > 0 &&
+      isFiniteVector3(parameters['location']),
     expectedTopology: () => ({ vertexCount: 482, edgeCount: 992, faceCount: 512 }),
   },
   'blender.mesh.create_icosphere': {
     observationKind: 'icosphere_ready',
-    dimensionMatchDetailKey: 'radiusMatches',
+    geometryMatchDetailKeys: ['radiusMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
@@ -45,6 +84,15 @@ const replayActionContracts = {
       radius: actionArguments['radius'],
       location: actionArguments['location'],
     }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['subdivisions']) &&
+      Number.isInteger(parameters['subdivisions']) &&
+      parameters['subdivisions'] >= 1 &&
+      parameters['subdivisions'] <= 5 &&
+      isFiniteNumber(parameters['radius']) &&
+      parameters['radius'] > 0 &&
+      isFiniteVector3(parameters['location']),
     expectedTopology: (actionArguments: Record<string, unknown>) => {
       const subdivisions = actionArguments['subdivisions'];
       if (
@@ -65,29 +113,39 @@ const replayActionContracts = {
   },
   'blender.mesh.create_cube': {
     observationKind: 'cube_ready',
-    dimensionMatchDetailKey: 'sizeMatches',
+    geometryMatchDetailKeys: ['sizeMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
       size: actionArguments['size'],
       location: actionArguments['location'],
     }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['size']) &&
+      parameters['size'] > 0 &&
+      isFiniteVector3(parameters['location']),
     expectedTopology: () => ({ vertexCount: 8, edgeCount: 12, faceCount: 6 }),
   },
   'blender.mesh.create_plane': {
     observationKind: 'plane_ready',
-    dimensionMatchDetailKey: 'sizeMatches',
+    geometryMatchDetailKeys: ['sizeMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
       size: actionArguments['size'],
       location: actionArguments['location'],
     }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['size']) &&
+      parameters['size'] > 0 &&
+      isFiniteVector3(parameters['location']),
     expectedTopology: () => ({ vertexCount: 4, edgeCount: 4, faceCount: 1 }),
   },
   'blender.mesh.create_torus': {
     observationKind: 'torus_ready',
-    dimensionMatchDetailKey: 'geometryMatches',
+    geometryMatchDetailKeys: ['geometryMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
       resourceId: actionArguments['resourceId'],
       objectName: actionArguments['objectName'],
@@ -97,6 +155,21 @@ const replayActionContracts = {
       minorRadius: actionArguments['minorRadius'],
       location: actionArguments['location'],
     }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['majorSegments']) &&
+      Number.isInteger(parameters['majorSegments']) &&
+      parameters['majorSegments'] >= 3 &&
+      parameters['majorSegments'] <= 128 &&
+      isFiniteNumber(parameters['minorSegments']) &&
+      Number.isInteger(parameters['minorSegments']) &&
+      parameters['minorSegments'] >= 3 &&
+      parameters['minorSegments'] <= 64 &&
+      isFiniteNumber(parameters['majorRadius']) &&
+      parameters['majorRadius'] > 0 &&
+      isFiniteNumber(parameters['minorRadius']) &&
+      parameters['minorRadius'] > 0 &&
+      isFiniteVector3(parameters['location']),
     expectedTopology: (actionArguments: Record<string, unknown>) => {
       const majorSegments = actionArguments['majorSegments'];
       const minorSegments = actionArguments['minorSegments'];
@@ -116,14 +189,63 @@ const replayActionContracts = {
       return { vertexCount, edgeCount: vertexCount * 2, faceCount: vertexCount };
     },
   },
+  'blender.mesh.create_cone': {
+    observationKind: 'cone_ready',
+    geometryMatchDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      radiusStart: actionArguments['radiusStart'],
+      radiusEnd: actionArguments['radiusEnd'],
+      start: actionArguments['start'],
+      end: actionArguments['end'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['radiusStart']) &&
+      parameters['radiusStart'] >= 0 &&
+      parameters['radiusStart'] <= 1000 &&
+      isFiniteNumber(parameters['radiusEnd']) &&
+      parameters['radiusEnd'] >= 0 &&
+      parameters['radiusEnd'] <= 1000 &&
+      (parameters['radiusStart'] > 0 || parameters['radiusEnd'] > 0) &&
+      segmentEndpointsDiffer(parameters),
+    expectedTopology: (actionArguments: Record<string, unknown>) => {
+      const radiusStart = actionArguments['radiusStart'];
+      const radiusEnd = actionArguments['radiusEnd'];
+      if (!isFiniteNumber(radiusStart) || !isFiniteNumber(radiusEnd)) return null;
+      return radiusStart === 0 || radiusEnd === 0
+        ? { vertexCount: 33, edgeCount: 64, faceCount: 33 }
+        : { vertexCount: 64, edgeCount: 96, faceCount: 34 };
+    },
+  },
+  'blender.mesh.create_cylinder': {
+    observationKind: 'cylinder_ready',
+    geometryMatchDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      resourceId: actionArguments['resourceId'],
+      objectName: actionArguments['objectName'],
+      radius: actionArguments['radius'],
+      start: actionArguments['start'],
+      end: actionArguments['end'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      hasReplayIdentity(parameters) &&
+      isFiniteNumber(parameters['radius']) &&
+      parameters['radius'] >= 0.0001 &&
+      parameters['radius'] <= 1000 &&
+      segmentEndpointsDiffer(parameters),
+    expectedTopology: () => ({ vertexCount: 64, edgeCount: 96, faceCount: 34 }),
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
   {
     readonly observationKind: string;
-    readonly dimensionMatchDetailKey: string;
+    readonly geometryMatchDetailKeys: readonly string[];
     readonly expectedParameters: (
       actionArguments: Record<string, unknown>,
     ) => Record<string, unknown>;
+    readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
     readonly expectedTopology: (actionArguments: Record<string, unknown>) => {
       readonly vertexCount: number;
       readonly edgeCount: number;
@@ -440,24 +562,6 @@ export function buildProcedureLeafReplayAttestation(input: {
   const expectedParameters = expectedObservation?.parameters;
   const expectedResourceId = expectedParameters?.['resourceId'];
   const expectedObjectName = expectedParameters?.['objectName'];
-  const expectedDimensions =
-    binding.actionName === 'blender.mesh.create_torus'
-      ? [expectedParameters?.['majorRadius'], expectedParameters?.['minorRadius']]
-      : [
-          expectedParameters?.[
-            binding.actionName === 'blender.mesh.create_uv_sphere' ||
-            binding.actionName === 'blender.mesh.create_icosphere'
-              ? 'radius'
-              : 'size'
-          ],
-        ];
-  const expectedSubdivisions = expectedParameters?.['subdivisions'];
-  const expectedMajorSegments = expectedParameters?.['majorSegments'];
-  const expectedMinorSegments = expectedParameters?.['minorSegments'];
-  const expectedLocation = expectedParameters?.['location'];
-  const expectedLocationX = Array.isArray(expectedLocation) ? expectedLocation[0] : undefined;
-  const expectedLocationY = Array.isArray(expectedLocation) ? expectedLocation[1] : undefined;
-  const expectedLocationZ = Array.isArray(expectedLocation) ? expectedLocation[2] : undefined;
   const meshContentSha256 = observation?.details['meshContentSha256'];
   const expectedTopology =
     expectedParameters === undefined ? null : actionContract.expectedTopology(expectedParameters);
@@ -480,7 +584,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     'contentIntact',
     'topologyMatches',
     'finiteCoordinates',
-    actionContract.dimensionMatchDetailKey,
+    ...actionContract.geometryMatchDetailKeys,
   ] as const;
   const strongDetailKeys = new Set<string>([
     'parameters',
@@ -506,33 +610,10 @@ export function buildProcedureLeafReplayAttestation(input: {
     Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
     observation.details['supported'] !== true ||
     !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
+    expectedParameters === undefined ||
+    !actionContract.parametersValid(expectedParameters) ||
     typeof expectedResourceId !== 'string' ||
     typeof expectedObjectName !== 'string' ||
-    expectedDimensions.some(
-      (dimension) => typeof dimension !== 'number' || !Number.isFinite(dimension) || dimension <= 0,
-    ) ||
-    !Array.isArray(expectedLocation) ||
-    expectedLocation.length !== 3 ||
-    typeof expectedLocationX !== 'number' ||
-    !Number.isFinite(expectedLocationX) ||
-    typeof expectedLocationY !== 'number' ||
-    !Number.isFinite(expectedLocationY) ||
-    typeof expectedLocationZ !== 'number' ||
-    !Number.isFinite(expectedLocationZ) ||
-    (binding.actionName === 'blender.mesh.create_icosphere' &&
-      (typeof expectedSubdivisions !== 'number' ||
-        !Number.isInteger(expectedSubdivisions) ||
-        expectedSubdivisions < 1 ||
-        expectedSubdivisions > 5)) ||
-    (binding.actionName === 'blender.mesh.create_torus' &&
-      (typeof expectedMajorSegments !== 'number' ||
-        !Number.isInteger(expectedMajorSegments) ||
-        expectedMajorSegments < 3 ||
-        expectedMajorSegments > 128 ||
-        typeof expectedMinorSegments !== 'number' ||
-        !Number.isInteger(expectedMinorSegments) ||
-        expectedMinorSegments < 3 ||
-        expectedMinorSegments > 64)) ||
     expectedTopology === null ||
     observation.details['resourceId'] !== expectedResourceId ||
     observation.details['objectName'] !== expectedObjectName ||

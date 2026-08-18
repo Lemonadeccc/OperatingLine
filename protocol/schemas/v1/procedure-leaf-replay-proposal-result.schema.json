@@ -11467,7 +11467,9 @@
             "blender.mesh.create_icosphere",
             "blender.mesh.create_cube",
             "blender.mesh.create_plane",
-            "blender.mesh.create_torus"
+            "blender.mesh.create_torus",
+            "blender.mesh.create_cone",
+            "blender.mesh.create_cylinder"
           ]
         },
         "claims": {

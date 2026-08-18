@@ -11,7 +11,7 @@ describe('action catalog registry', () => {
   it('selects the latest semantic catalog version and supports exact lookup', () => {
     const registry = createActionCatalogRegistry(blenderActionCatalogs);
 
-    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.21.0');
+    expect(registry.get({ targetAdapterId: 'blender' }).catalogVersion).toBe('1.22.0');
     expect(
       registry.get({ targetAdapterId: 'blender', catalogVersion: '1.18.0' }).catalogVersion,
     ).toBe('1.18.0');
@@ -274,13 +274,38 @@ describe('action catalog registry', () => {
       '77f4520c3673f28325cd0f0581fca11e30bb1fd2a365713484bf8c9c6c7f781a',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
-    const active = structuredClone(blenderActionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/action-catalog-1.21.0.json'), 'utf8'),
+    ) as typeof blenderActionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     const torus = active.actions.find((action) => action.name === 'blender.mesh.create_torus');
     if (torus === undefined) throw new Error('Expected Torus action');
     torus.supportedObservationKinds = torus.supportedObservationKinds.filter(
       (kind) => kind !== 'torus_ready',
     );
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes ActionCatalog 1.21.0 and adds only strong Cone and Cylinder observations in 1.22.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/action-catalog-1.21.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'd235d89dc59f759da46bff12298ac87cbcccf04bd8bdc0430e28dd24d43716db',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderActionCatalog;
+    const active = structuredClone(blenderActionCatalog);
+    active.catalogVersion = frozen.catalogVersion;
+    for (const [actionName, observationKind] of [
+      ['blender.mesh.create_cone', 'cone_ready'],
+      ['blender.mesh.create_cylinder', 'cylinder_ready'],
+    ] as const) {
+      const action = active.actions.find((candidate) => candidate.name === actionName);
+      if (action === undefined) throw new Error(`Expected ${actionName}`);
+      action.supportedObservationKinds = action.supportedObservationKinds.filter(
+        (kind) => kind !== observationKind,
+      );
+    }
     expect(active).toEqual(frozen);
   });
 

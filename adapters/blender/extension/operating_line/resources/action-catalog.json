@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.21.0",
+  "catalogVersion": "1.22.0",
   "adapterId": "blender",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
   "hostVersionRange": ">=4.5.0 <5.2.0",
@@ -550,7 +550,7 @@
         }
       ],
       "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists"],
+      "supportedObservationKinds": ["resource_exists", "cone_ready"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",
@@ -619,7 +619,7 @@
         }
       ],
       "supportedAnchorKinds": ["object", "world_position", "operator", "unavailable"],
-      "supportedObservationKinds": ["resource_exists"],
+      "supportedObservationKinds": ["resource_exists", "cylinder_ready"],
       "rollbackModes": ["compensating_action"],
       "safety": {
         "sideEffect": "scene_write",

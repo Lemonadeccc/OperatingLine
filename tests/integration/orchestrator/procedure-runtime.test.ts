@@ -768,14 +768,18 @@ function planeAuthoringCandidateFixture(
 
 function primitiveReplayAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
-  primitive: 'cube' | 'plane' | 'torus',
+  primitive: 'cube' | 'plane' | 'torus' | 'cone' | 'cylinder',
 ): Record<string, unknown> {
   const tree =
     primitive === 'cube'
       ? cubeAuthoringCandidateFixture(packet)
       : primitive === 'plane'
         ? planeAuthoringCandidateFixture(packet)
-        : torusAuthoringCandidateFixture(packet);
+        : primitive === 'torus'
+          ? torusAuthoringCandidateFixture(packet)
+          : primitive === 'cone'
+            ? coneAuthoringCandidateFixture(packet)
+            : cylinderAuthoringCandidateFixture(packet);
   const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
     (node) => node['kind'] === 'leaf',
   );
@@ -792,16 +796,41 @@ function primitiveReplayAuthoringCandidateFixture(
           minorRadius: action.arguments['minorRadius'],
           location: action.arguments['location'],
         }
-      : {
-          resourceId: action.arguments['resourceId'],
-          objectName: action.arguments['objectName'],
-          size: action.arguments['size'],
-          location: action.arguments['location'],
-        };
+      : primitive === 'cone'
+        ? {
+            resourceId: action.arguments['resourceId'],
+            objectName: action.arguments['objectName'],
+            radiusStart: action.arguments['radiusStart'],
+            radiusEnd: action.arguments['radiusEnd'],
+            start: action.arguments['start'],
+            end: action.arguments['end'],
+          }
+        : primitive === 'cylinder'
+          ? {
+              resourceId: action.arguments['resourceId'],
+              objectName: action.arguments['objectName'],
+              radius: action.arguments['radius'],
+              start: action.arguments['start'],
+              end: action.arguments['end'],
+            }
+          : {
+              resourceId: action.arguments['resourceId'],
+              objectName: action.arguments['objectName'],
+              size: action.arguments['size'],
+              location: action.arguments['location'],
+            };
   leaf['expectedObservations'] = [
     {
       kind:
-        primitive === 'cube' ? 'cube_ready' : primitive === 'plane' ? 'plane_ready' : 'torus_ready',
+        primitive === 'cube'
+          ? 'cube_ready'
+          : primitive === 'plane'
+            ? 'plane_ready'
+            : primitive === 'torus'
+              ? 'torus_ready'
+              : primitive === 'cone'
+                ? 'cone_ready'
+                : 'cylinder_ready',
       parameters,
     },
   ];
@@ -4749,7 +4778,7 @@ describe('procedure compilation runtime', () => {
       observationKind: 'cube_ready' as const,
       goal: '创建一个边长 2.5、位置精确的 Cube。',
       topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
-      geometryDetailKey: 'sizeMatches' as const,
+      geometryDetailKeys: ['sizeMatches'] as const,
       shortcutCoverage: 'materialized' as const,
     },
     {
@@ -4758,7 +4787,7 @@ describe('procedure compilation runtime', () => {
       observationKind: 'plane_ready' as const,
       goal: '创建一个边长 12.5、位置精确的 Plane。',
       topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
-      geometryDetailKey: 'sizeMatches' as const,
+      geometryDetailKeys: ['sizeMatches'] as const,
       shortcutCoverage: 'materialized' as const,
     },
     {
@@ -4767,7 +4796,25 @@ describe('procedure compilation runtime', () => {
       observationKind: 'torus_ready' as const,
       goal: '创建一个分段、半径和位置精确的 Torus。',
       topology: { vertexCount: 576, edgeCount: 1152, faceCount: 576 },
-      geometryDetailKey: 'geometryMatches' as const,
+      geometryDetailKeys: ['geometryMatches'] as const,
+      shortcutCoverage: 'unavailable' as const,
+    },
+    {
+      primitive: 'cone' as const,
+      actionName: 'blender.mesh.create_cone' as const,
+      observationKind: 'cone_ready' as const,
+      goal: '创建一个端点、半径和方向精确的 Cone。',
+      topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
+      geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'] as const,
+      shortcutCoverage: 'unavailable' as const,
+    },
+    {
+      primitive: 'cylinder' as const,
+      actionName: 'blender.mesh.create_cylinder' as const,
+      observationKind: 'cylinder_ready' as const,
+      goal: '创建一个端点、半径和方向精确的 Cylinder。',
+      topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
+      geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'] as const,
       shortcutCoverage: 'unavailable' as const,
     },
   ])(
@@ -4778,7 +4825,7 @@ describe('procedure compilation runtime', () => {
       observationKind,
       goal,
       topology,
-      geometryDetailKey,
+      geometryDetailKeys,
       shortcutCoverage,
     }) => {
       const runtime = await startRuntime({
@@ -4930,7 +4977,7 @@ describe('procedure compilation runtime', () => {
                 contentIntact: true,
                 topologyMatches: true,
                 finiteCoordinates: true,
-                [geometryDetailKey]: true,
+                ...Object.fromEntries(geometryDetailKeys.map((key) => [key, true])),
                 vertexCount,
                 edgeCount: topology.edgeCount,
                 faceCount: topology.faceCount,
@@ -5000,7 +5047,7 @@ describe('procedure compilation runtime', () => {
                   kind: observationKind,
                   details: {
                     parameters: observationParameters,
-                    [geometryDetailKey]: true,
+                    ...Object.fromEntries(geometryDetailKeys.map((key) => [key, true])),
                     ...topology,
                   },
                 },

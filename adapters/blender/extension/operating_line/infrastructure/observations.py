@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import bpy
+from mathutils import Vector
 
 from ..application.session import ActionReceipt
 from .snowman_actions.common import (
@@ -127,19 +128,162 @@ def _torus_coordinates_match(
     return True
 
 
+def _bounded_number_parameter(
+    value: Any,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float | None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        return None
+    result = float(value)
+    return result if minimum <= result <= maximum else None
+
+
+def _finite_vector3_parameter(value: Any) -> tuple[float, float, float] | None:
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or any(
+            isinstance(component, bool)
+            or not isinstance(component, (int, float))
+            or not math.isfinite(float(component))
+            or not -1000.0 <= float(component) <= 1000.0
+            for component in value
+        )
+    ):
+        return None
+    return tuple(float(component) for component in value)
+
+
+def _segment_ring_matches(
+    coordinates: list[Vector],
+    *,
+    z: float,
+    radius: float,
+    radial_tolerance: float,
+    depth_tolerance: float,
+) -> bool:
+    expected_count = 1 if radius == 0.0 else 32
+    if len(coordinates) != expected_count:
+        return False
+    if radius == 0.0:
+        coordinate = coordinates[0]
+        return bool(
+            math.isclose(float(coordinate.x), 0.0, rel_tol=0.0, abs_tol=radial_tolerance)
+            and math.isclose(
+                float(coordinate.y), 0.0, rel_tol=0.0, abs_tol=radial_tolerance
+            )
+            and math.isclose(float(coordinate.z), z, rel_tol=1e-5, abs_tol=depth_tolerance)
+        )
+
+    unmatched = list(coordinates)
+    for segment_index in range(32):
+        angle = math.tau * segment_index / 32
+        expected = (
+            radius * math.sin(angle),
+            radius * math.cos(angle),
+            z,
+        )
+        match_index = next(
+            (
+                index
+                for index, coordinate in enumerate(unmatched)
+                if all(
+                    math.isclose(
+                        float(actual),
+                        target,
+                        rel_tol=1e-5,
+                        abs_tol=radial_tolerance,
+                    )
+                    for actual, target in (
+                        (coordinate.x, expected[0]),
+                        (coordinate.y, expected[1]),
+                    )
+                )
+                and math.isclose(
+                    float(coordinate.z),
+                    expected[2],
+                    rel_tol=1e-5,
+                    abs_tol=depth_tolerance,
+                )
+            ),
+            None,
+        )
+        if match_index is None:
+            return False
+        unmatched.pop(match_index)
+    return not unmatched
+
+
+def _segment_mesh_geometry_matches(
+    mesh: bpy.types.Mesh,
+    *,
+    depth: float,
+    radius_start: float,
+    radius_end: float,
+) -> bool:
+    half_depth = depth / 2.0
+    radial_tolerance = max(1e-6, radius_start * 1e-5, radius_end * 1e-5)
+    depth_tolerance = max(1e-6, depth * 1e-5)
+    lower: list[Vector] = []
+    upper: list[Vector] = []
+    for vertex in mesh.vertices:
+        coordinate = vertex.co.copy()
+        if abs(float(coordinate.z) + half_depth) <= abs(float(coordinate.z) - half_depth):
+            lower.append(coordinate)
+        else:
+            upper.append(coordinate)
+    expected_face_sizes = (
+        [3] * 32 + [32]
+        if radius_start == 0.0 or radius_end == 0.0
+        else [4] * 32 + [32, 32]
+    )
+    return bool(
+        sorted(len(polygon.vertices) for polygon in mesh.polygons)
+        == expected_face_sizes
+        and _segment_ring_matches(
+            lower,
+            z=-half_depth,
+            radius=radius_start,
+            radial_tolerance=radial_tolerance,
+            depth_tolerance=depth_tolerance,
+        )
+        and _segment_ring_matches(
+            upper,
+            z=half_depth,
+            radius=radius_end,
+            radial_tolerance=radial_tolerance,
+            depth_tolerance=depth_tolerance,
+        )
+    )
+
+
 def _single_mesh_primitive_ready(
     parameters: Mapping[str, Any],
     receipts: Mapping[str, ActionReceipt],
     *,
     action_name: str,
-    primitive_kind: Literal["uv_sphere", "icosphere", "cube", "plane", "torus"],
+    primitive_kind: Literal[
+        "uv_sphere", "icosphere", "cube", "plane", "torus", "cone", "cylinder"
+    ],
 ) -> ObservationResult:
     spherical = primitive_kind in {"uv_sphere", "icosphere"}
     subdivisions_required = primitive_kind == "icosphere"
     torus = primitive_kind == "torus"
-    dimension_parameter = None if torus else ("radius" if spherical else "size")
+    segment = primitive_kind in {"cone", "cylinder"}
+    cone = primitive_kind == "cone"
+    dimension_parameter = (
+        None if torus or segment else ("radius" if spherical else "size")
+    )
     dimension_detail = (
-        "geometryMatches"
+        "segmentGeometryMatches"
+        if segment
+        else "geometryMatches"
         if torus
         else ("radiusMatches" if spherical else "sizeMatches")
     )
@@ -157,6 +301,17 @@ def _single_mesh_primitive_ready(
         else {
             "resourceId",
             "objectName",
+            "radiusStart",
+            "radiusEnd",
+            "start",
+            "end",
+        }
+        if cone
+        else {"resourceId", "objectName", "radius", "start", "end"}
+        if segment
+        else {
+            "resourceId",
+            "objectName",
             dimension_parameter,
             "location",
         }
@@ -170,6 +325,11 @@ def _single_mesh_primitive_ready(
     raw_minor_segments = parameters.get("minorSegments")
     raw_major_radius = parameters.get("majorRadius")
     raw_minor_radius = parameters.get("minorRadius")
+    raw_radius_start = parameters.get("radiusStart")
+    raw_radius_end = parameters.get("radiusEnd")
+    raw_segment_radius = parameters.get("radius") if segment else None
+    raw_start = parameters.get("start")
+    raw_end = parameters.get("end")
     raw_dimension = (
         parameters.get(dimension_parameter)
         if dimension_parameter is not None
@@ -215,17 +375,32 @@ def _single_mesh_primitive_ready(
         and float(raw_dimension) > 0
         else None
     )
+    radius_start = _bounded_number_parameter(
+        raw_radius_start if cone else raw_segment_radius,
+        minimum=0.0 if cone else 0.0001,
+        maximum=1000.0,
+    )
+    radius_end = _bounded_number_parameter(
+        raw_radius_end if cone else raw_segment_radius,
+        minimum=0.0 if cone else 0.0001,
+        maximum=1000.0,
+    )
+    start = _finite_vector3_parameter(raw_start)
+    end = _finite_vector3_parameter(raw_end)
+    raw_location_vector = _finite_vector3_parameter(raw_location)
     location = (
-        tuple(float(component) for component in raw_location)
-        if isinstance(raw_location, list)
-        and len(raw_location) == 3
-        and all(
-            not isinstance(component, bool)
-            and isinstance(component, (int, float))
-            and math.isfinite(float(component))
-            for component in raw_location
-        )
-        else ()
+        tuple((start[index] + end[index]) / 2.0 for index in range(3))
+        if segment and start is not None and end is not None
+        else raw_location_vector
+    )
+    segment_parameters_valid = bool(
+        segment
+        and start is not None
+        and end is not None
+        and start != end
+        and radius_start is not None
+        and radius_end is not None
+        and (not cone or radius_start > 0.0 or radius_end > 0.0)
     )
     parameters_valid = bool(
         set(parameters) == allowed_parameters
@@ -233,16 +408,20 @@ def _single_mesh_primitive_ready(
         and resource_id
         and isinstance(object_name, str)
         and object_name
-        and (not subdivisions_required or subdivisions is not None)
         and (
-            major_segments is not None
-            and minor_segments is not None
-            and major_radius is not None
-            and minor_radius is not None
-            if torus
-            else dimension is not None
+            segment_parameters_valid
+            if segment
+            else (not subdivisions_required or subdivisions is not None)
+            and (
+                major_segments is not None
+                and minor_segments is not None
+                and major_radius is not None
+                and minor_radius is not None
+                if torus
+                else dimension is not None
+            )
+            and location is not None
         )
-        and len(location) == 3
     )
 
     registry = build_resource_registry(receipts)
@@ -369,20 +548,40 @@ def _single_mesh_primitive_ready(
     location_matches = bool(
         object_owned
         and isinstance(obj, bpy.types.Object)
-        and len(location) == 3
+        and location is not None
         and all(
             math.isclose(float(actual), expected, rel_tol=0.0, abs_tol=tolerance)
             for actual, expected in zip(obj.location, location)
         )
     )
+    expected_rotation = (
+        (Vector(end) - Vector(start)).to_track_quat("Z", "Y")
+        if segment and start is not None and end is not None and start != end
+        else None
+    )
     rotation_matches = bool(
         object_owned
         and isinstance(obj, bpy.types.Object)
-        and math.isclose(
-            float(obj.matrix_basis.to_quaternion().angle),
-            0.0,
-            rel_tol=0.0,
-            abs_tol=tolerance,
+        and (
+            obj.rotation_mode == "QUATERNION"
+            and expected_rotation is not None
+            and math.isclose(
+                float(
+                    obj.matrix_basis.to_quaternion()
+                    .rotation_difference(expected_rotation)
+                    .angle
+                ),
+                0.0,
+                rel_tol=0.0,
+                abs_tol=tolerance,
+            )
+            if segment
+            else math.isclose(
+                float(obj.matrix_basis.to_quaternion().angle),
+                0.0,
+                rel_tol=0.0,
+                abs_tol=tolerance,
+            )
         )
     )
     scale_matches = bool(
@@ -419,12 +618,41 @@ def _single_mesh_primitive_ready(
         mesh_owned and isinstance(mesh, bpy.types.Mesh) and len(mesh.materials) == 0
     )
 
+    depth = (
+        (Vector(end) - Vector(start)).length
+        if segment and start is not None and end is not None
+        else None
+    )
+    endpoint_tolerance = max(1e-6, depth * 1e-5) if depth is not None else 1e-6
+    endpoints_match = bool(
+        segment
+        and object_owned
+        and isinstance(obj, bpy.types.Object)
+        and start is not None
+        and end is not None
+        and depth is not None
+        and (
+            obj.matrix_basis @ Vector((0.0, 0.0, -depth / 2.0)) - Vector(start)
+        ).length
+        <= endpoint_tolerance
+        and (
+            obj.matrix_basis @ Vector((0.0, 0.0, depth / 2.0)) - Vector(end)
+        ).length
+        <= endpoint_tolerance
+    )
+
     counts = (
         (len(mesh.vertices), len(mesh.edges), len(mesh.polygons))
         if isinstance(mesh, bpy.types.Mesh)
         else (0, 0, 0)
     )
-    if primitive_kind == "torus" and major_segments is not None and minor_segments is not None:
+    if segment and radius_start is not None and radius_end is not None:
+        expected_counts = (
+            (33, 64, 33)
+            if cone and (radius_start == 0.0 or radius_end == 0.0)
+            else (64, 96, 34)
+        )
+    elif primitive_kind == "torus" and major_segments is not None and minor_segments is not None:
         vertex_count = major_segments * minor_segments
         expected_counts = (vertex_count, vertex_count * 2, vertex_count)
     elif primitive_kind == "icosphere" and subdivisions is not None:
@@ -449,7 +677,20 @@ def _single_mesh_primitive_ready(
             for component in vertex.co
         )
     )
-    if primitive_kind == "torus":
+    if segment:
+        dimension_matches = bool(
+            isinstance(mesh, bpy.types.Mesh)
+            and depth is not None
+            and radius_start is not None
+            and radius_end is not None
+            and _segment_mesh_geometry_matches(
+                mesh,
+                depth=depth,
+                radius_start=radius_start,
+                radius_end=radius_end,
+            )
+        )
+    elif primitive_kind == "torus":
         dimension_matches = bool(
             isinstance(mesh, bpy.types.Mesh)
             and major_segments is not None
@@ -554,6 +795,7 @@ def _single_mesh_primitive_ready(
         and topology_matches
         and finite_coordinates
         and dimension_matches
+        and (not segment or endpoints_match)
         and content_intact
     )
     details = {
@@ -585,6 +827,8 @@ def _single_mesh_primitive_ready(
         "meshContentSha256": mesh_content_sha256,
     }
     details[dimension_detail] = dimension_matches
+    if segment:
+        details["endpointsMatch"] = endpoints_match
     return satisfied, details
 
 
@@ -640,6 +884,28 @@ def _torus_ready(
         receipts,
         action_name="blender.mesh.create_torus",
         primitive_kind="torus",
+    )
+
+
+def _cone_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _single_mesh_primitive_ready(
+        parameters,
+        receipts,
+        action_name="blender.mesh.create_cone",
+        primitive_kind="cone",
+    )
+
+
+def _cylinder_ready(
+    parameters: Mapping[str, Any], receipts: Mapping[str, ActionReceipt]
+) -> ObservationResult:
+    return _single_mesh_primitive_ready(
+        parameters,
+        receipts,
+        action_name="blender.mesh.create_cylinder",
+        primitive_kind="cylinder",
     )
 
 
@@ -2156,6 +2422,8 @@ OBSERVATION_EVALUATORS: dict[str, ObservationEvaluator] = {
     "cube_ready": _cube_ready,
     "plane_ready": _plane_ready,
     "torus_ready": _torus_ready,
+    "cone_ready": _cone_ready,
+    "cylinder_ready": _cylinder_ready,
     "material_assigned": _material_assigned,
     "armature_ready": _armature_ready,
     "pose_animation_ready": _pose_animation_ready,
