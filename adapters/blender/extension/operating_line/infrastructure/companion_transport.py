@@ -179,6 +179,7 @@ class CompanionTransport:
         self._flush_deadline = 0.0
         self._last_delivered_sequence = 0
         self._session_snapshot: CompanionSessionSnapshot | None = None
+        self._seen_replay_current_state_verification_ids: set[str] = set()
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -706,6 +707,9 @@ class CompanionTransport:
                         "Proposal revision thread id",
                     )
                     self._revision_history_signature = None
+        replay_current_state_request = self._validated_replay_current_state_request(
+            response.get("procedureReplayCurrentStateRequest")
+        )
         if plan is not None:
             self.incoming.put(
                 {
@@ -722,8 +726,113 @@ class CompanionTransport:
                     "proposalPlanContentSha256": proposal_plan_content_sha256,
                 }
             )
+        if replay_current_state_request is not None:
+            verification_id = replay_current_state_request["verificationId"]
+            if verification_id not in self._seen_replay_current_state_verification_ids:
+                if len(self._seen_replay_current_state_verification_ids) >= 256:
+                    self._seen_replay_current_state_verification_ids.pop()
+                self._seen_replay_current_state_verification_ids.add(verification_id)
+                self.incoming.put(
+                    {
+                        "kind": "procedure_replay_current_state_request",
+                        "request": replay_current_state_request,
+                    }
+                )
         self._poll_revision_history()
         self._poll_revision_branches()
+
+    def _validated_replay_current_state_request(
+        self,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("Replay current-state request must be an object or null")
+        self._validate_exact_keys(
+            value,
+            {
+                "formatVersion",
+                "verificationId",
+                "replayId",
+                "attestationId",
+                "attestationContentSha256",
+                "target",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "stepId",
+                "expectedObservation",
+                "requestedAt",
+            },
+            "Replay current-state request",
+        )
+        if value["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported replay current-state request format")
+        for key, label in (
+            ("verificationId", "Verification id"),
+            ("replayId", "Replay id"),
+            ("attestationId", "Attestation id"),
+            ("executionId", "Execution id"),
+        ):
+            self._validated_optional_uuid(value[key], label)
+        for key, label in (
+            ("attestationContentSha256", "Attestation content SHA-256"),
+            ("planContentSha256", "Plan content SHA-256"),
+        ):
+            if (
+                not isinstance(value[key], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value[key]) is None
+            ):
+                raise ValueError(f"{label} must be 64 lowercase hex characters")
+        target = value["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Replay current-state target must be an object")
+        self._validate_exact_keys(
+            target,
+            {"adapterId", "instanceId"},
+            "Replay current-state target",
+        )
+        if target["adapterId"] != "blender" or target["instanceId"] != self._instance_id:
+            raise ValueError("Replay current-state request targets a different Companion")
+        self._validated_optional_uuid(target["instanceId"], "Target instance id")
+        plan = value["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("Replay current-state plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision"}, "Replay current-state plan")
+        if not isinstance(plan["id"], str) or not plan["id"]:
+            raise ValueError("Replay current-state plan id must be non-empty text")
+        if (
+            isinstance(plan["revision"], bool)
+            or not isinstance(plan["revision"], int)
+            or plan["revision"] <= 0
+        ):
+            raise ValueError("Replay current-state plan revision must be positive")
+        if not isinstance(value["stepId"], str) or not value["stepId"]:
+            raise ValueError("Replay current-state step id must be non-empty text")
+        expected_observation = value["expectedObservation"]
+        if not isinstance(expected_observation, dict):
+            raise ValueError("Replay current-state expected observation must be an object")
+        self._validate_exact_keys(
+            expected_observation,
+            {"kind", "contentSha256"},
+            "Replay current-state expected observation",
+        )
+        if (
+            not isinstance(expected_observation["kind"], str)
+            or not expected_observation["kind"]
+        ):
+            raise ValueError("Replay current-state observation kind must be non-empty text")
+        if (
+            not isinstance(expected_observation["contentSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(expected_observation["contentSha256"])
+            is None
+        ):
+            raise ValueError(
+                "Replay current-state observation SHA-256 must be 64 lowercase hex characters"
+            )
+        self._validate_expiry(value["requestedAt"], "Replay current-state requestedAt")
+        return value
 
     @staticmethod
     def _validated_delivery_hash(

@@ -137,6 +137,15 @@ operation 必须与 report transition 对应，checkpoint commit 时间不得晚
 不证明之后的当前宿主状态；历史无该字段的已存 attestation 仍可解析。见
 `docs/adr/0071-native-undo-replay-checkpoint-attestation.md`。
 
+`procedure-leaf-replay-current-state-*` Schema 定义按需当前状态复核。MCP
+`operatingline.procedure.replay.current-state.request/get` 与对应 HTTP 接口先把唯一 verification ID、不可变
+attestation hash、目标 instance、Plan/execution/leaf 和期望强 Observation hash 持久化为 challenge；只有协议
+1.5 的精确协商 Companion lease 会在 Guide delivery 中收到它。Blender 主线程不执行 action 或 Undo，只重新
+评估当前 Observation 并读取当前 Undo journal，然后用 `current_state_rechecked` 回显完整 challenge。completed
+结果确定性区分 session、step、observation、checkpoint mismatch 与 verified，并随 requested/completed 事件
+进入 Eval/replay。任何结果都只证明 response report 时刻，继续声明之后状态 `not_verified`。见
+`docs/adr/0072-challenged-procedure-current-state-verification.md`。
+
 `action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
 `semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。

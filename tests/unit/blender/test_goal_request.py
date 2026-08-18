@@ -182,6 +182,59 @@ class GoalRequestTransportTests(unittest.TestCase):
         self.assertIsNone(transport.session_snapshot)
         self.assertEqual(established.heartbeat_sequence, 0)
 
+    def test_poll_delivers_each_replay_current_state_request_once(self) -> None:
+        instance_id = str(uuid.uuid4())
+        request = {
+            "formatVersion": "1.0.0",
+            "verificationId": str(uuid.uuid4()),
+            "replayId": str(uuid.uuid4()),
+            "attestationId": str(uuid.uuid4()),
+            "attestationContentSha256": "a" * 64,
+            "target": {"adapterId": "blender", "instanceId": instance_id},
+            "plan": {"id": "snowman", "revision": 1},
+            "planContentSha256": "b" * 64,
+            "executionId": str(uuid.uuid4()),
+            "stepId": "snowman.eye.left",
+            "expectedObservation": {
+                "kind": "uv_sphere_ready",
+                "contentSha256": "c" * 64,
+            },
+            "requestedAt": "2026-08-18T12:00:00Z",
+        }
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+        )
+
+        def request_json(_method, path, body=None, **_kwargs):
+            session_response = self._session_response(path, body)
+            if session_response is not None:
+                return session_response
+            if path.startswith("/api/v1/companion/guide?"):
+                return {
+                    "protocolVersion": transport.session_snapshot.negotiated_guide_protocol_version,
+                    "plan": None,
+                    "planContentSha256": None,
+                    "proposal": None,
+                    "proposalPlanContentSha256": None,
+                    "procedureReplayCurrentStateRequest": request,
+                }
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._establish_session()
+        transport._poll()
+        transport._poll()
+
+        self.assertEqual(transport.incoming.get_nowait()["kind"], "session_established")
+        self.assertEqual(
+            transport.incoming.get_nowait(),
+            {"kind": "procedure_replay_current_state_request", "request": request},
+        )
+        with self.assertRaises(Empty):
+            transport.incoming.get_nowait()
+
     def test_stop_flush_never_reestablishes_a_cleared_or_existing_session(self) -> None:
         transport = CompanionTransport(
             "http://127.0.0.1:43123",

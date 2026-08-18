@@ -182,13 +182,17 @@ attestation。新的 finalization 还要求 terminal report 携带当前 `next` 
 marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 与产物备份绑定到报告时状态。
 attestation 明确声明 `currentHostStateAfterReport: not_verified`。该证明仍只覆盖 managed Action 结果；menu
 未执行，shortcut 按目录事实保持 candidate 未执行或 unavailable，MCP unavailable，也不证明报告之后的当前
-场景或具体 UI 执行入口。见
+场景或具体 UI 执行入口。显式 current-state request 会作为持久唯一挑战随 Guide poll 只投递给精确协商
+lease；Companion 在主线程只读复算 request leaf 的强 Observation，读取当前 Scene marker/journal 后回报
+`current_state_rechecked`，不调用 action、rollback 或 Undo。Runtime 保存 verified 或确定性的
+session/step/observation/checkpoint mismatch；结果仍只覆盖 report 时刻。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
 [ADR 0068](../adr/0068-torus-managed-replay-attestation.md) 与
 [ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
-[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md)。
+[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md) 与
+[ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md)。
 
 ## 视觉引导状态
 

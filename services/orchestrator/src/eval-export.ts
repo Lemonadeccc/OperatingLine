@@ -242,6 +242,20 @@ function procedureLeafReplayAttestationMatches(
   );
 }
 
+function procedureLeafReplayCurrentStateMatches(
+  payload: unknown,
+  request: EvalExportRequest,
+): boolean {
+  const embeddedRequest = recordAt(payload, 'request') ?? payload;
+  const instanceId = stringAt(embeddedRequest, 'target', 'instanceId');
+  return (
+    instanceId !== null &&
+    stringAt(embeddedRequest, 'target', 'adapterId') === request.targetAdapterId &&
+    stringAt(embeddedRequest, 'plan', 'id') === request.planId &&
+    (request.instanceId === undefined || instanceId === request.instanceId)
+  );
+}
+
 function collectRelations(events: readonly StoredExecutionEvent[], request: EvalExportRequest) {
   const proposalPayloads = new Map<string, unknown>();
   const revisionRequestPayloads = new Map<string, unknown>();
@@ -416,6 +430,9 @@ function eventMatches(
       return procedureLeafReplayProposalMatches(event.payload, request);
     case 'procedure.leaf-replay.attested':
       return procedureLeafReplayAttestationMatches(event.payload, request);
+    case 'procedure.leaf-replay.current-state.requested':
+    case 'procedure.leaf-replay.current-state.completed':
+      return procedureLeafReplayCurrentStateMatches(event.payload, request);
     default:
       return false;
   }

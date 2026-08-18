@@ -427,6 +427,25 @@ class ObservationGateSessionTests(unittest.TestCase):
             self.result(True),
         )
 
+    def test_current_step_observation_evaluation_is_read_only(self) -> None:
+        ready = True
+
+        def evaluate(_expectations, _receipts):
+            return self.result(ready)
+
+        session, _calls = self.gated_session("rollback_step", evaluate)
+        session.start()
+        self.assertEqual(session.next().id, "step-gated")
+        before = session.snapshot_state()
+
+        ready = False
+        step, observations = session.evaluate_current_step_observations("step-gated")
+
+        self.assertEqual(step.id, "step-gated")
+        self.assertEqual(observations, self.result(False))
+        self.assertEqual(session.snapshot_state(), before)
+        self.assertEqual(session.evaluate_current_step_observations("missing"), (None, []))
+
     def test_invalid_evaluator_result_fails_closed(self) -> None:
         session, calls = self.gated_session(
             "rollback_step",

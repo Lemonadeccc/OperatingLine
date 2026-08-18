@@ -2,14 +2,18 @@ import {
   canonicalizeProtocolJsonValue,
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
+  computeProcedureLeafReplayCurrentStateVerificationContentSha256,
+  computeProcedureLeafReplayObservationContentSha256,
   protocolJsonValueCanonicalization,
   procedureLeafReplayActionNameSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayFormatVersion,
   procedureLeafReplayObservationSchema,
+  procedureLeafReplayCurrentStateVerificationSchema,
   type ActionCatalog,
   type CompanionStateReport,
+  type CompanionProcedureReplayCurrentStateRequest,
   type GuideProposal,
   type GuideProposalDecision,
   type PlanningIntent,
@@ -17,6 +21,7 @@ import {
   type ProcedureLeafReplayActionName,
   type ProcedureLeafReplayAttestation,
   type ProcedureLeafReplayBinding,
+  type ProcedureLeafReplayCurrentStateVerification,
   type ProcedureLeafReplayProposalRequest,
 } from '@operatingline/protocol';
 import type { StoredManagedReplayReceipt } from '@operatingline/persistence';
@@ -744,6 +749,176 @@ export function buildProcedureLeafReplayAttestation(input: {
       algorithm: 'sha256',
       canonicalization: protocolJsonValueCanonicalization,
       contentSha256: computeProcedureLeafReplayAttestationContentSha256(content),
+    },
+  });
+}
+
+export function buildProcedureLeafReplayCurrentStateRequest(input: {
+  readonly attestation: ProcedureLeafReplayAttestation;
+  readonly verificationId: string;
+  readonly requestedAt: string;
+}): CompanionProcedureReplayCurrentStateRequest {
+  const { attestation } = input;
+  const observation = attestation.successGate.observations[0];
+  if (
+    attestation.verificationScope.nativeUndoCheckpoint !== 'companion_reported_current_at_report' ||
+    attestation.verificationScope.currentHostStateAfterReport !== 'not_verified' ||
+    observation === undefined
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Current-state verification requires a checkpoint-backed replay attestation',
+      409,
+    );
+  }
+  return {
+    formatVersion: procedureLeafReplayFormatVersion,
+    verificationId: input.verificationId,
+    replayId: attestation.replayId,
+    attestationId: attestation.attestationId,
+    attestationContentSha256: attestation.integrity.contentSha256,
+    target: {
+      adapterId: 'blender',
+      instanceId: attestation.execution.host.instanceId,
+    },
+    plan: {
+      id: attestation.execution.plan.id,
+      revision: attestation.execution.plan.revision,
+    },
+    planContentSha256: attestation.execution.plan.contentSha256,
+    executionId: attestation.execution.execution.id,
+    stepId: attestation.execution.step.id,
+    expectedObservation: {
+      kind: observation.kind,
+      contentSha256: computeProcedureLeafReplayObservationContentSha256(observation),
+    },
+    requestedAt: input.requestedAt,
+  };
+}
+
+export function buildProcedureLeafReplayCurrentStateVerification(input: {
+  readonly attestation: ProcedureLeafReplayAttestation;
+  readonly request: CompanionProcedureReplayCurrentStateRequest;
+  readonly report: CompanionStateReport;
+  readonly reportReceipt: StoredManagedReplayReceipt;
+  readonly recordedAt: string;
+}): ProcedureLeafReplayCurrentStateVerification {
+  const { attestation, request, report, reportReceipt } = input;
+  const expectedRequest = buildProcedureLeafReplayCurrentStateRequest({
+    attestation,
+    verificationId: request.verificationId,
+    requestedAt: request.requestedAt,
+  });
+  if (!sameCanonicalValue(request, expectedRequest)) {
+    throw new ProcedureLeafReplayError(
+      'Current-state request does not match its replay attestation',
+      409,
+    );
+  }
+  if (
+    report.protocolVersion !== '1.5.0' ||
+    report.transition !== 'current_state_rechecked' ||
+    report.procedureReplayCurrentStateRequest === undefined ||
+    !sameCanonicalValue(report.procedureReplayCurrentStateRequest, request) ||
+    report.adapterId !== request.target.adapterId ||
+    report.instanceId !== request.target.instanceId ||
+    reportReceipt.subjectType !== 'companion_state_report' ||
+    reportReceipt.subjectId !== report.reportId ||
+    reportReceipt.authentication !== 'negotiated_companion_lease' ||
+    reportReceipt.adapterId !== request.target.adapterId ||
+    reportReceipt.instanceId !== request.target.instanceId ||
+    reportReceipt.sessionFingerprintSha256 === null ||
+    Date.parse(reportReceipt.receivedAt) < Date.parse(request.requestedAt) ||
+    Date.parse(input.recordedAt) < Date.parse(reportReceipt.receivedAt)
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Current-state report lacks the exact authenticated verification request chain',
+      409,
+    );
+  }
+
+  const sessionMatches =
+    report.plan?.id === request.plan.id &&
+    report.plan?.revision === request.plan.revision &&
+    report.planContentSha256 === request.planContentSha256 &&
+    report.executionId === request.executionId;
+  const stepMatches =
+    report.phase === 'completed' &&
+    report.activeStepId === request.stepId &&
+    report.stepId === request.stepId &&
+    report.completedStepIds.length === 1 &&
+    report.completedStepIds[0] === request.stepId &&
+    report.observationGate === null &&
+    report.artifactAttestation === null &&
+    report.error === null;
+  const observation = report.observations[0];
+  const observationMatches =
+    report.observations.length === 1 &&
+    observation?.kind === request.expectedObservation.kind &&
+    observation?.satisfied === true &&
+    sameCanonicalValue(observation, attestation.successGate.observations[0]);
+  const checkpoint = report.nativeUndoCheckpoint;
+  const checkpointMatches =
+    checkpoint !== undefined &&
+    checkpoint.session.plan.id === request.plan.id &&
+    checkpoint.session.plan.revision === request.plan.revision &&
+    checkpoint.session.planContentSha256 === request.planContentSha256 &&
+    checkpoint.session.executionId === request.executionId &&
+    checkpoint.session.activeStepId === request.stepId &&
+    checkpoint.session.completedStepIds.length === 1 &&
+    checkpoint.session.completedStepIds[0] === request.stepId &&
+    checkpoint.session.receiptStepIds.length === 1 &&
+    checkpoint.session.receiptStepIds[0] === request.stepId;
+  const reason = !sessionMatches
+    ? 'session_identity_mismatch'
+    : !stepMatches
+      ? 'step_state_mismatch'
+      : !observationMatches
+        ? 'observation_mismatch'
+        : !checkpointMatches
+          ? 'native_undo_checkpoint_mismatch'
+          : 'verified';
+  const verified = reason === 'verified';
+  const content: Omit<ProcedureLeafReplayCurrentStateVerification, 'integrity'> = {
+    formatVersion: procedureLeafReplayFormatVersion,
+    verificationId: request.verificationId,
+    replayId: request.replayId,
+    attestationId: request.attestationId,
+    attestationContentSha256: request.attestationContentSha256,
+    evidenceClass: 'companion_reported_managed_action_current_state',
+    request,
+    report: {
+      ...report,
+      protocolVersion: '1.5.0',
+      adapterId: 'blender',
+      transition: 'current_state_rechecked',
+      procedureReplayCurrentStateRequest: request,
+      artifactAttestation: null,
+    },
+    outcome: verified ? 'verified' : 'not_verified',
+    reason,
+    provenance: {
+      authentication: 'negotiated_companion_lease',
+      sessionFingerprintSha256: reportReceipt.sessionFingerprintSha256,
+      reportReceipt: {
+        sequence: reportReceipt.sequence,
+        receivedAt: reportReceipt.receivedAt,
+      },
+    },
+    verificationScope: {
+      managedActionCurrentState: verified ? 'verified_at_report' : 'not_verified_at_report',
+      nativeUndoCheckpoint: checkpointMatches
+        ? 'companion_reported_current_at_report'
+        : 'not_verified_at_report',
+      currentHostStateAfterReport: 'not_verified',
+    },
+    recordedAt: input.recordedAt,
+  };
+  return procedureLeafReplayCurrentStateVerificationSchema.parse({
+    ...content,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: protocolJsonValueCanonicalization,
+      contentSha256: computeProcedureLeafReplayCurrentStateVerificationContentSha256(content),
     },
   });
 }

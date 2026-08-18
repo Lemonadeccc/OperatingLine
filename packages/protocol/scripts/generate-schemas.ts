@@ -64,6 +64,11 @@ import {
   procedureAuthoringMaterializationResultSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
+  procedureLeafReplayCurrentStateRequestSchema,
+  procedureLeafReplayCurrentStateRequestResultSchema,
+  procedureLeafReplayCurrentStateStatusRequestSchema,
+  procedureLeafReplayCurrentStateStatusResultSchema,
+  procedureLeafReplayCurrentStateVerificationSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -427,6 +432,31 @@ const schemas = [
     'procedure-leaf-replay-finalize-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-leaf-replay-finalize-result.json',
     procedureLeafReplayFinalizeResultSchema,
+  ],
+  [
+    'procedure-leaf-replay-current-state-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-current-state-request.json',
+    procedureLeafReplayCurrentStateRequestSchema,
+  ],
+  [
+    'procedure-leaf-replay-current-state-request-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-current-state-request-result.json',
+    procedureLeafReplayCurrentStateRequestResultSchema,
+  ],
+  [
+    'procedure-leaf-replay-current-state-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-current-state-status-request.json',
+    procedureLeafReplayCurrentStateStatusRequestSchema,
+  ],
+  [
+    'procedure-leaf-replay-current-state-verification.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-current-state-verification.json',
+    procedureLeafReplayCurrentStateVerificationSchema,
+  ],
+  [
+    'procedure-leaf-replay-current-state-status-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-leaf-replay-current-state-status-result.json',
+    procedureLeafReplayCurrentStateStatusResultSchema,
   ],
   [
     'procedure-compilation-request.schema.json',

@@ -479,13 +479,17 @@ step、host version 和强 Observation 任一不匹配都会 fail closed。最�
 与 Scene marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 和产物备份一致；attestation
 因此声明 `nativeUndoCheckpoint: companion_reported_current_at_report`，并同时声明
 `currentHostStateAfterReport: not_verified`。合同仍不声称逐控件 UI 回放、快捷键等价、具体 UI 执行入口、
-action-level MCP 调用或报告之后的当前宿主状态。见
+action-level MCP 调用或报告之后的当前宿主状态。调用方可另行创建持久、唯一的 current-state challenge；只有
+精确目标协商 lease 会收到它，Blender 主线程只读复算强 Observation 与当前 Undo journal，Runtime 按
+session/step/observation/checkpoint mismatch 或 verified 保存 completed evidence。每次结果仍只覆盖其 response
+report 时刻，下一次“当前”查询必须使用新的 verification ID。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
 [ADR 0068](../adr/0068-torus-managed-replay-attestation.md) 与
 [ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
-[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md)。
+[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md) 与
+[ADR 0072](../adr/0072-challenged-procedure-current-state-verification.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数

@@ -2179,6 +2179,13 @@ class CompanionController:
                             "Runtime revision history is unavailable",
                         )
                     )
+                elif message.get("kind") == "procedure_replay_current_state_request":
+                    replay_request = message.get("request")
+                    try:
+                        self.report_procedure_replay_current_state(replay_request)
+                    except (KeyError, TypeError, ValueError) as error:
+                        self.error = str(error)
+                        self.status = "Replay current-state request rejected"
                 elif message.get("kind") == "session_established":
                     self.error = ""
                     session = get_session()
@@ -2222,6 +2229,25 @@ class CompanionController:
             return None
         return 0.2 if self.connected else 1.0
 
+    def report_procedure_replay_current_state(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        from .. import get_session
+
+        if not isinstance(request, dict):
+            raise TypeError("Replay current-state request must be an object")
+        step_id = request.get("stepId")
+        if not isinstance(step_id, str) or not step_id:
+            raise ValueError("Replay current-state request must contain a step id")
+        step, observations = get_session().evaluate_current_step_observations(step_id)
+        return self.report(
+            "current_state_rechecked",
+            step=step,
+            observations_override=observations,
+            procedure_replay_current_state_request=request,
+        )
+
     def report(
         self,
         transition: str,
@@ -2230,6 +2256,7 @@ class CompanionController:
         error: str | None = None,
         observations_override: list[dict[str, Any]] | None = None,
         observation_gate_override: ObservationGateState | None = None,
+        procedure_replay_current_state_request: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from .. import get_session
 
@@ -2278,7 +2305,9 @@ class CompanionController:
             )
         self._sequence += 1
         report_id = str(uuid.uuid4())
-        if phase == "completed" and session.execution_id is not None:
+        if transition == "current_state_rechecked":
+            pass
+        elif phase == "completed" and session.execution_id is not None:
             if self._artifact_attestation_execution_id != session.execution_id:
                 from ..infrastructure.artifact_attestation import (
                     build_terminal_artifact_attestation,
@@ -2300,16 +2329,30 @@ class CompanionController:
             "observation_recovered": "recheck",
             "step_rolled_back": "back",
         }.get(transition)
-        if protocol_version == "1.5.0" and expected_checkpoint_operation is not None:
+        if protocol_version == "1.5.0" and (
+            expected_checkpoint_operation is not None
+            or transition == "current_state_rechecked"
+        ):
             from ..infrastructure.native_history import (
                 native_undo_checkpoint_attestation,
             )
 
-            candidate_checkpoint = native_undo_checkpoint_attestation(session)
+            try:
+                candidate_checkpoint = native_undo_checkpoint_attestation(session)
+            except (OSError, RuntimeError, ValueError):
+                if transition != "current_state_rechecked":
+                    raise
+                candidate_checkpoint = None
             if (
                 candidate_checkpoint is not None
-                and candidate_checkpoint["operation"]
-                == expected_checkpoint_operation
+                and (
+                    transition == "current_state_rechecked"
+                    or candidate_checkpoint["operation"]
+                    == expected_checkpoint_operation
+                )
+                and set(candidate_checkpoint["session"]["receiptStepIds"]).issubset(
+                    candidate_checkpoint["session"]["completedStepIds"]
+                )
             ):
                 native_undo_checkpoint = candidate_checkpoint
         report = {
@@ -2347,11 +2390,19 @@ class CompanionController:
         if report["protocolVersion"] == "1.5.0":
             report["artifactAttestation"] = (
                 deepcopy(self._artifact_attestation)
-                if phase == "completed"
+                if phase == "completed" and transition != "current_state_rechecked"
                 else None
             )
             if native_undo_checkpoint is not None:
                 report["nativeUndoCheckpoint"] = deepcopy(native_undo_checkpoint)
+            if transition == "current_state_rechecked":
+                if procedure_replay_current_state_request is None:
+                    raise ValueError(
+                        "Current-state report requires its replay verification request"
+                    )
+                report["procedureReplayCurrentStateRequest"] = deepcopy(
+                    procedure_replay_current_state_request
+                )
         if self._transport is not None:
             self._transport.send_report(report)
         self.last_report = report

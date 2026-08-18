@@ -235,6 +235,70 @@ describe('companion protocol', () => {
     ).toBe(false);
   });
 
+  it('binds nonce-based replay current-state requests to protocol 1.5 recheck reports', () => {
+    const report = completedStateReport();
+    const request = {
+      formatVersion: '1.0.0',
+      verificationId: randomUUID(),
+      replayId: randomUUID(),
+      attestationId: randomUUID(),
+      attestationContentSha256: 'd'.repeat(64),
+      target: { adapterId: 'blender', instanceId: report.instanceId },
+      plan: report.plan,
+      planContentSha256: report.planContentSha256,
+      executionId: report.executionId,
+      stepId: report.stepId,
+      expectedObservation: {
+        kind: 'render_ready',
+        contentSha256: 'e'.repeat(64),
+      },
+      requestedAt: '2026-08-04T09:59:59Z',
+    } as const;
+    const rechecked = {
+      ...report,
+      transition: 'current_state_rechecked',
+      artifactAttestation: null,
+      procedureReplayCurrentStateRequest: request,
+    } as const;
+    expect(companionStateReportSchema.safeParse(rechecked).success).toBe(true);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...rechecked,
+        protocolVersion: '1.4.0',
+        artifactAttestation: undefined,
+      }).success,
+    ).toBe(false);
+    const withoutRequest = { ...rechecked } as Record<string, unknown>;
+    delete withoutRequest['procedureReplayCurrentStateRequest'];
+    expect(companionStateReportSchema.safeParse(withoutRequest).success).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        procedureReplayCurrentStateRequest: request,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.5.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+        procedureReplayCurrentStateRequest: request,
+      }).success,
+    ).toBe(true);
+    expect(
+      companionGuideDeliverySchema.safeParse({
+        protocolVersion: '1.4.0',
+        plan: null,
+        planContentSha256: null,
+        proposal: null,
+        proposalPlanContentSha256: null,
+        procedureReplayCurrentStateRequest: request,
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires an explicit artifact attestation field only from protocol 1.5', () => {
     const legacy = { ...currentStateReport(), protocolVersion: '1.4.0' };
     delete (legacy as { artifactAttestation?: unknown }).artifactAttestation;

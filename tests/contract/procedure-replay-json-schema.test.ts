@@ -11,9 +11,16 @@ import {
   compileProcedureTreeToGuidePlan,
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
+  computeProcedureLeafReplayCurrentStateVerificationContentSha256,
+  computeProcedureLeafReplayObservationContentSha256,
   procedureAuthoringCandidateTreeSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
+  procedureLeafReplayCurrentStateRequestSchema,
+  procedureLeafReplayCurrentStateRequestResultSchema,
+  procedureLeafReplayCurrentStateStatusRequestSchema,
+  procedureLeafReplayCurrentStateStatusResultSchema,
+  procedureLeafReplayCurrentStateVerificationSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -508,7 +515,8 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         currentHostStateAfterReport: 'not_verified',
       },
     } as const;
-    expect(procedureLeafReplayAttestationSchema.safeParse(attest(checkpointContent)).success).toBe(
+    const checkpointAttestation = attest(checkpointContent);
+    expect(procedureLeafReplayAttestationSchema.safeParse(checkpointAttestation).success).toBe(
       true,
     );
     expect(
@@ -516,6 +524,133 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         attest({ ...checkpointContent, verificationScope: content.verificationScope }),
       ).success,
     ).toBe(false);
+
+    const verificationId = 'bd5de2ab-2de5-4e7d-8a24-83d30a349ce9';
+    const currentStateRequest = {
+      formatVersion: '1.0.0',
+      verificationId,
+      replayId,
+      attestationId,
+      attestationContentSha256: checkpointAttestation.integrity.contentSha256,
+      target: { adapterId: 'blender', instanceId },
+      plan: { id: plan.id, revision: plan.revision },
+      planContentSha256,
+      executionId,
+      stepId: leaf.id,
+      expectedObservation: {
+        kind: observations[0].kind,
+        contentSha256: computeProcedureLeafReplayObservationContentSha256(observations[0]),
+      },
+      requestedAt: occurredAt,
+    } as const;
+    const currentStateReport = {
+      ...checkpointContent.report,
+      reportId: 'd932d853-158f-4407-b7f4-9fe21ce249dd',
+      transition: 'current_state_rechecked',
+      procedureReplayCurrentStateRequest: currentStateRequest,
+    } as const;
+    const currentStateContent = {
+      formatVersion: '1.0.0',
+      verificationId,
+      replayId,
+      attestationId,
+      attestationContentSha256: checkpointAttestation.integrity.contentSha256,
+      evidenceClass: 'companion_reported_managed_action_current_state',
+      request: currentStateRequest,
+      report: currentStateReport,
+      outcome: 'verified',
+      reason: 'verified',
+      provenance: {
+        authentication: 'negotiated_companion_lease',
+        sessionFingerprintSha256: '9'.repeat(64),
+        reportReceipt: { sequence: 4, receivedAt: occurredAt },
+      },
+      verificationScope: {
+        managedActionCurrentState: 'verified_at_report',
+        nativeUndoCheckpoint: 'companion_reported_current_at_report',
+        currentHostStateAfterReport: 'not_verified',
+      },
+      recordedAt: occurredAt,
+    } as const;
+    const currentStateVerification = {
+      ...currentStateContent,
+      integrity: {
+        algorithm: 'sha256',
+        canonicalization: 'operatingline-json-value-v1',
+        contentSha256:
+          computeProcedureLeafReplayCurrentStateVerificationContentSha256(currentStateContent),
+      },
+    } as const;
+    expect(
+      procedureLeafReplayCurrentStateRequestSchema.safeParse({ replayId, verificationId }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateRequestResultSchema.safeParse({
+        status: 'accepted',
+        request: currentStateRequest,
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateStatusRequestSchema.safeParse({ verificationId }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateVerificationSchema.safeParse(currentStateVerification).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateStatusResultSchema.safeParse({
+        status: 'pending',
+        request: currentStateRequest,
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateStatusResultSchema.safeParse({
+        status: 'completed',
+        verification: currentStateVerification,
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureLeafReplayCurrentStateVerificationSchema.safeParse({
+        ...currentStateVerification,
+        outcome: 'not_verified',
+      }).success,
+    ).toBe(false);
+
+    const failedObservationReport = {
+      ...currentStateReport,
+      observations: [
+        {
+          ...currentStateReport.observations[0],
+          satisfied: false,
+          details: {
+            ...currentStateReport.observations[0].details,
+            contentIntact: false,
+          },
+        },
+      ],
+    } as const;
+    const failedCurrentStateContent = {
+      ...currentStateContent,
+      report: failedObservationReport,
+      outcome: 'not_verified',
+      reason: 'observation_mismatch',
+      verificationScope: {
+        ...currentStateContent.verificationScope,
+        managedActionCurrentState: 'not_verified_at_report',
+      },
+    } as const;
+    expect(
+      procedureLeafReplayCurrentStateVerificationSchema.safeParse({
+        ...failedCurrentStateContent,
+        integrity: {
+          algorithm: 'sha256',
+          canonicalization: 'operatingline-json-value-v1',
+          contentSha256:
+            computeProcedureLeafReplayCurrentStateVerificationContentSha256(
+              failedCurrentStateContent,
+            ),
+        },
+      }).success,
+    ).toBe(true);
     expect(
       procedureLeafReplayAttestationSchema.safeParse(
         attest({
@@ -938,6 +1073,50 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-leaf-replay-finalize-result.schema.json'),
       resultCases,
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-current-state-request.schema.json'),
+      [
+        { value: { replayId, verificationId }, accepted: true },
+        { value: { replayId, verificationId: 'bad' }, accepted: false },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-current-state-request-result.schema.json'),
+      [
+        {
+          value: { status: 'accepted', request: currentStateRequest },
+          accepted: true,
+        },
+        {
+          value: { status: 'rejected', request: currentStateRequest },
+          accepted: false,
+        },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-current-state-status-request.schema.json'),
+      [
+        { value: { verificationId }, accepted: true },
+        { value: { verificationId: 'bad' }, accepted: false },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-current-state-verification.schema.json'),
+      [
+        { value: currentStateVerification, accepted: true },
+        { value: withoutKey(currentStateVerification, 'integrity'), accepted: false },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-leaf-replay-current-state-status-result.schema.json'),
+      [
+        { value: { status: 'pending', request: currentStateRequest }, accepted: true },
+        {
+          value: { status: 'completed', verification: currentStateVerification },
+          accepted: true,
+        },
+      ],
     );
   });
 });

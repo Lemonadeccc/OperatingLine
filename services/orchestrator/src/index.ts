@@ -67,6 +67,10 @@ import {
   procedureOperationSearchResultSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
+  procedureLeafReplayCurrentStateRequestSchema,
+  procedureLeafReplayCurrentStateRequestResultSchema,
+  procedureLeafReplayCurrentStateStatusRequestSchema,
+  procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayFinalizeRequestSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
@@ -140,6 +144,7 @@ import {
   restoreProcedureAuthoringProviderInvocations,
   type ProcedureAuthoringGenerationCoordinator,
 } from './procedure-authoring-generation.js';
+import { createProcedureLeafReplayCurrentStateCoordinator } from './procedure-replay-current-state.js';
 import {
   buildProcedureLeafReplayAttestation,
   buildProcedureLeafReplayBinding,
@@ -285,6 +290,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
   const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
   const database = openOperatingLineDatabase(options.databasePath);
+  const procedureLeafReplayCurrentStateCoordinator =
+    createProcedureLeafReplayCurrentStateCoordinator(database);
   const guideRevisionRequestService = createGuideRevisionRequestService({
     database,
     actionCatalogRegistry,
@@ -1912,6 +1919,106 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.replay.current-state.request',
+        {
+          description:
+            'Queue one read-only, nonce-bound current-state recheck for a finalized managed Procedure replay. The exact target Blender instance evaluates its present Observation and native Undo journal on the main thread; no scene action is executed.',
+          inputSchema: procedureLeafReplayCurrentStateRequestSchema,
+          outputSchema: procedureLeafReplayCurrentStateRequestResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureLeafReplayCurrentStateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_leaf_replay_current_state_request',
+                    message: 'Procedure replay current-state request violates the strict contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = procedureLeafReplayCurrentStateCoordinator.request(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_leaf_replay_current_state_request_failed',
+                    message:
+                      error instanceof ProcedureLeafReplayError
+                        ? error.message
+                        : 'Procedure replay current-state request failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.replay.current-state.get',
+        {
+          description:
+            'Read a pending or completed nonce-bound managed Procedure replay current-state verification.',
+          inputSchema: procedureLeafReplayCurrentStateStatusRequestSchema,
+          outputSchema: procedureLeafReplayCurrentStateStatusResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureLeafReplayCurrentStateStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_leaf_replay_current_state_status_request',
+                    message: 'Procedure replay current-state status request is invalid',
+                  }),
+                },
+              ],
+            };
+          }
+          const result = procedureLeafReplayCurrentStateCoordinator.get(
+            parsedRequest.data.verificationId,
+          );
+          if (result === null) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_leaf_replay_current_state_not_found',
+                    message: 'Procedure replay current-state verification was not found',
+                  }),
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+            structuredContent: result,
+          };
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.compile',
         {
           description:
@@ -2886,6 +2993,47 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/replay/current-state/request', async (request, reply) => {
+      const parsedRequest = procedureLeafReplayCurrentStateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_leaf_replay_current_state_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return procedureLeafReplayCurrentStateCoordinator.request(parsedRequest.data);
+      } catch (error) {
+        const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 500;
+        return reply.code(statusCode).send({
+          error: 'procedure_leaf_replay_current_state_request_failed',
+          message:
+            error instanceof ProcedureLeafReplayError
+              ? error.message
+              : 'Procedure replay current-state request failed',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/procedure/replay/current-state', async (request, reply) => {
+      const parsedRequest = procedureLeafReplayCurrentStateStatusRequestSchema.safeParse(
+        request.query,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_leaf_replay_current_state_status_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const result = procedureLeafReplayCurrentStateCoordinator.get(
+        parsedRequest.data.verificationId,
+      );
+      return result === null
+        ? reply.code(404).send({
+            error: 'procedure_leaf_replay_current_state_not_found',
+            message: 'Procedure replay current-state verification was not found',
+          })
+        : result;
+    });
     runtimeApp.post('/api/v1/procedure/compile', async (request, reply) => {
       const parsedRequest = procedureCompilationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -3353,12 +3501,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         knownProposalId,
       } = parsedRequest.data;
       const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      let replayCurrentStateAuthorized = false;
       if (leaseHeader !== undefined) {
         if (typeof leaseHeader !== 'string') {
           return reply.code(400).send({ error: 'invalid_companion_lease' });
         }
         try {
-          companionLeaseManager.authorize(leaseHeader, adapterId, instanceId);
+          const session = companionLeaseManager.authorize(leaseHeader, adapterId, instanceId);
+          replayCurrentStateAuthorized = session.lease.negotiatedGuideProtocolVersion === '1.5.0';
         } catch (error) {
           if (error instanceof CompanionLeaseError) {
             return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -3390,6 +3540,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const pendingProposal =
         storedProposal === null ? null : guideProposalSchema.parse(storedProposal);
       const callerHasPendingProposal = pendingProposal?.proposalId === knownProposalId;
+      const replayCurrentStateRequest = replayCurrentStateAuthorized
+        ? procedureLeafReplayCurrentStateCoordinator.pendingFor(adapterId, instanceId)
+        : null;
       return companionGuideDeliverySchema.parse({
         protocolVersion: guideProtocolVersion,
         plan: planAdapterId === adapterId && !callerHasActiveRevision ? activePlan : null,
@@ -3400,6 +3553,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           callerHasPendingProposal || pendingProposal === null
             ? null
             : computePlanContentSha256(pendingProposal.plan),
+        ...(replayCurrentStateRequest === null
+          ? {}
+          : { procedureReplayCurrentStateRequest: replayCurrentStateRequest }),
       });
     });
     runtimeApp.post('/api/v1/companion/revision-request', async (request, reply) => {
@@ -3533,6 +3689,26 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           throw error;
         }
       }
+      if (parsedReport.data.transition === 'current_state_rechecked') {
+        if (authenticatedSessionProvenance === undefined) {
+          return reply.code(409).send({
+            error: 'companion_lease_required',
+            message: 'Replay current-state responses require a negotiated Companion lease',
+          });
+        }
+        try {
+          procedureLeafReplayCurrentStateCoordinator.authorizeReport(parsedReport.data);
+        } catch (error) {
+          const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 409;
+          return reply.code(statusCode).send({
+            error: 'procedure_leaf_replay_current_state_response_rejected',
+            message:
+              error instanceof ProcedureLeafReplayError
+                ? error.message
+                : 'Procedure replay current-state response was rejected',
+          });
+        }
+      }
       const result = database.recordCompanionState(
         parsedReport.data,
         authenticatedSessionProvenance,
@@ -3545,6 +3721,33 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           parsedReport.data.adapterId,
           parsedReport.data.instanceId,
         );
+      }
+      if (
+        parsedReport.data.transition === 'current_state_rechecked' &&
+        (result === 'accepted' || result === 'duplicate')
+      ) {
+        const receipt = database.getManagedReplayReceipt(
+          'companion_state_report',
+          parsedReport.data.reportId,
+        );
+        if (receipt === null) {
+          return reply.code(409).send({
+            error: 'procedure_leaf_replay_current_state_receipt_missing',
+            message: 'Replay current-state response lacks an authenticated server receipt',
+          });
+        }
+        try {
+          procedureLeafReplayCurrentStateCoordinator.complete(parsedReport.data, receipt);
+        } catch (error) {
+          const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 500;
+          return reply.code(statusCode).send({
+            error: 'procedure_leaf_replay_current_state_completion_failed',
+            message:
+              error instanceof ProcedureLeafReplayError
+                ? error.message
+                : 'Procedure replay current-state verification could not be stored',
+          });
+        }
       }
       return { result };
     });

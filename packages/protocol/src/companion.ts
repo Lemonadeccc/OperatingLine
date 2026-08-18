@@ -5,6 +5,35 @@ import { guideProposalSchema } from './proposal.js';
 
 const companionContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
+const companionPlanReferenceSchema = z.strictObject({
+  id: z.string().min(1),
+  revision: z.number().int().positive(),
+});
+
+export const companionProcedureReplayCurrentStateRequestSchema = z.strictObject({
+  formatVersion: z.literal('1.0.0'),
+  verificationId: z.uuid(),
+  replayId: z.uuid(),
+  attestationId: z.uuid(),
+  attestationContentSha256: companionContentSha256Schema,
+  target: z.strictObject({
+    adapterId: z.literal('blender'),
+    instanceId: z.uuid(),
+  }),
+  plan: companionPlanReferenceSchema,
+  planContentSha256: companionContentSha256Schema,
+  executionId: z.uuid(),
+  stepId: guideStepIdSchema,
+  expectedObservation: z.strictObject({
+    kind: z.string().min(1),
+    contentSha256: companionContentSha256Schema,
+  }),
+  requestedAt: z.iso.datetime({ offset: true }),
+});
+export type CompanionProcedureReplayCurrentStateRequest = z.infer<
+  typeof companionProcedureReplayCurrentStateRequestSchema
+>;
+
 export const companionGuideRequestSchema = z
   .strictObject({
     adapterId: z.string().min(1),
@@ -44,6 +73,9 @@ export const companionGuideDeliverySchema = z
     planContentSha256: companionContentSha256Schema.nullable(),
     proposal: guideProposalSchema.nullable(),
     proposalPlanContentSha256: companionContentSha256Schema.nullable(),
+    procedureReplayCurrentStateRequest: companionProcedureReplayCurrentStateRequestSchema
+      .nullable()
+      .optional(),
   })
   .meta({
     allOf: [
@@ -56,6 +88,13 @@ export const companionGuideDeliverySchema = z
         if: { properties: { proposal: { type: 'null' } }, required: ['proposal'] },
         then: { properties: { proposalPlanContentSha256: { type: 'null' } } },
         else: { properties: { proposalPlanContentSha256: { type: 'string' } } },
+      },
+      {
+        if: {
+          properties: { procedureReplayCurrentStateRequest: { type: 'object' } },
+          required: ['procedureReplayCurrentStateRequest'],
+        },
+        then: { properties: { protocolVersion: { const: '1.5.0' } } },
       },
     ],
   })
@@ -72,6 +111,16 @@ export const companionGuideDeliverySchema = z
         code: 'custom',
         path: ['proposalPlanContentSha256'],
         message: 'proposalPlanContentSha256 must be present exactly when proposal is present',
+      });
+    }
+    if (
+      delivery.procedureReplayCurrentStateRequest != null &&
+      delivery.protocolVersion !== '1.5.0'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['procedureReplayCurrentStateRequest'],
+        message: 'Replay current-state requests require Guide protocol 1.5',
       });
     }
   });
@@ -95,6 +144,7 @@ export const companionTransitionSchema = z.enum([
   'step_observation_failed',
   'observation_recovered',
   'step_rolled_back',
+  'current_state_rechecked',
   'error',
 ]);
 export type CompanionTransition = z.infer<typeof companionTransitionSchema>;
@@ -199,11 +249,6 @@ export const companionArtifactAttestationSchema = z
   });
 export type CompanionArtifactAttestation = z.infer<typeof companionArtifactAttestationSchema>;
 
-const companionPlanReferenceSchema = z.strictObject({
-  id: z.string().min(1),
-  revision: z.number().int().positive(),
-});
-
 const companionNativeUndoCheckpointOperationSchema = z.enum(['start', 'next', 'recheck', 'back']);
 
 export const companionNativeUndoCheckpointSchema = z
@@ -280,11 +325,21 @@ export const companionStateReportSchema = z
     observationGate: companionObservationGateSchema.nullable().optional(),
     artifactAttestation: companionArtifactAttestationSchema.nullable().optional(),
     nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
+    procedureReplayCurrentStateRequest:
+      companionProcedureReplayCurrentStateRequestSchema.optional(),
     error: z.string().min(1).nullable(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
   .meta({
     allOf: [
+      {
+        if: {
+          properties: { transition: { const: 'current_state_rechecked' } },
+          required: ['transition'],
+        },
+        then: { required: ['procedureReplayCurrentStateRequest'] },
+        else: { not: { required: ['procedureReplayCurrentStateRequest'] } },
+      },
       {
         if: {
           properties: {
@@ -505,6 +560,7 @@ export const companionStateReportSchema = z
     }
     if (
       report.transition !== 'connected' &&
+      report.transition !== 'current_state_rechecked' &&
       report.transition !== 'error' &&
       report.plan === null
     ) {
@@ -575,6 +631,24 @@ export const companionStateReportSchema = z
         message: 'Artifact attestation reports require protocol 1.5',
       });
     }
+    const currentStateRequest = report.procedureReplayCurrentStateRequest;
+    if (
+      report.transition === 'current_state_rechecked' &&
+      (report.protocolVersion !== '1.5.0' || currentStateRequest === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['procedureReplayCurrentStateRequest'],
+        message: 'Current-state rechecks require a protocol 1.5 replay verification request',
+      });
+    }
+    if (report.transition !== 'current_state_rechecked' && currentStateRequest !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['procedureReplayCurrentStateRequest'],
+        message: 'Replay current-state requests are only valid on current_state_rechecked',
+      });
+    }
     if (report.artifactAttestation !== undefined && report.artifactAttestation !== null) {
       if (
         (report.phase !== 'completed' && report.phase !== 'error') ||
@@ -609,7 +683,10 @@ export const companionStateReportSchema = z
         default:
           expectedOperation = undefined;
       }
-      if (expectedOperation === undefined || nativeUndoCheckpoint.operation !== expectedOperation) {
+      if (
+        (report.transition !== 'current_state_rechecked' && expectedOperation === undefined) ||
+        (expectedOperation !== undefined && nativeUndoCheckpoint.operation !== expectedOperation)
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['nativeUndoCheckpoint', 'operation'],

@@ -9912,6 +9912,43 @@ def main() -> None:
                 ]
                 assert final_report["observations"][0]["satisfied"] is True
 
+        current_state_request = {
+            "formatVersion": "1.0.0",
+            "verificationId": str(uuid.uuid4()),
+            "replayId": str(uuid.uuid4()),
+            "attestationId": str(uuid.uuid4()),
+            "attestationContentSha256": "a" * 64,
+            "target": {
+                "adapterId": "blender",
+                "instanceId": operating_line.get_companion().instance_id,
+            },
+            "plan": {"id": session.plan_id, "revision": session.revision},
+            "planContentSha256": session.plan_content_sha256,
+            "executionId": execution_id,
+            "stepId": ACTION_STEPS[-1]["id"],
+            "expectedObservation": {
+                "kind": final_report["observations"][0]["kind"],
+                "contentSha256": "b" * 64,
+            },
+            "requestedAt": "2026-08-18T12:00:00Z",
+        }
+        session_before_current_state = session.snapshot_state()
+        current_state_report = (
+            operating_line.get_companion().report_procedure_replay_current_state(
+                current_state_request
+            )
+        )
+        assert current_state_report["transition"] == "current_state_rechecked"
+        assert current_state_report["procedureReplayCurrentStateRequest"] == (
+            current_state_request
+        )
+        assert current_state_report["artifactAttestation"] is None
+        assert current_state_report["observations"] == final_report["observations"]
+        assert current_state_report["nativeUndoCheckpoint"]["checkpointId"] == (
+            final_report["nativeUndoCheckpoint"]["checkpointId"]
+        )
+        assert session.snapshot_state() == session_before_current_state
+
         # Receiving a duplicate plan is a validated no-op and preserves scene work.
         completed_session = operating_line.get_session()
         pointers_before_update = {

@@ -7,6 +7,7 @@ import {
 import {
   companionNativeUndoCheckpointSchema,
   companionObservationSchema,
+  companionProcedureReplayCurrentStateRequestSchema,
   companionStateReportSchema,
 } from './companion.js';
 import { guideStepIdSchema } from './guide.js';
@@ -297,6 +298,21 @@ export const procedureLeafReplayFinalizeRequestSchema = z.strictObject({
 });
 export type ProcedureLeafReplayFinalizeRequest = z.infer<
   typeof procedureLeafReplayFinalizeRequestSchema
+>;
+
+export const procedureLeafReplayCurrentStateRequestSchema = z.strictObject({
+  replayId: z.uuid(),
+  verificationId: z.uuid(),
+});
+export type ProcedureLeafReplayCurrentStateRequest = z.infer<
+  typeof procedureLeafReplayCurrentStateRequestSchema
+>;
+
+export const procedureLeafReplayCurrentStateStatusRequestSchema = z.strictObject({
+  verificationId: z.uuid(),
+});
+export type ProcedureLeafReplayCurrentStateStatusRequest = z.infer<
+  typeof procedureLeafReplayCurrentStateStatusRequestSchema
 >;
 
 const procedureLeafReplayExecutionSchema = z.strictObject({
@@ -766,6 +782,12 @@ export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind',
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 
+export function computeProcedureLeafReplayObservationContentSha256(
+  observation: ProcedureLeafReplayObservation,
+): string {
+  return computeContentSha256(procedureLeafReplayObservationSchema.parse(observation));
+}
+
 const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   adapterId: z.literal('blender'),
   plan: z.strictObject({
@@ -940,6 +962,181 @@ export function computeProcedureLeafReplayAttestationContentSha256(
 ): string {
   return computeContentSha256(withoutIntegrity(attestation));
 }
+
+const procedureLeafReplayCurrentStateReportSchema = companionStateReportSchema.safeExtend({
+  protocolVersion: z.literal('1.5.0'),
+  adapterId: z.literal('blender'),
+  transition: z.literal('current_state_rechecked'),
+  procedureReplayCurrentStateRequest: companionProcedureReplayCurrentStateRequestSchema,
+  artifactAttestation: z.null(),
+});
+
+const procedureLeafReplayCurrentStateReasonSchema = z.enum([
+  'verified',
+  'session_identity_mismatch',
+  'step_state_mismatch',
+  'observation_mismatch',
+  'native_undo_checkpoint_mismatch',
+]);
+
+const procedureLeafReplayCurrentStateVerificationContentSchema = z.strictObject({
+  formatVersion: procedureLeafReplayFormatVersionSchema,
+  verificationId: z.uuid(),
+  replayId: z.uuid(),
+  attestationId: z.uuid(),
+  attestationContentSha256: contentSha256Schema,
+  evidenceClass: z.literal('companion_reported_managed_action_current_state'),
+  request: companionProcedureReplayCurrentStateRequestSchema,
+  report: procedureLeafReplayCurrentStateReportSchema,
+  outcome: z.enum(['verified', 'not_verified']),
+  reason: procedureLeafReplayCurrentStateReasonSchema,
+  provenance: z.strictObject({
+    authentication: z.literal('negotiated_companion_lease'),
+    sessionFingerprintSha256: contentSha256Schema,
+    reportReceipt: procedureLeafReplayReceiptSchema,
+  }),
+  verificationScope: z.strictObject({
+    managedActionCurrentState: z.enum(['verified_at_report', 'not_verified_at_report']),
+    nativeUndoCheckpoint: z.enum([
+      'companion_reported_current_at_report',
+      'not_verified_at_report',
+    ]),
+    currentHostStateAfterReport: z.literal('not_verified'),
+  }),
+  recordedAt: z.iso.datetime({ offset: true }),
+});
+
+export const procedureLeafReplayCurrentStateVerificationSchema =
+  procedureLeafReplayCurrentStateVerificationContentSchema
+    .safeExtend({ integrity: replayIntegritySchema })
+    .superRefine((verification, context) => {
+      const { request, report } = verification;
+      if (
+        verification.verificationId !== request.verificationId ||
+        verification.replayId !== request.replayId ||
+        verification.attestationId !== request.attestationId ||
+        verification.attestationContentSha256 !== request.attestationContentSha256 ||
+        computeContentSha256(report.procedureReplayCurrentStateRequest) !==
+          computeContentSha256(request) ||
+        report.adapterId !== request.target.adapterId ||
+        report.instanceId !== request.target.instanceId
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['request'],
+          message: 'Current-state verification must bind the exact delivered request',
+        });
+      }
+      const checkpoint = report.nativeUndoCheckpoint;
+      const checkpointMatches =
+        checkpoint !== undefined &&
+        checkpoint.session.plan.id === request.plan.id &&
+        checkpoint.session.plan.revision === request.plan.revision &&
+        checkpoint.session.planContentSha256 === request.planContentSha256 &&
+        checkpoint.session.executionId === request.executionId &&
+        checkpoint.session.activeStepId === request.stepId &&
+        checkpoint.session.completedStepIds.length === 1 &&
+        checkpoint.session.completedStepIds[0] === request.stepId &&
+        checkpoint.session.receiptStepIds.length === 1 &&
+        checkpoint.session.receiptStepIds[0] === request.stepId;
+      const observationMatches =
+        report.observations.length === 1 &&
+        report.observations[0]?.kind === request.expectedObservation.kind &&
+        report.observations[0]?.satisfied === true &&
+        computeContentSha256(report.observations[0]) === request.expectedObservation.contentSha256;
+      const sessionMatches =
+        report.plan?.id === request.plan.id &&
+        report.plan?.revision === request.plan.revision &&
+        report.planContentSha256 === request.planContentSha256 &&
+        report.executionId === request.executionId;
+      const stepMatches =
+        report.phase === 'completed' &&
+        report.activeStepId === request.stepId &&
+        report.stepId === request.stepId &&
+        report.completedStepIds.length === 1 &&
+        report.completedStepIds[0] === request.stepId &&
+        report.observationGate === null &&
+        report.error === null;
+      const verified = sessionMatches && stepMatches && observationMatches && checkpointMatches;
+      const expectedReason = !sessionMatches
+        ? 'session_identity_mismatch'
+        : !stepMatches
+          ? 'step_state_mismatch'
+          : !observationMatches
+            ? 'observation_mismatch'
+            : !checkpointMatches
+              ? 'native_undo_checkpoint_mismatch'
+              : 'verified';
+      if (
+        verification.reason !== expectedReason ||
+        verification.outcome !== (verified ? 'verified' : 'not_verified') ||
+        verification.verificationScope.managedActionCurrentState !==
+          (verified ? 'verified_at_report' : 'not_verified_at_report') ||
+        verification.verificationScope.nativeUndoCheckpoint !==
+          (checkpointMatches ? 'companion_reported_current_at_report' : 'not_verified_at_report')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['outcome'],
+          message: 'Current-state outcome and scope must match the reported evidence',
+        });
+      }
+      if (
+        Date.parse(request.requestedAt) >
+          Date.parse(verification.provenance.reportReceipt.receivedAt) ||
+        Date.parse(verification.provenance.reportReceipt.receivedAt) >
+          Date.parse(verification.recordedAt)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['provenance', 'reportReceipt'],
+          message: 'Current-state verification receipt must follow its request and precede storage',
+        });
+      }
+      if (
+        computeContentSha256(withoutIntegrity(verification)) !==
+        verification.integrity.contentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['integrity', 'contentSha256'],
+          message: 'Current-state verification integrity must match its canonical content',
+        });
+      }
+    });
+export type ProcedureLeafReplayCurrentStateVerification = z.infer<
+  typeof procedureLeafReplayCurrentStateVerificationSchema
+>;
+
+export function computeProcedureLeafReplayCurrentStateVerificationContentSha256(
+  verification:
+    | Omit<ProcedureLeafReplayCurrentStateVerification, 'integrity'>
+    | ProcedureLeafReplayCurrentStateVerification,
+): string {
+  return computeContentSha256(withoutIntegrity(verification));
+}
+
+export const procedureLeafReplayCurrentStateRequestResultSchema = z.strictObject({
+  status: z.enum(['accepted', 'duplicate']),
+  request: companionProcedureReplayCurrentStateRequestSchema,
+});
+export type ProcedureLeafReplayCurrentStateRequestResult = z.infer<
+  typeof procedureLeafReplayCurrentStateRequestResultSchema
+>;
+
+export const procedureLeafReplayCurrentStateStatusResultSchema = z.discriminatedUnion('status', [
+  z.strictObject({
+    status: z.literal('pending'),
+    request: companionProcedureReplayCurrentStateRequestSchema,
+  }),
+  z.strictObject({
+    status: z.literal('completed'),
+    verification: procedureLeafReplayCurrentStateVerificationSchema,
+  }),
+]);
+export type ProcedureLeafReplayCurrentStateStatusResult = z.infer<
+  typeof procedureLeafReplayCurrentStateStatusResultSchema
+>;
 
 export const procedureLeafReplayFinalizeResultSchema = z.strictObject({
   status: z.enum(['accepted', 'duplicate']),

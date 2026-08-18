@@ -23,6 +23,8 @@ import {
 import {
   canonicalizeProtocolJsonValue,
   guideProtocolVersion,
+  procedureLeafReplayCurrentStateRequestResultSchema,
+  procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalResultSchema,
   procedureAuthoringMaterializationResultSchema,
@@ -4085,8 +4087,10 @@ describe('procedure compilation runtime', () => {
   });
 
   it('attests only an approved terminal managed UV Sphere replay without upgrading UI tracks', async () => {
-    const runtime = await startRuntime({
-      databasePath: ':memory:',
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-current-state-replay-'));
+    const databasePath = join(directory, 'state.db');
+    let runtime = await startRuntime({
+      databasePath,
       accessToken,
       actionCatalogs: blenderActionCatalogs,
       interactionCatalogs: blenderInteractionCatalogs,
@@ -4332,8 +4336,8 @@ describe('procedure compilation runtime', () => {
         body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
       });
       expect(sessionResponse.status).toBe(200);
-      const session = (await sessionResponse.json()) as { leaseId: string };
-      const leaseHeaders = {
+      let session = (await sessionResponse.json()) as { leaseId: string };
+      let leaseHeaders = {
         ...headers,
         'x-operatingline-companion-lease': session.leaseId,
       };
@@ -4554,6 +4558,183 @@ describe('procedure compilation runtime', () => {
         }),
       ).toThrow(/ordered authenticated Companion session receipt chain/);
 
+      const requestCurrentState = async (verificationId: string) => {
+        const response = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/replay/current-state/request`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ replayId: replayRequest.replayId, verificationId }),
+          },
+        );
+        expect(response.status).toBe(200);
+        return procedureLeafReplayCurrentStateRequestResultSchema.parse(await response.json());
+      };
+      const deliverCurrentStateRequest = async () => {
+        const url = new URL('/api/v1/companion/guide', runtime.baseUrl);
+        url.searchParams.set('adapterId', 'blender');
+        url.searchParams.set('instanceId', targetInstanceId);
+        const response = await fetch(url, { headers: leaseHeaders });
+        expect(response.status).toBe(200);
+        const payload = (await response.json()) as {
+          procedureReplayCurrentStateRequest?: unknown;
+        };
+        return payload.procedureReplayCurrentStateRequest;
+      };
+      const verificationId = randomUUID();
+      const currentStateMcp = await callMcpTool(
+        runtime,
+        905,
+        'operatingline.procedure.replay.current-state.request',
+        { replayId: replayRequest.replayId, verificationId },
+      );
+      expect(currentStateMcp.result?.isError).not.toBe(true);
+      const currentStateRequested = procedureLeafReplayCurrentStateRequestResultSchema.parse(
+        currentStateMcp.result?.structuredContent,
+      );
+      expect(currentStateRequested.status).toBe('accepted');
+      expect(await requestCurrentState(verificationId)).toMatchObject({ status: 'duplicate' });
+      const competingRequest = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state/request`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: replayRequest.replayId,
+            verificationId: randomUUID(),
+          }),
+        },
+      );
+      expect(competingRequest.status).toBe(409);
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      const pendingStatusResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state?verificationId=${verificationId}`,
+        { headers },
+      );
+      expect(
+        procedureLeafReplayCurrentStateStatusResultSchema.parse(await pendingStatusResponse.json()),
+      ).toEqual({ status: 'pending', request: currentStateRequested.request });
+      const unauthenticatedDeliveryUrl = new URL('/api/v1/companion/guide', runtime.baseUrl);
+      unauthenticatedDeliveryUrl.searchParams.set('adapterId', 'blender');
+      unauthenticatedDeliveryUrl.searchParams.set('instanceId', targetInstanceId);
+      const unauthenticatedDelivery = await fetch(unauthenticatedDeliveryUrl, { headers });
+      expect(unauthenticatedDelivery.status).toBe(200);
+      await expect(unauthenticatedDelivery.json()).resolves.not.toHaveProperty(
+        'procedureReplayCurrentStateRequest',
+      );
+      const restartedSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(restartedSessionResponse.status).toBe(200);
+      session = (await restartedSessionResponse.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      expect(await deliverCurrentStateRequest()).toEqual(currentStateRequested.request);
+      const currentStateReport = {
+        ...terminalReport,
+        reportId: randomUUID(),
+        sequence: 7,
+        transition: 'current_state_rechecked',
+        procedureReplayCurrentStateRequest: currentStateRequested.request,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const currentStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(currentStateReport),
+      });
+      expect(currentStateResponse.status).toBe(200);
+      const currentStateStatusResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state?verificationId=${verificationId}`,
+        { headers },
+      );
+      expect(currentStateStatusResponse.status).toBe(200);
+      const currentStateStatus = procedureLeafReplayCurrentStateStatusResultSchema.parse(
+        await currentStateStatusResponse.json(),
+      );
+      expect(currentStateStatus).toMatchObject({
+        status: 'completed',
+        verification: {
+          outcome: 'verified',
+          reason: 'verified',
+          verificationScope: {
+            managedActionCurrentState: 'verified_at_report',
+            nativeUndoCheckpoint: 'companion_reported_current_at_report',
+            currentHostStateAfterReport: 'not_verified',
+          },
+        },
+      });
+      const currentStateMcpGet = await callMcpTool(
+        runtime,
+        906,
+        'operatingline.procedure.replay.current-state.get',
+        { verificationId },
+      );
+      expect(currentStateMcpGet.result?.isError).not.toBe(true);
+      expect(
+        procedureLeafReplayCurrentStateStatusResultSchema.parse(
+          currentStateMcpGet.result?.structuredContent,
+        ),
+      ).toEqual(currentStateStatus);
+      expect(await requestCurrentState(verificationId)).toMatchObject({ status: 'duplicate' });
+
+      const driftVerificationId = randomUUID();
+      const driftRequested = await requestCurrentState(driftVerificationId);
+      expect(await deliverCurrentStateRequest()).toEqual(driftRequested.request);
+      const driftReport = {
+        ...terminalReport,
+        reportId: randomUUID(),
+        sequence: 8,
+        transition: 'current_state_rechecked',
+        observations: [
+          {
+            ...terminalReport.observations[0],
+            satisfied: false,
+            details: {
+              ...terminalReport.observations[0]!.details,
+              contentIntact: false,
+            },
+          },
+        ],
+        procedureReplayCurrentStateRequest: driftRequested.request,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const driftResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(driftReport),
+      });
+      expect(driftResponse.status).toBe(200);
+      const driftStatusResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/current-state?verificationId=${driftVerificationId}`,
+        { headers },
+      );
+      const driftStatus = procedureLeafReplayCurrentStateStatusResultSchema.parse(
+        await driftStatusResponse.json(),
+      );
+      expect(driftStatus).toMatchObject({
+        status: 'completed',
+        verification: {
+          outcome: 'not_verified',
+          reason: 'observation_mismatch',
+          verificationScope: {
+            managedActionCurrentState: 'not_verified_at_report',
+            nativeUndoCheckpoint: 'companion_reported_current_at_report',
+          },
+        },
+      });
+
       const duplicateFinalize = await callMcpTool(
         runtime,
         901,
@@ -4597,6 +4778,8 @@ describe('procedure compilation runtime', () => {
       expect(evalBundle.summary.eventTypeCounts).toMatchObject({
         'procedure.leaf-replay.proposed': 1,
         'procedure.leaf-replay.attested': 1,
+        'procedure.leaf-replay.current-state.requested': 2,
+        'procedure.leaf-replay.current-state.completed': 2,
       });
       expect(
         evalBundle.events.filter((event) => event.eventType.startsWith('procedure.leaf-replay.')),
@@ -4609,9 +4792,24 @@ describe('procedure compilation runtime', () => {
           eventType: 'procedure.leaf-replay.attested',
           payload: finalized.attestation,
         }),
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.current-state.requested',
+          payload: currentStateRequested.request,
+        }),
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.current-state.completed',
+        }),
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.current-state.requested',
+          payload: driftRequested.request,
+        }),
+        expect.objectContaining({
+          eventType: 'procedure.leaf-replay.current-state.completed',
+        }),
       ]);
     } finally {
       await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

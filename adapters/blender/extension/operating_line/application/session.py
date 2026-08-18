@@ -631,6 +631,16 @@ class DemoSession:
         )
         raise ObservationGateError(step, self.observation_gate)
 
+    def evaluate_current_step_observations(
+        self,
+        step_id: str,
+    ) -> tuple[TaskNode | None, list[dict[str, Any]]]:
+        """Evaluate one known step without mutating progress or gate state."""
+        step = next((candidate for candidate in self.steps if candidate.id == step_id), None)
+        if step is None:
+            return None, []
+        return step, self._evaluate_step(step)
+
     def back(self) -> TaskNode | None:
         step = self.active_step
         if step is None:
