@@ -99,7 +99,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   不调用转录或模型。若运行入口显式配置了短期 YouTube OAuth access token，用户还可在确认网络请求与
   API 配额消耗后，先通过 MCP `operatingline.procedure.tutorial.youtube.tracks.list` 或 HTTP
   `POST /api/v1/procedure/tutorial/youtube/tracks` 枚举该可编辑视频的字幕轨元数据；该操作固定披露当前官方
-  `captions.list` 的 50-unit 成本，不下载字幕正文，也不会静默选轨。调用方明确选择后，再通过 MCP
+  `captions.list` 的 50-unit 成本，不下载字幕正文，也不会静默选轨。调用方可把已完成列表的 requestId 和
+  明确的语言、track kind、audio track、draft、CC、同步偏好交给 MCP
+  `operatingline.procedure.tutorial.youtube.tracks.recommend` 或 HTTP
+  `POST /api/v1/procedure/tutorial/youtube/tracks/recommend`；该确定性本地投影不联网、不增加 quota、不下载内容、
+  不调用模型，并逐项返回排序信号和排除原因，但仍固定要求人工选择。调用方明确选择后，再通过 MCP
   `operatingline.procedure.tutorial.youtube.import` 或 HTTP `POST /api/v1/procedure/tutorial/youtube/import`
   请求一个精确的 video ID、caption track ID 和 SRT/WebVTT 格式。Runtime 只使用官方 YouTube Data API
   读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
@@ -127,8 +131,9 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
   [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md) 与
   [ADR 0077](docs/adr/0077-caption-document-provider-generation.md)、
-  [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md) 与
-  [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md)。
+  [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md)、
+  [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md) 与
+  [ADR 0080](docs/adr/0080-explicit-youtube-caption-track-recommendation.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

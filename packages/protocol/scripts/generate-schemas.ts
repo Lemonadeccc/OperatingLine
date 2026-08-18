@@ -65,6 +65,8 @@ import {
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
+  procedureTutorialYoutubeTrackRecommendationRequestSchema,
+  procedureTutorialYoutubeTrackRecommendationResultSchema,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureLeafReplayAttestationSchema,
@@ -425,6 +427,16 @@ const schemas = [
     'procedure-tutorial-youtube-track-list-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-list-result.json',
     procedureTutorialYoutubeTrackListResultSchema,
+  ],
+  [
+    'procedure-tutorial-youtube-track-recommendation-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-recommendation-request.json',
+    procedureTutorialYoutubeTrackRecommendationRequestSchema,
+  ],
+  [
+    'procedure-tutorial-youtube-track-recommendation-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-recommendation-result.json',
+    procedureTutorialYoutubeTrackRecommendationResultSchema,
   ],
   [
     'procedure-authoring-materialization-request.schema.json',

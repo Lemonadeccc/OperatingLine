@@ -296,8 +296,12 @@
         同一 requestId 自动重试。入口不能抓取任意公开视频字幕，也不把编辑权限或权利声明当成 released
         训练许可。见 [ADR 0078](adr/0078-authorized-youtube-caption-acquisition.md) 与
         [ADR 0079](adr/0079-authorized-youtube-caption-track-discovery.md)。
-  - [ ] OAuth 登录/刷新、字幕轨自动推荐/选择、视频媒体下载/语音转录、画面与按键识别、自动语义分段、
-        证据帧，以及大步骤/小步骤质量校准；当前 Runtime 要求调用方从已枚举元数据中显式选择授权字幕轨。
+  - [x] 需显式确认的字幕轨推荐：本地确定性入口引用已完成 list，按调用方给出的语言、track kind、audio
+        track、draft、CC 与同步偏好返回稳定候选顺序、排序信号和逐轨排除原因。推荐不联网、不增加 quota、
+        不下载内容、不调用 Provider、不持久化为训练标签，也不自动选择；import 仍要求精确 track ID。见
+        [ADR 0080](adr/0080-explicit-youtube-caption-track-recommendation.md)。
+  - [ ] OAuth 登录/刷新、选择确认 UI 与选择理由证据、视频媒体下载/语音转录、画面与按键识别、自动语义
+        分段、证据帧，以及大步骤/小步骤质量校准；当前 Runtime 始终要求调用方显式选择授权字幕轨。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

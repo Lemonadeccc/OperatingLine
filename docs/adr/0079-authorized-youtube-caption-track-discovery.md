@@ -34,8 +34,8 @@ Source 只调用一次 `captions.list(part=snippet&videoId=...)`，不设置 tra
 
 Result 固定声明 `youtube.captions.list`、当前文档的 50 quota units，以及
 `captionContentDownloaded/videoMediaDownloaded/modelCalled/procedureStored/proposalCreated/hostExecutionStarted`
-全部为 `false`。空 tracks 数组是有效结果，表示授权请求成功但没有字幕轨；Runtime 不推荐或自动选择任何
-item。
+全部为 `false`。空 tracks 数组是有效结果，表示授权请求成功但没有字幕轨；该枚举操作不推荐或自动选择
+任何 item，后续确定性偏好排序由 ADR 0080 单独定义。
 
 Coordinator 在网络请求前持久化 requested evidence。相同 requestId 与完全相同输入共享进行中的请求或返回
 已完成结果，不同输入冲突。网络调用开始后的失败、权限错误或结果校验失败都要求新的 requestId，避免隐藏
@@ -47,8 +47,9 @@ token 或字幕正文。Runtime 重启后可以从 completed evidence 返回相�
 用户现在可以先枚举自己有权管理的视频字幕轨，再把明确选择的 track ID 交给 ADR 0078 import。枚举证明的
 只是 OAuth 身份能够读取这些轨道元数据，不代表内容已获得训练发布许可，也不证明字幕语义或时间码正确。
 
-仍需 OAuth 登录/refresh、基于用户偏好的显式推荐辅助、视频媒体/ASR fallback、画面与按键识别，以及把已选
-字幕获取与 Provider ProcedureTree 生成组合成一个仍受逐阶段授权的工作流。
+后续 [ADR 0080](0080-explicit-youtube-caption-track-recommendation.md) 增加基于用户偏好的确定性本地推荐，但仍不
+自动选择。仍需 OAuth 登录/refresh、选择确认 UI 与理由证据、视频媒体/ASR fallback、画面与按键识别，以及
+把已选字幕获取与 Provider ProcedureTree 生成组合成一个仍受逐阶段授权的工作流。
 
 ## 参考
 

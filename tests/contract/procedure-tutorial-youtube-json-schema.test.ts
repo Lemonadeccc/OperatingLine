@@ -12,9 +12,12 @@ import {
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
+  procedureTutorialYoutubeTrackRecommendationRequestSchema,
+  procedureTutorialYoutubeTrackRecommendationResultSchema,
 } from '@operatingline/protocol';
 
 import { buildProcedureTutorialYoutubePromptPacket } from '../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
+import { recommendProcedureTutorialYoutubeCaptionTracks } from '../../services/orchestrator/src/procedure-tutorial-youtube-track-recommendation.js';
 import type { ProcedureTutorialYoutubeCaptionAcquisitionResult } from '../../services/orchestrator/src/youtube-caption-source.js';
 import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-support/public-json-schema-validator.js';
 
@@ -122,6 +125,29 @@ const trackListResult = {
   listedAt: '2026-08-18T09:00:00Z',
 } as const;
 
+const trackRecommendationRequest = {
+  formatVersion: '1.0.0',
+  requestId: 'dc8f24f0-96f0-45cf-a38c-de4a1b8a8ba7',
+  trackListRequestId: trackListRequest.requestId,
+  videoId: trackListRequest.youtube.videoId,
+  preferences: {
+    preferredLanguages: ['en-US'],
+    languageMatching: 'primary_subtag_fallback',
+    allowUnlistedLanguages: false,
+    trackKindPriority: ['standard', 'ASR'],
+    audioTrackTypePriority: ['primary'],
+    allowDraftTracks: false,
+    preferClosedCaptions: true,
+    preferManualSync: true,
+    explicitSelectionRequired: true,
+  },
+} as const;
+
+const trackRecommendationResult = recommendProcedureTutorialYoutubeCaptionTracks(
+  procedureTutorialYoutubeTrackRecommendationRequestSchema.parse(trackRecommendationRequest),
+  procedureTutorialYoutubeTrackListResultSchema.parse(trackListResult),
+);
+
 describe('public authorized YouTube caption import JSON Schema', () => {
   it('publishes strict caption-track list request and metadata-only result contracts', async () => {
     const requestCases = [
@@ -174,6 +200,63 @@ describe('public authorized YouTube caption import JSON Schema', () => {
     );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-youtube-track-list-result.schema.json'),
+      resultCases,
+    );
+  });
+
+  it('publishes strict local recommendation contracts without selection or side effects', async () => {
+    const requestCases = [
+      { value: trackRecommendationRequest, accepted: true },
+      {
+        value: {
+          ...trackRecommendationRequest,
+          preferences: {
+            ...trackRecommendationRequest.preferences,
+            explicitSelectionRequired: false,
+          },
+        },
+        accepted: false,
+      },
+      { value: { ...trackRecommendationRequest, accessToken: 'forbidden' }, accepted: false },
+    ] as const;
+    const resultCases = [
+      { value: trackRecommendationResult, accepted: true },
+      {
+        value: {
+          ...trackRecommendationResult,
+          selection: {
+            ...trackRecommendationResult.selection,
+            automaticallySelected: true,
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...trackRecommendationResult,
+          sideEffects: { ...trackRecommendationResult.sideEffects, additionalQuotaUnits: 1 },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of requestCases) {
+      expect(
+        procedureTutorialYoutubeTrackRecommendationRequestSchema.safeParse(contractCase.value)
+          .success,
+      ).toBe(contractCase.accepted);
+    }
+    for (const contractCase of resultCases) {
+      expect(
+        procedureTutorialYoutubeTrackRecommendationResultSchema.safeParse(contractCase.value)
+          .success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-recommendation-request.schema.json'),
+      requestCases,
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-recommendation-result.schema.json'),
       resultCases,
     );
   });

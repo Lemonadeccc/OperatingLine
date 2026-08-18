@@ -23,8 +23,14 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain(
       'operatingline.procedure.tutorial.youtube.tracks.list',
     );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.procedure.tutorial.youtube.tracks.recommend',
+    );
     expect(operatingLineMcpInstructions).toContain('documented 50-unit captions.list cost');
-    expect(operatingLineMcpInstructions).toContain('rather than choosing silently');
+    expect(operatingLineMcpInstructions).toContain('neither listing nor recommendation selects');
+    expect(operatingLineMcpInstructions).toContain(
+      'without another network request, quota charge, caption download, or model call',
+    );
     expect(operatingLineMcpInstructions).toContain('cannot fetch arbitrary public-video captions');
     expect(operatingLineMcpInstructions).toContain(
       'send its normalized cues and task context to that Provider',

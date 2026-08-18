@@ -21,6 +21,7 @@ import {
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
   procedureTutorialYoutubeTrackListResultSchema,
+  procedureTutorialYoutubeTrackRecommendationResultSchema,
   type GuidePlan,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
@@ -361,6 +362,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.procedure.tutorial.import' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.list' },
+            { name: 'operatingline.procedure.tutorial.youtube.tracks.recommend' },
             { name: 'operatingline.procedure.tutorial.youtube.import' },
             { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
@@ -432,6 +434,15 @@ describe('OperatingLine runtime', () => {
       ).toMatchObject({
         type: 'object',
         required: ['formatVersion', 'requestId', 'youtube'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.tracks.recommend',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'trackListRequestId', 'videoId', 'preferences'],
         additionalProperties: false,
       });
       expect(
@@ -971,6 +982,23 @@ describe('OperatingLine runtime', () => {
         authorization: importRequest.youtube.authorization,
       },
     } as const;
+    const trackRecommendationRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      trackListRequestId: trackListRequest.requestId,
+      videoId: trackListRequest.youtube.videoId,
+      preferences: {
+        preferredLanguages: ['en-US'],
+        languageMatching: 'primary_subtag_fallback',
+        allowUnlistedLanguages: false,
+        trackKindPriority: ['standard', 'ASR'],
+        audioTrackTypePriority: ['primary'],
+        allowDraftTracks: false,
+        preferClosedCaptions: true,
+        preferManualSync: true,
+        explicitSelectionRequired: true,
+      },
+    } as const;
     const headers = {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
@@ -1027,9 +1055,60 @@ describe('OperatingLine runtime', () => {
         await expect(repeatedTrackList.json()).resolves.toEqual(trackList);
         expect(trackListCalls).toBe(1);
 
-        const imported = await callMcpTool(
+        const recommended = await callMcpTool(
           runtime,
           170,
+          'operatingline.procedure.tutorial.youtube.tracks.recommend',
+          trackRecommendationRequest,
+        );
+        expect(recommended.result?.isError).not.toBe(true);
+        const recommendation = procedureTutorialYoutubeTrackRecommendationResultSchema.parse(
+          recommended.result?.structuredContent,
+        );
+        expect(recommendation).toMatchObject({
+          requestId: trackRecommendationRequest.requestId,
+          sourceTrackList: {
+            requestId: trackListRequest.requestId,
+            videoId: trackListRequest.youtube.videoId,
+          },
+          recommendedCaptionTrackId: importRequest.youtube.captionTrackId,
+          selection: {
+            required: true,
+            automaticallySelected: false,
+            selectedCaptionTrackId: null,
+          },
+          sideEffects: {
+            networkFetched: false,
+            additionalQuotaUnits: 0,
+            captionContentDownloaded: false,
+            modelCalled: false,
+          },
+        });
+        expect(recommendation.rankedCandidates).toHaveLength(1);
+        expect(trackListCalls).toBe(1);
+        expect(sourceCalls).toBe(0);
+
+        const missingRecommendation = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/tracks/recommend`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...trackRecommendationRequest,
+              requestId: randomUUID(),
+              trackListRequestId: randomUUID(),
+            }),
+          },
+        );
+        expect(missingRecommendation.status).toBe(404);
+        await expect(missingRecommendation.json()).resolves.toMatchObject({
+          error: 'youtube_track_recommendation_source_not_found',
+          retryMode: 'same_request_id',
+        });
+
+        const imported = await callMcpTool(
+          runtime,
+          171,
           'operatingline.procedure.tutorial.youtube.import',
           importRequest,
         );
@@ -1079,7 +1158,7 @@ describe('OperatingLine runtime', () => {
 
         const validation = await callMcpTool(
           runtime,
-          171,
+          172,
           'operatingline.procedure.authoring.validate',
           { packet, tree: generatedProcedureCandidate(packet) },
         );
@@ -1175,6 +1254,22 @@ describe('OperatingLine runtime', () => {
         expect(restoredTrackList.status).toBe(200);
         await expect(restoredTrackList.json()).resolves.toEqual(
           expect.objectContaining({ requestId: trackListRequest.requestId }),
+        );
+        const restoredRecommendation = await fetch(
+          `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/tracks/recommend`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(trackRecommendationRequest),
+          },
+        );
+        expect(restoredRecommendation.status).toBe(200);
+        await expect(restoredRecommendation.json()).resolves.toEqual(
+          expect.objectContaining({
+            requestId: trackRecommendationRequest.requestId,
+            recommendedCaptionTrackId: importRequest.youtube.captionTrackId,
+            selection: expect.objectContaining({ automaticallySelected: false }),
+          }),
         );
         const restored = await fetch(
           `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/import`,

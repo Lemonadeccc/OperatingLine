@@ -65,6 +65,8 @@ import {
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
+  procedureTutorialYoutubeTrackRecommendationRequestSchema,
+  procedureTutorialYoutubeTrackRecommendationResultSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
@@ -179,6 +181,11 @@ import {
   procedureTutorialYoutubeTrackListHttpStatus,
   type ProcedureTutorialYoutubeImportCoordinator,
 } from './procedure-tutorial-youtube-import.js';
+import {
+  procedureTutorialYoutubeTrackRecommendationErrorResponse,
+  procedureTutorialYoutubeTrackRecommendationHttpStatus,
+  recommendProcedureTutorialYoutubeCaptionTracks,
+} from './procedure-tutorial-youtube-track-recommendation.js';
 import {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
@@ -1970,6 +1977,88 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.tutorial.youtube.tracks.recommend',
+        {
+          description:
+            'Deterministically rank one previously completed authorized YouTube caption-track list using explicit ordered language, track-kind, audio-track, draft, closed-caption, and synchronization preferences. This local advisory operation performs no network request, spends no additional API quota, downloads no caption or video content, calls no model, and never selects a track. Present the ranked and excluded tracks to the user, then require an explicit caption-track id in a later import request.',
+          inputSchema: deferMcpInputValidation(
+            procedureTutorialYoutubeTrackRecommendationRequestSchema,
+          ),
+          outputSchema: procedureTutorialYoutubeTrackRecommendationResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialYoutubeTrackRecommendationRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            const requestIdInput =
+              requestInput !== null &&
+              typeof requestInput === 'object' &&
+              !Array.isArray(requestInput)
+                ? (requestInput as Record<string, unknown>)['requestId']
+                : null;
+            const parsedRequestId = z.uuid().safeParse(requestIdInput);
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'youtube_track_recommendation_invalid',
+                    requestId: parsedRequestId.success ? parsedRequestId.data : null,
+                    message:
+                      'YouTube caption track recommendation request violates the strict public contract',
+                    retryMode: 'never',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const source = procedureTutorialYoutubeImportCoordinator!.completedTrackList(
+              parsedRequest.data.trackListRequestId,
+            );
+            const result = recommendProcedureTutorialYoutubeCaptionTracks(
+              parsedRequest.data,
+              source,
+            );
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: result.formatVersion,
+                    videoId: result.sourceTrackList.videoId,
+                    recommendedCaptionTrackId: result.recommendedCaptionTrackId,
+                    candidateCount: result.rankedCandidates.length,
+                    excludedCount: result.excludedTracks.length,
+                    selectionRequired: true,
+                    message:
+                      'The complete local ranking is in structuredContent; no caption track was selected.',
+                  }),
+                },
+              ],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(
+                    procedureTutorialYoutubeTrackRecommendationErrorResponse(
+                      error,
+                      parsedRequest.data.requestId,
+                    ),
+                  ),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.tutorial.youtube.import',
         {
           description:
@@ -3449,6 +3538,45 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           );
       }
     });
+    runtimeApp.post(
+      '/api/v1/procedure/tutorial/youtube/tracks/recommend',
+      async (request, reply) => {
+        const parsedRequest = procedureTutorialYoutubeTrackRecommendationRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          const requestIdInput =
+            request.body !== null &&
+            typeof request.body === 'object' &&
+            !Array.isArray(request.body)
+              ? (request.body as Record<string, unknown>)['requestId']
+              : null;
+          const parsedRequestId = z.uuid().safeParse(requestIdInput);
+          return reply.code(400).send({
+            error: 'youtube_track_recommendation_invalid',
+            requestId: parsedRequestId.success ? parsedRequestId.data : null,
+            message:
+              'YouTube caption track recommendation request violates the strict public contract',
+            retryMode: 'never',
+          });
+        }
+        try {
+          const source = procedureTutorialYoutubeImportCoordinator!.completedTrackList(
+            parsedRequest.data.trackListRequestId,
+          );
+          return recommendProcedureTutorialYoutubeCaptionTracks(parsedRequest.data, source);
+        } catch (error) {
+          return reply
+            .code(procedureTutorialYoutubeTrackRecommendationHttpStatus(error))
+            .send(
+              procedureTutorialYoutubeTrackRecommendationErrorResponse(
+                error,
+                parsedRequest.data.requestId,
+              ),
+            );
+        }
+      },
+    );
     runtimeApp.post('/api/v1/procedure/tutorial/youtube/import', async (request, reply) => {
       const parsedRequest = procedureTutorialYoutubeImportRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -4526,6 +4654,13 @@ export {
   type ProcedureTutorialYoutubeRetryMode,
   type ProcedureTutorialYoutubeTrackListRetryMode,
 } from './procedure-tutorial-youtube-import.js';
+export {
+  ProcedureTutorialYoutubeTrackRecommendationError,
+  procedureTutorialYoutubeTrackRecommendationErrorResponse,
+  procedureTutorialYoutubeTrackRecommendationHttpStatus,
+  recommendProcedureTutorialYoutubeCaptionTracks,
+  type ProcedureTutorialYoutubeTrackRecommendationRetryMode,
+} from './procedure-tutorial-youtube-track-recommendation.js';
 export {
   createYouTubeDataApiCaptionSource,
   parseYouTubeDurationMs,

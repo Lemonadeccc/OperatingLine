@@ -356,6 +356,13 @@ draft/auto-sync/status/failure metadata；结果明确记录当前文档的 50-u
 Provider。完全相同 requestId 幂等恢复，不同输入冲突；失败后必须换 requestId，避免隐式重复配额消耗。
 Runtime 不自动选择字幕轨。
 
+若调用方已有语言、track kind、audio track、draft、CC 与同步偏好，可把已完成 list 的 requestId 交给 MCP
+`operatingline.procedure.tutorial.youtube.tracks.recommend` 或 HTTP
+`POST /api/v1/procedure/tutorial/youtube/tracks/recommend`。该入口只读取已恢复的 completed list，按版本化固定
+策略排除非 serving 或不符合 allowlist 的轨道，再返回稳定 rank、排序信号与逐轨排除原因。它不联网、不增加
+quota、不下载内容、不调用 Provider，也不写 recommendation evidence；输出固定为未选择状态，调用方仍须在
+后续 import 中明确提交一个精确 track ID。这样算法第一名不会被误当成人工标签或自动下载授权。
+
 MCP `operatingline.procedure.tutorial.youtube.import` 与 HTTP
 `POST /api/v1/procedure/tutorial/youtube/import` 再要求调用方选择的 caption track ID、输出格式和权利声明。
 Coordinator 先持久化不含 token 和字幕
@@ -375,8 +382,9 @@ Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
 [ADR 0076](../adr/0076-user-supplied-caption-document-import.md) 与
 [ADR 0077](../adr/0077-caption-document-provider-generation.md)、
-[ADR 0078](../adr/0078-authorized-youtube-caption-acquisition.md) 与
-[ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md)。
+[ADR 0078](../adr/0078-authorized-youtube-caption-acquisition.md)、
+[ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md) 与
+[ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

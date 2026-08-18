@@ -24,4 +24,6 @@ token is never accepted in MCP/HTTP payloads, persisted, or logged; this runtime
 OAuth redirects or token refresh and cannot retrieve arbitrary public-video captions. If the exact
 track id is unknown, call `operatingline.procedure.tutorial.youtube.tracks.list` first with explicit
 network/quota approval. It spends the documented 50-unit `captions.list` cost and returns metadata
-only; the caller must select a track explicitly before import.
+only. `operatingline.procedure.tutorial.youtube.tracks.recommend` can then rank that completed list
+locally from explicit preferences without another network request, quota charge, download, or model
+call. The result never selects a track; the caller must still confirm an exact track id before import.

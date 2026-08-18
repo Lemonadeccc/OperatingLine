@@ -57,9 +57,9 @@ released 训练许可。
 项目现在可以在平台授权边界内，把一个真实 YouTube 字幕轨转换为可验证、可重启恢复的教程 authoring
 packet，同时保留原有 candidate-only、人工审阅和宿主执行边界。它不能用来抓取任意公开视频字幕。
 
-后续 [ADR 0079](0079-authorized-youtube-caption-track-discovery.md) 已增加授权视频字幕轨元数据枚举，但仍要求
-调用方显式选择。仍需 OAuth 授权流程与 token refresh、字幕轨自动推荐/选择、视频媒体导入与 ASR、
-画面/按键识别、自动语义
+后续 [ADR 0079](0079-authorized-youtube-caption-track-discovery.md) 已增加授权视频字幕轨元数据枚举，
+[ADR 0080](0080-explicit-youtube-caption-track-recommendation.md) 已增加无副作用的偏好排序，但仍要求调用方显式
+选择。仍需 OAuth 授权流程与 token refresh、选择确认 UI 与理由证据、视频媒体导入与 ASR、画面/按键识别、自动语义
 分段、证据帧抽取，以及把 `1.3.0` packet 交给 Provider 后生成完整 ProcedureTree 的组合入口。
 
 ## 参考
