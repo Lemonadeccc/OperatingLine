@@ -7,6 +7,7 @@ import {
   canonicalizeProtocolJsonValue,
   interactionCatalogSchema,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringPromptAcquisitionFormatVersion,
   procedureAuthoringPromptDocumentFormatVersion,
   procedureAuthoringPromptLegacyFormatVersion,
   procedureAuthoringPromptContextSchema,
@@ -60,6 +61,10 @@ const tutorialDocumentWorkflowInstructions = [
 
 const tutorialAcquisitionWorkflowInstructions = [
   'The caption document was acquired through the authorized YouTube Data API track recorded in provenance. Preserve the acquisition metadata, and do not treat OAuth edit permission or the caller rights declaration as independent training-release approval.',
+] as const;
+
+const tutorialSelectionWorkflowInstructions = [
+  'The caption track was explicitly selected in the local evidence ledger before import. Preserve the structured selection receipt binding exactly; free-text selection notes are intentionally excluded from this packet.',
 ] as const;
 
 export interface ProcedureAuthoringPromptPacketBuildOptions {
@@ -459,6 +464,9 @@ export function buildProcedureAuthoringPromptPacket(
       ...(tutorialTranscriptDocument?.acquisition === undefined
         ? {}
         : { tutorialTranscriptAcquisitionBound: true }),
+      ...(tutorialTranscriptDocument?.acquisition?.selection === undefined
+        ? {}
+        : { tutorialTranscriptSelectionBound: true }),
     },
   });
   const baseResponseSchema = z.toJSONSchema(procedureAuthoringCandidateTreeSchema, {
@@ -494,7 +502,9 @@ export function buildProcedureAuthoringPromptPacket(
           ? procedureAuthoringPromptTutorialFormatVersion
           : tutorialTranscriptDocument.acquisition === undefined
             ? procedureAuthoringPromptDocumentFormatVersion
-            : procedureAuthoringPromptFormatVersion,
+            : tutorialTranscriptDocument.acquisition.selection === undefined
+              ? procedureAuthoringPromptAcquisitionFormatVersion
+              : procedureAuthoringPromptFormatVersion,
     context,
     retrieval: {
       toolName: 'operatingline.procedure.search',
@@ -520,6 +530,9 @@ export function buildProcedureAuthoringPromptPacket(
               ...(tutorialTranscriptDocument?.acquisition === undefined
                 ? []
                 : tutorialAcquisitionWorkflowInstructions),
+              ...(tutorialTranscriptDocument?.acquisition?.selection === undefined
+                ? []
+                : tutorialSelectionWorkflowInstructions),
             ],
     },
     limits: {

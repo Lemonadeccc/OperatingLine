@@ -128,7 +128,9 @@ describe('authorized YouTube caption track selection', () => {
 
     expect(second).toEqual(first);
     expect(first).toMatchObject({
+      formatVersion: '1.1.0',
       requestId: overrideRequest.requestId,
+      requestFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
       selectedTrack: { captionTrackId: 'asr-en', status: 'serving' },
       confirmation: overrideRequest.confirmation,
       recommendation: {
@@ -161,8 +163,18 @@ describe('authorized YouTube caption track selection', () => {
       coordinator.select({ ...overrideRequest, captionTrackId: 'standard-en' }),
     ).toThrowError(expect.objectContaining({ code: 'youtube_track_selection_conflict' }));
 
+    const currentPayload = events[0]!.payload as Record<string, unknown>;
+    const currentResult = currentPayload['result'] as Record<string, unknown>;
+    const legacyResult = { ...currentResult, formatVersion: '1.0.0' };
+    delete legacyResult['requestFingerprint'];
+    const legacyEvents = [
+      {
+        ...events[0]!,
+        payload: { ...currentPayload, result: legacyResult },
+      },
+    ];
     const restarted = createProcedureTutorialYoutubeTrackSelectionCoordinator({
-      existingEvents: stored(events),
+      existingEvents: stored(legacyEvents),
       completedTrackList: () => {
         throw new Error('A restored selection must not reload its source list.');
       },

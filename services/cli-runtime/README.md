@@ -30,4 +30,8 @@ call. The result never selects a track. After confirmation,
 `operatingline.procedure.tutorial.youtube.tracks.select` can persist the exact serving track, a
 bounded reason, and whether the user accepted or overrode the recomputed recommendation. Optional
 reason notes are retained in the local evidence ledger. Selection downloads nothing; the caller must
-still pass the same exact track id to import.
+pass the selection request id and the same exact video and track ids to the current YouTube import
+request `1.1.0`. Before any YouTube API call, the runtime loads that recorded selection and rejects a
+missing or mismatched receipt. Legacy import request `1.0.0` remains compatibility-only. A successful
+bound import returns Procedure authoring packet `1.4.0` with structured, non-free-text selection
+provenance; optional reason notes are not copied into the packet or forwarded to a provider.

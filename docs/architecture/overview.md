@@ -368,16 +368,19 @@ quota、不下载内容、不调用 Provider，也不写 recommendation evidence
 受限 reason code、可选的最长 1,000 字符备注，以及可选的完整推荐偏好；Runtime 重算推荐后记录用户采用还是
 覆盖第一候选及所选候选 rank。相同 requestId/输入可重启幂等恢复，不同输入冲突。该本地操作只写一条
 completed evidence，不联网、不增加 quota、不下载内容或调用 Provider；备注会进入本地 evidence ledger，
-调用前必须披露。当前 import 尚未把 selection requestId 作为强制前置门，只由调用工作流保证使用同一精确
-video/track identity。
+调用前必须披露。
 
 MCP `operatingline.procedure.tutorial.youtube.import` 与 HTTP
-`POST /api/v1/procedure/tutorial/youtube/import` 再要求调用方选择的 caption track ID、输出格式和权利声明。
-Coordinator 先持久化不含 token 和字幕
+`POST /api/v1/procedure/tutorial/youtube/import` 的当前 request `1.1.0` 要求调用方同时提交已记录选择的
+`selectionRequestId`、所选 caption track ID、输出格式和权利声明。Coordinator 在任何 YouTube API 调用前
+从本地证据恢复选择收据，并核对其 request ID、video ID 和 caption track ID 与 import 请求完全一致；不存在、
+未完成或 identity 不一致时 fail closed。历史 request `1.0.0` 仅保留兼容读取，不代表当前工作流。
+Coordinator 随后持久化不含 token 和字幕
 正文的 requested evidence，再通过官方 YouTube Data API 读取 `videos.list` 元数据、用 `captions.list` 核对
 精确字幕轨并用 `captions.download` 获取 SRT/WebVTT；最大响应、UTF-8、轨道归属、语言、serving 状态与视频
-时长均 fail closed。结果沿用同一字幕解析器并生成 `1.3.0` packet，额外绑定 API 来源、权限类型、video/track
-identity、track kind、draft/auto-sync/status/last-updated 与请求格式。completed evidence 只保存规范化 packet，
+时长均 fail closed。结果沿用同一字幕解析器并生成 `1.4.0` packet，额外绑定 API 来源、权限类型、video/track
+identity、track kind、draft/auto-sync/status/last-updated、请求格式，以及非自由文本的选择 provenance。选择
+备注继续保存在本地 evidence ledger，不进入 packet，因此也不会作为 Provider 输入转发。completed evidence 只保存规范化 packet，
 失败证据只保存安全错误码；相同 requestId 同输入幂等恢复，不同输入冲突，已发出 API 请求的失败不会用同一
 requestId 自动重试，从而避免隐式重复配额消耗。该入口不下载视频媒体、不调用 Provider、不保存树、不创建
 Proposal 或执行宿主。官方字幕下载需要 OAuth 身份具备目标视频编辑权限，因此它不是任意公开视频字幕抓取
@@ -393,7 +396,8 @@ Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0078](../adr/0078-authorized-youtube-caption-acquisition.md)、
 [ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md)、
 [ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md) 与
-[ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)。
+[ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)、
+[ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

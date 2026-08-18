@@ -463,22 +463,38 @@ describe('OperatingLine runtime', () => {
         ],
         additionalProperties: false,
       });
-      expect(
-        toolsPayload.result?.tools?.find(
-          (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.import',
-        )?.inputSchema,
-      ).toMatchObject({
+      const youtubeImportInputSchema = toolsPayload.result?.tools?.find(
+        (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.import',
+      )?.inputSchema;
+      expect(youtubeImportInputSchema).toMatchObject({
         type: 'object',
-        required: [
-          'formatVersion',
-          'requestId',
-          'targetAdapterId',
-          'goal',
-          'treeId',
-          'revision',
-          'youtube',
+        oneOf: [
+          {
+            required: [
+              'formatVersion',
+              'requestId',
+              'targetAdapterId',
+              'goal',
+              'treeId',
+              'revision',
+              'youtube',
+            ],
+            additionalProperties: false,
+          },
+          {
+            required: [
+              'formatVersion',
+              'requestId',
+              'targetAdapterId',
+              'goal',
+              'treeId',
+              'revision',
+              'youtube',
+              'selectionRequestId',
+            ],
+            additionalProperties: false,
+          },
         ],
-        additionalProperties: false,
       });
       expect(
         toolsPayload.result?.tools?.find(
@@ -968,9 +984,11 @@ describe('OperatingLine runtime', () => {
         sourceCloseCalls += 1;
       },
     };
+    const selectionRequestId = randomUUID();
     const importRequest = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId: randomUUID(),
+      selectionRequestId,
       targetAdapterId: 'blender',
       actionCatalogVersion: blenderActionCatalog.catalogVersion,
       interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -1019,7 +1037,7 @@ describe('OperatingLine runtime', () => {
     } as const;
     const trackSelectionRequest = {
       formatVersion: '1.0.0',
-      requestId: randomUUID(),
+      requestId: selectionRequestId,
       trackListRequestId: trackListRequest.requestId,
       videoId: trackListRequest.youtube.videoId,
       captionTrackId: importRequest.youtube.captionTrackId,
@@ -1121,6 +1139,42 @@ describe('OperatingLine runtime', () => {
         expect(trackListCalls).toBe(1);
         expect(sourceCalls).toBe(0);
 
+        const { selectionRequestId: ignoredSelectionRequestId, ...legacyImportRequest } =
+          importRequest;
+        void ignoredSelectionRequestId;
+        const freshLegacyImport = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/import`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...legacyImportRequest,
+              formatVersion: '1.0.0',
+              requestId: randomUUID(),
+            }),
+          },
+        );
+        expect(freshLegacyImport.status).toBe(422);
+        await expect(freshLegacyImport.json()).resolves.toMatchObject({
+          error: 'youtube_import_legacy_request_unsupported',
+          retryMode: 'never',
+        });
+        expect(sourceCalls).toBe(0);
+
+        const importBeforeSelection = await callMcpTool(
+          runtime,
+          1701,
+          'operatingline.procedure.tutorial.youtube.import',
+          importRequest,
+        );
+        expect(importBeforeSelection.result?.isError).toBe(true);
+        expect(JSON.parse(importBeforeSelection.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+          error: 'youtube_import_selection_not_found',
+          requestId: importRequest.requestId,
+          retryMode: 'same_request_id',
+        });
+        expect(sourceCalls).toBe(0);
+
         const missingRecommendation = await fetch(
           `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/tracks/recommend`,
           {
@@ -1150,7 +1204,9 @@ describe('OperatingLine runtime', () => {
           selected.result?.structuredContent,
         );
         expect(selection).toMatchObject({
+          formatVersion: '1.1.0',
           requestId: trackSelectionRequest.requestId,
+          requestFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
           selectedTrack: {
             captionTrackId: importRequest.youtube.captionTrackId,
             status: 'serving',
@@ -1191,7 +1247,7 @@ describe('OperatingLine runtime', () => {
         expect(imported.result?.isError).not.toBe(true);
         packet = procedureAuthoringPromptPacketSchema.parse(imported.result?.structuredContent);
         expect(packet).toMatchObject({
-          formatVersion: '1.3.0',
+          formatVersion: '1.4.0',
           context: {
             requestedTreeId: importRequest.treeId,
             tutorialProvenance: {
@@ -1215,6 +1271,15 @@ describe('OperatingLine runtime', () => {
                     captionTrackId: importRequest.youtube.captionTrackId,
                     trackLanguage: 'en',
                     status: 'serving',
+                    selection: {
+                      requestId: trackSelectionRequest.requestId,
+                      requestFingerprint: selection.requestFingerprint,
+                      trackListRequestId: trackListRequest.requestId,
+                      confirmedAt: selection.recordedAt,
+                      reasonCode: 'recommended_candidate',
+                      selectedTrackWasRecommended: true,
+                      selectedCandidateRank: 1,
+                    },
                   },
                 },
               },
@@ -1222,6 +1287,7 @@ describe('OperatingLine runtime', () => {
             constraints: {
               tutorialTranscriptDocumentBound: true,
               tutorialTranscriptAcquisitionBound: true,
+              tutorialTranscriptSelectionBound: true,
             },
           },
           sideEffects: {
@@ -1231,6 +1297,9 @@ describe('OperatingLine runtime', () => {
             hostExecutionStarted: false,
           },
         });
+        expect(JSON.stringify(packet)).not.toContain(
+          trackSelectionRequest.confirmation.reason.note,
+        );
 
         const validation = await callMcpTool(
           runtime,
@@ -1240,7 +1309,7 @@ describe('OperatingLine runtime', () => {
         );
         expect(validation.result?.isError).not.toBe(true);
         expect(validation.result?.structuredContent).toMatchObject({
-          formatVersion: '1.3.0',
+          formatVersion: '1.4.0',
           packetContentSha256: packet.integrity.contentSha256,
         });
 

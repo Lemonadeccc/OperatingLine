@@ -1,6 +1,7 @@
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
 import {
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialYoutubeImportFormatVersion,
   procedureTutorialYoutubeImportCompletedEventSchema,
   procedureTutorialYoutubeImportFailedEventSchema,
   procedureTutorialYoutubeImportRequestSchema,
@@ -10,6 +11,7 @@ import {
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListRequestedEventSchema,
   procedureTutorialYoutubeTrackListResultSchema,
+  procedureTutorialYoutubeTrackSelectionCurrentResultSchema,
   type ActionCatalog,
   type InteractionCatalog,
   type ProcedureAuthoringPromptPacket,
@@ -18,6 +20,7 @@ import {
   type ProcedureTutorialYoutubeTrackListErrorCode,
   type ProcedureTutorialYoutubeTrackListRequest,
   type ProcedureTutorialYoutubeTrackListResult,
+  type ProcedureTutorialYoutubeTrackSelectionCurrentResult,
 } from '@operatingline/protocol';
 
 import { plannerProviderRequestFingerprint } from './planner-provider-invocation.js';
@@ -90,7 +93,11 @@ export interface ProcedureTutorialYoutubeImportCoordinatorOptions {
   readonly buildPacket: (
     request: ProcedureTutorialYoutubeImportRequest,
     acquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult,
+    selection: ProcedureTutorialYoutubeTrackSelectionCurrentResult | undefined,
   ) => ProcedureAuthoringPromptPacket;
+  readonly completedTrackSelection?: (
+    requestId: string,
+  ) => ProcedureTutorialYoutubeTrackSelectionCurrentResult | null;
   readonly appendEvent: (event: ExecutionEventInput) => void;
 }
 
@@ -131,6 +138,44 @@ function safeImportError(error: unknown): ProcedureTutorialYoutubeImportError {
     'Authorized YouTube caption data could not produce a valid Procedure authoring packet',
     'new_request_id',
   );
+}
+
+function resolveImportTrackSelection(
+  request: ProcedureTutorialYoutubeImportRequest,
+  lookup: ProcedureTutorialYoutubeImportCoordinatorOptions['completedTrackSelection'],
+): ProcedureTutorialYoutubeTrackSelectionCurrentResult | undefined {
+  if (request.formatVersion !== procedureTutorialYoutubeImportFormatVersion) {
+    throw new ProcedureTutorialYoutubeImportError(
+      'youtube_import_legacy_request_unsupported',
+      'YouTube caption import request 1.0.0 is accepted only when restoring historical completed evidence; submit request 1.1.0 with a recorded selectionRequestId',
+      'never',
+    );
+  }
+  const resultInput = lookup?.(request.selectionRequestId) ?? null;
+  if (resultInput === null) {
+    throw new ProcedureTutorialYoutubeImportError(
+      'youtube_import_selection_not_found',
+      `Recorded YouTube caption track selection ${request.selectionRequestId} was not found`,
+      'same_request_id',
+    );
+  }
+  const parsed = procedureTutorialYoutubeTrackSelectionCurrentResultSchema.safeParse(resultInput);
+  if (
+    !parsed.success ||
+    parsed.data.requestId !== request.selectionRequestId ||
+    parsed.data.sourceTrackList.videoId !== request.youtube.videoId ||
+    parsed.data.selectedTrack.captionTrackId !== request.youtube.captionTrackId ||
+    parsed.data.selectedTrack.status !== 'serving' ||
+    (request.youtube.expectedTrackLanguage !== undefined &&
+      parsed.data.selectedTrack.language !== request.youtube.expectedTrackLanguage)
+  ) {
+    throw new ProcedureTutorialYoutubeImportError(
+      'youtube_import_selection_mismatch',
+      'Recorded YouTube caption track selection identity does not match the import request',
+      'never',
+    );
+  }
+  return parsed.data;
 }
 
 function assertMatchingTrackListIdentity(
@@ -179,8 +224,28 @@ export function buildProcedureTutorialYoutubePromptPacket(
   acquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult,
   actionCatalog: ActionCatalog,
   interactionCatalog: InteractionCatalog,
+  selectionInput?: ProcedureTutorialYoutubeTrackSelectionCurrentResult,
 ): ProcedureAuthoringPromptPacket {
   const request = procedureTutorialYoutubeImportRequestSchema.parse(requestInput);
+  const selection =
+    selectionInput === undefined
+      ? undefined
+      : procedureTutorialYoutubeTrackSelectionCurrentResultSchema.parse(selectionInput);
+  if (request.formatVersion === procedureTutorialYoutubeImportFormatVersion) {
+    if (
+      selection === undefined ||
+      selection.requestId !== request.selectionRequestId ||
+      selection.sourceTrackList.videoId !== request.youtube.videoId ||
+      selection.selectedTrack.captionTrackId !== request.youtube.captionTrackId ||
+      selection.selectedTrack.status !== 'serving' ||
+      (request.youtube.expectedTrackLanguage !== undefined &&
+        selection.selectedTrack.language !== request.youtube.expectedTrackLanguage)
+    ) {
+      throw new Error('YouTube caption track selection identity does not match the import request');
+    }
+  } else if (selection !== undefined) {
+    throw new Error('Legacy YouTube caption imports cannot carry track selection provenance');
+  }
   if (
     acquisition.captionDocument.acquisition.videoId !== request.youtube.videoId ||
     acquisition.captionDocument.acquisition.captionTrackId !== request.youtube.captionTrackId ||
@@ -230,7 +295,23 @@ export function buildProcedureTutorialYoutubePromptPacket(
   return buildProcedureAuthoringPromptPacket(parsed.request, actionCatalog, interactionCatalog, {
     tutorialTranscriptDocument: {
       ...parsed.document,
-      acquisition: acquisition.captionDocument.acquisition,
+      acquisition: {
+        ...acquisition.captionDocument.acquisition,
+        ...(selection === undefined
+          ? {}
+          : {
+              selection: {
+                requestId: selection.requestId,
+                requestFingerprint: selection.requestFingerprint,
+                trackListRequestId: selection.sourceTrackList.requestId,
+                confirmedAt: selection.recordedAt,
+                reasonCode: selection.confirmation.reason.reasonCode,
+                selectedTrackWasRecommended:
+                  selection.recommendation?.selectedTrackWasRecommended ?? null,
+                selectedCandidateRank: selection.recommendation?.selectedCandidateRank ?? null,
+              },
+            }),
+      },
     },
   });
 }
@@ -256,6 +337,9 @@ export function restoreProcedureTutorialYoutubeImports(events: readonly StoredEx
     } else if (event.eventType === 'procedure.tutorial.youtube.caption.completed') {
       const payload = procedureTutorialYoutubeImportCompletedEventSchema.parse(event.payload);
       const identity = { fingerprint: payload.requestFingerprint };
+      assertMatchingIdentity(payload.request.requestId, identity, {
+        fingerprint: plannerProviderRequestFingerprint(payload.request),
+      });
       record(payload.request.requestId, identity);
       completed.set(payload.request.requestId, { ...identity, packet: payload.packet });
     }
@@ -491,6 +575,7 @@ export function createProcedureTutorialYoutubeImportCoordinator(
           'new_request_id',
         );
       }
+      const selection = resolveImportTrackSelection(request, options.completedTrackSelection);
       if (closing) {
         throw new ProcedureTutorialYoutubeImportError(
           'youtube_source_unavailable',
@@ -512,6 +597,10 @@ export function createProcedureTutorialYoutubeImportCoordinator(
         videoId: request.youtube.videoId,
         captionTrackId: request.youtube.captionTrackId,
         requestedFormat: request.youtube.requestedFormat,
+        selectionRequestId:
+          request.formatVersion === procedureTutorialYoutubeImportFormatVersion
+            ? request.selectionRequestId
+            : null,
         occurredAt: new Date().toISOString(),
       });
       appendEvidence(
@@ -529,7 +618,7 @@ export function createProcedureTutorialYoutubeImportCoordinator(
           try {
             const acquisition = await options.source!.acquire(request.youtube);
             const packet = procedureAuthoringPromptPacketSchema.parse(
-              options.buildPacket(request, acquisition),
+              options.buildPacket(request, acquisition, selection),
             );
             const occurredAt = new Date().toISOString();
             const completedPayload = procedureTutorialYoutubeImportCompletedEventSchema.parse({
@@ -556,6 +645,10 @@ export function createProcedureTutorialYoutubeImportCoordinator(
               videoId: request.youtube.videoId,
               captionTrackId: request.youtube.captionTrackId,
               requestedFormat: request.youtube.requestedFormat,
+              selectionRequestId:
+                request.formatVersion === procedureTutorialYoutubeImportFormatVersion
+                  ? request.selectionRequestId
+                  : null,
               error: safeError.code,
               occurredAt: new Date().toISOString(),
             });
@@ -602,6 +695,12 @@ export function procedureTutorialYoutubeImportHttpStatus(
 ): 400 | 404 | 409 | 413 | 422 | 500 | 502 | 503 {
   const code = safeImportError(error).code;
   switch (code) {
+    case 'youtube_import_legacy_request_unsupported':
+      return 422;
+    case 'youtube_import_selection_not_found':
+      return 404;
+    case 'youtube_import_selection_mismatch':
+      return 409;
     case 'youtube_source_unauthorized':
       return 502;
     case 'youtube_video_not_found':

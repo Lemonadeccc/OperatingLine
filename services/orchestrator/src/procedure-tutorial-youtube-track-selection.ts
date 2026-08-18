@@ -2,12 +2,12 @@ import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/p
 import {
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackSelectionCompletedEventSchema,
+  procedureTutorialYoutubeTrackSelectionCurrentResultSchema,
   procedureTutorialYoutubeTrackSelectionRequestSchema,
-  procedureTutorialYoutubeTrackSelectionResultSchema,
   type ProcedureTutorialYoutubeTrackListResult,
   type ProcedureTutorialYoutubeTrackSelectionErrorCode,
+  type ProcedureTutorialYoutubeTrackSelectionCurrentResult,
   type ProcedureTutorialYoutubeTrackSelectionRequest,
-  type ProcedureTutorialYoutubeTrackSelectionResult,
 } from '@operatingline/protocol';
 
 import { plannerProviderRequestFingerprint } from './planner-provider-invocation.js';
@@ -35,7 +35,7 @@ interface SelectionIdentity {
 }
 
 interface CompletedSelection extends SelectionIdentity {
-  readonly result: ProcedureTutorialYoutubeTrackSelectionResult;
+  readonly result: ProcedureTutorialYoutubeTrackSelectionCurrentResult;
 }
 
 export interface ProcedureTutorialYoutubeTrackSelectionCoordinatorOptions {
@@ -50,8 +50,8 @@ export interface ProcedureTutorialYoutubeTrackSelectionCoordinatorOptions {
 export interface ProcedureTutorialYoutubeTrackSelectionCoordinator {
   select(
     request: ProcedureTutorialYoutubeTrackSelectionRequest,
-  ): ProcedureTutorialYoutubeTrackSelectionResult;
-  completedSelection(requestId: string): ProcedureTutorialYoutubeTrackSelectionResult | null;
+  ): ProcedureTutorialYoutubeTrackSelectionCurrentResult;
+  completedSelection(requestId: string): ProcedureTutorialYoutubeTrackSelectionCurrentResult | null;
 }
 
 function safeSelectionError(error: unknown): ProcedureTutorialYoutubeTrackSelectionError {
@@ -81,7 +81,7 @@ export function buildProcedureTutorialYoutubeTrackSelection(
   requestInput: ProcedureTutorialYoutubeTrackSelectionRequest,
   sourceInput: ProcedureTutorialYoutubeTrackListResult | null,
   recordedAt: string,
-): ProcedureTutorialYoutubeTrackSelectionResult {
+): ProcedureTutorialYoutubeTrackSelectionCurrentResult {
   try {
     const request = procedureTutorialYoutubeTrackSelectionRequestSchema.parse(requestInput);
     if (sourceInput === null) {
@@ -145,9 +145,10 @@ export function buildProcedureTutorialYoutubeTrackSelection(
       (candidate) => candidate.track.captionTrackId === request.captionTrackId,
     );
 
-    return procedureTutorialYoutubeTrackSelectionResultSchema.parse({
-      formatVersion: '1.0.0',
+    return procedureTutorialYoutubeTrackSelectionCurrentResultSchema.parse({
+      formatVersion: '1.1.0',
       requestId: request.requestId,
+      requestFingerprint: plannerProviderRequestFingerprint(request),
       sourceTrackList: {
         requestId: source.requestId,
         videoId: source.videoId,
@@ -192,11 +193,22 @@ export function restoreProcedureTutorialYoutubeTrackSelections(
     }
     const payload = procedureTutorialYoutubeTrackSelectionCompletedEventSchema.parse(event.payload);
     const identity = { fingerprint: payload.requestFingerprint };
+    assertMatchingSelectionIdentity(payload.request.requestId, identity, {
+      fingerprint: plannerProviderRequestFingerprint(payload.request),
+    });
     const existing = completed.get(payload.request.requestId);
     if (existing !== undefined) {
       assertMatchingSelectionIdentity(payload.request.requestId, existing, identity);
     }
-    completed.set(payload.request.requestId, { ...identity, result: payload.result });
+    const result =
+      payload.result.formatVersion === '1.0.0'
+        ? procedureTutorialYoutubeTrackSelectionCurrentResultSchema.parse({
+            ...payload.result,
+            formatVersion: '1.1.0',
+            requestFingerprint: payload.requestFingerprint,
+          })
+        : payload.result;
+    completed.set(payload.request.requestId, { ...identity, result });
   }
   return completed;
 }

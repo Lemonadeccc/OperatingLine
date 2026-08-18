@@ -106,12 +106,14 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   不调用模型，并逐项返回排序信号和排除原因，但仍固定要求人工选择。选择后可通过 MCP
   `operatingline.procedure.tutorial.youtube.tracks.select` 或 HTTP
   `POST /api/v1/procedure/tutorial/youtube/tracks/select` 保存精确 serving track、受限理由，以及是否采用或覆盖
-  重算后的推荐；可选理由备注会进入本地证据账本。该收据不联网或下载字幕，也尚未成为 import 的强制前置
-  条件。随后再通过 MCP
+  重算后的推荐；可选理由备注会进入本地证据账本。该收据不联网或下载字幕。当前 YouTube import request
+  `1.1.0` 必须携带该收据的 `selectionRequestId`；Runtime 在任何 YouTube API 调用前加载已记录选择，并核对
+  收据、请求与所选字幕轨的 video/track identity。历史 `1.0.0` 请求仅保留兼容读取。随后再通过 MCP
   `operatingline.procedure.tutorial.youtube.import` 或 HTTP `POST /api/v1/procedure/tutorial/youtube/import`
   请求一个精确的 video ID、caption track ID 和 SRT/WebVTT 格式。Runtime 只使用官方 YouTube Data API
   读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
-  随后返回含获取 provenance 的 `1.3.0` packet；OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
+  随后返回含获取 provenance 和结构化选择 provenance 的 `1.4.0` packet；选择理由的自由文本备注只留在
+  本地证据账本，不进入 packet 或 Provider 输入。OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
   持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕，也不负责
   OAuth 登录/刷新、自动选轨、视频媒体下载或语音转录。显式审阅 Provider 披露后，可改用 MCP
   `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
@@ -138,7 +140,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md)、
   [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md)、
   [ADR 0080](docs/adr/0080-explicit-youtube-caption-track-recommendation.md) 与
-  [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)。
+  [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)、
+  [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

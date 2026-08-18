@@ -9,12 +9,16 @@ import {
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   type ProcedureTutorialYoutubeImportRequest,
+  type ProcedureTutorialYoutubeTrackSelectionCurrentResult,
 } from '@operatingline/protocol';
 
 import {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,
+  procedureTutorialYoutubeImportErrorResponse,
+  procedureTutorialYoutubeImportHttpStatus,
 } from '../../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
+import { plannerProviderRequestFingerprint } from '../../../services/orchestrator/src/planner-provider-invocation.js';
 import {
   ProcedureTutorialYoutubeSourceError,
   type ProcedureTutorialYoutubeCaptionAcquisitionResult,
@@ -48,6 +52,14 @@ const request = procedureTutorialYoutubeImportRequestSchema.parse({
       videoEditPermissionExpected: true,
     },
   },
+});
+
+const selectionRequestId = '68e3cc4a-fb97-42e9-8d31-c0fe7679eea0';
+const boundRequest = procedureTutorialYoutubeImportRequestSchema.parse({
+  ...request,
+  formatVersion: '1.1.0',
+  requestId: '8bfbbf5a-b535-4eeb-9a44-09f96d2bda19',
+  selectionRequestId,
 });
 
 const acquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult = {
@@ -105,6 +117,38 @@ const trackListSourceResult = {
   ],
 };
 
+const selection: ProcedureTutorialYoutubeTrackSelectionCurrentResult = {
+  formatVersion: '1.1.0',
+  requestId: selectionRequestId,
+  requestFingerprint: 'a'.repeat(64),
+  sourceTrackList: {
+    requestId: trackListRequest.requestId,
+    videoId: request.youtube.videoId,
+    listedAt: '2026-08-18T09:00:00Z',
+  },
+  selectedTrack: trackListSourceResult.tracks[0]!,
+  confirmation: {
+    explicitlyConfirmedByUser: true,
+    reason: {
+      reasonCode: 'caption_quality_review',
+      note: 'This local note must not enter the provider packet.',
+    },
+  },
+  recommendation: null,
+  sideEffects: {
+    captionTrackSelectionRecorded: true,
+    networkFetched: false,
+    additionalQuotaUnits: 0,
+    captionContentDownloaded: false,
+    videoMediaDownloaded: false,
+    modelCalled: false,
+    procedureStored: false,
+    proposalCreated: false,
+    hostExecutionStarted: false,
+  },
+  recordedAt: '2026-08-18T10:00:00Z',
+};
+
 function stored(events: readonly ExecutionEventInput[]): StoredExecutionEvent[] {
   return events.map((event, index) => ({
     sequence: index + 1,
@@ -134,12 +178,14 @@ function source(
 function buildPacket(
   input: ProcedureTutorialYoutubeImportRequest,
   result: ProcedureTutorialYoutubeCaptionAcquisitionResult,
+  selectedTrack?: ProcedureTutorialYoutubeTrackSelectionCurrentResult,
 ) {
   return buildProcedureTutorialYoutubePromptPacket(
     input,
     result,
     blenderActionCatalog,
     blenderInteractionCatalog,
+    selectedTrack,
   );
 }
 
@@ -238,22 +284,9 @@ describe('authorized YouTube caption import coordinator', () => {
     await coordinator.close();
   });
 
-  it('imports once, persists normalized evidence, detects conflicts, and restores', async () => {
-    const selectedSource = source();
-    const events: ExecutionEventInput[] = [];
-    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
-      source: selectedSource,
-      existingEvents: [],
-      buildPacket,
-      appendEvent: (event) => events.push(event),
-    });
-
-    const first = await coordinator.importCaption(request);
-    const second = await coordinator.importCaption(request);
-
-    expect(second).toEqual(first);
-    expect(selectedSource.acquire).toHaveBeenCalledTimes(1);
-    expect(first).toMatchObject({
+  it('builds packet 1.3.0 for legacy evidence, rejects fresh legacy imports, and restores history', async () => {
+    const packet = buildPacket(request, acquisition);
+    expect(packet).toMatchObject({
       formatVersion: '1.3.0',
       context: {
         requestedTreeId: request.treeId,
@@ -283,46 +316,270 @@ describe('authorized YouTube caption import coordinator', () => {
         },
       },
     });
-    expect(events.map((event) => event.eventType)).toEqual([
-      'procedure.tutorial.youtube.caption.requested',
-      'procedure.tutorial.youtube.caption.completed',
-    ]);
-    expect(JSON.stringify(events)).not.toContain(captionDocument);
-    expect(JSON.stringify(events)).not.toContain('captionDocument');
 
-    await expect(
-      coordinator.importCaption({
-        ...request,
-        youtube: { ...request.youtube, defaultConfidence: 0.8 },
-      }),
-    ).rejects.toMatchObject({ code: 'youtube_import_conflict' });
-    await coordinator.close();
-
-    const restartedSource = source(async () => {
-      throw new Error('A completed YouTube caption import must restore without another API call.');
-    });
-    const restarted = createProcedureTutorialYoutubeImportCoordinator({
-      source: restartedSource,
-      existingEvents: stored(events),
-      buildPacket,
-      appendEvent: () => {
-        throw new Error('A restored import must not append duplicate evidence.');
-      },
-    });
-    await expect(restarted.importCaption(request)).resolves.toEqual(first);
-    expect(restartedSource.acquire).not.toHaveBeenCalled();
-    await restarted.close();
-  });
-
-  it('fails before evidence when no authorized source is configured', async () => {
+    const selectedSource = source();
     const events: ExecutionEventInput[] = [];
     const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
       existingEvents: [],
       buildPacket,
       appendEvent: (event) => events.push(event),
     });
 
     await expect(coordinator.importCaption(request)).rejects.toMatchObject({
+      code: 'youtube_import_legacy_request_unsupported',
+      retryMode: 'never',
+    });
+    expect(
+      procedureTutorialYoutubeImportHttpStatus(
+        await coordinator.importCaption(request).catch((error) => error),
+      ),
+    ).toBe(422);
+    expect(selectedSource.acquire).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    await coordinator.close();
+
+    const requestFingerprint = plannerProviderRequestFingerprint(request);
+    const historicalEvents: ExecutionEventInput[] = [
+      {
+        id: `procedure-tutorial-youtube-caption-requested:${request.requestId}`,
+        eventType: 'procedure.tutorial.youtube.caption.requested',
+        payload: {
+          requestId: request.requestId,
+          requestFingerprint,
+          videoId: request.youtube.videoId,
+          captionTrackId: request.youtube.captionTrackId,
+          requestedFormat: request.youtube.requestedFormat,
+          occurredAt: '2026-08-18T10:00:00Z',
+        },
+      },
+      {
+        id: `procedure-tutorial-youtube-caption-completed:${request.requestId}`,
+        eventType: 'procedure.tutorial.youtube.caption.completed',
+        payload: {
+          request,
+          requestFingerprint,
+          packet,
+          occurredAt: '2026-08-18T10:01:00Z',
+        },
+      },
+    ];
+    const restartedSource = source(async () => {
+      throw new Error('Historical legacy import evidence must restore without another API call.');
+    });
+    const restarted = createProcedureTutorialYoutubeImportCoordinator({
+      source: restartedSource,
+      existingEvents: stored(historicalEvents),
+      buildPacket,
+      appendEvent: () => {
+        throw new Error('A restored import must not append duplicate evidence.');
+      },
+    });
+    await expect(restarted.importCaption(request)).resolves.toEqual(packet);
+    expect(restartedSource.acquire).not.toHaveBeenCalled();
+    await restarted.close();
+  });
+
+  it('restores a historical failed import event without a selection field', async () => {
+    const selectedSource = source();
+    const requestFingerprint = plannerProviderRequestFingerprint(request);
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: stored([
+        {
+          id: `procedure-tutorial-youtube-caption-failed:${request.requestId}`,
+          eventType: 'procedure.tutorial.youtube.caption.failed',
+          payload: {
+            requestId: request.requestId,
+            requestFingerprint,
+            videoId: request.youtube.videoId,
+            captionTrackId: request.youtube.captionTrackId,
+            requestedFormat: request.youtube.requestedFormat,
+            error: 'youtube_source_unauthorized',
+            occurredAt: '2026-08-18T10:00:00Z',
+          },
+        },
+      ]),
+      buildPacket,
+      appendEvent: () => {
+        throw new Error('Historical failed evidence must prevent a duplicate import attempt.');
+      },
+    });
+
+    await expect(coordinator.importCaption(request)).rejects.toMatchObject({
+      code: 'youtube_import_already_attempted',
+      retryMode: 'new_request_id',
+    });
+    expect(selectedSource.acquire).not.toHaveBeenCalled();
+    await coordinator.close();
+  });
+
+  it('binds a persisted selection receipt before importing and restores packet 1.4.0', async () => {
+    const selectedSource = source();
+    const events: ExecutionEventInput[] = [];
+    const completedTrackSelection = vi.fn((requestId: string) =>
+      requestId === selection.requestId ? selection : null,
+    );
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      completedTrackSelection,
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const first = await coordinator.importCaption(boundRequest);
+    const second = await coordinator.importCaption(boundRequest);
+
+    expect(second).toEqual(first);
+    expect(completedTrackSelection).toHaveBeenCalledTimes(1);
+    expect(completedTrackSelection).toHaveBeenCalledWith(selectionRequestId);
+    expect(selectedSource.acquire).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      formatVersion: '1.4.0',
+      context: {
+        tutorialProvenance: {
+          transcript: {
+            document: {
+              acquisition: {
+                videoId: boundRequest.youtube.videoId,
+                captionTrackId: boundRequest.youtube.captionTrackId,
+                selection: {
+                  requestId: selectionRequestId,
+                  requestFingerprint: selection.requestFingerprint,
+                  trackListRequestId: selection.sourceTrackList.requestId,
+                  confirmedAt: selection.recordedAt,
+                  reasonCode: 'caption_quality_review',
+                  selectedTrackWasRecommended: null,
+                  selectedCandidateRank: null,
+                },
+              },
+            },
+          },
+        },
+        constraints: { tutorialTranscriptSelectionBound: true },
+      },
+    });
+    expect(JSON.stringify(first)).not.toContain(selection.confirmation.reason.note);
+    expect(events.map((event) => event.eventType)).toEqual([
+      'procedure.tutorial.youtube.caption.requested',
+      'procedure.tutorial.youtube.caption.completed',
+    ]);
+    expect(events[0]?.payload).toMatchObject({ selectionRequestId });
+    await expect(
+      coordinator.importCaption({
+        ...boundRequest,
+        selectionRequestId: '0386dad4-0c8b-4df6-91c1-a76ae9c08aba',
+      }),
+    ).rejects.toMatchObject({ code: 'youtube_import_conflict' });
+    await coordinator.close();
+
+    const restartedSource = source(async () => {
+      throw new Error('A completed selection-bound import must restore without an API call.');
+    });
+    const restartedSelectionLookup = vi.fn(() => {
+      throw new Error('A completed selection-bound import must restore without a receipt lookup.');
+    });
+    const restarted = createProcedureTutorialYoutubeImportCoordinator({
+      source: restartedSource,
+      existingEvents: stored(events),
+      completedTrackSelection: restartedSelectionLookup,
+      buildPacket,
+      appendEvent: () => {
+        throw new Error('A restored selection-bound import must not append duplicate evidence.');
+      },
+    });
+    await expect(restarted.importCaption(boundRequest)).resolves.toEqual(first);
+    expect(restartedSelectionLookup).not.toHaveBeenCalled();
+    expect(restartedSource.acquire).not.toHaveBeenCalled();
+    await restarted.close();
+  });
+
+  it('allows the same bound request after its missing selection receipt is recorded', async () => {
+    let recorded = false;
+    const selectedSource = source();
+    const events: ExecutionEventInput[] = [];
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      completedTrackSelection: () => (recorded ? selection : null),
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    let missingError: unknown;
+    try {
+      await coordinator.importCaption(boundRequest);
+    } catch (error) {
+      missingError = error;
+    }
+    expect(missingError).toMatchObject({
+      code: 'youtube_import_selection_not_found',
+      retryMode: 'same_request_id',
+    });
+    expect(procedureTutorialYoutubeImportHttpStatus(missingError)).toBe(404);
+    expect(
+      procedureTutorialYoutubeImportErrorResponse(missingError, boundRequest.requestId),
+    ).toEqual(expect.objectContaining({ error: 'youtube_import_selection_not_found' }));
+    expect(selectedSource.acquire).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+
+    recorded = true;
+    await expect(coordinator.importCaption(boundRequest)).resolves.toMatchObject({
+      formatVersion: '1.4.0',
+    });
+    expect(selectedSource.acquire).toHaveBeenCalledTimes(1);
+    await coordinator.close();
+  });
+
+  it('rejects a receipt for another video or track before API use', async () => {
+    for (const mismatchedSelection of [
+      {
+        ...selection,
+        sourceTrackList: { ...selection.sourceTrackList, videoId: 'abcdefghijk' },
+      },
+      {
+        ...selection,
+        selectedTrack: { ...selection.selectedTrack, captionTrackId: 'another-track' },
+      },
+    ]) {
+      const selectedSource = source();
+      const events: ExecutionEventInput[] = [];
+      const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+        source: selectedSource,
+        existingEvents: [],
+        completedTrackSelection: () => mismatchedSelection,
+        buildPacket,
+        appendEvent: (event) => events.push(event),
+      });
+
+      let mismatchError: unknown;
+      try {
+        await coordinator.importCaption(boundRequest);
+      } catch (error) {
+        mismatchError = error;
+      }
+      expect(mismatchError).toMatchObject({
+        code: 'youtube_import_selection_mismatch',
+        retryMode: 'never',
+      });
+      expect(procedureTutorialYoutubeImportHttpStatus(mismatchError)).toBe(409);
+      expect(selectedSource.acquire).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+      await coordinator.close();
+    }
+  });
+
+  it('fails before evidence when no authorized source is configured', async () => {
+    const events: ExecutionEventInput[] = [];
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      existingEvents: [],
+      completedTrackSelection: () => selection,
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    await expect(coordinator.importCaption(boundRequest)).rejects.toMatchObject({
       code: 'youtube_source_unavailable',
       retryMode: 'same_request_id',
     });
@@ -341,11 +598,12 @@ describe('authorized YouTube caption import coordinator', () => {
     const coordinator = createProcedureTutorialYoutubeImportCoordinator({
       source: selectedSource,
       existingEvents: [],
+      completedTrackSelection: () => selection,
       buildPacket,
       appendEvent: (event) => events.push(event),
     });
 
-    await expect(coordinator.importCaption(request)).rejects.toMatchObject({
+    await expect(coordinator.importCaption(boundRequest)).rejects.toMatchObject({
       code: 'youtube_source_unauthorized',
       retryMode: 'new_request_id',
     });
@@ -354,7 +612,7 @@ describe('authorized YouTube caption import coordinator', () => {
       'procedure.tutorial.youtube.caption.failed',
     ]);
     expect(JSON.stringify(events)).not.toContain('authorization is invalid');
-    await expect(coordinator.importCaption(request)).rejects.toMatchObject({
+    await expect(coordinator.importCaption(boundRequest)).rejects.toMatchObject({
       code: 'youtube_import_already_attempted',
       retryMode: 'new_request_id',
     });

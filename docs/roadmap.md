@@ -302,11 +302,16 @@
         [ADR 0080](adr/0080-explicit-youtube-caption-track-recommendation.md)。
   - [x] 字幕轨选择与理由证据：本地 MCP/HTTP 只接受明确确认的 serving track，保存受限 reason code、可选
         备注，并在给出推荐偏好时重算用户采用/覆盖结果；completed receipt 可重启幂等恢复，不联网、下载或
-        调用 Provider。备注进入本地证据账本；当前收据还不是 import 的强制前置条件。见
+        调用 Provider。备注进入本地证据账本。见
         [ADR 0081](adr/0081-persisted-youtube-caption-track-selection.md)。
-  - [ ] OAuth 登录/刷新、选择确认可视化 UI、选择收据与 import 的强制 identity 绑定、视频媒体下载/语音
-        转录、画面与按键识别、自动语义分段、证据帧，以及大步骤/小步骤质量校准；当前 Runtime 始终要求
-        调用方显式选择授权字幕轨。
+  - [x] 选择收据与 import 的强制 identity 绑定：当前 YouTube import request `1.1.0` 必须引用已记录的
+        `selectionRequestId`，并在任何 API 调用前核对选择收据、video ID 与 caption track ID。历史 `1.0.0`
+        仅保留兼容读取；成功导入生成携带非自由文本选择 provenance 的 authoring packet `1.4.0`，选择备注
+        不进入 packet 或 Provider 输入。见 [ADR 0082](adr/0082-selection-bound-youtube-caption-import.md)。
+  - [ ] OAuth 登录与 token refresh：用显式授权流程替代 Runtime 外预先取得的短期 access token；当前 Runtime
+        仍只接受 composition root 注入的 token，并要求调用方显式选择授权字幕轨。
+  - [ ] 选择确认可视化 UI、视频媒体下载/语音转录、画面与按键识别、自动语义分段、证据帧，以及大步骤/
+        小步骤质量校准。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

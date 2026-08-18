@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { evalContentSha256Schema } from './eval-common.js';
 import {
+  procedureAuthoringPromptAcquisitionFormatVersion,
   procedureAuthoringPromptFormatVersion,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
@@ -10,10 +11,12 @@ import {
   procedureAuthoringYoutubeVideoIdSchema,
 } from './procedure-authoring.js';
 
-export const procedureTutorialYoutubeImportFormatVersion = '1.0.0' as const;
-export const procedureTutorialYoutubeImportFormatVersionSchema = z.literal(
+export const procedureTutorialYoutubeImportLegacyFormatVersion = '1.0.0' as const;
+export const procedureTutorialYoutubeImportFormatVersion = '1.1.0' as const;
+export const procedureTutorialYoutubeImportFormatVersionSchema = z.enum([
+  procedureTutorialYoutubeImportLegacyFormatVersion,
   procedureTutorialYoutubeImportFormatVersion,
-);
+]);
 export const procedureTutorialYoutubeTrackListFormatVersion = '1.0.0' as const;
 export const procedureTutorialYoutubeTrackListFormatVersionSchema = z.literal(
   procedureTutorialYoutubeTrackListFormatVersion,
@@ -26,6 +29,12 @@ export const procedureTutorialYoutubeTrackSelectionFormatVersion = '1.0.0' as co
 export const procedureTutorialYoutubeTrackSelectionFormatVersionSchema = z.literal(
   procedureTutorialYoutubeTrackSelectionFormatVersion,
 );
+export const procedureTutorialYoutubeTrackSelectionResultLegacyFormatVersion = '1.0.0' as const;
+export const procedureTutorialYoutubeTrackSelectionResultFormatVersion = '1.1.0' as const;
+export const procedureTutorialYoutubeTrackSelectionResultFormatVersionSchema = z.enum([
+  procedureTutorialYoutubeTrackSelectionResultLegacyFormatVersion,
+  procedureTutorialYoutubeTrackSelectionResultFormatVersion,
+]);
 export const procedureTutorialYoutubeCaptionTrackMaxCount = 2_000 as const;
 export const procedureTutorialYoutubePreferredLanguageMaxCount = 32 as const;
 
@@ -63,8 +72,7 @@ const procedureTutorialYoutubeSourceSchema = z.discriminatedUnion('rightsStatus'
   }),
 ]);
 
-export const procedureTutorialYoutubeImportRequestSchema = z.strictObject({
-  formatVersion: procedureTutorialYoutubeImportFormatVersionSchema,
+const procedureTutorialYoutubeImportRequestCommonShape = {
   requestId: z.uuid(),
   targetAdapterId: procedureAuthoringPromptRequestSchema.shape.targetAdapterId,
   actionCatalogVersion: procedureAuthoringPromptRequestSchema.shape.actionCatalogVersion,
@@ -74,7 +82,19 @@ export const procedureTutorialYoutubeImportRequestSchema = z.strictObject({
   revision: procedureAuthoringPromptRequestSchema.shape.revision,
   locale: procedureAuthoringPromptRequestSchema.shape.locale,
   youtube: procedureTutorialYoutubeSourceSchema,
-});
+} as const;
+
+export const procedureTutorialYoutubeImportRequestSchema = z.discriminatedUnion('formatVersion', [
+  z.strictObject({
+    formatVersion: z.literal(procedureTutorialYoutubeImportLegacyFormatVersion),
+    ...procedureTutorialYoutubeImportRequestCommonShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureTutorialYoutubeImportFormatVersion),
+    ...procedureTutorialYoutubeImportRequestCommonShape,
+    selectionRequestId: z.uuid(),
+  }),
+]);
 export type ProcedureTutorialYoutubeImportRequest = z.infer<
   typeof procedureTutorialYoutubeImportRequestSchema
 >;
@@ -406,38 +426,55 @@ export type ProcedureTutorialYoutubeTrackSelectionRequest = z.infer<
   typeof procedureTutorialYoutubeTrackSelectionRequestSchema
 >;
 
-export const procedureTutorialYoutubeTrackSelectionResultSchema = z
-  .strictObject({
-    formatVersion: procedureTutorialYoutubeTrackSelectionFormatVersionSchema,
+const procedureTutorialYoutubeTrackSelectionResultCommonShape = {
+  requestId: z.uuid(),
+  sourceTrackList: z.strictObject({
     requestId: z.uuid(),
-    sourceTrackList: z.strictObject({
-      requestId: z.uuid(),
-      videoId: procedureAuthoringYoutubeVideoIdSchema,
-      listedAt: z.iso.datetime({ offset: true }),
-    }),
-    selectedTrack: procedureTutorialYoutubeCaptionTrackSchema,
-    confirmation: procedureTutorialYoutubeTrackSelectionRequestSchema.shape.confirmation,
-    recommendation: z
-      .strictObject({
-        preferences: procedureTutorialYoutubeTrackRecommendationPreferencesSchema,
-        recommendedCaptionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema.nullable(),
-        selectedCandidateRank: z.number().int().positive().nullable(),
-        selectedTrackWasRecommended: z.boolean(),
-      })
-      .nullable(),
-    sideEffects: z.strictObject({
-      captionTrackSelectionRecorded: z.literal(true),
-      networkFetched: z.literal(false),
-      additionalQuotaUnits: z.literal(0),
-      captionContentDownloaded: z.literal(false),
-      videoMediaDownloaded: z.literal(false),
-      modelCalled: z.literal(false),
-      procedureStored: z.literal(false),
-      proposalCreated: z.literal(false),
-      hostExecutionStarted: z.literal(false),
-    }),
-    recordedAt: z.iso.datetime({ offset: true }),
-  })
+    videoId: procedureAuthoringYoutubeVideoIdSchema,
+    listedAt: z.iso.datetime({ offset: true }),
+  }),
+  selectedTrack: procedureTutorialYoutubeCaptionTrackSchema,
+  confirmation: procedureTutorialYoutubeTrackSelectionRequestSchema.shape.confirmation,
+  recommendation: z
+    .strictObject({
+      preferences: procedureTutorialYoutubeTrackRecommendationPreferencesSchema,
+      recommendedCaptionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema.nullable(),
+      selectedCandidateRank: z.number().int().positive().nullable(),
+      selectedTrackWasRecommended: z.boolean(),
+    })
+    .nullable(),
+  sideEffects: z.strictObject({
+    captionTrackSelectionRecorded: z.literal(true),
+    networkFetched: z.literal(false),
+    additionalQuotaUnits: z.literal(0),
+    captionContentDownloaded: z.literal(false),
+    videoMediaDownloaded: z.literal(false),
+    modelCalled: z.literal(false),
+    procedureStored: z.literal(false),
+    proposalCreated: z.literal(false),
+    hostExecutionStarted: z.literal(false),
+  }),
+  recordedAt: z.iso.datetime({ offset: true }),
+} as const;
+
+const procedureTutorialYoutubeTrackSelectionLegacyResultSchema = z.strictObject({
+  formatVersion: z.literal(procedureTutorialYoutubeTrackSelectionResultLegacyFormatVersion),
+  ...procedureTutorialYoutubeTrackSelectionResultCommonShape,
+});
+export const procedureTutorialYoutubeTrackSelectionCurrentResultSchema = z.strictObject({
+  formatVersion: z.literal(procedureTutorialYoutubeTrackSelectionResultFormatVersion),
+  requestFingerprint: evalContentSha256Schema,
+  ...procedureTutorialYoutubeTrackSelectionResultCommonShape,
+});
+export type ProcedureTutorialYoutubeTrackSelectionCurrentResult = z.infer<
+  typeof procedureTutorialYoutubeTrackSelectionCurrentResultSchema
+>;
+
+export const procedureTutorialYoutubeTrackSelectionResultSchema = z
+  .discriminatedUnion('formatVersion', [
+    procedureTutorialYoutubeTrackSelectionLegacyResultSchema,
+    procedureTutorialYoutubeTrackSelectionCurrentResultSchema,
+  ])
   .superRefine((result, context) => {
     if (result.selectedTrack.status !== 'serving') {
       context.addIssue({
@@ -506,6 +543,8 @@ export const procedureTutorialYoutubeTrackSelectionCompletedEventSchema = z
   .superRefine((event, context) => {
     if (
       event.result.requestId !== event.request.requestId ||
+      (event.result.formatVersion === procedureTutorialYoutubeTrackSelectionResultFormatVersion &&
+        event.result.requestFingerprint !== event.requestFingerprint) ||
       event.result.sourceTrackList.requestId !== event.request.trackListRequestId ||
       event.result.sourceTrackList.videoId !== event.request.videoId ||
       event.result.selectedTrack.captionTrackId !== event.request.captionTrackId ||
@@ -590,6 +629,9 @@ export type ProcedureTutorialYoutubeTrackListCompletedEvent = z.infer<
 >;
 
 export const procedureTutorialYoutubeImportErrorCodeSchema = z.enum([
+  'youtube_import_legacy_request_unsupported',
+  'youtube_import_selection_not_found',
+  'youtube_import_selection_mismatch',
   'youtube_source_unavailable',
   'youtube_source_unauthorized',
   'youtube_video_not_found',
@@ -612,6 +654,7 @@ const procedureTutorialYoutubeImportEvidenceScopeSchema = z.strictObject({
   videoId: procedureAuthoringYoutubeVideoIdSchema,
   captionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema,
   requestedFormat: procedureAuthoringTutorialTranscriptDocumentSchema.shape.format,
+  selectionRequestId: z.uuid().nullable().optional(),
 });
 
 export const procedureTutorialYoutubeImportRequestedEventSchema =
@@ -643,9 +686,18 @@ export const procedureTutorialYoutubeImportCompletedEventSchema = z
     const packetContext = packet.context;
     const tutorial = packetContext.tutorialProvenance;
     const acquisition = tutorial?.transcript.document?.acquisition;
+    const selection = acquisition?.selection;
     const request = event.request;
+    const selectionRequestId =
+      request.formatVersion === procedureTutorialYoutubeImportFormatVersion
+        ? request.selectionRequestId
+        : null;
+    const expectedPacketFormatVersion =
+      selectionRequestId === null
+        ? procedureAuthoringPromptAcquisitionFormatVersion
+        : procedureAuthoringPromptFormatVersion;
     if (
-      packet.formatVersion !== procedureAuthoringPromptFormatVersion ||
+      packet.formatVersion !== expectedPacketFormatVersion ||
       packetContext.requestedTreeId !== request.treeId ||
       packetContext.recommendedRevision !== request.revision ||
       packetContext.catalogBinding.adapterId !== request.targetAdapterId ||
@@ -659,6 +711,8 @@ export const procedureTutorialYoutubeImportCompletedEventSchema = z
       acquisition?.videoId !== request.youtube.videoId ||
       acquisition.captionTrackId !== request.youtube.captionTrackId ||
       acquisition.requestedFormat !== request.youtube.requestedFormat ||
+      (selectionRequestId === null) !== (selection === undefined) ||
+      (selectionRequestId !== null && selection?.requestId !== selectionRequestId) ||
       (request.youtube.expectedTrackLanguage !== undefined &&
         acquisition.trackLanguage !== request.youtube.expectedTrackLanguage) ||
       (request.actionCatalogVersion !== undefined &&

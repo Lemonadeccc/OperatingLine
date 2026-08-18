@@ -59,9 +59,10 @@ packet，同时保留原有 candidate-only、人工审阅和宿主执行边界�
 
 后续 [ADR 0079](0079-authorized-youtube-caption-track-discovery.md) 已增加授权视频字幕轨元数据枚举，
 [ADR 0080](0080-explicit-youtube-caption-track-recommendation.md) 已增加无副作用的偏好排序，
-[ADR 0081](0081-persisted-youtube-caption-track-selection.md) 已增加显式选择与理由收据。仍需 OAuth 授权流程与
-token refresh、选择确认 UI、选择收据与 import 强制绑定、视频媒体导入与 ASR、画面/按键识别、自动语义
-分段、证据帧抽取，以及把 `1.3.0` packet 交给 Provider 后生成完整 ProcedureTree 的组合入口。
+[ADR 0081](0081-persisted-youtube-caption-track-selection.md) 已增加显式选择与理由收据，
+[ADR 0082](0082-selection-bound-youtube-caption-import.md) 已把当前 import 和 `1.4.0` packet 绑定到该收据。
+仍需 OAuth 授权流程与 token refresh、选择确认 UI、视频媒体导入与 ASR、画面/按键识别、自动语义分段、
+证据帧抽取，以及把 packet 交给 Provider 后生成完整 ProcedureTree 的组合入口。
 
 ## 参考
 

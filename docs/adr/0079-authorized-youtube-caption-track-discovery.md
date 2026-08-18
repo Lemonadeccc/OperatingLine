@@ -48,9 +48,10 @@ token 或字幕正文。Runtime 重启后可以从 completed evidence 返回相�
 只是 OAuth 身份能够读取这些轨道元数据，不代表内容已获得训练发布许可，也不证明字幕语义或时间码正确。
 
 后续 [ADR 0080](0080-explicit-youtube-caption-track-recommendation.md) 增加基于用户偏好的确定性本地推荐，但仍不
-自动选择；[ADR 0081](0081-persisted-youtube-caption-track-selection.md) 进一步记录显式选择与理由。仍需 OAuth
-登录/refresh、选择确认 UI、选择收据与 import 强制绑定、视频媒体/ASR fallback、画面与按键识别，以及把
-已选字幕获取与 Provider ProcedureTree 生成组合成一个仍受逐阶段授权的工作流。
+自动选择；[ADR 0081](0081-persisted-youtube-caption-track-selection.md) 进一步记录显式选择与理由，
+[ADR 0082](0082-selection-bound-youtube-caption-import.md) 已把当前 import 与该选择强制绑定。仍需 OAuth
+登录/refresh、选择确认 UI、视频媒体/ASR fallback、画面与按键识别，以及把已选字幕获取与 Provider
+ProcedureTree 生成组合成一个仍受逐阶段授权的工作流。
 
 ## 参考
 

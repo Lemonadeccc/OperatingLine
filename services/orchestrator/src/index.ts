@@ -1219,7 +1219,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ? {}
         : { source: options.youtubeCaptionSource }),
       existingEvents: existingProcedureTutorialYoutubeEvents,
-      buildPacket: (request, acquisition) => {
+      completedTrackSelection: (requestId) =>
+        procedureTutorialYoutubeTrackSelectionCoordinator!.completedSelection(requestId),
+      buildPacket: (request, acquisition, selection) => {
         const actionCatalog = actionCatalogRegistry.get({
           targetAdapterId: request.targetAdapterId,
           ...(request.actionCatalogVersion === undefined
@@ -1238,6 +1240,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           acquisition,
           actionCatalog,
           interactionCatalog,
+          selection,
         );
       },
       appendEvent: (event) => database.appendEvent(event),
@@ -2155,7 +2158,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.tutorial.youtube.import',
         {
           description:
-            'Explicitly use a configured OAuth-authorized YouTube Data API source to read video metadata, verify one exact caption track belongs to that video, and download it as SRT or WebVTT before returning a document-bound Procedure authoring packet. The authorized account must be able to edit the video; the call consumes YouTube API quota but never downloads video media, calls a model, stores a tree, creates a Proposal, or executes the host. OAuth credentials are runtime-managed and must never be included in this request.',
+            'Import request 1.1.0 requires a previously persisted explicit caption-track selectionRequestId. Before any network or quota use, the runtime verifies that receipt matches the requested YouTube video and caption track, then uses the configured OAuth-authorized YouTube Data API source to download SRT or WebVTT and returns a selection-bound Procedure authoring packet. Legacy request 1.0.0 remains compatibility-only. The authorized account must be able to edit the video; the call never downloads video media, calls a model, stores a tree, creates a Proposal, or executes the host. OAuth credentials are runtime-managed and must never be included in this request.',
           inputSchema: deferMcpInputValidation(procedureTutorialYoutubeImportRequestSchema),
           outputSchema: procedureAuthoringPromptPacketSchema,
         },

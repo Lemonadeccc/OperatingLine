@@ -43,9 +43,11 @@ Result 固定声明选择证据已保存，同时声明没有网络请求、额�
 项目现在能把“算法推荐”和“用户实际选择”作为不同类型的数据保存，并明确表示用户是否覆盖推荐。该收据适合
 后续审计和构建人工选择数据，但备注仍可能敏感，导出前需要沿用现有证据审阅与脱敏边界。
 
-当前 import request 尚未强制携带 selection requestId，协议仍兼容已有直接精确选轨调用；现阶段 MCP 工作流
-要求两者使用同一 video/track identity。后续需要把收据变成新版 import 的强制前置门，并在可视化 UI 中展示
-推荐、排除原因、理由输入和最终确认。
+后续 [ADR 0082](0082-selection-bound-youtube-caption-import.md) 已把收据变成当前 import `1.1.0` 的强制前置门，
+并把非自由文本选择 provenance 绑定到 authoring packet `1.4.0`。当前选择 Result `1.1.0` 还把原请求
+fingerprint 放入收据；历史 Result `1.0.0` 会从 completed event 的既有 fingerprint 在内存中升级，不改写账本。
+本 ADR 的备注仍只保存在本地证据账本。
+仍需在可视化 UI 中展示推荐、排除原因、理由输入和最终确认。
 
 ## 参考
 

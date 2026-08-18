@@ -9,6 +9,7 @@ import {
 } from '@operatingline/blender-action-catalog';
 import {
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialYoutubeImportCompletedEventSchema,
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
@@ -159,7 +160,10 @@ const trackSelectionRequest = {
   captionTrackId: 'caption-track-en',
   confirmation: {
     explicitlyConfirmedByUser: true,
-    reason: { reasonCode: 'recommended_candidate' },
+    reason: {
+      reasonCode: 'recommended_candidate',
+      note: 'LOCAL_SELECTION_NOTE_MUST_NOT_ENTER_PACKET',
+    },
   },
   recommendationPreferences: trackRecommendationRequest.preferences,
 } as const;
@@ -169,6 +173,13 @@ const trackSelectionResult = buildProcedureTutorialYoutubeTrackSelection(
   procedureTutorialYoutubeTrackListResultSchema.parse(trackListResult),
   '2026-08-18T10:00:00Z',
 );
+
+const boundRequest = {
+  ...request,
+  formatVersion: '1.1.0',
+  requestId: 'b4362a77-a7cb-498f-b7da-f8021477d35f',
+  selectionRequestId: trackSelectionRequest.requestId,
+} as const;
 
 describe('public authorized YouTube caption import JSON Schema', () => {
   it('publishes strict caption-track list request and metadata-only result contracts', async () => {
@@ -308,8 +319,18 @@ describe('public authorized YouTube caption import JSON Schema', () => {
       },
       { value: { ...trackSelectionRequest, oauthAccessToken: 'forbidden' }, accepted: false },
     ] as const;
+    const legacyTrackSelectionResult = {
+      ...trackSelectionResult,
+      formatVersion: '1.0.0',
+    } as Record<string, unknown>;
+    delete legacyTrackSelectionResult['requestFingerprint'];
     const resultCases = [
       { value: trackSelectionResult, accepted: true },
+      { value: legacyTrackSelectionResult, accepted: true },
+      {
+        value: { ...trackSelectionResult, requestFingerprint: undefined },
+        accepted: false,
+      },
       {
         value: {
           ...trackSelectionResult,
@@ -351,6 +372,17 @@ describe('public authorized YouTube caption import JSON Schema', () => {
   it('requires exact source identity, explicit network/quota authorization, and no credentials', async () => {
     const cases = [
       { value: request, accepted: true },
+      { value: boundRequest, accepted: true },
+      {
+        value: { ...request, selectionRequestId: trackSelectionRequest.requestId },
+        accepted: false,
+      },
+      { value: { ...request, formatVersion: '1.1.0' }, accepted: false },
+      {
+        value: { ...boundRequest, selectionRequestId: 'not-a-uuid' },
+        accepted: false,
+      },
+      { value: { ...boundRequest, formatVersion: '2.0.0' }, accepted: false },
       {
         value: { ...request, youtube: { ...request.youtube, videoId: 'short' } },
         accepted: false,
@@ -422,5 +454,129 @@ describe('public authorized YouTube caption import JSON Schema', () => {
       publicSchema('procedure-authoring-prompt-packet.schema.json'),
       cases,
     );
+  });
+
+  it('binds packet 1.4.0 to the exact persisted selection without forwarding its note', async () => {
+    const packet = buildProcedureTutorialYoutubePromptPacket(
+      procedureTutorialYoutubeImportRequestSchema.parse(boundRequest),
+      acquisition,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+      trackSelectionResult,
+    );
+    expect(packet).toMatchObject({
+      formatVersion: '1.4.0',
+      context: {
+        tutorialProvenance: {
+          transcript: {
+            document: {
+              acquisition: {
+                videoId: boundRequest.youtube.videoId,
+                captionTrackId: boundRequest.youtube.captionTrackId,
+                selection: {
+                  requestId: trackSelectionRequest.requestId,
+                  requestFingerprint: trackSelectionResult.requestFingerprint,
+                  trackListRequestId: trackSelectionRequest.trackListRequestId,
+                  confirmedAt: trackSelectionResult.recordedAt,
+                  reasonCode: 'recommended_candidate',
+                  selectedTrackWasRecommended: true,
+                  selectedCandidateRank: 1,
+                },
+              },
+            },
+          },
+        },
+        constraints: { tutorialTranscriptSelectionBound: true },
+      },
+    });
+    expect(JSON.stringify(packet)).not.toContain(trackSelectionRequest.confirmation.reason.note);
+
+    const wrongVersion = { ...packet, formatVersion: '1.3.0' };
+    const missingSelection = structuredClone(packet);
+    delete missingSelection.context.tutorialProvenance?.transcript.document?.acquisition?.selection;
+    delete missingSelection.context.constraints.tutorialTranscriptSelectionBound;
+    const legacyPacketWithSelection = buildProcedureTutorialYoutubePromptPacket(
+      procedureTutorialYoutubeImportRequestSchema.parse(request),
+      acquisition,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const acquisitionSelection =
+      packet.context.tutorialProvenance?.transcript.document?.acquisition?.selection;
+    if (
+      legacyPacketWithSelection.context.tutorialProvenance?.transcript.document?.acquisition !==
+        undefined &&
+      acquisitionSelection !== undefined
+    ) {
+      legacyPacketWithSelection.context.tutorialProvenance.transcript.document.acquisition.selection =
+        acquisitionSelection;
+      legacyPacketWithSelection.context.constraints.tutorialTranscriptSelectionBound = true;
+    }
+    const recommendedReasonMismatch = structuredClone(packet);
+    const recommendedReasonMismatchSelection =
+      recommendedReasonMismatch.context.tutorialProvenance?.transcript.document?.acquisition
+        ?.selection;
+    if (recommendedReasonMismatchSelection !== undefined) {
+      recommendedReasonMismatchSelection.selectedTrackWasRecommended = false;
+      recommendedReasonMismatchSelection.selectedCandidateRank = 2;
+    }
+    const recommendedRankMismatch = structuredClone(packet);
+    const recommendedRankMismatchSelection =
+      recommendedRankMismatch.context.tutorialProvenance?.transcript.document?.acquisition
+        ?.selection;
+    if (recommendedRankMismatchSelection !== undefined) {
+      recommendedRankMismatchSelection.selectedCandidateRank = 2;
+    }
+    const unrankedWithRank = structuredClone(packet);
+    const unrankedWithRankSelection =
+      unrankedWithRank.context.tutorialProvenance?.transcript.document?.acquisition?.selection;
+    if (unrankedWithRankSelection !== undefined) {
+      unrankedWithRankSelection.reasonCode = 'caption_quality_review';
+      unrankedWithRankSelection.selectedTrackWasRecommended = null;
+      unrankedWithRankSelection.selectedCandidateRank = 2;
+    }
+    const nonRecommendedRankOne = structuredClone(packet);
+    const nonRecommendedRankOneSelection =
+      nonRecommendedRankOne.context.tutorialProvenance?.transcript.document?.acquisition?.selection;
+    if (nonRecommendedRankOneSelection !== undefined) {
+      nonRecommendedRankOneSelection.reasonCode = 'caption_quality_review';
+      nonRecommendedRankOneSelection.selectedTrackWasRecommended = false;
+      nonRecommendedRankOneSelection.selectedCandidateRank = 1;
+    }
+    const cases = [
+      { value: packet, accepted: true },
+      { value: wrongVersion, accepted: false },
+      { value: missingSelection, accepted: false },
+      { value: legacyPacketWithSelection, accepted: false },
+      { value: recommendedReasonMismatch, accepted: false },
+      { value: recommendedRankMismatch, accepted: false },
+      { value: unrankedWithRank, accepted: false },
+      { value: nonRecommendedRankOne, accepted: false },
+    ] as const;
+    for (const contractCase of cases) {
+      expect(procedureAuthoringPromptPacketSchema.safeParse(contractCase.value).success).toBe(
+        contractCase.accepted,
+      );
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-authoring-prompt-packet.schema.json'),
+      cases,
+    );
+
+    const completed = {
+      request: boundRequest,
+      requestFingerprint: 'b'.repeat(64),
+      packet,
+      occurredAt: '2026-08-18T10:01:00Z',
+    } as const;
+    expect(procedureTutorialYoutubeImportCompletedEventSchema.safeParse(completed).success).toBe(
+      true,
+    );
+    expect(
+      procedureTutorialYoutubeImportCompletedEventSchema.safeParse({
+        ...completed,
+        request: { ...boundRequest, selectionRequestId: '2793937a-020d-4a47-a1a0-c080878a34fe' },
+      }).success,
+    ).toBe(false);
   });
 });

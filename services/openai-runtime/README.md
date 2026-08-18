@@ -34,7 +34,9 @@ pnpm dev:openai
   `operatingline.procedure.tutorial.youtube.tracks.list`，明确确认网络与当前官方 50-unit 配额后枚举元数据；
   再按明确偏好调用 `operatingline.procedure.tutorial.youtube.tracks.recommend` 做无网络、无额外 quota、无模型
   调用的本地排序。确认后调用 `operatingline.procedure.tutorial.youtube.tracks.select` 保存精确 serving track、
-  选择理由及采用/覆盖推荐的结果；可选理由备注会进入本地证据账本。选择操作不下载内容。Token 不进入协议、
+  选择理由及采用/覆盖推荐的结果；可选理由备注会进入本地证据账本。当前 import request `1.1.0` 必须引用该
+  `selectionRequestId`，并在任何 API 调用前核对收据与 video/track identity；历史 `1.0.0` 仅保留兼容读取。
+  选择操作不下载内容。Token 不进入协议、
   事件或日志，当前入口不负责 OAuth 跳转或刷新。
 
 ## 调用顺序
@@ -67,11 +69,12 @@ HTTP 对应入口为 `GET /api/v1/procedure/authoring/providers` 与
 明确声明一次 `captions.list` 的 50-unit 成本。可选调用
 `operatingline.procedure.tutorial.youtube.tracks.recommend`，引用该 completed list 并提供有序偏好；Runtime
 返回稳定排名与排除原因，但不联网、调用模型或选择轨道。调用方确认精确 track ID 后调用
-`operatingline.procedure.tutorial.youtube.tracks.select` 保存选择和受限理由；理由备注会持久化。随后再调用
-`operatingline.procedure.tutorial.youtube.import`，提交所选 caption track ID、SRT/WebVTT 目标格式和权利声明。
-它通过官方 API 核对字幕轨归属和 serving 状态，返回 packet `1.3.0`，但不调用模型、
+`operatingline.procedure.tutorial.youtube.tracks.select` 保存选择和受限理由；理由备注会持久化。随后再调用当前
+`operatingline.procedure.tutorial.youtube.import` request `1.1.0`，提交 `selectionRequestId`、所选 caption
+track ID、SRT/WebVTT 目标格式和权利声明。它先在本地核对选择收据与精确 video/track identity，再通过官方
+API 核对字幕轨归属和 serving 状态，返回带非自由文本选择 provenance 的 packet `1.4.0`，但不调用模型、
 保存树、创建 Proposal 或执行 Blender。官方字幕下载要求授权账号具备视频编辑权限，因此该入口不能抓取
-任意公开视频字幕。
+任意公开视频字幕。选择理由备注不会进入 packet，也不会转发给 OpenAI Provider。
 
 节点局部重规划：
 
