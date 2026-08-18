@@ -10,6 +10,8 @@ import {
 import {
   procedureAuthoringPromptPacketSchema,
   procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialYoutubeTrackListRequestSchema,
+  procedureTutorialYoutubeTrackListResultSchema,
 } from '@operatingline/protocol';
 
 import { buildProcedureTutorialYoutubePromptPacket } from '../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
@@ -71,7 +73,111 @@ const acquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult = {
   },
 };
 
+const trackListRequest = {
+  formatVersion: '1.0.0',
+  requestId: '640a1f82-834c-4825-ae1e-12d6f749aa0f',
+  youtube: {
+    videoId: 'dQw4w9WgXcQ',
+    authorization: {
+      networkFetchApproved: true,
+      quotaCostAcknowledged: true,
+      videoEditPermissionExpected: true,
+    },
+  },
+} as const;
+
+const trackListResult = {
+  formatVersion: '1.0.0',
+  requestId: trackListRequest.requestId,
+  source: 'youtube_data_api_v3',
+  authorization: 'oauth_video_edit_permission',
+  videoId: trackListRequest.youtube.videoId,
+  tracks: [
+    {
+      captionTrackId: 'caption-track-en',
+      lastUpdated: '2026-08-18T08:00:00Z',
+      trackKind: 'standard',
+      language: 'en',
+      name: 'English',
+      audioTrackType: 'primary',
+      isCC: true,
+      isLarge: false,
+      isEasyReader: false,
+      isDraft: false,
+      isAutoSynced: false,
+      status: 'serving',
+    },
+  ],
+  sideEffects: {
+    networkFetched: true,
+    quotaOperation: 'youtube.captions.list',
+    documentedQuotaUnits: 50,
+    captionContentDownloaded: false,
+    videoMediaDownloaded: false,
+    modelCalled: false,
+    procedureStored: false,
+    proposalCreated: false,
+    hostExecutionStarted: false,
+  },
+  listedAt: '2026-08-18T09:00:00Z',
+} as const;
+
 describe('public authorized YouTube caption import JSON Schema', () => {
+  it('publishes strict caption-track list request and metadata-only result contracts', async () => {
+    const requestCases = [
+      { value: trackListRequest, accepted: true },
+      {
+        value: {
+          ...trackListRequest,
+          youtube: {
+            ...trackListRequest.youtube,
+            authorization: {
+              ...trackListRequest.youtube.authorization,
+              quotaCostAcknowledged: false,
+            },
+          },
+        },
+        accepted: false,
+      },
+      { value: { ...trackListRequest, accessToken: 'forbidden' }, accepted: false },
+    ] as const;
+    const resultCases = [
+      { value: trackListResult, accepted: true },
+      {
+        value: {
+          ...trackListResult,
+          tracks: [{ ...trackListResult.tracks[0], failureReason: 'processingFailed' }],
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...trackListResult,
+          sideEffects: { ...trackListResult.sideEffects, captionContentDownloaded: true },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of requestCases) {
+      expect(
+        procedureTutorialYoutubeTrackListRequestSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    for (const contractCase of resultCases) {
+      expect(
+        procedureTutorialYoutubeTrackListResultSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-list-request.schema.json'),
+      requestCases,
+    );
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-tutorial-youtube-track-list-result.schema.json'),
+      resultCases,
+    );
+  });
+
   it('requires exact source identity, explicit network/quota authorization, and no credentials', async () => {
     const cases = [
       { value: request, accepted: true },

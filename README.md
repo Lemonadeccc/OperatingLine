@@ -97,12 +97,15 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `POST /api/v1/procedure/tutorial/import`：Runtime 严格解析文档，以原始 UTF-8 内容的 SHA-256、字节数、
   cue 数和统一置信度绑定 `1.2.0` packet，再把规范化 cue 作为同一视频证据。导入不联网、不下载视频、
   不调用转录或模型。若运行入口显式配置了短期 YouTube OAuth access token，用户还可在确认网络请求与
-  API 配额消耗后，通过 MCP `operatingline.procedure.tutorial.youtube.import` 或 HTTP
-  `POST /api/v1/procedure/tutorial/youtube/import` 请求一个精确的 video ID、caption track ID 和 SRT/WebVTT
-  格式。Runtime 只使用官方 YouTube Data API 读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
+  API 配额消耗后，先通过 MCP `operatingline.procedure.tutorial.youtube.tracks.list` 或 HTTP
+  `POST /api/v1/procedure/tutorial/youtube/tracks` 枚举该可编辑视频的字幕轨元数据；该操作固定披露当前官方
+  `captions.list` 的 50-unit 成本，不下载字幕正文，也不会静默选轨。调用方明确选择后，再通过 MCP
+  `operatingline.procedure.tutorial.youtube.import` 或 HTTP `POST /api/v1/procedure/tutorial/youtube/import`
+  请求一个精确的 video ID、caption track ID 和 SRT/WebVTT 格式。Runtime 只使用官方 YouTube Data API
+  读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
   随后返回含获取 provenance 的 `1.3.0` packet；OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
   持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕，也不负责
-  OAuth 登录/刷新、字幕轨枚举、视频媒体下载或语音转录。显式审阅 Provider 披露后，可改用 MCP
+  OAuth 登录/刷新、自动选轨、视频媒体下载或语音转录。显式审阅 Provider 披露后，可改用 MCP
   `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
   解析文档、把只含摘要和规范化 cue 的 `1.2.0` packet 发送给所选 Provider，并立即执行候选校验与编译。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
@@ -124,7 +127,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
   [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md) 与
   [ADR 0077](docs/adr/0077-caption-document-provider-generation.md)、
-  [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md)。
+  [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md) 与
+  [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound

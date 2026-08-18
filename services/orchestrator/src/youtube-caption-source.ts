@@ -1,8 +1,12 @@
 import {
   procedureAuthoringTutorialTranscriptDocumentMaxBytes,
   procedureAuthoringYoutubeCaptionAcquisitionSchema,
+  procedureTutorialYoutubeCaptionTrackMaxCount,
+  procedureTutorialYoutubeCaptionTrackSchema,
   type ProcedureAuthoringYoutubeCaptionAcquisition,
+  type ProcedureTutorialYoutubeCaptionTrack,
   type ProcedureTutorialYoutubeImportRequest,
+  type ProcedureTutorialYoutubeTrackListRequest,
 } from '@operatingline/protocol';
 import { z } from 'zod';
 
@@ -23,23 +27,44 @@ const youtubeVideoListResponseSchema = z.object({
     .max(1),
 });
 
+const youtubeCaptionSnippetCoreSchema = z.object({
+  videoId: z.string(),
+  lastUpdated: z.iso.datetime({ offset: true }),
+  trackKind: z.enum(['ASR', 'forced', 'standard']),
+  language: z.string().min(1).max(64).regex(/^\S+$/),
+  isDraft: z.boolean(),
+  isAutoSynced: z.boolean(),
+  status: z.enum(['failed', 'serving', 'syncing']),
+});
+
+const youtubeCaptionResourceCoreSchema = z.object({
+  id: z.string(),
+  snippet: youtubeCaptionSnippetCoreSchema,
+});
+
 const youtubeCaptionListResponseSchema = z.object({
   items: z
+    .array(youtubeCaptionResourceCoreSchema)
+    .max(procedureTutorialYoutubeCaptionTrackMaxCount),
+});
+
+const youtubeCaptionTrackListResponseSchema = z.object({
+  items: z
     .array(
-      z.object({
-        id: z.string(),
-        snippet: z.object({
-          videoId: z.string(),
-          lastUpdated: z.iso.datetime({ offset: true }),
-          trackKind: z.enum(['ASR', 'forced', 'standard']),
-          language: z.string().min(1).max(64).regex(/^\S+$/),
-          isDraft: z.boolean(),
-          isAutoSynced: z.boolean(),
-          status: z.enum(['failed', 'serving', 'syncing']),
+      youtubeCaptionResourceCoreSchema.extend({
+        snippet: youtubeCaptionSnippetCoreSchema.extend({
+          name: z.string().max(150),
+          audioTrackType: z.enum(['commentary', 'descriptive', 'primary', 'unknown']),
+          isCC: z.boolean(),
+          isLarge: z.boolean(),
+          isEasyReader: z.boolean(),
+          failureReason: z
+            .enum(['processingFailed', 'unknownFormat', 'unsupportedFormat'])
+            .optional(),
         }),
       }),
     )
-    .max(1),
+    .max(procedureTutorialYoutubeCaptionTrackMaxCount),
 });
 
 export type ProcedureTutorialYoutubeSourceErrorCode =
@@ -74,8 +99,16 @@ export interface ProcedureTutorialYoutubeCaptionAcquisitionResult {
   };
 }
 
+export interface ProcedureTutorialYoutubeCaptionTrackListSourceResult {
+  readonly videoId: string;
+  readonly tracks: readonly ProcedureTutorialYoutubeCaptionTrack[];
+}
+
 export interface ProcedureTutorialYoutubeCaptionSource {
   readonly id: 'youtube_data_api_v3';
+  listTracks(
+    request: ProcedureTutorialYoutubeTrackListRequest['youtube'],
+  ): Promise<ProcedureTutorialYoutubeCaptionTrackListSourceResult>;
   acquire(
     request: ProcedureTutorialYoutubeImportRequest['youtube'],
   ): Promise<ProcedureTutorialYoutubeCaptionAcquisitionResult>;
@@ -253,7 +286,9 @@ export function createYouTubeDataApiCaptionSource(
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const authorization = `Bearer ${options.accessToken}`;
 
-  const acquire: ProcedureTutorialYoutubeCaptionSource['acquire'] = async (request) => {
+  const runAuthorized = async <Result>(
+    operation: (authorizedFetch: (url: URL) => Promise<Response>) => Promise<Result>,
+  ): Promise<Result> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const authorizedFetch = async (url: URL): Promise<Response> => {
@@ -273,8 +308,72 @@ export function createYouTubeDataApiCaptionSource(
         );
       }
     };
-
     try {
+      return await operation(authorizedFetch);
+    } catch (error) {
+      throw safeSourceError(error);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const listTracks: ProcedureTutorialYoutubeCaptionSource['listTracks'] = async (request) =>
+    runAuthorized(async (authorizedFetch) => {
+      const captionsUrl = new URL('captions', youtubeDataApiBaseUrl);
+      captionsUrl.searchParams.set('part', 'snippet');
+      captionsUrl.searchParams.set('videoId', request.videoId);
+      const captionsResponse = await authorizedFetch(captionsUrl);
+      if (!captionsResponse.ok) {
+        throw responseError(captionsResponse, 'youtube_video_not_found');
+      }
+      const captionList = youtubeCaptionTrackListResponseSchema.safeParse(
+        await readJson(captionsResponse),
+      );
+      if (!captionList.success) {
+        throw new ProcedureTutorialYoutubeSourceError(
+          'youtube_source_failed',
+          'YouTube Data API returned invalid caption track list metadata',
+        );
+      }
+      const trackIds = new Set<string>();
+      const tracks = captionList.data.items.map((caption) => {
+        if (caption.snippet.videoId !== request.videoId || trackIds.has(caption.id)) {
+          throw new ProcedureTutorialYoutubeSourceError(
+            'youtube_source_failed',
+            'YouTube Data API returned inconsistent caption track list metadata',
+          );
+        }
+        trackIds.add(caption.id);
+        return procedureTutorialYoutubeCaptionTrackSchema.parse({
+          captionTrackId: caption.id,
+          lastUpdated: caption.snippet.lastUpdated,
+          trackKind: caption.snippet.trackKind,
+          language: caption.snippet.language,
+          name: caption.snippet.name,
+          audioTrackType: caption.snippet.audioTrackType,
+          isCC: caption.snippet.isCC,
+          isLarge: caption.snippet.isLarge,
+          isEasyReader: caption.snippet.isEasyReader,
+          isDraft: caption.snippet.isDraft,
+          isAutoSynced: caption.snippet.isAutoSynced,
+          status: caption.snippet.status,
+          ...(caption.snippet.status !== 'failed' || caption.snippet.failureReason === undefined
+            ? {}
+            : { failureReason: caption.snippet.failureReason }),
+        });
+      });
+      tracks.sort((left, right) =>
+        left.captionTrackId < right.captionTrackId
+          ? -1
+          : left.captionTrackId > right.captionTrackId
+            ? 1
+            : 0,
+      );
+      return { videoId: request.videoId, tracks };
+    });
+
+  const acquire: ProcedureTutorialYoutubeCaptionSource['acquire'] = async (request) =>
+    runAuthorized(async (authorizedFetch) => {
       const videoUrl = new URL('videos', youtubeDataApiBaseUrl);
       videoUrl.searchParams.set('part', 'snippet,contentDetails');
       videoUrl.searchParams.set('id', request.videoId);
@@ -314,6 +413,7 @@ export function createYouTubeDataApiCaptionSource(
       }
       const caption = captionList.data.items[0];
       if (
+        captionList.data.items.length !== 1 ||
         caption === undefined ||
         caption.id !== request.captionTrackId ||
         caption.snippet.videoId !== request.videoId
@@ -379,12 +479,7 @@ export function createYouTubeDataApiCaptionSource(
           acquisition,
         },
       };
-    } catch (error) {
-      throw safeSourceError(error);
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
+    });
 
-  return { id: 'youtube_data_api_v3', acquire };
+  return { id: 'youtube_data_api_v3', listTracks, acquire };
 }

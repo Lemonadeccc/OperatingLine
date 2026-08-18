@@ -21,4 +21,7 @@ Optionally set `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` to a short-lived token
 runtime. Then `operatingline.procedure.tutorial.youtube.import` can use the official YouTube Data API
 to read metadata and one exact caption track for a video the authenticated account can edit. The
 token is never accepted in MCP/HTTP payloads, persisted, or logged; this runtime does not implement
-OAuth redirects or token refresh and cannot retrieve arbitrary public-video captions.
+OAuth redirects or token refresh and cannot retrieve arbitrary public-video captions. If the exact
+track id is unknown, call `operatingline.procedure.tutorial.youtube.tracks.list` first with explicit
+network/quota approval. It spends the documented 50-unit `captions.list` cost and returns metadata
+only; the caller must select a track explicitly before import.

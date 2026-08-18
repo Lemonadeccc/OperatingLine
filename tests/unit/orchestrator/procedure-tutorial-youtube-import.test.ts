@@ -7,6 +7,7 @@ import {
 } from '@operatingline/blender-action-catalog';
 import {
   procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialYoutubeTrackListRequestSchema,
   type ProcedureTutorialYoutubeImportRequest,
 } from '@operatingline/protocol';
 
@@ -18,6 +19,7 @@ import {
   ProcedureTutorialYoutubeSourceError,
   type ProcedureTutorialYoutubeCaptionAcquisitionResult,
   type ProcedureTutorialYoutubeCaptionSource,
+  type ProcedureTutorialYoutubeCaptionTrackListSourceResult,
 } from '../../../services/orchestrator/src/youtube-caption-source.js';
 
 const captionDocument =
@@ -74,6 +76,35 @@ const acquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult = {
   },
 };
 
+const trackListRequest = procedureTutorialYoutubeTrackListRequestSchema.parse({
+  formatVersion: '1.0.0',
+  requestId: 'af653187-ac15-42eb-8652-d4b71b6c43ee',
+  youtube: {
+    videoId: request.youtube.videoId,
+    authorization: request.youtube.authorization,
+  },
+});
+
+const trackListSourceResult = {
+  videoId: trackListRequest.youtube.videoId,
+  tracks: [
+    {
+      captionTrackId: request.youtube.captionTrackId,
+      lastUpdated: '2026-08-18T08:00:00Z',
+      trackKind: 'standard' as const,
+      language: 'en',
+      name: 'English',
+      audioTrackType: 'primary' as const,
+      isCC: true,
+      isLarge: false,
+      isEasyReader: false,
+      isDraft: false,
+      isAutoSynced: false,
+      status: 'serving' as const,
+    },
+  ],
+};
+
 function stored(events: readonly ExecutionEventInput[]): StoredExecutionEvent[] {
   return events.map((event, index) => ({
     sequence: index + 1,
@@ -87,9 +118,15 @@ function stored(events: readonly ExecutionEventInput[]): StoredExecutionEvent[] 
 function source(
   implementation: () => Promise<ProcedureTutorialYoutubeCaptionAcquisitionResult> = async () =>
     acquisition,
-): ProcedureTutorialYoutubeCaptionSource & { acquire: ReturnType<typeof vi.fn> } {
+  listImplementation: () => Promise<ProcedureTutorialYoutubeCaptionTrackListSourceResult> = async () =>
+    trackListSourceResult,
+): ProcedureTutorialYoutubeCaptionSource & {
+  acquire: ReturnType<typeof vi.fn>;
+  listTracks: ReturnType<typeof vi.fn>;
+} {
   return {
     id: 'youtube_data_api_v3',
+    listTracks: vi.fn(listImplementation),
     acquire: vi.fn(implementation),
   };
 }
@@ -107,6 +144,100 @@ function buildPacket(
 }
 
 describe('authorized YouTube caption import coordinator', () => {
+  it('lists caption tracks once, persists metadata-only evidence, detects conflicts, and restores', async () => {
+    const selectedSource = source();
+    const events: ExecutionEventInput[] = [];
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    const first = await coordinator.listTracks(trackListRequest);
+    const second = await coordinator.listTracks(trackListRequest);
+
+    expect(second).toEqual(first);
+    expect(selectedSource.listTracks).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({
+      formatVersion: '1.0.0',
+      requestId: trackListRequest.requestId,
+      videoId: trackListRequest.youtube.videoId,
+      tracks: trackListSourceResult.tracks,
+      sideEffects: {
+        networkFetched: true,
+        quotaOperation: 'youtube.captions.list',
+        documentedQuotaUnits: 50,
+        captionContentDownloaded: false,
+        videoMediaDownloaded: false,
+        modelCalled: false,
+      },
+    });
+    expect(events.map((event) => event.eventType)).toEqual([
+      'procedure.tutorial.youtube.caption-tracks.requested',
+      'procedure.tutorial.youtube.caption-tracks.completed',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('captionDocument');
+
+    await expect(
+      coordinator.listTracks({
+        ...trackListRequest,
+        youtube: { ...trackListRequest.youtube, videoId: 'abcdefghijk' },
+      }),
+    ).rejects.toMatchObject({ code: 'youtube_track_list_conflict' });
+    await coordinator.close();
+
+    const restartedSource = source(async () => acquisition);
+    restartedSource.listTracks.mockImplementation(async () => {
+      throw new Error('A completed track list must restore without another API call.');
+    });
+    const restarted = createProcedureTutorialYoutubeImportCoordinator({
+      source: restartedSource,
+      existingEvents: stored(events),
+      buildPacket,
+      appendEvent: () => {
+        throw new Error('A restored track list must not append duplicate evidence.');
+      },
+    });
+    await expect(restarted.listTracks(trackListRequest)).resolves.toEqual(first);
+    expect(restartedSource.listTracks).not.toHaveBeenCalled();
+    await restarted.close();
+  });
+
+  it('records track-list failure and refuses a hidden same-id quota retry', async () => {
+    const events: ExecutionEventInput[] = [];
+    const selectedSource = source(
+      async () => acquisition,
+      async () => {
+        throw new ProcedureTutorialYoutubeSourceError(
+          'youtube_source_unauthorized',
+          'YouTube Data API authorization is invalid or lacks permission to edit this video',
+        );
+      },
+    );
+    const coordinator = createProcedureTutorialYoutubeImportCoordinator({
+      source: selectedSource,
+      existingEvents: [],
+      buildPacket,
+      appendEvent: (event) => events.push(event),
+    });
+
+    await expect(coordinator.listTracks(trackListRequest)).rejects.toMatchObject({
+      code: 'youtube_source_unauthorized',
+      retryMode: 'new_request_id',
+    });
+    expect(events.map((event) => event.eventType)).toEqual([
+      'procedure.tutorial.youtube.caption-tracks.requested',
+      'procedure.tutorial.youtube.caption-tracks.failed',
+    ]);
+    await expect(coordinator.listTracks(trackListRequest)).rejects.toMatchObject({
+      code: 'youtube_track_list_already_attempted',
+      retryMode: 'new_request_id',
+    });
+    expect(selectedSource.listTracks).toHaveBeenCalledTimes(1);
+    await coordinator.close();
+  });
+
   it('imports once, persists normalized evidence, detects conflicts, and restores', async () => {
     const selectedSource = source();
     const events: ExecutionEventInput[] = [];

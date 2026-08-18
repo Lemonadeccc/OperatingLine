@@ -63,6 +63,8 @@ import {
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
   procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialYoutubeTrackListRequestSchema,
+  procedureTutorialYoutubeTrackListResultSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
@@ -171,8 +173,10 @@ import {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,
   procedureTutorialYoutubeImportErrorResponse,
-  procedureTutorialYoutubeImportEvidenceEventTypes,
+  procedureTutorialYoutubeEvidenceEventTypes,
   procedureTutorialYoutubeImportHttpStatus,
+  procedureTutorialYoutubeTrackListErrorResponse,
+  procedureTutorialYoutubeTrackListHttpStatus,
   type ProcedureTutorialYoutubeImportCoordinator,
 } from './procedure-tutorial-youtube-import.js';
 import {
@@ -1190,14 +1194,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureAuthoringGenerationEvents = database.listExecutionEventsByTypes(
       procedureAuthoringGenerationEvidenceEventTypes,
     );
-    const existingProcedureTutorialYoutubeImportEvents = database.listExecutionEventsByTypes(
-      procedureTutorialYoutubeImportEvidenceEventTypes,
+    const existingProcedureTutorialYoutubeEvents = database.listExecutionEventsByTypes(
+      procedureTutorialYoutubeEvidenceEventTypes,
     );
     procedureTutorialYoutubeImportCoordinator = createProcedureTutorialYoutubeImportCoordinator({
       ...(options.youtubeCaptionSource === undefined
         ? {}
         : { source: options.youtubeCaptionSource }),
-      existingEvents: existingProcedureTutorialYoutubeImportEvents,
+      existingEvents: existingProcedureTutorialYoutubeEvents,
       buildPacket: (request, acquisition) => {
         const actionCatalog = actionCatalogRegistry.get({
           targetAdapterId: request.targetAdapterId,
@@ -1886,6 +1890,78 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                         ? error.message
                         : 'Procedure tutorial transcript import failed',
                   }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.youtube.tracks.list',
+        {
+          description:
+            'Explicitly spend the documented 50-unit YouTube Data API quota cost to list caption-track metadata for one video owned or managed by the authenticated account. This returns track ids, languages, names, kinds, accessibility flags, draft/sync state, and processing status so the caller can explicitly select a track for a later import. It does not download caption content or video media, call a model, store a tree, create a Proposal, or execute the host. OAuth credentials are runtime-managed and must never be included in this request.',
+          inputSchema: deferMcpInputValidation(procedureTutorialYoutubeTrackListRequestSchema),
+          outputSchema: procedureTutorialYoutubeTrackListResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialYoutubeTrackListRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            const requestIdInput =
+              requestInput !== null &&
+              typeof requestInput === 'object' &&
+              !Array.isArray(requestInput)
+                ? (requestInput as Record<string, unknown>)['requestId']
+                : null;
+            const parsedRequestId = z.uuid().safeParse(requestIdInput);
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'youtube_track_list_invalid',
+                    requestId: parsedRequestId.success ? parsedRequestId.data : null,
+                    message:
+                      'YouTube caption track list request violates the strict public contract',
+                    retryMode: 'never',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = await procedureTutorialYoutubeImportCoordinator!.listTracks(
+              parsedRequest.data,
+            );
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: result.formatVersion,
+                    videoId: result.videoId,
+                    trackCount: result.tracks.length,
+                    message: 'The complete caption track list is in structuredContent.',
+                  }),
+                },
+              ],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(
+                    procedureTutorialYoutubeTrackListErrorResponse(
+                      error,
+                      parsedRequest.data.requestId,
+                    ),
+                  ),
                 },
               ],
             };
@@ -3348,6 +3424,31 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/tutorial/youtube/tracks', async (request, reply) => {
+      const parsedRequest = procedureTutorialYoutubeTrackListRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send({
+          error: 'youtube_track_list_invalid',
+          requestId: parsedRequestId.success ? parsedRequestId.data : null,
+          message: 'YouTube caption track list request violates the strict public contract',
+          retryMode: 'never',
+        });
+      }
+      try {
+        return await procedureTutorialYoutubeImportCoordinator!.listTracks(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialYoutubeTrackListHttpStatus(error))
+          .send(
+            procedureTutorialYoutubeTrackListErrorResponse(error, parsedRequest.data.requestId),
+          );
+      }
+    });
     runtimeApp.post('/api/v1/procedure/tutorial/youtube/import', async (request, reply) => {
       const parsedRequest = procedureTutorialYoutubeImportRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -4408,14 +4509,22 @@ export {
 export {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,
+  procedureTutorialYoutubeEvidenceEventTypes,
   procedureTutorialYoutubeImportErrorResponse,
   procedureTutorialYoutubeImportEvidenceEventTypes,
   procedureTutorialYoutubeImportHttpStatus,
+  procedureTutorialYoutubeTrackListErrorResponse,
+  procedureTutorialYoutubeTrackListEvidenceEventTypes,
+  procedureTutorialYoutubeTrackListHttpStatus,
   restoreProcedureTutorialYoutubeImports,
+  restoreProcedureTutorialYoutubeTrackLists,
   ProcedureTutorialYoutubeImportError,
+  ProcedureTutorialYoutubeTrackListError,
   type ProcedureTutorialYoutubeImportCoordinator,
   type ProcedureTutorialYoutubeImportCoordinatorOptions,
   type ProcedureTutorialYoutubeImportRetryMode,
+  type ProcedureTutorialYoutubeRetryMode,
+  type ProcedureTutorialYoutubeTrackListRetryMode,
 } from './procedure-tutorial-youtube-import.js';
 export {
   createYouTubeDataApiCaptionSource,
@@ -4423,6 +4532,7 @@ export {
   ProcedureTutorialYoutubeSourceError,
   type ProcedureTutorialYoutubeCaptionAcquisitionResult,
   type ProcedureTutorialYoutubeCaptionSource,
+  type ProcedureTutorialYoutubeCaptionTrackListSourceResult,
   type ProcedureTutorialYoutubeSourceErrorCode,
   type YouTubeDataApiCaptionSourceOptions,
 } from './youtube-caption-source.js';

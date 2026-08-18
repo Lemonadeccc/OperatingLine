@@ -30,7 +30,9 @@ pnpm dev:openai
   Session 的旧版 Companion。只接受精确值 `true` 或 `false`。
 - `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`：预先通过 OAuth 获得的短期 YouTube Data API token。
   配置后可显式调用 `operatingline.procedure.tutorial.youtube.import`；授权账号必须能编辑目标视频，Runtime
-  只读取元数据和指定字幕轨，不下载视频。Token 不进入协议、事件或日志，当前入口不负责 OAuth 跳转或刷新。
+  只读取元数据和指定字幕轨，不下载视频。若不知道 track ID，可先调用
+  `operatingline.procedure.tutorial.youtube.tracks.list`，明确确认网络与当前官方 50-unit 配额后枚举元数据；
+  Runtime 不会自动选轨。Token 不进入协议、事件或日志，当前入口不负责 OAuth 跳转或刷新。
 
 ## 调用顺序
 
@@ -57,9 +59,11 @@ pnpm dev:openai
 HTTP 对应入口为 `GET /api/v1/procedure/authoring/providers` 与
 `POST /api/v1/procedure/authoring/generate`。
 
-若配置了上述 YouTube OAuth token，可在用户明确确认网络与配额消耗后调用
-`operatingline.procedure.tutorial.youtube.import`，提交精确的 11 字符 video ID、caption track ID、SRT/WebVTT
-目标格式和权利声明。它通过官方 API 核对字幕轨归属和 serving 状态，返回 packet `1.3.0`，但不调用模型、
+若配置了上述 YouTube OAuth token，可在用户明确确认网络与配额消耗后先调用
+`operatingline.procedure.tutorial.youtube.tracks.list`，提交精确的 11 字符 video ID；结果只包含字幕轨元数据，
+明确声明一次 `captions.list` 的 50-unit 成本，并要求调用方显式选轨。随后调用
+`operatingline.procedure.tutorial.youtube.import`，提交所选 caption track ID、SRT/WebVTT 目标格式和权利声明。
+它通过官方 API 核对字幕轨归属和 serving 状态，返回 packet `1.3.0`，但不调用模型、
 保存树、创建 Proposal 或执行 Blender。官方字幕下载要求授权账号具备视频编辑权限，因此该入口不能抓取
 任意公开视频字幕。
 

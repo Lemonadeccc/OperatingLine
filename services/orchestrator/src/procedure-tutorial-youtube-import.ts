@@ -5,11 +5,19 @@ import {
   procedureTutorialYoutubeImportFailedEventSchema,
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeImportRequestedEventSchema,
+  procedureTutorialYoutubeTrackListCompletedEventSchema,
+  procedureTutorialYoutubeTrackListFailedEventSchema,
+  procedureTutorialYoutubeTrackListRequestSchema,
+  procedureTutorialYoutubeTrackListRequestedEventSchema,
+  procedureTutorialYoutubeTrackListResultSchema,
   type ActionCatalog,
   type InteractionCatalog,
   type ProcedureAuthoringPromptPacket,
   type ProcedureTutorialYoutubeImportErrorCode,
   type ProcedureTutorialYoutubeImportRequest,
+  type ProcedureTutorialYoutubeTrackListErrorCode,
+  type ProcedureTutorialYoutubeTrackListRequest,
+  type ProcedureTutorialYoutubeTrackListResult,
 } from '@operatingline/protocol';
 
 import { plannerProviderRequestFingerprint } from './planner-provider-invocation.js';
@@ -26,9 +34,19 @@ export const procedureTutorialYoutubeImportEvidenceEventTypes = [
   'procedure.tutorial.youtube.caption.completed',
   'procedure.tutorial.youtube.caption.failed',
 ] as const;
+export const procedureTutorialYoutubeTrackListEvidenceEventTypes = [
+  'procedure.tutorial.youtube.caption-tracks.requested',
+  'procedure.tutorial.youtube.caption-tracks.completed',
+  'procedure.tutorial.youtube.caption-tracks.failed',
+] as const;
+export const procedureTutorialYoutubeEvidenceEventTypes = [
+  ...procedureTutorialYoutubeImportEvidenceEventTypes,
+  ...procedureTutorialYoutubeTrackListEvidenceEventTypes,
+] as const;
 
-export type ProcedureTutorialYoutubeImportRetryMode =
-  'same_request_id' | 'new_request_id' | 'never';
+export type ProcedureTutorialYoutubeRetryMode = 'same_request_id' | 'new_request_id' | 'never';
+export type ProcedureTutorialYoutubeImportRetryMode = ProcedureTutorialYoutubeRetryMode;
+export type ProcedureTutorialYoutubeTrackListRetryMode = ProcedureTutorialYoutubeRetryMode;
 
 export class ProcedureTutorialYoutubeImportError extends Error {
   constructor(
@@ -41,12 +59,27 @@ export class ProcedureTutorialYoutubeImportError extends Error {
   }
 }
 
+export class ProcedureTutorialYoutubeTrackListError extends Error {
+  constructor(
+    readonly code: ProcedureTutorialYoutubeTrackListErrorCode,
+    message: string,
+    readonly retryMode: ProcedureTutorialYoutubeTrackListRetryMode,
+  ) {
+    super(message);
+    this.name = 'ProcedureTutorialYoutubeTrackListError';
+  }
+}
+
 interface ImportIdentity {
   readonly fingerprint: string;
 }
 
 interface CompletedImport extends ImportIdentity {
   readonly packet: ProcedureAuthoringPromptPacket;
+}
+
+interface CompletedTrackList extends ImportIdentity {
+  readonly result: ProcedureTutorialYoutubeTrackListResult;
 }
 
 export interface ProcedureTutorialYoutubeImportCoordinatorOptions {
@@ -60,10 +93,14 @@ export interface ProcedureTutorialYoutubeImportCoordinatorOptions {
 }
 
 export interface ProcedureTutorialYoutubeImportCoordinator {
+  listTracks(
+    request: ProcedureTutorialYoutubeTrackListRequest,
+  ): Promise<ProcedureTutorialYoutubeTrackListResult>;
   importCaption(
     request: ProcedureTutorialYoutubeImportRequest,
   ): Promise<ProcedureAuthoringPromptPacket>;
   completedPacket(requestId: string): ProcedureAuthoringPromptPacket | null;
+  completedTrackList(requestId: string): ProcedureTutorialYoutubeTrackListResult | null;
   beginClose(): void;
   close(): Promise<void>;
 }
@@ -90,6 +127,47 @@ function safeImportError(error: unknown): ProcedureTutorialYoutubeImportError {
   return new ProcedureTutorialYoutubeImportError(
     'youtube_packet_invalid',
     'Authorized YouTube caption data could not produce a valid Procedure authoring packet',
+    'new_request_id',
+  );
+}
+
+function assertMatchingTrackListIdentity(
+  requestId: string,
+  expected: ImportIdentity,
+  actual: ImportIdentity,
+): void {
+  if (expected.fingerprint !== actual.fingerprint) {
+    throw new ProcedureTutorialYoutubeTrackListError(
+      'youtube_track_list_conflict',
+      `YouTube caption track list requestId ${requestId} was reused with different input`,
+      'new_request_id',
+    );
+  }
+}
+
+function safeTrackListError(error: unknown): ProcedureTutorialYoutubeTrackListError {
+  if (error instanceof ProcedureTutorialYoutubeTrackListError) return error;
+  if (error instanceof ProcedureTutorialYoutubeSourceError) {
+    if (
+      error.code === 'youtube_source_unauthorized' ||
+      error.code === 'youtube_video_not_found' ||
+      error.code === 'youtube_source_failed'
+    ) {
+      return new ProcedureTutorialYoutubeTrackListError(
+        error.code,
+        error.message,
+        'new_request_id',
+      );
+    }
+    return new ProcedureTutorialYoutubeTrackListError(
+      'youtube_source_failed',
+      'YouTube Data API caption track listing failed without a safe public error',
+      'new_request_id',
+    );
+  }
+  return new ProcedureTutorialYoutubeTrackListError(
+    'youtube_track_list_invalid',
+    'Authorized YouTube caption track metadata violates the strict result contract',
     'new_request_id',
   );
 }
@@ -183,15 +261,52 @@ export function restoreProcedureTutorialYoutubeImports(events: readonly StoredEx
   return { attempted, completed };
 }
 
+export function restoreProcedureTutorialYoutubeTrackLists(
+  events: readonly StoredExecutionEvent[],
+): {
+  readonly attempted: ReadonlyMap<string, ImportIdentity>;
+  readonly completed: ReadonlyMap<string, CompletedTrackList>;
+} {
+  const attempted = new Map<string, ImportIdentity>();
+  const completed = new Map<string, CompletedTrackList>();
+  const record = (requestId: string, identity: ImportIdentity) => {
+    const existing = completed.get(requestId) ?? attempted.get(requestId);
+    if (existing !== undefined) assertMatchingTrackListIdentity(requestId, existing, identity);
+    attempted.set(requestId, identity);
+  };
+  for (const event of events) {
+    if (event.eventType === 'procedure.tutorial.youtube.caption-tracks.requested') {
+      const payload = procedureTutorialYoutubeTrackListRequestedEventSchema.parse(event.payload);
+      record(payload.requestId, { fingerprint: payload.requestFingerprint });
+    } else if (event.eventType === 'procedure.tutorial.youtube.caption-tracks.failed') {
+      const payload = procedureTutorialYoutubeTrackListFailedEventSchema.parse(event.payload);
+      record(payload.requestId, { fingerprint: payload.requestFingerprint });
+    } else if (event.eventType === 'procedure.tutorial.youtube.caption-tracks.completed') {
+      const payload = procedureTutorialYoutubeTrackListCompletedEventSchema.parse(event.payload);
+      const identity = { fingerprint: payload.requestFingerprint };
+      record(payload.request.requestId, identity);
+      completed.set(payload.request.requestId, { ...identity, result: payload.result });
+    }
+  }
+  return { attempted, completed };
+}
+
 export function createProcedureTutorialYoutubeImportCoordinator(
   options: ProcedureTutorialYoutubeImportCoordinatorOptions,
 ): ProcedureTutorialYoutubeImportCoordinator {
   const restored = restoreProcedureTutorialYoutubeImports(options.existingEvents);
+  const restoredTrackLists = restoreProcedureTutorialYoutubeTrackLists(options.existingEvents);
   const attempted = new Map(restored.attempted);
   const completed = new Map(restored.completed);
+  const trackListsAttempted = new Map(restoredTrackLists.attempted);
+  const completedTrackLists = new Map(restoredTrackLists.completed);
   const inFlight = new Map<
     string,
     ImportIdentity & { readonly promise: Promise<ProcedureAuthoringPromptPacket> }
+  >();
+  const trackListsInFlight = new Map<
+    string,
+    ImportIdentity & { readonly promise: Promise<ProcedureTutorialYoutubeTrackListResult> }
   >();
   let closing = false;
   let closePromise: Promise<void> | undefined;
@@ -215,7 +330,143 @@ export function createProcedureTutorialYoutubeImportCoordinator(
     }
   };
 
+  const appendTrackListEvidence = (
+    event: ExecutionEventInput,
+    retryMode: ProcedureTutorialYoutubeTrackListRetryMode,
+  ) => {
+    try {
+      options.appendEvent(event);
+    } catch {
+      throw new ProcedureTutorialYoutubeTrackListError(
+        'youtube_track_list_persistence_failed',
+        'YouTube caption track list evidence could not be persisted',
+        retryMode,
+      );
+    }
+  };
+
   return {
+    listTracks: async (requestInput) => {
+      const request = procedureTutorialYoutubeTrackListRequestSchema.parse(requestInput);
+      const identity = { fingerprint: plannerProviderRequestFingerprint(request) };
+      const running = trackListsInFlight.get(request.requestId);
+      if (running !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, running, identity);
+        return structuredClone(await running.promise);
+      }
+      const prior = completedTrackLists.get(request.requestId);
+      if (prior !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, prior, identity);
+        return structuredClone(prior.result);
+      }
+      const priorAttempt = trackListsAttempted.get(request.requestId);
+      if (priorAttempt !== undefined) {
+        assertMatchingTrackListIdentity(request.requestId, priorAttempt, identity);
+        throw new ProcedureTutorialYoutubeTrackListError(
+          'youtube_track_list_already_attempted',
+          `YouTube caption track list ${request.requestId} already reached a terminal or uncertain state`,
+          'new_request_id',
+        );
+      }
+      if (closing) {
+        throw new ProcedureTutorialYoutubeTrackListError(
+          'youtube_track_list_unavailable',
+          'YouTube caption track listing is stopping',
+          'same_request_id',
+        );
+      }
+      if (options.source === undefined) {
+        throw new ProcedureTutorialYoutubeTrackListError(
+          'youtube_track_list_unavailable',
+          'No authorized YouTube Data API caption source is configured',
+          'same_request_id',
+        );
+      }
+
+      const requestedPayload = procedureTutorialYoutubeTrackListRequestedEventSchema.parse({
+        requestId: request.requestId,
+        requestFingerprint: identity.fingerprint,
+        videoId: request.youtube.videoId,
+        occurredAt: new Date().toISOString(),
+      });
+      appendTrackListEvidence(
+        {
+          id: `procedure-tutorial-youtube-caption-tracks-requested:${request.requestId}`,
+          eventType: 'procedure.tutorial.youtube.caption-tracks.requested',
+          payload: requestedPayload,
+        },
+        'same_request_id',
+      );
+      trackListsAttempted.set(request.requestId, identity);
+
+      const promise = Promise.resolve()
+        .then(async () => {
+          try {
+            const sourceResult = await options.source!.listTracks(request.youtube);
+            if (sourceResult.videoId !== request.youtube.videoId) {
+              throw new Error('YouTube caption track list source identity does not match request');
+            }
+            const listedAt = new Date().toISOString();
+            const result = procedureTutorialYoutubeTrackListResultSchema.parse({
+              formatVersion: '1.0.0',
+              requestId: request.requestId,
+              source: 'youtube_data_api_v3',
+              authorization: 'oauth_video_edit_permission',
+              videoId: request.youtube.videoId,
+              tracks: sourceResult.tracks,
+              sideEffects: {
+                networkFetched: true,
+                quotaOperation: 'youtube.captions.list',
+                documentedQuotaUnits: 50,
+                captionContentDownloaded: false,
+                videoMediaDownloaded: false,
+                modelCalled: false,
+                procedureStored: false,
+                proposalCreated: false,
+                hostExecutionStarted: false,
+              },
+              listedAt,
+            });
+            const completedPayload = procedureTutorialYoutubeTrackListCompletedEventSchema.parse({
+              request,
+              requestFingerprint: identity.fingerprint,
+              result,
+              occurredAt: listedAt,
+            });
+            appendTrackListEvidence(
+              {
+                id: `procedure-tutorial-youtube-caption-tracks-completed:${request.requestId}`,
+                eventType: 'procedure.tutorial.youtube.caption-tracks.completed',
+                payload: completedPayload,
+              },
+              'new_request_id',
+            );
+            completedTrackLists.set(request.requestId, { ...identity, result });
+            return result;
+          } catch (error) {
+            const safeError = safeTrackListError(error);
+            const failedPayload = procedureTutorialYoutubeTrackListFailedEventSchema.parse({
+              requestId: request.requestId,
+              requestFingerprint: identity.fingerprint,
+              videoId: request.youtube.videoId,
+              error: safeError.code,
+              occurredAt: new Date().toISOString(),
+            });
+            appendTrackListEvidence(
+              {
+                id: `procedure-tutorial-youtube-caption-tracks-failed:${request.requestId}`,
+                eventType: 'procedure.tutorial.youtube.caption-tracks.failed',
+                payload: failedPayload,
+              },
+              'new_request_id',
+            );
+            throw safeError;
+          }
+        })
+        .finally(() => trackListsInFlight.delete(request.requestId));
+      trackListsInFlight.set(request.requestId, { ...identity, promise });
+      return structuredClone(await promise);
+    },
     importCaption: async (requestInput) => {
       const request = procedureTutorialYoutubeImportRequestSchema.parse(requestInput);
       const identity = { fingerprint: plannerProviderRequestFingerprint(request) };
@@ -325,11 +576,18 @@ export function createProcedureTutorialYoutubeImportCoordinator(
       const result = completed.get(requestId);
       return result === undefined ? null : structuredClone(result.packet);
     },
+    completedTrackList: (requestId) => {
+      const result = completedTrackLists.get(requestId);
+      return result === undefined ? null : structuredClone(result.result);
+    },
     beginClose,
     close: () => {
       beginClose();
       closePromise ??= (async () => {
-        await Promise.allSettled([...inFlight.values()].map(({ promise }) => promise));
+        await Promise.allSettled([
+          ...[...inFlight.values()].map(({ promise }) => promise),
+          ...[...trackListsInFlight.values()].map(({ promise }) => promise),
+        ]);
         await options.source?.close?.();
       })();
       return closePromise;
@@ -373,6 +631,46 @@ export function procedureTutorialYoutubeImportErrorResponse(
   readonly retryMode: ProcedureTutorialYoutubeImportRetryMode;
 } {
   const safeError = safeImportError(error);
+  return {
+    error: safeError.code,
+    requestId,
+    message: safeError.message,
+    retryMode: safeError.retryMode,
+  };
+}
+
+export function procedureTutorialYoutubeTrackListHttpStatus(
+  error: unknown,
+): 404 | 409 | 422 | 500 | 502 | 503 {
+  const code = safeTrackListError(error).code;
+  switch (code) {
+    case 'youtube_source_unauthorized':
+      return 502;
+    case 'youtube_video_not_found':
+      return 404;
+    case 'youtube_track_list_conflict':
+    case 'youtube_track_list_already_attempted':
+      return 409;
+    case 'youtube_track_list_invalid':
+      return 422;
+    case 'youtube_track_list_unavailable':
+      return 503;
+    case 'youtube_source_failed':
+    case 'youtube_track_list_persistence_failed':
+      return 500;
+  }
+}
+
+export function procedureTutorialYoutubeTrackListErrorResponse(
+  error: unknown,
+  requestId: string | null,
+): {
+  readonly error: ProcedureTutorialYoutubeTrackListErrorCode;
+  readonly requestId: string | null;
+  readonly message: string;
+  readonly retryMode: ProcedureTutorialYoutubeTrackListRetryMode;
+} {
+  const safeError = safeTrackListError(error);
   return {
     error: safeError.code,
     requestId,

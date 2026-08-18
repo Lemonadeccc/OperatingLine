@@ -20,6 +20,7 @@ import {
   guideProtocolVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialYoutubeTrackListResultSchema,
   type GuidePlan,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
@@ -359,6 +360,7 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.procedure.tutorial.import' },
+            { name: 'operatingline.procedure.tutorial.youtube.tracks.list' },
             { name: 'operatingline.procedure.tutorial.youtube.import' },
             { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
@@ -421,6 +423,15 @@ describe('OperatingLine runtime', () => {
           'requestId',
           'providerId',
         ],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.tracks.list',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'youtube'],
         additionalProperties: false,
       });
       expect(
@@ -863,10 +874,34 @@ describe('OperatingLine runtime', () => {
     const databasePath = join(directory, 'events.db');
     const captionDocument =
       'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove it.\n';
+    let trackListCalls = 0;
     let sourceCalls = 0;
     let sourceCloseCalls = 0;
     const source: ProcedureTutorialYoutubeCaptionSource = {
       id: 'youtube_data_api_v3',
+      listTracks: async (sourceRequest) => {
+        trackListCalls += 1;
+        expect(sourceRequest).toMatchObject({ videoId: 'dQw4w9WgXcQ' });
+        return {
+          videoId: sourceRequest.videoId,
+          tracks: [
+            {
+              captionTrackId: 'caption-track-en',
+              lastUpdated: '2026-08-18T08:00:00Z',
+              trackKind: 'standard',
+              language: 'en',
+              name: 'English',
+              audioTrackType: 'primary',
+              isCC: true,
+              isLarge: false,
+              isEasyReader: false,
+              isDraft: false,
+              isAutoSynced: false,
+              status: 'serving',
+            },
+          ],
+        };
+      },
       acquire: async (sourceRequest) => {
         sourceCalls += 1;
         expect(sourceRequest).toMatchObject({
@@ -928,6 +963,14 @@ describe('OperatingLine runtime', () => {
         },
       },
     } as const;
+    const trackListRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      youtube: {
+        videoId: importRequest.youtube.videoId,
+        authorization: importRequest.youtube.authorization,
+      },
+    } as const;
     const headers = {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
@@ -943,6 +986,47 @@ describe('OperatingLine runtime', () => {
       });
       let packet: ProcedureAuthoringPromptPacket;
       try {
+        const listed = await callMcpTool(
+          runtime,
+          169,
+          'operatingline.procedure.tutorial.youtube.tracks.list',
+          trackListRequest,
+        );
+        expect(listed.result?.isError).not.toBe(true);
+        const trackList = procedureTutorialYoutubeTrackListResultSchema.parse(
+          listed.result?.structuredContent,
+        );
+        expect(trackList).toMatchObject({
+          requestId: trackListRequest.requestId,
+          videoId: trackListRequest.youtube.videoId,
+          tracks: [
+            {
+              captionTrackId: importRequest.youtube.captionTrackId,
+              language: 'en',
+              status: 'serving',
+            },
+          ],
+          sideEffects: {
+            quotaOperation: 'youtube.captions.list',
+            documentedQuotaUnits: 50,
+            captionContentDownloaded: false,
+            videoMediaDownloaded: false,
+            modelCalled: false,
+          },
+        });
+
+        const repeatedTrackList = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/tracks`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(trackListRequest),
+          },
+        );
+        expect(repeatedTrackList.status).toBe(200);
+        await expect(repeatedTrackList.json()).resolves.toEqual(trackList);
+        expect(trackListCalls).toBe(1);
+
         const imported = await callMcpTool(
           runtime,
           170,
@@ -1044,11 +1128,16 @@ describe('OperatingLine runtime', () => {
       const database = openOperatingLineDatabase(databasePath);
       try {
         const events = database.listExecutionEventsByTypes([
+          'procedure.tutorial.youtube.caption-tracks.requested',
+          'procedure.tutorial.youtube.caption-tracks.completed',
+          'procedure.tutorial.youtube.caption-tracks.failed',
           'procedure.tutorial.youtube.caption.requested',
           'procedure.tutorial.youtube.caption.completed',
           'procedure.tutorial.youtube.caption.failed',
         ]);
         expect(events.map((event) => event.eventType)).toEqual([
+          'procedure.tutorial.youtube.caption-tracks.requested',
+          'procedure.tutorial.youtube.caption-tracks.completed',
           'procedure.tutorial.youtube.caption.requested',
           'procedure.tutorial.youtube.caption.completed',
         ]);
@@ -1060,6 +1149,9 @@ describe('OperatingLine runtime', () => {
 
       const restoredSource: ProcedureTutorialYoutubeCaptionSource = {
         id: 'youtube_data_api_v3',
+        listTracks: async () => {
+          throw new Error('Restored YouTube track list must not call the source.');
+        },
         acquire: async () => {
           throw new Error('Restored YouTube import must not call the source.');
         },
@@ -1072,6 +1164,18 @@ describe('OperatingLine runtime', () => {
         youtubeCaptionSource: restoredSource,
       });
       try {
+        const restoredTrackList = await fetch(
+          `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/tracks`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(trackListRequest),
+          },
+        );
+        expect(restoredTrackList.status).toBe(200);
+        await expect(restoredTrackList.json()).resolves.toEqual(
+          expect.objectContaining({ requestId: trackListRequest.requestId }),
+        );
         const restored = await fetch(
           `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/import`,
           {

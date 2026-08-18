@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { procedureTutorialYoutubeImportRequestSchema } from '@operatingline/protocol';
+import {
+  procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialYoutubeTrackListRequestSchema,
+} from '@operatingline/protocol';
 
 import {
   createYouTubeDataApiCaptionSource,
@@ -27,6 +30,14 @@ const request = procedureTutorialYoutubeImportRequestSchema.parse({
       quotaCostAcknowledged: true,
       videoEditPermissionExpected: true,
     },
+  },
+});
+const trackListRequest = procedureTutorialYoutubeTrackListRequestSchema.parse({
+  formatVersion: '1.0.0',
+  requestId: '4684a4c2-e800-4a23-89cc-a47f8f74f76d',
+  youtube: {
+    videoId: request.youtube.videoId,
+    authorization: request.youtube.authorization,
   },
 });
 
@@ -136,6 +147,98 @@ describe('YouTube Data API caption source', () => {
       });
     }
     expect(JSON.stringify(result)).not.toContain(accessToken);
+  });
+
+  it('lists all authorized caption-track metadata without downloading caption content', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        items: [
+          {
+            id: 'track-z-failed',
+            snippet: {
+              videoId: trackListRequest.youtube.videoId,
+              lastUpdated: '2026-08-18T08:05:00Z',
+              trackKind: 'ASR',
+              language: 'zh-Hans',
+              name: '简体中文',
+              audioTrackType: 'primary',
+              isCC: false,
+              isLarge: false,
+              isEasyReader: false,
+              isDraft: true,
+              isAutoSynced: true,
+              status: 'failed',
+              failureReason: 'processingFailed',
+            },
+          },
+          {
+            id: 'track-a-serving',
+            snippet: {
+              videoId: trackListRequest.youtube.videoId,
+              lastUpdated: '2026-08-18T08:00:00Z',
+              trackKind: 'standard',
+              language: 'en',
+              name: 'English',
+              audioTrackType: 'primary',
+              isCC: true,
+              isLarge: false,
+              isEasyReader: false,
+              isDraft: false,
+              isAutoSynced: false,
+              status: 'serving',
+            },
+          },
+        ],
+      }),
+    );
+    const source = createYouTubeDataApiCaptionSource({ accessToken, fetch: fetchImpl });
+
+    await expect(source.listTracks(trackListRequest.youtube)).resolves.toEqual({
+      videoId: trackListRequest.youtube.videoId,
+      tracks: [
+        {
+          captionTrackId: 'track-a-serving',
+          lastUpdated: '2026-08-18T08:00:00Z',
+          trackKind: 'standard',
+          language: 'en',
+          name: 'English',
+          audioTrackType: 'primary',
+          isCC: true,
+          isLarge: false,
+          isEasyReader: false,
+          isDraft: false,
+          isAutoSynced: false,
+          status: 'serving',
+        },
+        {
+          captionTrackId: 'track-z-failed',
+          lastUpdated: '2026-08-18T08:05:00Z',
+          trackKind: 'ASR',
+          language: 'zh-Hans',
+          name: '简体中文',
+          audioTrackType: 'primary',
+          isCC: false,
+          isLarge: false,
+          isEasyReader: false,
+          isDraft: true,
+          isAutoSynced: true,
+          status: 'failed',
+          failureReason: 'processingFailed',
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchImpl.mock.calls[0]!;
+    const url = new URL(String(input));
+    expect(url.pathname).toBe('/youtube/v3/captions');
+    expect(url.searchParams.get('part')).toBe('snippet');
+    expect(url.searchParams.get('videoId')).toBe(trackListRequest.youtube.videoId);
+    expect(url.searchParams.has('id')).toBe(false);
+    expect(init).toMatchObject({
+      method: 'GET',
+      redirect: 'error',
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
   });
 
   it('returns safe authorization errors without reading or echoing the upstream body', async () => {

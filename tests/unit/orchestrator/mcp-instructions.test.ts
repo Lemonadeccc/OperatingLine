@@ -20,6 +20,11 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain(
       'operatingline.procedure.tutorial.youtube.import',
     );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.procedure.tutorial.youtube.tracks.list',
+    );
+    expect(operatingLineMcpInstructions).toContain('documented 50-unit captions.list cost');
+    expect(operatingLineMcpInstructions).toContain('rather than choosing silently');
     expect(operatingLineMcpInstructions).toContain('cannot fetch arbitrary public-video captions');
     expect(operatingLineMcpInstructions).toContain(
       'send its normalized cues and task context to that Provider',

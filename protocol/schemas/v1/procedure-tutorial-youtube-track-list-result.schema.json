@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "source": {
+      "type": "string",
+      "const": "youtube_data_api_v3"
+    },
+    "authorization": {
+      "type": "string",
+      "const": "oauth_video_edit_permission"
+    },
+    "videoId": {
+      "type": "string",
+      "minLength": 11,
+      "maxLength": 11,
+      "pattern": "^[A-Za-z0-9_-]{11}$"
+    },
+    "tracks": {
+      "maxItems": 2000,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "captionTrackId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "^\\S+$"
+              },
+              "lastUpdated": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "trackKind": {
+                "type": "string",
+                "enum": [
+                  "ASR",
+                  "forced",
+                  "standard"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 150
+              },
+              "audioTrackType": {
+                "type": "string",
+                "enum": [
+                  "commentary",
+                  "descriptive",
+                  "primary",
+                  "unknown"
+                ]
+              },
+              "isCC": {
+                "type": "boolean"
+              },
+              "isLarge": {
+                "type": "boolean"
+              },
+              "isEasyReader": {
+                "type": "boolean"
+              },
+              "isDraft": {
+                "type": "boolean"
+              },
+              "isAutoSynced": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "const": "serving"
+              }
+            },
+            "required": [
+              "captionTrackId",
+              "lastUpdated",
+              "trackKind",
+              "language",
+              "name",
+              "audioTrackType",
+              "isCC",
+              "isLarge",
+              "isEasyReader",
+              "isDraft",
+              "isAutoSynced",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "captionTrackId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "^\\S+$"
+              },
+              "lastUpdated": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "trackKind": {
+                "type": "string",
+                "enum": [
+                  "ASR",
+                  "forced",
+                  "standard"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 150
+              },
+              "audioTrackType": {
+                "type": "string",
+                "enum": [
+                  "commentary",
+                  "descriptive",
+                  "primary",
+                  "unknown"
+                ]
+              },
+              "isCC": {
+                "type": "boolean"
+              },
+              "isLarge": {
+                "type": "boolean"
+              },
+              "isEasyReader": {
+                "type": "boolean"
+              },
+              "isDraft": {
+                "type": "boolean"
+              },
+              "isAutoSynced": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "const": "syncing"
+              }
+            },
+            "required": [
+              "captionTrackId",
+              "lastUpdated",
+              "trackKind",
+              "language",
+              "name",
+              "audioTrackType",
+              "isCC",
+              "isLarge",
+              "isEasyReader",
+              "isDraft",
+              "isAutoSynced",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "captionTrackId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024,
+                "pattern": "^\\S+$"
+              },
+              "lastUpdated": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "trackKind": {
+                "type": "string",
+                "enum": [
+                  "ASR",
+                  "forced",
+                  "standard"
+                ]
+              },
+              "language": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^\\S+$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 150
+              },
+              "audioTrackType": {
+                "type": "string",
+                "enum": [
+                  "commentary",
+                  "descriptive",
+                  "primary",
+                  "unknown"
+                ]
+              },
+              "isCC": {
+                "type": "boolean"
+              },
+              "isLarge": {
+                "type": "boolean"
+              },
+              "isEasyReader": {
+                "type": "boolean"
+              },
+              "isDraft": {
+                "type": "boolean"
+              },
+              "isAutoSynced": {
+                "type": "boolean"
+              },
+              "status": {
+                "type": "string",
+                "const": "failed"
+              },
+              "failureReason": {
+                "type": "string",
+                "enum": [
+                  "processingFailed",
+                  "unknownFormat",
+                  "unsupportedFormat"
+                ]
+              }
+            },
+            "required": [
+              "captionTrackId",
+              "lastUpdated",
+              "trackKind",
+              "language",
+              "name",
+              "audioTrackType",
+              "isCC",
+              "isLarge",
+              "isEasyReader",
+              "isDraft",
+              "isAutoSynced",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "sideEffects": {
+      "type": "object",
+      "properties": {
+        "networkFetched": {
+          "type": "boolean",
+          "const": true
+        },
+        "quotaOperation": {
+          "type": "string",
+          "const": "youtube.captions.list"
+        },
+        "documentedQuotaUnits": {
+          "type": "number",
+          "const": 50
+        },
+        "captionContentDownloaded": {
+          "type": "boolean",
+          "const": false
+        },
+        "videoMediaDownloaded": {
+          "type": "boolean",
+          "const": false
+        },
+        "modelCalled": {
+          "type": "boolean",
+          "const": false
+        },
+        "procedureStored": {
+          "type": "boolean",
+          "const": false
+        },
+        "proposalCreated": {
+          "type": "boolean",
+          "const": false
+        },
+        "hostExecutionStarted": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "networkFetched",
+        "quotaOperation",
+        "documentedQuotaUnits",
+        "captionContentDownloaded",
+        "videoMediaDownloaded",
+        "modelCalled",
+        "procedureStored",
+        "proposalCreated",
+        "hostExecutionStarted"
+      ],
+      "additionalProperties": false
+    },
+    "listedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "requestId",
+    "source",
+    "authorization",
+    "videoId",
+    "tracks",
+    "sideEffects",
+    "listedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-list-result.json"
+}

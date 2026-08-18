@@ -48,7 +48,7 @@ Coordinator 在网络请求前持久化 requested evidence。相同 requestId �
 requestId，避免隐藏的重复配额消耗。completed evidence 保存严格请求和规范化 packet，failed evidence 只保存
 安全错误码；两者均不保存 OAuth token 或原始字幕全文。
 
-该入口只获取一个调用方已知 ID 的字幕轨，不枚举轨道、不下载视频媒体、不转录音频、不调用 Provider、
+该入口只获取一个调用方已选择 ID 的字幕轨，不自动选择轨道、不下载视频媒体、不转录音频、不调用 Provider、
 不保存 ProcedureTree、不创建 Proposal，也不执行 Blender。OAuth 编辑权限和调用方权利声明都不自动构成
 released 训练许可。
 
@@ -57,7 +57,9 @@ released 训练许可。
 项目现在可以在平台授权边界内，把一个真实 YouTube 字幕轨转换为可验证、可重启恢复的教程 authoring
 packet，同时保留原有 candidate-only、人工审阅和宿主执行边界。它不能用来抓取任意公开视频字幕。
 
-仍需 OAuth 授权流程与 token refresh、字幕轨枚举/选择、视频媒体导入与 ASR、画面/按键识别、自动语义
+后续 [ADR 0079](0079-authorized-youtube-caption-track-discovery.md) 已增加授权视频字幕轨元数据枚举，但仍要求
+调用方显式选择。仍需 OAuth 授权流程与 token refresh、字幕轨自动推荐/选择、视频媒体导入与 ASR、
+画面/按键识别、自动语义
 分段、证据帧抽取，以及把 `1.3.0` packet 交给 Provider 后生成完整 ProcedureTree 的组合入口。
 
 ## 参考

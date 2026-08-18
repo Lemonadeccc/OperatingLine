@@ -289,13 +289,15 @@
         authoring validator 与 compile 门。审计不保存原始字幕文档，结果不自动 store、materialize、propose
         或 execute。见 [ADR 0077](adr/0077-caption-document-provider-generation.md)。
   - [x] 经授权的 YouTube 字幕获取：显式 MCP/HTTP 请求在用户确认网络与配额后，通过运行时注入的 OAuth
-        token 调用官方 Data API，读取可编辑视频元数据、核对一个精确 serving caption track 并下载
-        SRT/WebVTT，随后绑定获取 provenance 的 authoring packet `1.3.0`。请求、日志和事件都不含 token，
-        completed evidence 不含原始字幕全文；重启幂等且失败不使用同一 requestId 自动重试。入口不能抓取
-        任意公开视频字幕，也不把编辑权限或权利声明当成 released 训练许可。见
-        [ADR 0078](adr/0078-authorized-youtube-caption-acquisition.md)。
-  - [ ] OAuth 登录/刷新与字幕轨枚举、视频媒体下载/语音转录、画面与按键识别、自动语义分段、证据帧，
-        以及大步骤/小步骤质量校准；当前 Runtime 只导入调用方已知 ID 的授权字幕轨。
+        token 调用官方 Data API。独立 track-list MCP/HTTP 以一次 `captions.list` 的 50-unit 配额枚举可编辑
+        视频的有界字幕轨元数据，不下载正文或静默选轨；调用方选择后，import 再读取视频元数据、核对一个
+        精确 serving track 并下载 SRT/WebVTT，随后绑定获取 provenance 的 authoring packet `1.3.0`。请求、
+        日志和事件都不含 token，completed evidence 不含原始字幕全文；两条操作均可重启幂等，且失败不使用
+        同一 requestId 自动重试。入口不能抓取任意公开视频字幕，也不把编辑权限或权利声明当成 released
+        训练许可。见 [ADR 0078](adr/0078-authorized-youtube-caption-acquisition.md) 与
+        [ADR 0079](adr/0079-authorized-youtube-caption-track-discovery.md)。
+  - [ ] OAuth 登录/刷新、字幕轨自动推荐/选择、视频媒体下载/语音转录、画面与按键识别、自动语义分段、
+        证据帧，以及大步骤/小步骤质量校准；当前 Runtime 要求调用方从已枚举元数据中显式选择授权字幕轨。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision
