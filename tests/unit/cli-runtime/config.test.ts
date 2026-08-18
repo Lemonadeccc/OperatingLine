@@ -96,4 +96,21 @@ describe('local AI client runtime configuration', () => {
       ).toThrow('OPERATINGLINE_ALLOW_LEGACY_COMPANIONS');
     }
   });
+
+  it('accepts an optional pre-authorized YouTube OAuth token without normalizing it', () => {
+    expect(
+      loadCliRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN: 'youtube-oauth-token',
+      }),
+    ).toMatchObject({ youtubeAccessToken: 'youtube-oauth-token' });
+    for (const token of [' token', 'token ', 'token\nvalue']) {
+      expect(() =>
+        loadCliRuntimeConfig({
+          ...requiredEnvironment,
+          OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN: token,
+        }),
+      ).toThrow('OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN');
+    }
+  });
 });

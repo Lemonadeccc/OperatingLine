@@ -96,7 +96,13 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   若调用方已有 SRT/WebVTT 文档，可改用版本化 MCP `operatingline.procedure.tutorial.import` 或 HTTP
   `POST /api/v1/procedure/tutorial/import`：Runtime 严格解析文档，以原始 UTF-8 内容的 SHA-256、字节数、
   cue 数和统一置信度绑定 `1.2.0` packet，再把规范化 cue 作为同一视频证据。导入不联网、不下载视频、
-  不调用转录或模型。显式审阅 Provider 披露后，可改用 MCP
+  不调用转录或模型。若运行入口显式配置了短期 YouTube OAuth access token，用户还可在确认网络请求与
+  API 配额消耗后，通过 MCP `operatingline.procedure.tutorial.youtube.import` 或 HTTP
+  `POST /api/v1/procedure/tutorial/youtube/import` 请求一个精确的 video ID、caption track ID 和 SRT/WebVTT
+  格式。Runtime 只使用官方 YouTube Data API 读取视频元数据、核对该字幕轨归属与 serving 状态并下载字幕，
+  随后返回含获取 provenance 的 `1.3.0` packet；OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
+  持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕，也不负责
+  OAuth 登录/刷新、字幕轨枚举、视频媒体下载或语音转录。显式审阅 Provider 披露后，可改用 MCP
   `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
   解析文档、把只含摘要和规范化 cue 的 `1.2.0` packet 发送给所选 Provider，并立即执行候选校验与编译。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
@@ -117,7 +123,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
   [ADR 0076](docs/adr/0076-user-supplied-caption-document-import.md) 与
-  [ADR 0077](docs/adr/0077-caption-document-provider-generation.md)。
+  [ADR 0077](docs/adr/0077-caption-document-provider-generation.md)、
+  [ADR 0078](docs/adr/0078-authorized-youtube-caption-acquisition.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
@@ -640,6 +647,10 @@ pnpm dev:clients
 
 该入口会探测已安装的 `codex` 和 `claude`，但不会自动调用。若只想由 Codex/Claude 桌面端或 CLI 作为
 外部 MCP Host 发起任务，改用 provider-free 的 `pnpm dev`。
+
+如需启用上述官方 YouTube 字幕导入，可在启动 `pnpm dev`、`pnpm dev:clients` 或 `pnpm dev:openai` 前额外
+导出短期 `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`；未设置时相应工具保持可发现但返回 source
+unavailable。不要把真实 token 写入仓库或 MCP/HTTP 请求。
 
 一键配置当前机器上已安装的 Codex 和 Claude Code；缺少其中一个 CLI 时会跳过它：
 

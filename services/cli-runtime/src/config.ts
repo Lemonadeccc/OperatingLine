@@ -8,6 +8,7 @@ export interface CliRuntimeConfig {
   readonly databasePath: string;
   readonly port: number;
   readonly plannerProviderTimeoutMs: number;
+  readonly youtubeAccessToken?: string;
   readonly codex: {
     readonly executable: string;
     readonly model?: string;
@@ -46,6 +47,10 @@ export function loadCliRuntimeConfig(
   );
   const codexModel = optionalValue(environment['OPERATINGLINE_CODEX_MODEL']);
   const claudeModel = optionalValue(environment['OPERATINGLINE_CLAUDE_MODEL']);
+  const youtubeAccessToken = optionalSecret(
+    environment['OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN'],
+    'OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN',
+  );
 
   return {
     accessToken,
@@ -59,6 +64,7 @@ export function loadCliRuntimeConfig(
     ),
     port,
     plannerProviderTimeoutMs,
+    ...(youtubeAccessToken === undefined ? {} : { youtubeAccessToken }),
     codex: {
       executable: executableValue(environment['OPERATINGLINE_CODEX_BIN'], 'codex'),
       ...(codexModel === undefined ? {} : { model: codexModel }),
@@ -69,6 +75,24 @@ export function loadCliRuntimeConfig(
       maximumBudgetUsd,
     },
   };
+}
+
+function optionalSecret(value: string | undefined, name: string): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (value.length > 8_192 || containsWhitespaceOrControl(value)) {
+    throw new Error(`${name} must be at most 8192 characters and contain no whitespace`);
+  }
+  return value;
+}
+
+function containsWhitespaceOrControl(value: string): boolean {
+  return (
+    /\s/u.test(value) ||
+    Array.from(value).some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint !== undefined && (codePoint < 0x20 || codePoint === 0x7f);
+    })
+  );
 }
 
 function strictBoolean(value: string | undefined, name: string, fallback: boolean): boolean {

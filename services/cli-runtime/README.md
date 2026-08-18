@@ -16,3 +16,9 @@ available through `pnpm dev`.
 Legacy companions that do not establish a renewable session remain allowed by default during the
 migration window. Set `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS=false` to require session leases. The
 setting accepts only the exact values `true` or `false`.
+
+Optionally set `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` to a short-lived token obtained outside the
+runtime. Then `operatingline.procedure.tutorial.youtube.import` can use the official YouTube Data API
+to read metadata and one exact caption track for a video the authenticated account can edit. The
+token is never accepted in MCP/HTTP payloads, persisted, or logged; this runtime does not implement
+OAuth redirects or token refresh and cannot retrieve arbitrary public-video captions.

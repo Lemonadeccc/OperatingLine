@@ -11,7 +11,7 @@ import {
   createClaudeCodeCliPlannerProvider,
   createCodexCliPlannerProvider,
 } from '@operatingline/cli-planner-provider';
-import { startRuntime } from '@operatingline/orchestrator';
+import { createYouTubeDataApiCaptionSource, startRuntime } from '@operatingline/orchestrator';
 
 import { loadCliRuntimeConfig } from './config.js';
 
@@ -23,6 +23,10 @@ const plannerProviders = [
   createCodexCliPlannerProvider(config.codex),
   createClaudeCodeCliPlannerProvider(config.claude),
 ];
+const youtubeCaptionSource =
+  config.youtubeAccessToken === undefined
+    ? undefined
+    : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken });
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,
@@ -31,6 +35,7 @@ const runtime = await startRuntime({
   interactionCatalogs: blenderInteractionCatalogs,
   plannerProviders,
   plannerProviderTimeoutMs: config.plannerProviderTimeoutMs,
+  ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,
 });
@@ -43,6 +48,7 @@ logger.info(
       version: provider.descriptor.version,
       availability: provider.descriptor.availability,
     })),
+    youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
   },
   'local AI client runtime ready',
 );

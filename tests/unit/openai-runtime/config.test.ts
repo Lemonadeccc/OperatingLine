@@ -61,4 +61,21 @@ describe('opt-in OpenAI runtime configuration', () => {
       ).toThrow('OPERATINGLINE_ALLOW_LEGACY_COMPANIONS');
     }
   });
+
+  it('accepts an optional pre-authorized YouTube OAuth token without normalizing it', () => {
+    expect(
+      loadOpenAIRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN: 'youtube-oauth-token',
+      }),
+    ).toMatchObject({ youtubeAccessToken: 'youtube-oauth-token' });
+    for (const token of [' token', 'token ', 'token\nvalue']) {
+      expect(() =>
+        loadOpenAIRuntimeConfig({
+          ...requiredEnvironment,
+          OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN: token,
+        }),
+      ).toThrow('OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN');
+    }
+  });
 });

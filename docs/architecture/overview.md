@@ -344,13 +344,30 @@ candidate Schema 和 packet identity，再执行同一 installed-catalog validat
 requested/completed/failed evidence 支持重启后幂等恢复。文档请求 fingerprint 覆盖精确原文，但 completed
 evidence 只保存规范化 segments 与 packet 中的 digest/统计量，不保存原始 SRT/WebVTT 语法。成功结果明确为
 `modelCalled: true`，但 tree 仍不自动 store/materialize/propose/execute。Procedure treatment/output attestation 使用独立 operation 合同，不扩宽
-既有 initial-plan/local-replan Eval。当前仍没有自动视频获取/转录/画面识别、向量/语义 RAG、流式
+既有 initial-plan/local-replan Eval。
+
+可选的授权 YouTube caption source 由 composition root 从
+`OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN` 注入；OAuth token 不是公开协议字段，也不进入日志或事件。
+MCP `operatingline.procedure.tutorial.youtube.import` 与 HTTP
+`POST /api/v1/procedure/tutorial/youtube/import` 要求 UUID request、精确的 11 字符 video ID、caption track ID、
+输出格式、权利声明，以及三个值为 `true` 的网络/配额/编辑权限确认。Coordinator 先持久化不含 token 和字幕
+正文的 requested evidence，再通过官方 YouTube Data API 读取 `videos.list` 元数据、用 `captions.list` 核对
+精确字幕轨并用 `captions.download` 获取 SRT/WebVTT；最大响应、UTF-8、轨道归属、语言、serving 状态与视频
+时长均 fail closed。结果沿用同一字幕解析器并生成 `1.3.0` packet，额外绑定 API 来源、权限类型、video/track
+identity、track kind、draft/auto-sync/status/last-updated 与请求格式。completed evidence 只保存规范化 packet，
+失败证据只保存安全错误码；相同 requestId 同输入幂等恢复，不同输入冲突，已发出 API 请求的失败不会用同一
+requestId 自动重试，从而避免隐式重复配额消耗。该入口不下载视频媒体、不调用 Provider、不保存树、不创建
+Proposal 或执行宿主。官方字幕下载需要 OAuth 身份具备目标视频编辑权限，因此它不是任意公开视频字幕抓取
+器；当前也不实现 OAuth 跳转/刷新或字幕轨枚举。
+
+当前仍没有视频媒体下载/语音转录/画面识别、向量/语义 RAG、流式
 Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
 [ADR 0076](../adr/0076-user-supplied-caption-document-import.md) 与
-[ADR 0077](../adr/0077-caption-document-provider-generation.md)。
+[ADR 0077](../adr/0077-caption-document-provider-generation.md)、
+[ADR 0078](../adr/0078-authorized-youtube-caption-acquisition.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

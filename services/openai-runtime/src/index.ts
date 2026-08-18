@@ -8,7 +8,7 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 import { createOpenAIResponsesPlannerProvider } from '@operatingline/openai-planner-provider';
-import { startRuntime } from '@operatingline/orchestrator';
+import { createYouTubeDataApiCaptionSource, startRuntime } from '@operatingline/orchestrator';
 
 import { loadOpenAIRuntimeConfig } from './config.js';
 
@@ -20,6 +20,10 @@ const plannerProvider = createOpenAIResponsesPlannerProvider({
   apiKey: config.apiKey,
   model: config.model,
 });
+const youtubeCaptionSource =
+  config.youtubeAccessToken === undefined
+    ? undefined
+    : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken });
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,
@@ -27,6 +31,7 @@ const runtime = await startRuntime({
   actionCatalogs: blenderActionCatalogs,
   interactionCatalogs: blenderInteractionCatalogs,
   plannerProviders: [plannerProvider],
+  ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,
 });
@@ -36,6 +41,7 @@ logger.info(
     mcpEndpoint: runtime.mcpEndpoint,
     plannerProviderId: plannerProvider.descriptor.id,
     plannerProviderVersion: plannerProvider.descriptor.version,
+    youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
   },
   'opt-in OpenAI runtime ready',
 );

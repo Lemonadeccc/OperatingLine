@@ -8,7 +8,7 @@ import {
   blenderInteractionCatalogs,
 } from '@operatingline/blender-action-catalog';
 
-import { startRuntime } from './index.js';
+import { createYouTubeDataApiCaptionSource, startRuntime } from './index.js';
 
 const logger = pino({ name: 'operating-line-runtime' });
 const databasePath = resolve(process.env.OPERATINGLINE_DATABASE_PATH ?? '.data/operating-line.db');
@@ -21,6 +21,11 @@ const allowLegacyCompanions = strictBoolean(
   'OPERATINGLINE_ALLOW_LEGACY_COMPANIONS',
   true,
 );
+const youtubeAccessToken = process.env.OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN;
+const youtubeCaptionSource =
+  youtubeAccessToken === undefined || youtubeAccessToken === ''
+    ? undefined
+    : createYouTubeDataApiCaptionSource({ accessToken: youtubeAccessToken });
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const runtime = await startRuntime({
@@ -29,11 +34,18 @@ const runtime = await startRuntime({
   adapters: [],
   actionCatalogs: blenderActionCatalogs,
   interactionCatalogs: blenderInteractionCatalogs,
+  ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
   companionLeases: { allowLegacyCompanions },
   port: Number(process.env.OPERATINGLINE_PORT ?? 0),
 });
 
-logger.info({ mcpEndpoint: runtime.mcpEndpoint }, 'runtime ready');
+logger.info(
+  {
+    mcpEndpoint: runtime.mcpEndpoint,
+    youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
+  },
+  'runtime ready',
+);
 
 const shutdown = async (): Promise<void> => {
   await runtime.stop();

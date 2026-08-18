@@ -29,6 +29,7 @@ import {
   computeEvalContentSha256,
   computePlanContentSha256,
   startRuntime,
+  type ProcedureTutorialYoutubeCaptionSource,
   type RunningRuntime,
 } from '@operatingline/orchestrator';
 
@@ -358,6 +359,7 @@ describe('OperatingLine runtime', () => {
             },
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.procedure.tutorial.import' },
+            { name: 'operatingline.procedure.tutorial.youtube.import' },
             { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.providers.list' },
@@ -418,6 +420,23 @@ describe('OperatingLine runtime', () => {
           'tutorial',
           'requestId',
           'providerId',
+        ],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.tutorial.youtube.import',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: [
+          'formatVersion',
+          'requestId',
+          'targetAdapterId',
+          'goal',
+          'treeId',
+          'revision',
+          'youtube',
         ],
         additionalProperties: false,
       });
@@ -836,6 +855,238 @@ describe('OperatingLine runtime', () => {
       expect(unknownArgument.result?.content?.[0]?.text).toContain('unknown python');
     } finally {
       await runtime.stop();
+    }
+  });
+
+  it('imports an OAuth-authorized YouTube caption track without persisting raw captions', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-youtube-caption-test-'));
+    const databasePath = join(directory, 'events.db');
+    const captionDocument =
+      'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove it.\n';
+    let sourceCalls = 0;
+    let sourceCloseCalls = 0;
+    const source: ProcedureTutorialYoutubeCaptionSource = {
+      id: 'youtube_data_api_v3',
+      acquire: async (sourceRequest) => {
+        sourceCalls += 1;
+        expect(sourceRequest).toMatchObject({
+          videoId: 'dQw4w9WgXcQ',
+          captionTrackId: 'caption-track-en',
+          requestedFormat: 'webvtt',
+        });
+        return {
+          video: {
+            uri: `https://www.youtube.com/watch?v=${sourceRequest.videoId}`,
+            title: 'Authorized Blender eye tutorial',
+            durationMs: 20_000,
+          },
+          captionDocument: {
+            format: 'webvtt',
+            content: captionDocument,
+            locale: 'en',
+            acquisition: {
+              source: 'youtube_data_api_v3',
+              authorization: 'oauth_video_edit_permission',
+              videoId: sourceRequest.videoId,
+              captionTrackId: sourceRequest.captionTrackId,
+              trackLanguage: 'en',
+              trackKind: 'standard',
+              isDraft: false,
+              isAutoSynced: false,
+              status: 'serving',
+              lastUpdated: '2026-08-18T08:00:00Z',
+              requestedFormat: 'webvtt',
+            },
+          },
+        };
+      },
+      close: () => {
+        sourceCloseCalls += 1;
+      },
+    };
+    const importRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderActionCatalog.catalogVersion,
+      interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+      goal: 'Create and position an eye from an authorized YouTube caption track.',
+      treeId: 'runtime.youtube.caption.eye',
+      revision: 1,
+      locale: 'en',
+      youtube: {
+        videoId: 'dQw4w9WgXcQ',
+        captionTrackId: 'caption-track-en',
+        requestedFormat: 'webvtt',
+        expectedTrackLanguage: 'en',
+        defaultConfidence: 0.91,
+        rightsStatus: 'permission_granted',
+        authorization: {
+          networkFetchApproved: true,
+          quotaCostAcknowledged: true,
+          videoEditPermissionExpected: true,
+        },
+      },
+    } as const;
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+
+    try {
+      const runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+        youtubeCaptionSource: source,
+      });
+      let packet: ProcedureAuthoringPromptPacket;
+      try {
+        const imported = await callMcpTool(
+          runtime,
+          170,
+          'operatingline.procedure.tutorial.youtube.import',
+          importRequest,
+        );
+        expect(imported.result?.isError).not.toBe(true);
+        packet = procedureAuthoringPromptPacketSchema.parse(imported.result?.structuredContent);
+        expect(packet).toMatchObject({
+          formatVersion: '1.3.0',
+          context: {
+            requestedTreeId: importRequest.treeId,
+            tutorialProvenance: {
+              source: {
+                uri: `https://www.youtube.com/watch?v=${importRequest.youtube.videoId}`,
+                title: 'Authorized Blender eye tutorial',
+                durationMs: 20_000,
+                rightsStatus: 'permission_granted',
+              },
+              transcript: {
+                origin: 'youtube_data_api_v3',
+                locale: 'en',
+                document: {
+                  format: 'webvtt',
+                  cueCount: 2,
+                  confidence: { origin: 'user_declared_default', value: 0.91 },
+                  acquisition: {
+                    source: 'youtube_data_api_v3',
+                    authorization: 'oauth_video_edit_permission',
+                    videoId: importRequest.youtube.videoId,
+                    captionTrackId: importRequest.youtube.captionTrackId,
+                    trackLanguage: 'en',
+                    status: 'serving',
+                  },
+                },
+              },
+            },
+            constraints: {
+              tutorialTranscriptDocumentBound: true,
+              tutorialTranscriptAcquisitionBound: true,
+            },
+          },
+          sideEffects: {
+            modelCalled: false,
+            procedureStored: false,
+            proposalCreated: false,
+            hostExecutionStarted: false,
+          },
+        });
+
+        const validation = await callMcpTool(
+          runtime,
+          171,
+          'operatingline.procedure.authoring.validate',
+          { packet, tree: generatedProcedureCandidate(packet) },
+        );
+        expect(validation.result?.isError).not.toBe(true);
+        expect(validation.result?.structuredContent).toMatchObject({
+          formatVersion: '1.3.0',
+          packetContentSha256: packet.integrity.contentSha256,
+        });
+
+        const repeated = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/import`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(importRequest),
+          },
+        );
+        expect(repeated.status).toBe(200);
+        await expect(repeated.json()).resolves.toEqual(packet);
+        expect(sourceCalls).toBe(1);
+
+        const invalidRequestId = randomUUID();
+        const invalid = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/youtube/import`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            ...importRequest,
+            requestId: invalidRequestId,
+            oauthAccessToken: 'MUST_NOT_LEAK',
+          }),
+        });
+        expect(invalid.status).toBe(400);
+        const invalidBody = await invalid.json();
+        expect(invalidBody).toEqual({
+          error: 'youtube_packet_invalid',
+          requestId: invalidRequestId,
+          message: 'YouTube caption import request violates the strict public contract',
+          retryMode: 'never',
+        });
+        expect(JSON.stringify(invalidBody)).not.toContain('MUST_NOT_LEAK');
+      } finally {
+        await runtime.stop();
+      }
+      expect(sourceCloseCalls).toBe(1);
+
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        const events = database.listExecutionEventsByTypes([
+          'procedure.tutorial.youtube.caption.requested',
+          'procedure.tutorial.youtube.caption.completed',
+          'procedure.tutorial.youtube.caption.failed',
+        ]);
+        expect(events.map((event) => event.eventType)).toEqual([
+          'procedure.tutorial.youtube.caption.requested',
+          'procedure.tutorial.youtube.caption.completed',
+        ]);
+        expect(JSON.stringify(events)).not.toContain(captionDocument);
+        expect(JSON.stringify(events)).not.toContain('captionDocument');
+      } finally {
+        database.close();
+      }
+
+      const restoredSource: ProcedureTutorialYoutubeCaptionSource = {
+        id: 'youtube_data_api_v3',
+        acquire: async () => {
+          throw new Error('Restored YouTube import must not call the source.');
+        },
+      };
+      const restarted = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+        youtubeCaptionSource: restoredSource,
+      });
+      try {
+        const restored = await fetch(
+          `${restarted.baseUrl}/api/v1/procedure/tutorial/youtube/import`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(importRequest),
+          },
+        );
+        expect(restored.status).toBe(200);
+        await expect(restored.json()).resolves.toEqual(packet!);
+      } finally {
+        await restarted.stop();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

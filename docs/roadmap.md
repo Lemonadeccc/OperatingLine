@@ -288,8 +288,14 @@
         交给调用方明确选择的 Provider，复用 request fingerprint、重启幂等、candidate identity、安装目录、
         authoring validator 与 compile 门。审计不保存原始字幕文档，结果不自动 store、materialize、propose
         或 execute。见 [ADR 0077](adr/0077-caption-document-provider-generation.md)。
-  - [ ] 经授权的 YouTube 获取、字幕抓取/语音转录、画面与按键识别、自动分段、证据帧，以及大步骤/小
-        步骤质量校准；当前 Runtime 不下载或转录视频，也不把调用方权利声明当成 released 训练许可。
+  - [x] 经授权的 YouTube 字幕获取：显式 MCP/HTTP 请求在用户确认网络与配额后，通过运行时注入的 OAuth
+        token 调用官方 Data API，读取可编辑视频元数据、核对一个精确 serving caption track 并下载
+        SRT/WebVTT，随后绑定获取 provenance 的 authoring packet `1.3.0`。请求、日志和事件都不含 token，
+        completed evidence 不含原始字幕全文；重启幂等且失败不使用同一 requestId 自动重试。入口不能抓取
+        任意公开视频字幕，也不把编辑权限或权利声明当成 released 训练许可。见
+        [ADR 0078](adr/0078-authorized-youtube-caption-acquisition.md)。
+  - [ ] OAuth 登录/刷新与字幕轨枚举、视频媒体下载/语音转录、画面与按键识别、自动语义分段、证据帧，
+        以及大步骤/小步骤质量校准；当前 Runtime 只导入调用方已知 ID 的授权字幕轨。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

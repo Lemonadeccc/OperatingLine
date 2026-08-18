@@ -62,6 +62,7 @@ import {
   procedureAuthoringPromptRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
+  procedureTutorialYoutubeImportRequestSchema,
   procedureAuthoringValidationRequestSchema,
   procedureAuthoringValidationResultSchema,
   procedureOperationSearchHitSchema,
@@ -167,6 +168,14 @@ import {
 } from './procedure-authoring-prompt.js';
 import { buildProcedureTutorialTranscriptPromptPacket } from './procedure-tutorial-transcript-import.js';
 import {
+  buildProcedureTutorialYoutubePromptPacket,
+  createProcedureTutorialYoutubeImportCoordinator,
+  procedureTutorialYoutubeImportErrorResponse,
+  procedureTutorialYoutubeImportEvidenceEventTypes,
+  procedureTutorialYoutubeImportHttpStatus,
+  type ProcedureTutorialYoutubeImportCoordinator,
+} from './procedure-tutorial-youtube-import.js';
+import {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,
   plannerGenerationEvidenceEventTypes,
@@ -192,6 +201,7 @@ import {
 } from './guide-validation.js';
 import { closeAll, throwAfterCleanup, type CleanupStep } from './lifecycle.js';
 import { isStableVersionRangeSubset } from './stable-version-ranges.js';
+import type { ProcedureTutorialYoutubeCaptionSource } from './youtube-caption-source.js';
 
 export interface StartRuntimeOptions {
   databasePath: string;
@@ -201,6 +211,7 @@ export interface StartRuntimeOptions {
   interactionCatalogs?: readonly InteractionCatalog[];
   plannerProviders?: readonly PlannerProvider[];
   plannerProviderTimeoutMs?: number;
+  youtubeCaptionSource?: ProcedureTutorialYoutubeCaptionSource;
   companionLeases?: CompanionLeaseManagerOptions;
   port?: number;
 }
@@ -310,13 +321,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
+  let procedureTutorialYoutubeImportCoordinator:
+    ProcedureTutorialYoutubeImportCoordinator | undefined;
   let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
   const cleanupSteps: CleanupStep[] = [
     () => companionInitialPlanRunCoordinator?.beginClose(),
     () => companionReplanRunCoordinator?.beginClose(),
-    () => companionDialogueRunCoordinator?.beginClose(),
+    () => {
+      companionDialogueRunCoordinator?.beginClose();
+      procedureTutorialYoutubeImportCoordinator?.beginClose();
+    },
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
         await plannerGenerationCoordinator.close();
@@ -326,6 +342,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         await plannerReplanGenerationCoordinator?.close();
       }
     },
+    () => procedureTutorialYoutubeImportCoordinator?.close(),
     () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
     () => companionDialogueRunCoordinator?.close(),
@@ -1173,6 +1190,37 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureAuthoringGenerationEvents = database.listExecutionEventsByTypes(
       procedureAuthoringGenerationEvidenceEventTypes,
     );
+    const existingProcedureTutorialYoutubeImportEvents = database.listExecutionEventsByTypes(
+      procedureTutorialYoutubeImportEvidenceEventTypes,
+    );
+    procedureTutorialYoutubeImportCoordinator = createProcedureTutorialYoutubeImportCoordinator({
+      ...(options.youtubeCaptionSource === undefined
+        ? {}
+        : { source: options.youtubeCaptionSource }),
+      existingEvents: existingProcedureTutorialYoutubeImportEvents,
+      buildPacket: (request, acquisition) => {
+        const actionCatalog = actionCatalogRegistry.get({
+          targetAdapterId: request.targetAdapterId,
+          ...(request.actionCatalogVersion === undefined
+            ? {}
+            : { catalogVersion: request.actionCatalogVersion }),
+        });
+        const interactionCatalog = interactionCatalogRegistry.get({
+          targetAdapterId: request.targetAdapterId,
+          actionCatalogVersion: actionCatalog.catalogVersion,
+          ...(request.interactionCatalogVersion === undefined
+            ? {}
+            : { interactionCatalogVersion: request.interactionCatalogVersion }),
+        });
+        return buildProcedureTutorialYoutubePromptPacket(
+          request,
+          acquisition,
+          actionCatalog,
+          interactionCatalog,
+        );
+      },
+      appendEvent: (event) => database.appendEvent(event),
+    });
     const plannerProviderInvocationManager = createPlannerProviderInvocationManager({
       registry: plannerProviderRegistry,
       ...(options.plannerProviderTimeoutMs === undefined
@@ -1838,6 +1886,75 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                         ? error.message
                         : 'Procedure tutorial transcript import failed',
                   }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.youtube.import',
+        {
+          description:
+            'Explicitly use a configured OAuth-authorized YouTube Data API source to read video metadata, verify one exact caption track belongs to that video, and download it as SRT or WebVTT before returning a document-bound Procedure authoring packet. The authorized account must be able to edit the video; the call consumes YouTube API quota but never downloads video media, calls a model, stores a tree, creates a Proposal, or executes the host. OAuth credentials are runtime-managed and must never be included in this request.',
+          inputSchema: deferMcpInputValidation(procedureTutorialYoutubeImportRequestSchema),
+          outputSchema: procedureAuthoringPromptPacketSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTutorialYoutubeImportRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            const requestIdInput =
+              requestInput !== null &&
+              typeof requestInput === 'object' &&
+              !Array.isArray(requestInput)
+                ? (requestInput as Record<string, unknown>)['requestId']
+                : null;
+            const parsedRequestId = z.uuid().safeParse(requestIdInput);
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'youtube_packet_invalid',
+                    requestId: parsedRequestId.success ? parsedRequestId.data : null,
+                    message: 'YouTube caption import request violates the strict public contract',
+                    retryMode: 'never',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const packet = await procedureTutorialYoutubeImportCoordinator!.importCaption(
+              parsedRequest.data,
+            );
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    formatVersion: packet.formatVersion,
+                    packetContentSha256: packet.integrity.contentSha256,
+                    message: 'The complete authoring packet is in structuredContent.',
+                  }),
+                },
+              ],
+              structuredContent: packet,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify(
+                    procedureTutorialYoutubeImportErrorResponse(
+                      error,
+                      parsedRequest.data.requestId,
+                    ),
+                  ),
                 },
               ],
             };
@@ -3231,6 +3348,29 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/tutorial/youtube/import', async (request, reply) => {
+      const parsedRequest = procedureTutorialYoutubeImportRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        const requestIdInput =
+          request.body !== null && typeof request.body === 'object' && !Array.isArray(request.body)
+            ? (request.body as Record<string, unknown>)['requestId']
+            : null;
+        const parsedRequestId = z.uuid().safeParse(requestIdInput);
+        return reply.code(400).send({
+          error: 'youtube_packet_invalid',
+          requestId: parsedRequestId.success ? parsedRequestId.data : null,
+          message: 'YouTube caption import request violates the strict public contract',
+          retryMode: 'never',
+        });
+      }
+      try {
+        return await procedureTutorialYoutubeImportCoordinator!.importCaption(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialYoutubeImportHttpStatus(error))
+          .send(procedureTutorialYoutubeImportErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
     runtimeApp.post('/api/v1/procedure/tutorial/generate', async (request, reply) => {
       const parsedRequest = procedureTutorialTranscriptGenerateRequestSchema.safeParse(
         request.body,
@@ -4176,6 +4316,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           version: provider.version,
           available: provider.availability.available,
         })),
+        youtubeCaptionSource:
+          options.youtubeCaptionSource === undefined
+            ? null
+            : { id: options.youtubeCaptionSource.id, available: true },
         mcpEndpoint,
       },
     });
@@ -4261,6 +4405,27 @@ export {
   parseProcedureTutorialTranscriptImport,
   type ParsedProcedureTutorialTranscriptImport,
 } from './procedure-tutorial-transcript-import.js';
+export {
+  buildProcedureTutorialYoutubePromptPacket,
+  createProcedureTutorialYoutubeImportCoordinator,
+  procedureTutorialYoutubeImportErrorResponse,
+  procedureTutorialYoutubeImportEvidenceEventTypes,
+  procedureTutorialYoutubeImportHttpStatus,
+  restoreProcedureTutorialYoutubeImports,
+  ProcedureTutorialYoutubeImportError,
+  type ProcedureTutorialYoutubeImportCoordinator,
+  type ProcedureTutorialYoutubeImportCoordinatorOptions,
+  type ProcedureTutorialYoutubeImportRetryMode,
+} from './procedure-tutorial-youtube-import.js';
+export {
+  createYouTubeDataApiCaptionSource,
+  parseYouTubeDurationMs,
+  ProcedureTutorialYoutubeSourceError,
+  type ProcedureTutorialYoutubeCaptionAcquisitionResult,
+  type ProcedureTutorialYoutubeCaptionSource,
+  type ProcedureTutorialYoutubeSourceErrorCode,
+  type YouTubeDataApiCaptionSourceOptions,
+} from './youtube-caption-source.js';
 export {
   createPlannerGenerationCoordinator,
   PlannerGenerationRuntimeError,

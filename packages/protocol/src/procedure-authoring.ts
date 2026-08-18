@@ -15,10 +15,12 @@ import { catalogVersionSchema } from './version.js';
 
 export const procedureAuthoringPromptLegacyFormatVersion = '1.0.0' as const;
 export const procedureAuthoringPromptTutorialFormatVersion = '1.1.0' as const;
-export const procedureAuthoringPromptFormatVersion = '1.2.0' as const;
+export const procedureAuthoringPromptDocumentFormatVersion = '1.2.0' as const;
+export const procedureAuthoringPromptFormatVersion = '1.3.0' as const;
 export const supportedProcedureAuthoringPromptFormatVersions = [
   procedureAuthoringPromptLegacyFormatVersion,
   procedureAuthoringPromptTutorialFormatVersion,
+  procedureAuthoringPromptDocumentFormatVersion,
   procedureAuthoringPromptFormatVersion,
 ] as const;
 export const procedureAuthoringPromptPacketMaxCanonicalBytes = 262_144 as const;
@@ -79,6 +81,32 @@ export type ProcedureAuthoringTutorialTranscriptSegment = z.infer<
   typeof procedureAuthoringTutorialTranscriptSegmentSchema
 >;
 
+export const procedureAuthoringYoutubeVideoIdSchema = z
+  .string()
+  .length(11)
+  .regex(/^[A-Za-z0-9_-]{11}$/);
+export const procedureAuthoringYoutubeCaptionTrackIdSchema = z
+  .string()
+  .min(1)
+  .max(1_024)
+  .regex(/^\S+$/);
+export const procedureAuthoringYoutubeCaptionAcquisitionSchema = z.strictObject({
+  source: z.literal('youtube_data_api_v3'),
+  authorization: z.literal('oauth_video_edit_permission'),
+  videoId: procedureAuthoringYoutubeVideoIdSchema,
+  captionTrackId: procedureAuthoringYoutubeCaptionTrackIdSchema,
+  trackLanguage: procedureAuthoringLocaleSchema,
+  trackKind: z.enum(['ASR', 'forced', 'standard']),
+  isDraft: z.boolean(),
+  isAutoSynced: z.boolean(),
+  status: z.literal('serving'),
+  lastUpdated: z.iso.datetime({ offset: true }),
+  requestedFormat: z.enum(['webvtt', 'srt']),
+});
+export type ProcedureAuthoringYoutubeCaptionAcquisition = z.infer<
+  typeof procedureAuthoringYoutubeCaptionAcquisitionSchema
+>;
+
 export const procedureAuthoringTutorialTranscriptDocumentSchema = z.strictObject({
   format: z.enum(['webvtt', 'srt']),
   contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -93,6 +121,7 @@ export const procedureAuthoringTutorialTranscriptDocumentSchema = z.strictObject
     origin: z.literal('user_declared_default'),
     value: procedureAuthoringTutorialTranscriptSegmentSchema.shape.confidence,
   }),
+  acquisition: procedureAuthoringYoutubeCaptionAcquisitionSchema.optional(),
 });
 export type ProcedureAuthoringTutorialTranscriptDocument = z.infer<
   typeof procedureAuthoringTutorialTranscriptDocumentSchema
@@ -252,7 +281,7 @@ const procedureAuthoringTutorialProvenanceSchema = z
   .strictObject({
     source: procedureAuthoringTutorialSourceSchema,
     transcript: z.strictObject({
-      origin: z.literal('user_supplied'),
+      origin: z.enum(['user_supplied', 'youtube_data_api_v3']),
       locale: procedureAuthoringLocaleSchema.optional(),
       document: procedureAuthoringTutorialTranscriptDocumentSchema.optional(),
       segments: z
@@ -275,6 +304,37 @@ const procedureAuthoringTutorialProvenanceSchema = z
   })
   .superRefine((tutorial, context) => {
     const document = tutorial.transcript.document;
+    const acquisition = document?.acquisition;
+    if ((tutorial.transcript.origin === 'youtube_data_api_v3') !== (acquisition !== undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transcript', 'origin'],
+        message: 'YouTube transcript origin and acquisition provenance must be declared together',
+      });
+    }
+    if (acquisition !== undefined) {
+      if (document?.format !== acquisition.requestedFormat) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'document', 'format'],
+          message: 'YouTube caption document format must match the requested download format',
+        });
+      }
+      if (tutorial.transcript.locale !== acquisition.trackLanguage) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'locale'],
+          message: 'YouTube caption locale must match the acquired track language',
+        });
+      }
+      if (tutorial.source.uri !== `https://www.youtube.com/watch?v=${acquisition.videoId}`) {
+        context.addIssue({
+          code: 'custom',
+          path: ['source', 'uri'],
+          message: 'YouTube tutorial URI must match the acquired video id',
+        });
+      }
+    }
     if (document !== undefined) {
       if (document.cueCount !== tutorial.transcript.segments.length) {
         context.addIssue({
@@ -334,6 +394,40 @@ const procedureAuthoringTutorialProvenanceSchema = z
       }
       previousEndMs = Math.max(previousEndMs, segment.locator.endMs);
     }
+  })
+  .meta({
+    allOf: [
+      {
+        if: {
+          properties: {
+            transcript: {
+              properties: { origin: { const: 'youtube_data_api_v3' } },
+              required: ['origin'],
+            },
+          },
+          required: ['transcript'],
+        },
+        then: {
+          properties: {
+            transcript: {
+              properties: {
+                document: { required: ['acquisition'] },
+              },
+              required: ['document'],
+            },
+          },
+        },
+        else: {
+          properties: {
+            transcript: {
+              properties: {
+                document: { not: { required: ['acquisition'] } },
+              },
+            },
+          },
+        },
+      },
+    ],
   });
 
 const procedureAuthoringActionCatalogSchema = actionCatalogSchema
@@ -366,6 +460,7 @@ export const procedureAuthoringPromptContextSchema = z
       persistenceRequiresExplicitStore: z.literal(true),
       allSemanticOperationsTutorialEvidenceBound: z.literal(true).optional(),
       tutorialTranscriptDocumentBound: z.literal(true).optional(),
+      tutorialTranscriptAcquisitionBound: z.literal(true).optional(),
     }),
   })
   .superRefine((context, refinement) => {
@@ -386,6 +481,17 @@ export const procedureAuthoringPromptContextSchema = z
         code: 'custom',
         path: ['constraints', 'tutorialTranscriptDocumentBound'],
         message: 'Tutorial transcript document provenance and binding must be declared together',
+      });
+    }
+    const acquisitionPresent =
+      context.tutorialProvenance?.transcript.document?.acquisition !== undefined;
+    const acquisitionBindingRequired =
+      context.constraints.tutorialTranscriptAcquisitionBound === true;
+    if (acquisitionPresent !== acquisitionBindingRequired) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['constraints', 'tutorialTranscriptAcquisitionBound'],
+        message: 'Tutorial transcript acquisition provenance and binding must be declared together',
       });
     }
   })
@@ -427,6 +533,34 @@ export const procedureAuthoringPromptContextSchema = z
           },
         },
       },
+      {
+        if: {
+          properties: {
+            tutorialProvenance: {
+              properties: {
+                transcript: {
+                  properties: {
+                    document: { required: ['acquisition'] },
+                  },
+                  required: ['document'],
+                },
+              },
+              required: ['transcript'],
+            },
+          },
+          required: ['tutorialProvenance'],
+        },
+        then: {
+          properties: {
+            constraints: { required: ['tutorialTranscriptAcquisitionBound'] },
+          },
+        },
+        else: {
+          properties: {
+            constraints: { not: { required: ['tutorialTranscriptAcquisitionBound'] } },
+          },
+        },
+      },
     ],
   });
 export type ProcedureAuthoringPromptContext = z.infer<typeof procedureAuthoringPromptContextSchema>;
@@ -463,6 +597,32 @@ const procedureAuthoringPromptVersionJsonSchemaMetadata = {
     },
     {
       if: {
+        properties: {
+          formatVersion: { const: procedureAuthoringPromptDocumentFormatVersion },
+        },
+        required: ['formatVersion'],
+      },
+      then: {
+        properties: {
+          context: {
+            properties: {
+              tutorialProvenance: {
+                properties: {
+                  transcript: {
+                    properties: { document: { not: { required: ['acquisition'] } } },
+                    required: ['document'],
+                  },
+                },
+                required: ['transcript'],
+              },
+            },
+            required: ['tutorialProvenance'],
+          },
+        },
+      },
+    },
+    {
+      if: {
         properties: { formatVersion: { const: procedureAuthoringPromptFormatVersion } },
         required: ['formatVersion'],
       },
@@ -471,7 +631,12 @@ const procedureAuthoringPromptVersionJsonSchemaMetadata = {
           context: {
             properties: {
               tutorialProvenance: {
-                properties: { transcript: { required: ['document'] } },
+                properties: {
+                  transcript: {
+                    properties: { document: { required: ['acquisition'] } },
+                    required: ['document'],
+                  },
+                },
                 required: ['transcript'],
               },
             },
@@ -518,7 +683,9 @@ export const procedureAuthoringPromptPacketContentSchema = z
         ? procedureAuthoringPromptLegacyFormatVersion
         : tutorial.transcript.document === undefined
           ? procedureAuthoringPromptTutorialFormatVersion
-          : procedureAuthoringPromptFormatVersion;
+          : tutorial.transcript.document.acquisition === undefined
+            ? procedureAuthoringPromptDocumentFormatVersion
+            : procedureAuthoringPromptFormatVersion;
     if (packet.formatVersion !== expectedFormat) {
       context.addIssue({
         code: 'custom',

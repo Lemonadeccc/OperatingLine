@@ -29,6 +29,7 @@ export * from './procedure-authoring-provider.js';
 export * from './procedure-materialization.js';
 export * from './procedure-replay.js';
 export * from './procedure-tutorial-import.js';
+export * from './procedure-tutorial-youtube.js';
 export * from './revision.js';
 export * from './runtime.js';
 export * from './version.js';

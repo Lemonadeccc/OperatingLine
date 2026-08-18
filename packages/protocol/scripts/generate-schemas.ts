@@ -62,6 +62,7 @@ import {
   procedureAuthoringValidationResultSchema,
   procedureTutorialTranscriptImportRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
+  procedureTutorialYoutubeImportRequestSchema,
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureLeafReplayAttestationSchema,
@@ -407,6 +408,11 @@ const schemas = [
     'procedure-tutorial-transcript-generate-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-transcript-generate-request.json',
     procedureTutorialTranscriptGenerateRequestSchema,
+  ],
+  [
+    'procedure-tutorial-youtube-import-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-import-request.json',
+    procedureTutorialYoutubeImportRequestSchema,
   ],
   [
     'procedure-authoring-materialization-request.schema.json',
