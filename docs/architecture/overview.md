@@ -475,12 +475,17 @@ binding 原子入库，Proposal 仍必须由同一 Blender 实例人工 Accept�
 step、host version 和强 Observation 任一不匹配都会 fail closed。最终 attestation 与 replay 事件为追加式，
 可进入 Eval/replay 导出。其证据范围严格是 managed Action 结果：menu 为
 `catalog_grounded_not_executed`、shortcut 按物化事实为 `candidate_not_executed` 或 `unavailable`、MCP 为
-`unavailable`；合同不声称
-逐控件 UI 回放、快捷键等价、具体 UI 执行入口、action-level MCP 调用或原生 Undo checkpoint 已被证明。见
+`unavailable`。新的 finalization 还要求 terminal report 携带 `next` 原生 Undo checkpoint：它必须在报告时
+与 Scene marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 和产物备份一致；attestation
+因此声明 `nativeUndoCheckpoint: companion_reported_current_at_report`，并同时声明
+`currentHostStateAfterReport: not_verified`。合同仍不声称逐控件 UI 回放、快捷键等价、具体 UI 执行入口、
+action-level MCP 调用或报告之后的当前宿主状态。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
-[ADR 0068](../adr/0068-torus-managed-replay-attestation.md)。
+[ADR 0068](../adr/0068-torus-managed-replay-attestation.md) 与
+[ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
+[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md)。
 
 协议另行支持显式的 shortcut operator-property surface：无参数 `F9` `key_input` 紧跟来源 operation 并
 绑定 `screen.redo_last` 与 expected operator，随后是连续的单值 `operator_property_update`，最后由无参数

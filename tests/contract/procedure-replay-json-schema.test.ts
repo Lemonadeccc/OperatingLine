@@ -474,6 +474,63 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
     );
     expect(procedureLeafReplayAttestationSchema.safeParse(attestation).success).toBe(true);
 
+    const nativeUndoCheckpoint = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: 'b217922f-f130-4689-bc9a-b6ac4d00d3ae',
+      previousCheckpointId: '2e20d994-06b8-43e1-8aa0-b46173b87f26',
+      operation: 'next',
+      committedAt: occurredAt,
+      marker: {
+        key: '_operating_line_native_history_v1',
+        matched: true,
+      },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: { id: plan.id, revision: plan.revision },
+        planContentSha256,
+        executionId,
+        activeStepId: leaf.id,
+        completedStepIds: [leaf.id],
+        receiptStepIds: [leaf.id],
+      },
+    } as const;
+    const checkpointContent = {
+      ...content,
+      report: { ...content.report, nativeUndoCheckpoint },
+      verificationScope: {
+        ...content.verificationScope,
+        nativeUndoCheckpoint: 'companion_reported_current_at_report',
+        currentHostStateAfterReport: 'not_verified',
+      },
+    } as const;
+    expect(procedureLeafReplayAttestationSchema.safeParse(attest(checkpointContent)).success).toBe(
+      true,
+    );
+    expect(
+      procedureLeafReplayAttestationSchema.safeParse(
+        attest({ ...checkpointContent, verificationScope: content.verificationScope }),
+      ).success,
+    ).toBe(false);
+    expect(
+      procedureLeafReplayAttestationSchema.safeParse(
+        attest({
+          ...checkpointContent,
+          report: {
+            ...checkpointContent.report,
+            nativeUndoCheckpoint: {
+              ...nativeUndoCheckpoint,
+              session: { ...nativeUndoCheckpoint.session, receiptStepIds: ['different.step'] },
+            },
+          },
+        }),
+      ).success,
+    ).toBe(false);
+
     const icosphereObservation = {
       ...observations[0],
       kind: 'icosphere_ready',

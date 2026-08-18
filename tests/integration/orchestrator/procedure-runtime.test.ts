@@ -69,6 +69,41 @@ function blenderCompanionHello(instanceId: string) {
   };
 }
 
+function replayNativeUndoCheckpoint(input: {
+  readonly planId: string;
+  readonly planRevision: number;
+  readonly planContentSha256: string;
+  readonly executionId: string;
+  readonly stepId: string;
+  readonly occurredAt: string;
+}) {
+  return {
+    formatVersion: '1.0.0' as const,
+    evidenceClass: 'companion_reported_native_undo_checkpoint' as const,
+    checkpointId: randomUUID(),
+    previousCheckpointId: randomUUID(),
+    operation: 'next' as const,
+    committedAt: new Date(Date.parse(input.occurredAt) - 1).toISOString(),
+    marker: {
+      key: '_operating_line_native_history_v1' as const,
+      matched: true as const,
+    },
+    journal: {
+      entryPresent: true as const,
+      snapshotMatchesSession: true as const,
+      artifactsBackedUp: true as const,
+    },
+    session: {
+      plan: { id: input.planId, revision: input.planRevision },
+      planContentSha256: input.planContentSha256,
+      executionId: input.executionId,
+      activeStepId: input.stepId,
+      completedStepIds: [input.stepId],
+      receiptStepIds: [input.stepId],
+    },
+  };
+}
+
 interface McpToolResponse {
   result?: {
     isError?: boolean;
@@ -4212,64 +4247,76 @@ describe('procedure compilation runtime', () => {
         throw new Error('Expected replay observation identities');
       }
       const executionId = randomUUID();
-      const report = (sequence: number, hostVersion: string) => ({
-        protocolVersion: guideProtocolVersion,
-        reportId: randomUUID(),
-        sequence,
-        adapterId: 'blender',
-        instanceId: targetInstanceId,
-        companionVersion: '0.1.0',
-        hostVersion,
-        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
-        planContentSha256: computePlanContentSha256(proposal.plan),
-        executionId,
-        phase: 'completed',
-        activeStepId: replayRequest.leafId,
-        completedStepIds: [replayRequest.leafId],
-        transition: 'step_succeeded',
-        stepId: replayRequest.leafId,
-        observations: [
-          {
-            kind: 'uv_sphere_ready',
-            satisfied: true,
-            details: {
-              parameters: observationParameters,
-              supported: true,
-              resourceId,
-              objectName,
-              meshId: `${resourceId}.mesh`,
-              collectionId: 'snowman.collection',
-              parametersValid: true,
-              objectOwned: true,
-              meshOwned: true,
-              collectionOwned: true,
-              receiptMatches: true,
-              objectDataMatches: true,
-              collectionLinkMatches: true,
-              nameMatches: true,
-              locationMatches: true,
-              rotationMatches: true,
-              scaleMatches: true,
-              transformIsolated: true,
-              modifiersAbsent: true,
-              shapeKeysAbsent: true,
-              materialsAbsent: true,
-              contentIntact: true,
-              topologyMatches: true,
-              finiteCoordinates: true,
-              radiusMatches: true,
-              vertexCount: 482,
-              edgeCount: 992,
-              faceCount: 512,
-              meshContentSha256: 'a'.repeat(64),
+      const report = (sequence: number, hostVersion: string) => {
+        const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+        const planContentSha256 = computePlanContentSha256(proposal.plan);
+        return {
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion,
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256,
+          executionId,
+          phase: 'completed',
+          activeStepId: replayRequest.leafId,
+          completedStepIds: [replayRequest.leafId],
+          transition: 'step_succeeded',
+          stepId: replayRequest.leafId,
+          observations: [
+            {
+              kind: 'uv_sphere_ready',
+              satisfied: true,
+              details: {
+                parameters: observationParameters,
+                supported: true,
+                resourceId,
+                objectName,
+                meshId: `${resourceId}.mesh`,
+                collectionId: 'snowman.collection',
+                parametersValid: true,
+                objectOwned: true,
+                meshOwned: true,
+                collectionOwned: true,
+                receiptMatches: true,
+                objectDataMatches: true,
+                collectionLinkMatches: true,
+                nameMatches: true,
+                locationMatches: true,
+                rotationMatches: true,
+                scaleMatches: true,
+                transformIsolated: true,
+                modifiersAbsent: true,
+                shapeKeysAbsent: true,
+                materialsAbsent: true,
+                contentIntact: true,
+                topologyMatches: true,
+                finiteCoordinates: true,
+                radiusMatches: true,
+                vertexCount: 482,
+                edgeCount: 992,
+                faceCount: 512,
+                meshContentSha256: 'a'.repeat(64),
+              },
             },
-          },
-        ],
-        observationGate: null,
-        artifactAttestation: null,
-        error: null,
-        occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
-      });
+          ],
+          observationGate: null,
+          artifactAttestation: null,
+          nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+            planId: proposal.plan.id,
+            planRevision: proposal.plan.revision,
+            planContentSha256,
+            executionId,
+            stepId: replayRequest.leafId,
+            occurredAt,
+          }),
+          error: null,
+          occurredAt,
+        };
+      };
 
       const legacyReport = report(1, '4.5.3 LTS');
       const legacyState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
@@ -4391,7 +4438,29 @@ describe('procedure compilation runtime', () => {
         error: 'companion_session_identity_mismatch',
       });
 
-      const terminalReport = report(5, '4.5.3 LTS');
+      const missingCheckpointReport = report(5, '4.5.3 LTS');
+      delete (missingCheckpointReport as { nativeUndoCheckpoint?: unknown }).nativeUndoCheckpoint;
+      const missingCheckpointState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(missingCheckpointReport),
+      });
+      expect(missingCheckpointState.status).toBe(200);
+      const missingCheckpointFinalize = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/replay/finalize`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            replayId: replayRequest.replayId,
+            attestationId: randomUUID(),
+            reportId: missingCheckpointReport.reportId,
+          }),
+        },
+      );
+      expect(missingCheckpointFinalize.status).toBe(409);
+
+      const terminalReport = report(6, '4.5.3 LTS');
       const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
         method: 'POST',
         headers: leaseHeaders,
@@ -4435,6 +4504,8 @@ describe('procedure compilation runtime', () => {
             menuTrack: 'catalog_grounded_not_executed',
             shortcutTrack: 'candidate_not_executed',
             mcpTrack: 'unavailable',
+            nativeUndoCheckpoint: 'companion_reported_current_at_report',
+            currentHostStateAfterReport: 'not_verified',
           },
         },
       });
@@ -4645,64 +4716,77 @@ describe('procedure compilation runtime', () => {
       if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
         throw new Error('Expected Icosphere replay observation identities');
       }
-      const report = (sequence: number, vertexCount: number) => ({
-        protocolVersion: guideProtocolVersion,
-        reportId: randomUUID(),
-        sequence,
-        adapterId: 'blender',
-        instanceId: targetInstanceId,
-        companionVersion: '0.1.0',
-        hostVersion: '4.5.3 LTS',
-        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
-        planContentSha256: computePlanContentSha256(proposal.plan),
-        executionId: randomUUID(),
-        phase: 'completed',
-        activeStepId: replayRequest.leafId,
-        completedStepIds: [replayRequest.leafId],
-        transition: 'step_succeeded',
-        stepId: replayRequest.leafId,
-        observations: [
-          {
-            kind: 'icosphere_ready',
-            satisfied: true,
-            details: {
-              parameters: observationParameters,
-              supported: true,
-              resourceId,
-              objectName,
-              meshId: `${resourceId}.mesh`,
-              collectionId: 'snowman.collection',
-              parametersValid: true,
-              objectOwned: true,
-              meshOwned: true,
-              collectionOwned: true,
-              receiptMatches: true,
-              objectDataMatches: true,
-              collectionLinkMatches: true,
-              nameMatches: true,
-              locationMatches: true,
-              rotationMatches: true,
-              scaleMatches: true,
-              transformIsolated: true,
-              modifiersAbsent: true,
-              shapeKeysAbsent: true,
-              materialsAbsent: true,
-              contentIntact: true,
-              topologyMatches: true,
-              finiteCoordinates: true,
-              radiusMatches: true,
-              vertexCount,
-              edgeCount: 480,
-              faceCount: 320,
-              meshContentSha256: 'c'.repeat(64),
+      const report = (sequence: number, vertexCount: number) => {
+        const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+        const planContentSha256 = computePlanContentSha256(proposal.plan);
+        const executionId = randomUUID();
+        return {
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion: '4.5.3 LTS',
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256,
+          executionId,
+          phase: 'completed',
+          activeStepId: replayRequest.leafId,
+          completedStepIds: [replayRequest.leafId],
+          transition: 'step_succeeded',
+          stepId: replayRequest.leafId,
+          observations: [
+            {
+              kind: 'icosphere_ready',
+              satisfied: true,
+              details: {
+                parameters: observationParameters,
+                supported: true,
+                resourceId,
+                objectName,
+                meshId: `${resourceId}.mesh`,
+                collectionId: 'snowman.collection',
+                parametersValid: true,
+                objectOwned: true,
+                meshOwned: true,
+                collectionOwned: true,
+                receiptMatches: true,
+                objectDataMatches: true,
+                collectionLinkMatches: true,
+                nameMatches: true,
+                locationMatches: true,
+                rotationMatches: true,
+                scaleMatches: true,
+                transformIsolated: true,
+                modifiersAbsent: true,
+                shapeKeysAbsent: true,
+                materialsAbsent: true,
+                contentIntact: true,
+                topologyMatches: true,
+                finiteCoordinates: true,
+                radiusMatches: true,
+                vertexCount,
+                edgeCount: 480,
+                faceCount: 320,
+                meshContentSha256: 'c'.repeat(64),
+              },
             },
-          },
-        ],
-        observationGate: null,
-        artifactAttestation: null,
-        error: null,
-        occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
-      });
+          ],
+          observationGate: null,
+          artifactAttestation: null,
+          nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+            planId: proposal.plan.id,
+            planRevision: proposal.plan.revision,
+            planContentSha256,
+            executionId,
+            stepId: replayRequest.leafId,
+            occurredAt,
+          }),
+          error: null,
+          occurredAt,
+        };
+      };
 
       const wrongTopologyReport = report(1, 42);
       const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
@@ -4749,6 +4833,10 @@ describe('procedure compilation runtime', () => {
           replayId: replayRequest.replayId,
           execution: {
             action: { adapterId: 'blender', name: 'blender.mesh.create_icosphere' },
+          },
+          verificationScope: {
+            nativeUndoCheckpoint: 'companion_reported_current_at_report',
+            currentHostStateAfterReport: 'not_verified',
           },
           successGate: {
             observations: [
@@ -4932,64 +5020,77 @@ describe('procedure compilation runtime', () => {
         if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
           throw new Error(`Expected ${primitive} replay observation identities`);
         }
-        const report = (sequence: number, vertexCount: number) => ({
-          protocolVersion: guideProtocolVersion,
-          reportId: randomUUID(),
-          sequence,
-          adapterId: 'blender',
-          instanceId: targetInstanceId,
-          companionVersion: '0.1.0',
-          hostVersion: '4.5.3 LTS',
-          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
-          planContentSha256: computePlanContentSha256(proposal.plan),
-          executionId: randomUUID(),
-          phase: 'completed',
-          activeStepId: replayRequest.leafId,
-          completedStepIds: [replayRequest.leafId],
-          transition: 'step_succeeded',
-          stepId: replayRequest.leafId,
-          observations: [
-            {
-              kind: observationKind,
-              satisfied: true,
-              details: {
-                parameters: observationParameters,
-                supported: true,
-                resourceId,
-                objectName,
-                meshId: `${resourceId}.mesh`,
-                collectionId: 'snowman.collection',
-                parametersValid: true,
-                objectOwned: true,
-                meshOwned: true,
-                collectionOwned: true,
-                receiptMatches: true,
-                objectDataMatches: true,
-                collectionLinkMatches: true,
-                nameMatches: true,
-                locationMatches: true,
-                rotationMatches: true,
-                scaleMatches: true,
-                transformIsolated: true,
-                modifiersAbsent: true,
-                shapeKeysAbsent: true,
-                materialsAbsent: true,
-                contentIntact: true,
-                topologyMatches: true,
-                finiteCoordinates: true,
-                ...Object.fromEntries(geometryDetailKeys.map((key) => [key, true])),
-                vertexCount,
-                edgeCount: topology.edgeCount,
-                faceCount: topology.faceCount,
-                meshContentSha256: 'd'.repeat(64),
+        const report = (sequence: number, vertexCount: number) => {
+          const occurredAt = new Date(Date.now() - 1_000 + sequence).toISOString();
+          const planContentSha256 = computePlanContentSha256(proposal.plan);
+          const executionId = randomUUID();
+          return {
+            protocolVersion: guideProtocolVersion,
+            reportId: randomUUID(),
+            sequence,
+            adapterId: 'blender',
+            instanceId: targetInstanceId,
+            companionVersion: '0.1.0',
+            hostVersion: '4.5.3 LTS',
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            phase: 'completed',
+            activeStepId: replayRequest.leafId,
+            completedStepIds: [replayRequest.leafId],
+            transition: 'step_succeeded',
+            stepId: replayRequest.leafId,
+            observations: [
+              {
+                kind: observationKind,
+                satisfied: true,
+                details: {
+                  parameters: observationParameters,
+                  supported: true,
+                  resourceId,
+                  objectName,
+                  meshId: `${resourceId}.mesh`,
+                  collectionId: 'snowman.collection',
+                  parametersValid: true,
+                  objectOwned: true,
+                  meshOwned: true,
+                  collectionOwned: true,
+                  receiptMatches: true,
+                  objectDataMatches: true,
+                  collectionLinkMatches: true,
+                  nameMatches: true,
+                  locationMatches: true,
+                  rotationMatches: true,
+                  scaleMatches: true,
+                  transformIsolated: true,
+                  modifiersAbsent: true,
+                  shapeKeysAbsent: true,
+                  materialsAbsent: true,
+                  contentIntact: true,
+                  topologyMatches: true,
+                  finiteCoordinates: true,
+                  ...Object.fromEntries(geometryDetailKeys.map((key) => [key, true])),
+                  vertexCount,
+                  edgeCount: topology.edgeCount,
+                  faceCount: topology.faceCount,
+                  meshContentSha256: 'd'.repeat(64),
+                },
               },
-            },
-          ],
-          observationGate: null,
-          artifactAttestation: null,
-          error: null,
-          occurredAt: new Date(Date.now() - 1_000 + sequence).toISOString(),
-        });
+            ],
+            observationGate: null,
+            artifactAttestation: null,
+            nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+              planId: proposal.plan.id,
+              planRevision: proposal.plan.revision,
+              planContentSha256,
+              executionId,
+              stepId: replayRequest.leafId,
+              occurredAt,
+            }),
+            error: null,
+            occurredAt,
+          };
+        };
 
         const wrongTopologyReport = report(1, topology.vertexCount + 1);
         const wrongState = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
@@ -5040,6 +5141,8 @@ describe('procedure compilation runtime', () => {
             verificationScope: {
               shortcutTrack:
                 shortcutCoverage === 'materialized' ? 'candidate_not_executed' : 'unavailable',
+              nativeUndoCheckpoint: 'companion_reported_current_at_report',
+              currentHostStateAfterReport: 'not_verified',
             },
             successGate: {
               observations: [

@@ -178,14 +178,17 @@ Cone/Cylinder 复算中点、方向 Quaternion、世界端点、32 段局部环�
 modifier、shape key、material slot、parent 或 constraint。accepted decision 与 terminal
 `step_succeeded` report 必须由同一协商 lease 提交，Runtime 以服务端 receipt 序列固定先后；之后调用方
 才可 finalize 追加式
-attestation。该证明只覆盖 managed Action 结果；menu 未执行，shortcut 按目录事实保持 candidate 未执行或
-unavailable，MCP unavailable，且当前合同不含
-独立的原生 Undo checkpoint 或具体 UI 执行入口证明。见
+attestation。新的 finalization 还要求 terminal report 携带当前 `next` 原生 Undo checkpoint，并把 Scene
+marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 与产物备份绑定到报告时状态。
+attestation 明确声明 `currentHostStateAfterReport: not_verified`。该证明仍只覆盖 managed Action 结果；menu
+未执行，shortcut 按目录事实保持 candidate 未执行或 unavailable，MCP unavailable，也不证明报告之后的当前
+场景或具体 UI 执行入口。见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
 [ADR 0067](../adr/0067-sized-primitive-managed-replay-attestation.md) 与
 [ADR 0068](../adr/0068-torus-managed-replay-attestation.md) 与
-[ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md)。
+[ADR 0069](../adr/0069-segment-primitives-managed-replay-attestation.md) 与
+[ADR 0071](../adr/0071-native-undo-replay-checkpoint-attestation.md)。
 
 ## 视觉引导状态
 

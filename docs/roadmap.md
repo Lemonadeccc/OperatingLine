@@ -493,8 +493,12 @@
           Quaternion、世界端点、32 段局部环坐标与面形。普通锥台/圆柱固定验证 `64/96/34`，单端半径为零的
           尖锥固定验证 `33/64/33`；两者的 shortcut 与 MCP 继续诚实保持 unavailable。见
           [ADR 0069](adr/0069-segment-primitives-managed-replay-attestation.md)。
-    - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor、原生 Undo checkpoint attestation，
-          以及七种已证明 primitive 之外的复合与编辑叶节点覆盖。
+    - [x] 原生 Undo checkpoint 回放证明：Companion 在报告时核对 Scene marker、journal、Session 与产物
+          备份，并绑定精确 Plan/hash/execution/receipt；新的 finalize 缺失或错配 checkpoint 时 fail closed。
+          attestation 明确不证明报告之后的当前场景。见
+          [ADR 0071](adr/0071-native-undo-replay-checkpoint-attestation.md)。
+    - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
+          复合与编辑叶节点覆盖。
   - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
         candidate；仍需经验证的语义召回、流式 Procedure 对话、自动局部树重规划与结果治理，使不会 Blender
         的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。

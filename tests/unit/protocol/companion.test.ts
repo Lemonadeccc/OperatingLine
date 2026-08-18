@@ -176,6 +176,65 @@ describe('companion protocol', () => {
     ).toBe(false);
   });
 
+  it('binds native Undo checkpoint evidence to the exact reported session', () => {
+    const report = completedStateReport();
+    const nativeUndoCheckpoint = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: randomUUID(),
+      previousCheckpointId: randomUUID(),
+      operation: 'next',
+      committedAt: '2026-08-04T09:59:59Z',
+      marker: {
+        key: '_operating_line_native_history_v1',
+        matched: true,
+      },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: report.plan,
+        planContentSha256: report.planContentSha256,
+        executionId: report.executionId,
+        activeStepId: report.activeStepId,
+        completedStepIds: report.completedStepIds,
+        receiptStepIds: report.completedStepIds,
+      },
+    } as const;
+    expect(companionStateReportSchema.safeParse({ ...report, nativeUndoCheckpoint }).success).toBe(
+      true,
+    );
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        nativeUndoCheckpoint: { ...nativeUndoCheckpoint, operation: 'back' },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        nativeUndoCheckpoint: {
+          ...nativeUndoCheckpoint,
+          session: {
+            ...nativeUndoCheckpoint.session,
+            executionId: randomUUID(),
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      companionStateReportSchema.safeParse({
+        ...report,
+        nativeUndoCheckpoint: {
+          ...nativeUndoCheckpoint,
+          committedAt: '2026-08-04T10:00:01Z',
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires an explicit artifact attestation field only from protocol 1.5', () => {
     const legacy = { ...currentStateReport(), protocolVersion: '1.4.0' };
     delete (legacy as { artifactAttestation?: unknown }).artifactAttestation;

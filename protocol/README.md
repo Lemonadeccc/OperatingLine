@@ -129,6 +129,14 @@ Guide protocol `1.2.0` 为 action 叶节点增加可选 `observationPolicy`。�
 `observationGate`（无门状态为 `null`），并用 `blocked`、`step_observation_failed` 与
 `observation_recovered` 区分可修复门失败和宿主 error。旧版 report 不得携带此字段。
 
+Companion report 可以附带 `nativeUndoCheckpoint`，把报告时选中的宿主 checkpoint UUID/前驱/操作与精确
+Scene marker、journal Session snapshot、receipt 文件产物备份、Plan/hash/execution 和有序步骤身份绑定。
+operation 必须与 report transition 对应，checkpoint commit 时间不得晚于 report。通用旧 report 仍可不带该
+字段；但新的 `procedure.replay.finalize` 必须从 terminal `step_succeeded` report 取得 `next` checkpoint，且
+其中唯一 receipt 必须属于 replay leaf。生成的 attestation 声明 checkpoint 仅在报告时被 Companion 验证，
+不证明之后的当前宿主状态；历史无该字段的已存 attestation 仍可解析。见
+`docs/adr/0071-native-undo-replay-checkpoint-attestation.md`。
+
 `action-catalog.schema.json` 定义宿主发布的版本化允许动作目录，包括可选的适配器自有
 `semanticCapabilities`；`planning-context.schema.json`
 定义 Orchestrator 交给模型客户端的目录、目标、revision 提示、Companion 状态和计划约束组合。

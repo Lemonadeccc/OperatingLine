@@ -2293,6 +2293,25 @@ class CompanionController:
             self._artifact_attestation_execution_id = None
             self._artifact_attestation = None
         _connected, protocol_version = self._transport_connection_state()
+        native_undo_checkpoint = None
+        expected_checkpoint_operation = {
+            "walkthrough_started": "start",
+            "step_succeeded": "next",
+            "observation_recovered": "recheck",
+            "step_rolled_back": "back",
+        }.get(transition)
+        if protocol_version == "1.5.0" and expected_checkpoint_operation is not None:
+            from ..infrastructure.native_history import (
+                native_undo_checkpoint_attestation,
+            )
+
+            candidate_checkpoint = native_undo_checkpoint_attestation(session)
+            if (
+                candidate_checkpoint is not None
+                and candidate_checkpoint["operation"]
+                == expected_checkpoint_operation
+            ):
+                native_undo_checkpoint = candidate_checkpoint
         report = {
             "protocolVersion": protocol_version,
             "reportId": report_id,
@@ -2331,6 +2350,8 @@ class CompanionController:
                 if phase == "completed"
                 else None
             )
+            if native_undo_checkpoint is not None:
+                report["nativeUndoCheckpoint"] = deepcopy(native_undo_checkpoint)
         if self._transport is not None:
             self._transport.send_report(report)
         self.last_report = report

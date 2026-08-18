@@ -4,7 +4,11 @@ import {
   canonicalizeProtocolJsonValue,
   protocolJsonValueCanonicalization,
 } from './canonical-json-value.js';
-import { companionObservationSchema, companionStateReportSchema } from './companion.js';
+import {
+  companionNativeUndoCheckpointSchema,
+  companionObservationSchema,
+  companionStateReportSchema,
+} from './companion.js';
 import { guideStepIdSchema } from './guide.js';
 import {
   procedureAuthoringMaterializationRequestSchema,
@@ -778,6 +782,7 @@ const procedureLeafReplayReportSchema = companionStateReportSchema.safeExtend({
   observations: z.array(procedureLeafReplayObservationSchema).length(1),
   observationGate: z.null(),
   artifactAttestation: z.null(),
+  nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
   error: z.null(),
 });
 
@@ -801,6 +806,8 @@ const procedureLeafReplayVerificationScopeSchema = z.strictObject({
   menuTrack: z.literal('catalog_grounded_not_executed'),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.literal('unavailable'),
+  nativeUndoCheckpoint: z.literal('companion_reported_current_at_report').optional(),
+  currentHostStateAfterReport: z.literal('not_verified').optional(),
 });
 
 const procedureLeafReplayAttestationContentSchema = z.strictObject({
@@ -889,6 +896,31 @@ export const procedureLeafReplayAttestationSchema = procedureLeafReplayAttestati
         code: 'custom',
         path: ['successGate', 'observations'],
         message: 'Replay success-gate observations must exactly match the companion report',
+      });
+    }
+    const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
+    const nativeUndoClaim = attestation.verificationScope.nativeUndoCheckpoint;
+    const currentStateClaim = attestation.verificationScope.currentHostStateAfterReport;
+    if (
+      (nativeUndoCheckpoint === undefined) !== (nativeUndoClaim === undefined) ||
+      (nativeUndoClaim === undefined) !== (currentStateClaim === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['verificationScope', 'nativeUndoCheckpoint'],
+        message: 'Replay native Undo claims must be present exactly with checkpoint evidence',
+      });
+    }
+    if (
+      nativeUndoCheckpoint !== undefined &&
+      (nativeUndoCheckpoint.operation !== 'next' ||
+        nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
+        nativeUndoCheckpoint.session.receiptStepIds[0] !== execution.step.id)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['report', 'nativeUndoCheckpoint'],
+        message: 'Replay native Undo checkpoint must contain the exact managed step receipt',
       });
     }
     if (

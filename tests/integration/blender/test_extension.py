@@ -9716,6 +9716,23 @@ def main() -> None:
         assert operating_line.get_companion().last_report["executionId"] == (
             first_execution_id
         )
+        start_checkpoint = operating_line.get_companion().last_report[
+            "nativeUndoCheckpoint"
+        ]
+        uuid.UUID(start_checkpoint["checkpointId"])
+        assert start_checkpoint["operation"] == "start"
+        assert start_checkpoint["marker"] == {
+            "key": NATIVE_HISTORY_MARKER_KEY,
+            "matched": True,
+        }
+        assert start_checkpoint["journal"] == {
+            "entryPresent": True,
+            "snapshotMatchesSession": True,
+            "artifactsBackedUp": True,
+        }
+        assert start_checkpoint["session"]["executionId"] == first_execution_id
+        assert start_checkpoint["session"]["completedStepIds"] == []
+        assert start_checkpoint["session"]["receiptStepIds"] == []
         assert session.started and session.active_index == -1
         assert overlay_enabled() is True
         assert bpy.context.window_manager.operating_line_overlay_enabled is True
@@ -9850,6 +9867,17 @@ def main() -> None:
             assert operating_line.get_companion().last_report["transition"] == (
                 "step_succeeded"
             )
+            checkpoint = operating_line.get_companion().last_report[
+                "nativeUndoCheckpoint"
+            ]
+            uuid.UUID(checkpoint["checkpointId"])
+            assert checkpoint["operation"] == "next"
+            assert checkpoint["session"]["executionId"] == execution_id
+            assert checkpoint["session"]["activeStepId"] == step_data["id"]
+            assert checkpoint["session"]["completedStepIds"] == [
+                item["id"] for item in ACTION_STEPS[: index + 1]
+            ]
+            assert checkpoint["session"]["receiptStepIds"][-1] == step_data["id"]
             obj = bpy.data.objects.get(name)
             assert obj is not None, f"{name} was not created"
             assert obj.type == "MESH"
@@ -9917,6 +9945,9 @@ def main() -> None:
         assert operating_line.get_companion().last_report["transition"] == (
             "step_rolled_back"
         )
+        assert operating_line.get_companion().last_report[
+            "nativeUndoCheckpoint"
+        ]["operation"] == "back"
         assert_absent(EXPECTED[-1])
         assert_absent("UserRenamedSnowmanHead")
         assert bpy.data.objects.get("UserDuplicateSnowmanHead") is duplicate_head

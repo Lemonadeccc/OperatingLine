@@ -798,6 +798,172 @@
                   }
                 ]
               },
+              "nativeUndoCheckpoint": {
+                "type": "object",
+                "properties": {
+                  "formatVersion": {
+                    "type": "string",
+                    "const": "1.0.0"
+                  },
+                  "evidenceClass": {
+                    "type": "string",
+                    "const": "companion_reported_native_undo_checkpoint"
+                  },
+                  "checkpointId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "previousCheckpointId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "start",
+                      "next",
+                      "recheck",
+                      "back"
+                    ]
+                  },
+                  "committedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "marker": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "const": "_operating_line_native_history_v1"
+                      },
+                      "matched": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "matched"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "journal": {
+                    "type": "object",
+                    "properties": {
+                      "entryPresent": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "snapshotMatchesSession": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "artifactsBackedUp": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "entryPresent",
+                      "snapshotMatchesSession",
+                      "artifactsBackedUp"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "session": {
+                    "type": "object",
+                    "properties": {
+                      "plan": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "revision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "planContentSha256": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "executionId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "activeStepId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "completedStepIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "uniqueItems": true
+                      },
+                      "receiptStepIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "plan",
+                      "planContentSha256",
+                      "executionId",
+                      "activeStepId",
+                      "completedStepIds",
+                      "receiptStepIds"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "formatVersion",
+                  "evidenceClass",
+                  "checkpointId",
+                  "previousCheckpointId",
+                  "operation",
+                  "committedAt",
+                  "marker",
+                  "journal",
+                  "session"
+                ],
+                "additionalProperties": false
+              },
               "error": {
                 "anyOf": [
                   {

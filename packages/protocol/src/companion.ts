@@ -204,6 +204,56 @@ const companionPlanReferenceSchema = z.strictObject({
   revision: z.number().int().positive(),
 });
 
+const companionNativeUndoCheckpointOperationSchema = z.enum(['start', 'next', 'recheck', 'back']);
+
+export const companionNativeUndoCheckpointSchema = z
+  .strictObject({
+    formatVersion: z.literal('1.0.0'),
+    evidenceClass: z.literal('companion_reported_native_undo_checkpoint'),
+    checkpointId: z.uuid(),
+    previousCheckpointId: z.uuid().nullable(),
+    operation: companionNativeUndoCheckpointOperationSchema,
+    committedAt: z.iso.datetime({ offset: true }),
+    marker: z.strictObject({
+      key: z.literal('_operating_line_native_history_v1'),
+      matched: z.literal(true),
+    }),
+    journal: z.strictObject({
+      entryPresent: z.literal(true),
+      snapshotMatchesSession: z.literal(true),
+      artifactsBackedUp: z.literal(true),
+    }),
+    session: z.strictObject({
+      plan: companionPlanReferenceSchema,
+      planContentSha256: companionContentSha256Schema,
+      executionId: z.uuid(),
+      activeStepId: guideStepIdSchema.nullable(),
+      completedStepIds: z
+        .array(guideStepIdSchema)
+        .meta({ uniqueItems: true })
+        .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+          message: 'Native Undo completedStepIds must contain unique step ids',
+        }),
+      receiptStepIds: z
+        .array(guideStepIdSchema)
+        .meta({ uniqueItems: true })
+        .refine((stepIds) => new Set(stepIds).size === stepIds.length, {
+          message: 'Native Undo receiptStepIds must contain unique step ids',
+        }),
+    }),
+  })
+  .superRefine((checkpoint, context) => {
+    const completedStepIds = new Set(checkpoint.session.completedStepIds);
+    if (checkpoint.session.receiptStepIds.some((stepId) => !completedStepIds.has(stepId))) {
+      context.addIssue({
+        code: 'custom',
+        path: ['session', 'receiptStepIds'],
+        message: 'Native Undo receipts must belong to completed steps',
+      });
+    }
+  });
+export type CompanionNativeUndoCheckpoint = z.infer<typeof companionNativeUndoCheckpointSchema>;
+
 export const companionStateReportSchema = z
   .strictObject({
     protocolVersion: guideProtocolVersionSchema,
@@ -229,6 +279,7 @@ export const companionStateReportSchema = z
     observations: z.array(companionObservationSchema),
     observationGate: companionObservationGateSchema.nullable().optional(),
     artifactAttestation: companionArtifactAttestationSchema.nullable().optional(),
+    nativeUndoCheckpoint: companionNativeUndoCheckpointSchema.optional(),
     error: z.string().min(1).nullable(),
     occurredAt: z.iso.datetime({ offset: true }),
   })
@@ -536,6 +587,60 @@ export const companionStateReportSchema = z
           code: 'custom',
           path: ['artifactAttestation'],
           message: 'Artifact attestation requires and must match a terminal execution',
+        });
+      }
+    }
+    const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
+    if (nativeUndoCheckpoint !== undefined) {
+      let expectedOperation: 'start' | 'next' | 'recheck' | 'back' | undefined;
+      switch (report.transition) {
+        case 'walkthrough_started':
+          expectedOperation = 'start';
+          break;
+        case 'step_succeeded':
+          expectedOperation = 'next';
+          break;
+        case 'observation_recovered':
+          expectedOperation = 'recheck';
+          break;
+        case 'step_rolled_back':
+          expectedOperation = 'back';
+          break;
+        default:
+          expectedOperation = undefined;
+      }
+      if (expectedOperation === undefined || nativeUndoCheckpoint.operation !== expectedOperation) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeUndoCheckpoint', 'operation'],
+          message: 'Native Undo checkpoint operation must match the reported transition',
+        });
+      }
+      if (
+        report.plan === null ||
+        report.planContentSha256 === null ||
+        report.executionId === null ||
+        nativeUndoCheckpoint.session.plan.id !== report.plan.id ||
+        nativeUndoCheckpoint.session.plan.revision !== report.plan.revision ||
+        nativeUndoCheckpoint.session.planContentSha256 !== report.planContentSha256 ||
+        nativeUndoCheckpoint.session.executionId !== report.executionId ||
+        nativeUndoCheckpoint.session.activeStepId !== report.activeStepId ||
+        nativeUndoCheckpoint.session.completedStepIds.length !== report.completedStepIds.length ||
+        nativeUndoCheckpoint.session.completedStepIds.some(
+          (stepId, index) => stepId !== report.completedStepIds[index],
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeUndoCheckpoint', 'session'],
+          message: 'Native Undo checkpoint must bind the exact reported session state',
+        });
+      }
+      if (Date.parse(nativeUndoCheckpoint.committedAt) > Date.parse(report.occurredAt)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['nativeUndoCheckpoint', 'committedAt'],
+          message: 'Native Undo checkpoint cannot postdate its companion report',
         });
       }
     }

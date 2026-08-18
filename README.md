@@ -226,13 +226,16 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   `procedure.replay.finalize` 才能把它们、精确 Plan/执行/步骤身份和强 Observation 写成追加式 attestation，
   并进入 Eval/replay 导出。证明范围只包含
   `managedActionResult: verified`；菜单保持 `catalog_grounded_not_executed`，快捷键严格保留目录事实：有候选时为
-  `candidate_not_executed`，Torus/Cone/Cylinder 等无候选时为 `unavailable`；MCP 保持 `unavailable`。它不是逐控件 UI replay，也不单独证明 Blender 原生
-  Undo checkpoint，也不声称具体 UI 执行入口。见
+  `candidate_not_executed`，Torus/Cone/Cylinder 等无候选时为 `unavailable`；MCP 保持 `unavailable`。新的
+  finalize 必须同时取得报告时与精确 Plan、execution、leaf receipt、Scene marker、journal snapshot 和产物备份
+  绑定的 Blender 原生 Undo checkpoint；attestation 明确写入 `currentHostStateAfterReport: not_verified`，所以它
+  不是逐控件 UI replay，也不声称报告之后的当前场景或具体 UI 执行入口。见
   [ADR 0065](docs/adr/0065-managed-procedure-leaf-replay-attestation.md) 与
   [ADR 0066](docs/adr/0066-icosphere-managed-replay-attestation.md) 与
   [ADR 0067](docs/adr/0067-sized-primitive-managed-replay-attestation.md) 与
   [ADR 0068](docs/adr/0068-torus-managed-replay-attestation.md) 与
-  [ADR 0069](docs/adr/0069-segment-primitives-managed-replay-attestation.md)。
+  [ADR 0069](docs/adr/0069-segment-primitives-managed-replay-attestation.md) 与
+  [ADR 0071](docs/adr/0071-native-undo-replay-checkpoint-attestation.md)。
 - **ActionCatalog 与 PlanningContext**：MCP 客户端可以查询目标宿主真实允许的动作版本、参数
   Schema、资源读写、观察、回退、安全边界、适配器自有 `semanticCapabilities`、最新 Companion 状态和
   下一 Plan revision；未知动作、

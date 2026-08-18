@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import hashlib
 import os
 from pathlib import Path
@@ -34,6 +35,7 @@ class NativeHistoryCheckpoint:
     operation: str
     snapshot: SessionSnapshot
     artifacts: tuple[ArtifactIdentity, ...]
+    committed_at: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +247,7 @@ class NativeHistoryController:
         previous_id: str | None,
         operation: str,
         session: DemoSession,
+        committed_at: str | None = None,
     ) -> NativeHistoryCheckpoint:
         snapshot = session.snapshot_state()
         return NativeHistoryCheckpoint(
@@ -253,6 +256,7 @@ class NativeHistoryController:
             operation=operation,
             snapshot=snapshot,
             artifacts=self._capture_artifacts(snapshot),
+            committed_at=committed_at,
         )
 
     def _prune_redo_branches(self) -> None:
@@ -334,6 +338,7 @@ class NativeHistoryController:
             current.previous_id,
             current.operation,
             session,
+            current.committed_at,
         )
         self._prepared_from = self._current_id
         self._prepared_operation = operation
@@ -364,6 +369,7 @@ class NativeHistoryController:
                 previous_id,
                 operation,
                 session,
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
             owner[NATIVE_HISTORY_MARKER_KEY] = checkpoint_id
             if self._marker(owner) != checkpoint_id:
@@ -375,6 +381,71 @@ class NativeHistoryController:
         self._current_id = checkpoint_id
         self.cancel()
         return checkpoint_id
+
+    def current_checkpoint_attestation(
+        self,
+        session: DemoSession,
+    ) -> dict[str, Any] | None:
+        """Describe the exact journal entry currently selected by Blender history."""
+        if not self._registered or self._current_id is None:
+            return None
+        checkpoint = self._checkpoints.get(self._current_id)
+        owner = self._owner_scene()
+        if checkpoint is None or owner is None:
+            raise RuntimeError("Blender native Undo checkpoint is unavailable")
+        if checkpoint.operation not in {"start", "next", "recheck", "back"}:
+            raise RuntimeError("Blender native Undo checkpoint operation is invalid")
+        if checkpoint.committed_at is None:
+            raise RuntimeError("Blender native Undo checkpoint timestamp is unavailable")
+        if self._marker(owner) != checkpoint.checkpoint_id:
+            raise RuntimeError("Blender native Undo checkpoint marker is out of sync")
+        current_snapshot = session.snapshot_state()
+        if current_snapshot != checkpoint.snapshot:
+            raise RuntimeError("Blender native Undo checkpoint no longer matches the session")
+        if (
+            current_snapshot.plan_id is None
+            or current_snapshot.revision is None
+            or session.plan_content_sha256 is None
+            or current_snapshot.execution_id is None
+        ):
+            return None
+        for artifact in checkpoint.artifacts:
+            content = self._artifact_blobs.get(artifact.sha256)
+            if content is None or _sha256(content) != artifact.sha256:
+                raise RuntimeError(
+                    f"Native Undo artifact backup is unavailable: {artifact.logical_id}"
+                )
+        active = session.active_step
+        return {
+            "formatVersion": "1.0.0",
+            "evidenceClass": "companion_reported_native_undo_checkpoint",
+            "checkpointId": checkpoint.checkpoint_id,
+            "previousCheckpointId": checkpoint.previous_id,
+            "operation": checkpoint.operation,
+            "committedAt": checkpoint.committed_at,
+            "marker": {
+                "key": NATIVE_HISTORY_MARKER_KEY,
+                "matched": True,
+            },
+            "journal": {
+                "entryPresent": True,
+                "snapshotMatchesSession": True,
+                "artifactsBackedUp": True,
+            },
+            "session": {
+                "plan": {
+                    "id": current_snapshot.plan_id,
+                    "revision": current_snapshot.revision,
+                },
+                "planContentSha256": session.plan_content_sha256,
+                "executionId": current_snapshot.execution_id,
+                "activeStepId": active.id if active is not None else None,
+                "completedStepIds": list(session.completed_step_ids),
+                "receiptStepIds": [
+                    step_id for step_id, _receipt in current_snapshot.receipts
+                ],
+            },
+        }
 
     @staticmethod
     def _artifact_map(
@@ -604,6 +675,12 @@ def native_history_checkpoint_count() -> int:
     return _CONTROLLER.checkpoint_count
 
 
+def native_undo_checkpoint_attestation(
+    session: DemoSession,
+) -> dict[str, Any] | None:
+    return _CONTROLLER.current_checkpoint_attestation(session)
+
+
 __all__ = (
     "NATIVE_HISTORY_MARKER_KEY",
     "NativeHistoryCheckpoint",
@@ -614,6 +691,7 @@ __all__ = (
     "discard_native_history",
     "native_history_checkpoint_count",
     "native_history_error",
+    "native_undo_checkpoint_attestation",
     "prepare_native_history",
     "prepared_native_history_changed",
     "register_native_history",

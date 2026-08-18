@@ -543,6 +543,18 @@ export function buildProcedureLeafReplayAttestation(input: {
       409,
     );
   }
+  const nativeUndoCheckpoint = report.nativeUndoCheckpoint;
+  if (
+    nativeUndoCheckpoint === undefined ||
+    nativeUndoCheckpoint.operation !== 'next' ||
+    nativeUndoCheckpoint.session.receiptStepIds.length !== 1 ||
+    nativeUndoCheckpoint.session.receiptStepIds[0] !== binding.leafId
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Companion report does not prove a current native Undo checkpoint for the replay step',
+      409,
+    );
+  }
   if (
     !satisfiesStableVersionRange(
       report.hostVersion,
@@ -721,6 +733,8 @@ export function buildProcedureLeafReplayAttestation(input: {
       menuTrack: 'catalog_grounded_not_executed',
       shortcutTrack: binding.claims.shortcutTrack,
       mcpTrack: 'unavailable',
+      nativeUndoCheckpoint: 'companion_reported_current_at_report',
+      currentHostStateAfterReport: 'not_verified',
     },
     attestedAt: input.attestedAt,
   };
