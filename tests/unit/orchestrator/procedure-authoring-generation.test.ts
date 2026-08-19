@@ -17,10 +17,12 @@ import {
   plannerProviderDescriptorSchema,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringValidationResultSchema,
+  procedureTutorialYoutubeImportRequestSchema,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
   type ProcedureTutorialTranscriptGenerateRequest,
   type ProcedureTutorialTranscriptImportRequest,
+  type ProcedureTutorialYoutubeTrackSelectionCurrentResult,
 } from '@operatingline/protocol';
 
 import {
@@ -31,6 +33,8 @@ import { buildProcedureAuthoringPromptPacket } from '../../../services/orchestra
 import { plannerProviderRequestFingerprint } from '../../../services/orchestrator/src/planner-provider-invocation.js';
 import { createPlannerProviderRegistry } from '../../../services/orchestrator/src/planner-provider-registry.js';
 import { buildProcedureTutorialTranscriptPromptPacket } from '../../../services/orchestrator/src/procedure-tutorial-transcript-import.js';
+import { buildProcedureTutorialYoutubePromptPacket } from '../../../services/orchestrator/src/procedure-tutorial-youtube-import.js';
+import type { ProcedureTutorialYoutubeCaptionAcquisitionResult } from '../../../services/orchestrator/src/youtube-caption-source.js';
 import {
   validateGuidePlanAgainstActionCatalog,
   validateGuidePlanStructure,
@@ -111,6 +115,113 @@ const tutorialTranscriptGenerateRequest: ProcedureTutorialTranscriptGenerateRequ
     },
   },
 };
+
+const youtubeSelectionRequestId = '68e3cc4a-fb97-42e9-8d31-c0fe7679eea0';
+const youtubeImportRequest = procedureTutorialYoutubeImportRequestSchema.parse({
+  formatVersion: '1.1.0',
+  requestId: '8bfbbf5a-b535-4eeb-9a44-09f96d2bda19',
+  selectionRequestId: youtubeSelectionRequestId,
+  targetAdapterId: request.targetAdapterId,
+  actionCatalogVersion: request.actionCatalogVersion,
+  interactionCatalogVersion: request.interactionCatalogVersion,
+  goal: request.goal,
+  treeId: 'snowman.eye.left.youtube.procedure',
+  revision: 4,
+  locale: request.locale,
+  youtube: {
+    videoId: 'dQw4w9WgXcQ',
+    captionTrackId: 'caption-track-en',
+    requestedFormat: 'webvtt',
+    expectedTrackLanguage: 'en',
+    defaultConfidence: 0.91,
+    rightsStatus: 'permission_granted',
+    authorization: {
+      networkFetchApproved: true,
+      quotaCostAcknowledged: true,
+      videoEditPermissionExpected: true,
+    },
+  },
+});
+
+const youtubeAcquisition: ProcedureTutorialYoutubeCaptionAcquisitionResult = {
+  video: {
+    uri: `https://www.youtube.com/watch?v=${youtubeImportRequest.youtube.videoId}`,
+    title: 'Authorized Blender eye tutorial',
+    durationMs: 20_000,
+  },
+  captionDocument: {
+    format: 'webvtt',
+    content:
+      'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove it.\n',
+    locale: 'en',
+    acquisition: {
+      source: 'youtube_data_api_v3',
+      authorization: 'oauth_video_edit_permission',
+      videoId: youtubeImportRequest.youtube.videoId,
+      captionTrackId: youtubeImportRequest.youtube.captionTrackId,
+      trackLanguage: 'en',
+      trackKind: 'standard',
+      isDraft: false,
+      isAutoSynced: false,
+      status: 'serving',
+      lastUpdated: '2026-08-18T08:00:00Z',
+      requestedFormat: 'webvtt',
+    },
+  },
+};
+
+function buildSelectedYoutubePacket(
+  requestFingerprint = 'a'.repeat(64),
+): ProcedureAuthoringPromptPacket {
+  const selection: ProcedureTutorialYoutubeTrackSelectionCurrentResult = {
+    formatVersion: '1.1.0',
+    requestId: youtubeSelectionRequestId,
+    requestFingerprint,
+    sourceTrackList: {
+      requestId: 'af653187-ac15-42eb-8652-d4b71b6c43ee',
+      videoId: youtubeImportRequest.youtube.videoId,
+      listedAt: '2026-08-18T09:00:00Z',
+    },
+    selectedTrack: {
+      captionTrackId: youtubeImportRequest.youtube.captionTrackId,
+      lastUpdated: '2026-08-18T08:00:00Z',
+      trackKind: 'standard',
+      language: 'en',
+      name: 'English',
+      audioTrackType: 'primary',
+      isCC: true,
+      isLarge: false,
+      isEasyReader: false,
+      isDraft: false,
+      isAutoSynced: false,
+      status: 'serving',
+    },
+    confirmation: {
+      explicitlyConfirmedByUser: true,
+      reason: { reasonCode: 'caption_quality_review' },
+    },
+    recommendation: null,
+    sideEffects: {
+      captionTrackSelectionRecorded: true,
+      networkFetched: false,
+      additionalQuotaUnits: 0,
+      captionContentDownloaded: false,
+      videoMediaDownloaded: false,
+      modelCalled: false,
+      procedureStored: false,
+      proposalCreated: false,
+      hostExecutionStarted: false,
+    },
+    recordedAt: '2026-08-18T10:00:00Z',
+  };
+  return buildProcedureTutorialYoutubePromptPacket(
+    youtubeImportRequest,
+    youtubeAcquisition,
+    blenderActionCatalog,
+    blenderInteractionCatalog,
+    selection,
+  );
+}
 
 function buildPacket(): ProcedureAuthoringPromptPacket {
   return buildProcedureAuthoringPromptPacket(
@@ -576,6 +687,135 @@ describe('Procedure authoring provider generation', () => {
     ).resolves.toEqual(first);
     expect(restartedProvider.authorProcedure).not.toHaveBeenCalled();
     await restarted.close();
+  });
+
+  it('generates idempotently from the exact supplied selected-caption packet', async () => {
+    const packet = buildSelectedYoutubePacket();
+    const events: ExecutionEventInput[] = [];
+    const selectedProvider = provider((providerPacket) => candidate(providerPacket));
+    const coordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([selectedProvider]),
+      existingEvents: [],
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: (event) => events.push(event),
+    });
+    const input = {
+      requestId: '8a8f752a-a5a5-4a32-b7ad-e102593cd7b5',
+      providerId: request.providerId,
+      packet,
+    };
+
+    const first = await coordinator.generateFromPacket(input);
+    const second = await coordinator.generateFromPacket(input);
+
+    expect(second).toEqual(first);
+    expect(selectedProvider.authorProcedure).toHaveBeenCalledTimes(1);
+    expect(selectedProvider.authorProcedure).toHaveBeenCalledWith(
+      expect.objectContaining({ packet }),
+    );
+    expect(first.packet).toEqual(packet);
+    expect(first.packet.context.tutorialProvenance?.transcript.document?.acquisition).toEqual(
+      packet.context.tutorialProvenance?.transcript.document?.acquisition,
+    );
+    expect(events[0]?.payload).toMatchObject({
+      inputMode: 'prepared_packet',
+      packetContentSha256: packet.integrity.contentSha256,
+    });
+    expect(events[1]?.payload).toMatchObject({
+      inputMode: 'prepared_packet',
+      requestFingerprint: plannerProviderRequestFingerprint({
+        requestId: input.requestId,
+        providerId: input.providerId,
+        packet,
+      }),
+      request: {
+        requestId: input.requestId,
+        providerId: input.providerId,
+        packetContentSha256: packet.integrity.contentSha256,
+      },
+      result: { packet },
+    });
+    expect(JSON.stringify(events[1]?.payload)).not.toContain('user_supplied');
+    const completedEvidence = coordinator.completedEvidence(input.requestId);
+    expect(completedEvidence).toEqual({
+      eventId: `procedure-authoring-generation-completed:${input.requestId}`,
+      event: events[1]?.payload,
+    });
+    await coordinator.close();
+
+    const restartedProvider = provider(() => {
+      throw new Error('Restored packet generation must not call the Provider again.');
+    });
+    const restarted = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([restartedProvider]),
+      existingEvents: stored(events),
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: () => {
+        throw new Error('Restored packet generation must not append duplicate evidence.');
+      },
+    });
+    await expect(restarted.generateFromPacket(input)).resolves.toEqual(first);
+    expect(restarted.completedEvidence(input.requestId)).toEqual(completedEvidence);
+    expect(restartedProvider.authorProcedure).not.toHaveBeenCalled();
+    await restarted.close();
+  });
+
+  it('conflicts when the same packet-generation request id selects another caption packet', async () => {
+    const firstPacket = buildSelectedYoutubePacket('a'.repeat(64));
+    const secondPacket = buildSelectedYoutubePacket('b'.repeat(64));
+    const selectedProvider = provider((providerPacket) => candidate(providerPacket));
+    const coordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([selectedProvider]),
+      existingEvents: [],
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: () => undefined,
+    });
+    const identity = {
+      requestId: '3002c13f-cdc7-4de1-b454-1f7c996b956e',
+      providerId: request.providerId,
+    };
+
+    await coordinator.generateFromPacket({ ...identity, packet: firstPacket });
+    await expect(
+      coordinator.generateFromPacket({ ...identity, packet: secondPacket }),
+    ).rejects.toMatchObject({
+      code: 'planner_generation_conflict',
+      retryMode: 'new_request_id',
+    });
+    expect(selectedProvider.authorProcedure).toHaveBeenCalledTimes(1);
+    await coordinator.close();
+  });
+
+  it('rejects invalid supplied packet integrity before calling the Provider', async () => {
+    const packet = structuredClone(buildSelectedYoutubePacket());
+    packet.integrity.contentSha256 = '0'.repeat(64);
+    const events: ExecutionEventInput[] = [];
+    const selectedProvider = provider((providerPacket) => candidate(providerPacket));
+    const coordinator = createProcedureAuthoringGenerationCoordinator({
+      registry: createPlannerProviderRegistry([selectedProvider]),
+      existingEvents: [],
+      buildPacket: () => buildPacket(),
+      buildTutorialTranscriptPacket,
+      validateCandidate,
+      appendEvent: (event) => events.push(event),
+    });
+
+    await expect(
+      coordinator.generateFromPacket({
+        requestId: 'bbce8791-a4c1-40df-8c2b-bd3357e84c38',
+        providerId: request.providerId,
+        packet,
+      }),
+    ).rejects.toThrow('Procedure authoring packet integrity check failed');
+    expect(selectedProvider.authorProcedure).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
+    await coordinator.close();
   });
 
   it('rejects providers without the explicit Procedure authoring method before any call', async () => {

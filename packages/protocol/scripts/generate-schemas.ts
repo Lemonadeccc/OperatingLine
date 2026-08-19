@@ -63,6 +63,13 @@ import {
   procedureTutorialTranscriptImportRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialAuthoringBindingSchema,
+  procedureTutorialAuthoringResultSchema,
+  procedureTutorialAuthoringReviewRequestSchema,
+  procedureTutorialAuthoringResumeRequestSchema,
+  procedureTutorialAuthoringRunCreateRequestSchema,
+  procedureTutorialAuthoringRunStatusRequestSchema,
+  procedureTutorialAuthoringRunStatusSchema,
   procedureTutorialMediaAnalysisRequestSchema,
   procedureTutorialMediaAnalysisResultSchema,
   procedureTutorialMediaCapabilitiesSchema,
@@ -427,6 +434,41 @@ const schemas = [
     procedureTutorialYoutubeImportRequestSchema,
   ],
   [
+    'procedure-tutorial-authoring-run-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-run-create-request.json',
+    procedureTutorialAuthoringRunCreateRequestSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-run-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-run-status-request.json',
+    procedureTutorialAuthoringRunStatusRequestSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-run-status.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-run-status.json',
+    procedureTutorialAuthoringRunStatusSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-review-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-review-request.json',
+    procedureTutorialAuthoringReviewRequestSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-resume-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-resume-request.json',
+    procedureTutorialAuthoringResumeRequestSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-result.json',
+    procedureTutorialAuthoringResultSchema,
+  ],
+  [
+    'procedure-tutorial-authoring-binding.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-authoring-binding.json',
+    procedureTutorialAuthoringBindingSchema,
+  ],
+  [
     'procedure-tutorial-media-analysis-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-analysis-request.json',
     procedureTutorialMediaAnalysisRequestSchema,
@@ -695,11 +737,13 @@ function hardenDraft7Tuples(value: unknown): void {
 }
 
 for (const [filename, id, schema] of schemas) {
-  const mediaSchema = filename.startsWith('procedure-tutorial-media-');
+  const draft7TupleSchema =
+    filename.startsWith('procedure-tutorial-media-') ||
+    filename.startsWith('procedure-tutorial-authoring-');
   const jsonSchema = z.toJSONSchema(schema, {
-    target: mediaSchema ? 'draft-7' : 'draft-2020-12',
+    target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
   });
-  if (mediaSchema) hardenDraft7Tuples(jsonSchema);
+  if (draft7TupleSchema) hardenDraft7Tuples(jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

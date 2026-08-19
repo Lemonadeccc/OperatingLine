@@ -1,5 +1,20 @@
 import { DatabaseSync } from 'node:sqlite';
 
+const offsetIsoDateTimePattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
+function isOffsetIsoDateTime(value: string): boolean {
+  const match = offsetIsoDateTimePattern.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1]!;
+}
+
 export interface ExecutionEventInput {
   id: string;
   eventType: string;
@@ -176,6 +191,11 @@ export interface ProcedureTreeRecordInput {
   hostVersionRange: string;
   contentSha256: string;
   tree: unknown;
+  atomicEvidence?:
+    | (ExecutionEventInput & {
+        createdAt: string;
+      })
+    | undefined;
 }
 
 export interface StoredProcedureTreeSummary {
@@ -2525,8 +2545,22 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       if (!/^[a-f0-9]{64}$/.test(input.contentSha256)) {
         throw new Error('Procedure tree content SHA-256 must be lowercase hexadecimal');
       }
+      if (
+        input.atomicEvidence !== undefined &&
+        (input.atomicEvidence.id.trim().length === 0 ||
+          input.atomicEvidence.eventType.trim().length === 0 ||
+          !isOffsetIsoDateTime(input.atomicEvidence.createdAt))
+      ) {
+        throw new Error(
+          'Atomic procedure tree evidence identity fields must be nonempty and createdAt must be an ISO date-time with an offset',
+        );
+      }
       validateShortcutSurfaceLifecycle(input.tree);
       const payload = canonicalJson(input.tree);
+      const atomicEvidencePayload =
+        input.atomicEvidence === undefined
+          ? undefined
+          : canonicalJson(input.atomicEvidence.payload);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
         const latestRow = findLatestProcedureTree.get(input.treeId);
@@ -2542,8 +2576,19 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
             existing.hostVersionRange === input.hostVersionRange &&
             existing.contentSha256 === input.contentSha256 &&
             canonicalJson(existing.tree) === payload;
+          const atomicEvidenceMatches = (() => {
+            if (input.atomicEvidence === undefined) return true;
+            const row = findEvent.get(input.atomicEvidence.id);
+            if (row === undefined) return false;
+            const event = parseExecutionEventRow(row);
+            return (
+              event.eventType === input.atomicEvidence.eventType &&
+              event.createdAt === input.atomicEvidence.createdAt &&
+              canonicalJson(event.payload) === atomicEvidencePayload
+            );
+          })();
           sqlite.exec('COMMIT;');
-          return duplicate
+          return duplicate && atomicEvidenceMatches
             ? { result: 'duplicate', record: existing }
             : { result: 'conflict', latestRevision: latest?.revision ?? existing.revision };
         }
@@ -2556,7 +2601,7 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           return { result: 'stale', latestRevision: latest.revision };
         }
 
-        const storedAt = new Date().toISOString();
+        const storedAt = input.atomicEvidence?.createdAt ?? new Date().toISOString();
         insertProcedureTree.run(
           input.treeId,
           input.revision,
@@ -2586,6 +2631,17 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
           }),
           storedAt,
         );
+        if (input.atomicEvidence !== undefined) {
+          if (atomicEvidencePayload === undefined) {
+            throw new Error('Atomic procedure tree evidence payload could not be encoded');
+          }
+          insertEvent.run(
+            input.atomicEvidence.id,
+            input.atomicEvidence.eventType,
+            atomicEvidencePayload,
+            input.atomicEvidence.createdAt,
+          );
+        }
         const storedRow = findProcedureTree.get(input.treeId, input.revision);
         if (storedRow === undefined) {
           throw new Error('Procedure tree insertion could not be read back');

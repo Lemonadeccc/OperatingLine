@@ -146,6 +146,7 @@ const procedureAuthoringGenerationEventScopeSchema = z.strictObject({
 
 export const procedureAuthoringGenerationRequestedEventSchema =
   procedureAuthoringGenerationEventScopeSchema.extend({
+    inputMode: z.literal('prepared_packet').optional(),
     packetFormatVersion: procedureAuthoringPromptFormatVersionSchema,
     runtimeTreatment: procedureAuthoringProviderRuntimeTreatmentAttestationSchema.optional(),
     occurredAt: z.iso.datetime({ offset: true }),
@@ -189,7 +190,7 @@ function tutorialRequestMatchesPacket(
   );
 }
 
-export const procedureAuthoringGenerationCompletedEventSchema = z
+const procedureAuthoringGenerationCompletedFromRequestEventSchema = z
   .strictObject({
     request: procedureAuthoringGenerateRequestSchema,
     requestFingerprint: evalContentSha256Schema,
@@ -231,12 +232,58 @@ export const procedureAuthoringGenerationCompletedEventSchema = z
       });
     }
   });
+
+const procedureAuthoringPreparedPacketEvidenceRequestSchema = z.strictObject({
+  requestId: z.uuid(),
+  providerId: plannerProviderIdSchema,
+  packetContentSha256: evalContentSha256Schema,
+});
+
+const procedureAuthoringGenerationCompletedFromPreparedPacketEventSchema = z
+  .strictObject({
+    inputMode: z.literal('prepared_packet'),
+    request: procedureAuthoringPreparedPacketEvidenceRequestSchema,
+    requestFingerprint: evalContentSha256Schema,
+    result: procedureAuthoringGenerationResultSchema,
+    runtimeAttestation: procedureAuthoringProviderRuntimeOutputAttestationSchema.optional(),
+  })
+  .superRefine((event, context) => {
+    if (
+      event.result.requestId !== event.request.requestId ||
+      event.result.provider.id !== event.request.providerId ||
+      event.result.packet.integrity.contentSha256 !== event.request.packetContentSha256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['request'],
+        message: 'Prepared-packet generation evidence must bind the exact packet and provider',
+      });
+    }
+    if (
+      event.runtimeAttestation !== undefined &&
+      (event.runtimeAttestation.operation !== 'procedure_authoring' ||
+        event.runtimeAttestation.requestId !== event.request.requestId ||
+        event.runtimeAttestation.requestFingerprint !== event.requestFingerprint)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeAttestation'],
+        message: 'Runtime attestation must match the exact prepared-packet request',
+      });
+    }
+  });
+
+export const procedureAuthoringGenerationCompletedEventSchema = z.union([
+  procedureAuthoringGenerationCompletedFromPreparedPacketEventSchema,
+  procedureAuthoringGenerationCompletedFromRequestEventSchema,
+]);
 export type ProcedureAuthoringGenerationCompletedEvent = z.infer<
   typeof procedureAuthoringGenerationCompletedEventSchema
 >;
 
 export const procedureAuthoringGenerationFailedEventSchema =
   procedureAuthoringGenerationEventScopeSchema.extend({
+    inputMode: z.literal('prepared_packet').optional(),
     error: plannerGenerationErrorCodeSchema,
     durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     occurredAt: z.iso.datetime({ offset: true }),

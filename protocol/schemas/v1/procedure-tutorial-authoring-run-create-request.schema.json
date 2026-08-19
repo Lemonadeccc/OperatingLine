@@ -1,0 +1,498 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "selected_youtube_caption"
+        },
+        "captionImport": {
+          "type": "object",
+          "properties": {
+            "formatVersion": {
+              "type": "string",
+              "const": "1.1.0"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "targetAdapterId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 180,
+              "pattern": "^\\S+$"
+            },
+            "actionCatalogVersion": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+            },
+            "interactionCatalogVersion": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+            },
+            "goal": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10000,
+              "pattern": "\\S"
+            },
+            "treeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "locale": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^\\S+$"
+            },
+            "youtube": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "videoId": {
+                      "type": "string",
+                      "minLength": 11,
+                      "maxLength": 11,
+                      "pattern": "^[A-Za-z0-9_-]{11}$"
+                    },
+                    "captionTrackId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024,
+                      "pattern": "^\\S+$"
+                    },
+                    "requestedFormat": {
+                      "type": "string",
+                      "enum": [
+                        "webvtt",
+                        "srt"
+                      ]
+                    },
+                    "expectedTrackLanguage": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^\\S+$"
+                    },
+                    "defaultConfidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "authorization": {
+                      "type": "object",
+                      "properties": {
+                        "networkFetchApproved": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "quotaCostAcknowledged": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "videoEditPermissionExpected": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "networkFetchApproved",
+                        "quotaCostAcknowledged",
+                        "videoEditPermissionExpected"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rightsStatus": {
+                      "type": "string",
+                      "const": "permission_granted"
+                    },
+                    "license": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": [
+                    "videoId",
+                    "captionTrackId",
+                    "requestedFormat",
+                    "defaultConfidence",
+                    "authorization",
+                    "rightsStatus"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "videoId": {
+                      "type": "string",
+                      "minLength": 11,
+                      "maxLength": 11,
+                      "pattern": "^[A-Za-z0-9_-]{11}$"
+                    },
+                    "captionTrackId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024,
+                      "pattern": "^\\S+$"
+                    },
+                    "requestedFormat": {
+                      "type": "string",
+                      "enum": [
+                        "webvtt",
+                        "srt"
+                      ]
+                    },
+                    "expectedTrackLanguage": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^\\S+$"
+                    },
+                    "defaultConfidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "authorization": {
+                      "type": "object",
+                      "properties": {
+                        "networkFetchApproved": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "quotaCostAcknowledged": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "videoEditPermissionExpected": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "networkFetchApproved",
+                        "quotaCostAcknowledged",
+                        "videoEditPermissionExpected"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rightsStatus": {
+                      "type": "string",
+                      "const": "license_verified"
+                    },
+                    "license": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": [
+                    "videoId",
+                    "captionTrackId",
+                    "requestedFormat",
+                    "defaultConfidence",
+                    "authorization",
+                    "rightsStatus",
+                    "license"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "videoId": {
+                      "type": "string",
+                      "minLength": 11,
+                      "maxLength": 11,
+                      "pattern": "^[A-Za-z0-9_-]{11}$"
+                    },
+                    "captionTrackId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024,
+                      "pattern": "^\\S+$"
+                    },
+                    "requestedFormat": {
+                      "type": "string",
+                      "enum": [
+                        "webvtt",
+                        "srt"
+                      ]
+                    },
+                    "expectedTrackLanguage": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^\\S+$"
+                    },
+                    "defaultConfidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "authorization": {
+                      "type": "object",
+                      "properties": {
+                        "networkFetchApproved": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "quotaCostAcknowledged": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "videoEditPermissionExpected": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "networkFetchApproved",
+                        "quotaCostAcknowledged",
+                        "videoEditPermissionExpected"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rightsStatus": {
+                      "type": "string",
+                      "const": "public_domain"
+                    },
+                    "license": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": [
+                    "videoId",
+                    "captionTrackId",
+                    "requestedFormat",
+                    "defaultConfidence",
+                    "authorization",
+                    "rightsStatus"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "selectionRequestId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "formatVersion",
+            "requestId",
+            "targetAdapterId",
+            "goal",
+            "treeId",
+            "revision",
+            "youtube",
+            "selectionRequestId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "captionImport"
+      ],
+      "additionalProperties": false
+    },
+    "provider": {
+      "type": "object",
+      "properties": {
+        "generationRequestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "authorization": {
+          "type": "object",
+          "properties": {
+            "providerDescriptor": {
+              "type": "object",
+              "properties": {
+                "contractVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "version": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                },
+                "displayName": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 180
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "availability": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "available"
+                  ],
+                  "additionalProperties": false
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "maxConcurrency": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 8
+                    }
+                  },
+                  "required": [
+                    "maxConcurrency"
+                  ],
+                  "additionalProperties": false
+                },
+                "dataHandling": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "executionLocation": {
+                          "type": "string",
+                          "const": "local"
+                        },
+                        "dataTransmission": {
+                          "type": "string",
+                          "const": "none"
+                        },
+                        "credentialManagement": {
+                          "type": "string",
+                          "const": "provider_managed"
+                        }
+                      },
+                      "required": [
+                        "executionLocation",
+                        "dataTransmission",
+                        "credentialManagement"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "executionLocation": {
+                          "type": "string",
+                          "const": "remote"
+                        },
+                        "dataTransmission": {
+                          "type": "string",
+                          "const": "provider_managed"
+                        },
+                        "credentialManagement": {
+                          "type": "string",
+                          "const": "provider_managed"
+                        }
+                      },
+                      "required": [
+                        "executionLocation",
+                        "dataTransmission",
+                        "credentialManagement"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "contractVersion",
+                "id",
+                "version",
+                "displayName",
+                "description",
+                "availability",
+                "limits",
+                "dataHandling"
+              ],
+              "additionalProperties": false
+            },
+            "explicitlyConfirmedByUser": {
+              "type": "boolean",
+              "const": true
+            },
+            "dataHandlingAcknowledged": {
+              "type": "boolean",
+              "const": true
+            },
+            "possibleProviderCostAcknowledged": {
+              "type": "boolean",
+              "const": true
+            },
+            "confirmedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "providerDescriptor",
+            "explicitlyConfirmedByUser",
+            "dataHandlingAcknowledged",
+            "possibleProviderCostAcknowledged",
+            "confirmedAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "generationRequestId",
+        "authorization"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "formatVersion",
+    "requestId",
+    "source",
+    "provider"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-tutorial-authoring-run-create-request.json"
+}

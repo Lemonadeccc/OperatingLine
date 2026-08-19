@@ -475,6 +475,81 @@ describe('OperatingLine persistence', () => {
     }
   });
 
+  it('atomically binds exact evidence to a newly stored procedure revision', () => {
+    const database = openOperatingLineDatabase(':memory:');
+    const record = procedureTreeRecord(1);
+    const atomicEvidence = {
+      id: 'procedure-tutorial-authoring-completed:run-1',
+      eventType: 'procedure.tutorial.authoring.completed',
+      payload: { bindingContentSha256: 'a'.repeat(64), runId: 'run-1' },
+      createdAt: '2026-08-19T00:00:00.000Z',
+    };
+
+    const accepted = database.recordProcedureTree({ ...record, atomicEvidence });
+    expect(accepted).toMatchObject({
+      result: 'accepted',
+      record: { storedAt: atomicEvidence.createdAt },
+    });
+    expect(database.getExecutionEvent(atomicEvidence.id)).toMatchObject({
+      eventType: atomicEvidence.eventType,
+      payload: atomicEvidence.payload,
+      createdAt: atomicEvidence.createdAt,
+    });
+    expect(database.recordProcedureTree({ ...record, atomicEvidence })).toMatchObject({
+      result: 'duplicate',
+    });
+    expect(
+      database.recordProcedureTree({
+        ...record,
+        atomicEvidence: {
+          ...atomicEvidence,
+          payload: { bindingContentSha256: 'b'.repeat(64), runId: 'run-1' },
+        },
+      }),
+    ).toEqual({ result: 'conflict', latestRevision: 1 });
+
+    const unbound = procedureTreeRecord(1, {
+      treeId: 'unbound.eye.procedure',
+      title: 'Unbound eye',
+      tree: {
+        ...(record.tree as Record<string, unknown>),
+        id: 'unbound.eye.procedure',
+        title: 'Unbound eye',
+      },
+    });
+    expect(database.recordProcedureTree(unbound)).toMatchObject({ result: 'accepted' });
+    expect(
+      database.recordProcedureTree({
+        ...unbound,
+        atomicEvidence: { ...atomicEvidence, id: `${atomicEvidence.id}:unbound` },
+      }),
+    ).toEqual({ result: 'conflict', latestRevision: 1 });
+
+    const invalidTimestamp = procedureTreeRecord(1, {
+      treeId: 'invalid-timestamp.eye.procedure',
+      title: 'Invalid timestamp eye',
+      tree: {
+        ...(record.tree as Record<string, unknown>),
+        id: 'invalid-timestamp.eye.procedure',
+        title: 'Invalid timestamp eye',
+      },
+    });
+    expect(() =>
+      database.recordProcedureTree({
+        ...invalidTimestamp,
+        atomicEvidence: {
+          ...atomicEvidence,
+          id: `${atomicEvidence.id}:invalid-timestamp`,
+          createdAt: 'not-a-date',
+        },
+      }),
+    ).toThrow('createdAt must be an ISO date-time with an offset');
+    expect(
+      database.getProcedureTree(invalidTimestamp.treeId, invalidTimestamp.revision),
+    ).toBeNull();
+    database.close();
+  });
+
   it('serializes concurrent writes of the same procedure revision', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-race-test-'));
     const databasePath = join(directory, 'state.db');
@@ -2077,6 +2152,42 @@ describe('OperatingLine persistence', () => {
           treeId: 'snowman.eye.procedure',
         }),
       ).toEqual([]);
+      expect(database.countEvents()).toBe(0);
+      database.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rolls back a procedure revision when its atomic evidence cannot be appended', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-binding-rollback-test-'));
+    const databasePath = join(directory, 'state.db');
+    try {
+      openOperatingLineDatabase(databasePath).close();
+      const injected = new DatabaseSync(databasePath);
+      injected.exec(`
+        CREATE TRIGGER fail_procedure_binding_event
+        BEFORE INSERT ON execution_events
+        WHEN NEW.event_type = 'procedure.tutorial.authoring.completed'
+        BEGIN
+          SELECT RAISE(FAIL, 'injected procedure binding event failure');
+        END;
+      `);
+      injected.close();
+
+      const database = openOperatingLineDatabase(databasePath);
+      expect(() =>
+        database.recordProcedureTree({
+          ...procedureTreeRecord(),
+          atomicEvidence: {
+            id: 'procedure-tutorial-authoring-completed:run-rollback',
+            eventType: 'procedure.tutorial.authoring.completed',
+            payload: { runId: 'run-rollback' },
+            createdAt: '2026-08-19T00:00:00.000Z',
+          },
+        }),
+      ).toThrow('injected procedure binding event failure');
+      expect(database.listProcedureTrees(0, 10)).toEqual([]);
       expect(database.countEvents()).toBe(0);
       database.close();
     } finally {

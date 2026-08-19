@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
+import { isDeepStrictEqual } from 'node:util';
 
 import { createMcpFastifyApp } from '@modelcontextprotocol/fastify';
 import { toNodeHandler } from '@modelcontextprotocol/node';
@@ -8,6 +9,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
 import {
   openOperatingLineDatabase,
+  type ExecutionEventInput,
   type StoredProcedureOperationIndex as DatabaseStoredProcedureOperationIndex,
   type StoredProcedureTreeRecord as DatabaseStoredProcedureTreeRecord,
   type StoredProcedureTreeSummary as DatabaseStoredProcedureTreeSummary,
@@ -67,6 +69,11 @@ import {
   procedureTutorialMediaJobStatusRequestSchema,
   procedureTutorialMediaJobStatusSchema,
   procedureTutorialMediaResumeRequestSchema,
+  procedureTutorialAuthoringResumeRequestSchema,
+  procedureTutorialAuthoringReviewRequestSchema,
+  procedureTutorialAuthoringRunCreateRequestSchema,
+  procedureTutorialAuthoringRunStatusRequestSchema,
+  procedureTutorialAuthoringRunStatusSchema,
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
@@ -115,6 +122,7 @@ import {
   type PlanningIntent,
   type PlanningQualityReport,
   type ProcedureLeafReplayBinding,
+  type ProcedureTutorialAuthoringBinding,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -161,6 +169,13 @@ import {
   restoreProcedureAuthoringProviderInvocations,
   type ProcedureAuthoringGenerationCoordinator,
 } from './procedure-authoring-generation.js';
+import {
+  createProcedureTutorialAuthoringRunCoordinator,
+  procedureTutorialAuthoringRunErrorResponse,
+  procedureTutorialAuthoringRunEvidenceEventTypes,
+  procedureTutorialAuthoringRunHttpStatus,
+  type ProcedureTutorialAuthoringRunCoordinator,
+} from './procedure-tutorial-authoring-run.js';
 import { createProcedureLeafReplayCurrentStateCoordinator } from './procedure-replay-current-state.js';
 import {
   buildProcedureLeafReplayAttestation,
@@ -443,6 +458,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
+  let procedureTutorialAuthoringRunCoordinator:
+    ProcedureTutorialAuthoringRunCoordinator | undefined;
   let procedureTutorialYoutubeImportCoordinator:
     ProcedureTutorialYoutubeImportCoordinator | undefined;
   let procedureTutorialYoutubeTrackSelectionCoordinator:
@@ -456,6 +473,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => companionReplanRunCoordinator?.beginClose(),
     () => {
       companionDialogueRunCoordinator?.beginClose();
+      procedureTutorialAuthoringRunCoordinator?.beginClose();
       procedureTutorialYoutubeImportCoordinator?.beginClose();
       procedureTutorialMediaCoordinator?.beginClose();
     },
@@ -469,6 +487,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     },
     () => procedureTutorialYoutubeImportCoordinator?.close(),
+    () => procedureTutorialAuthoringRunCoordinator?.close(),
     () => procedureTutorialMediaCoordinator?.close(),
     () => tutorialMediaPipelineForCleanup?.close(),
     () => companionInitialPlanRunCoordinator?.close(),
@@ -906,12 +925,17 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         storedAt: record.storedAt,
       });
 
-    const storeProcedureTree = (
-      request: ReturnType<typeof procedureTreeStoreRequestSchema.parse>,
+    type ProcedureTreeInput = ReturnType<typeof procedureTreeStoreRequestSchema.parse>['tree'];
+    type AtomicProcedureTreeEvidence = NonNullable<
+      Parameters<typeof database.recordProcedureTree>[0]['atomicEvidence']
+    >;
+    const persistProcedureTree = (
+      treeInput: ProcedureTreeInput,
+      atomicEvidence?: AtomicProcedureTreeEvidence,
     ) => {
       const tree = (() => {
         try {
-          return validateAndCompileProcedureTree(request.tree).tree;
+          return validateAndCompileProcedureTree(treeInput).tree;
         } catch (error) {
           throw new ProcedureTreeValidationError(
             error instanceof Error ? error.message : 'Unknown procedure validation error',
@@ -929,6 +953,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         hostVersionRange: tree.hostVersionRange,
         contentSha256,
         tree,
+        ...(atomicEvidence === undefined ? {} : { atomicEvidence }),
       });
       if (!('record' in stored)) {
         throw new ProcedureTreeRevisionError(
@@ -946,6 +971,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         hostExecutionStarted: false,
       });
     };
+    const storeProcedureTree = (
+      request: ReturnType<typeof procedureTreeStoreRequestSchema.parse>,
+    ) => persistProcedureTree(request.tree);
 
     const getProcedureTree = (request: ReturnType<typeof procedureTreeGetRequestSchema.parse>) => {
       const stored = database.getProcedureTree(request.treeId, request.revision);
@@ -1320,6 +1348,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureTutorialYoutubeEvents = database.listExecutionEventsByTypes(
       procedureTutorialYoutubeEvidenceEventTypes,
     );
+    const existingProcedureTutorialAuthoringRunEvents = database.listExecutionEventsByTypes(
+      procedureTutorialAuthoringRunEvidenceEventTypes,
+    );
     if (
       tutorialMediaRuntime.capabilities.availability === 'available' &&
       tutorialMediaRuntime.pipeline !== undefined
@@ -1393,6 +1424,64 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       buildPacket: getProcedureAuthoringPrompt,
       buildTutorialTranscriptPacket: importProcedureTutorialTranscript,
       validateCandidate: (packet, tree) => validateProcedureAuthoring({ packet, tree }),
+      appendEvent: (event) => database.appendEvent(event),
+    });
+    const restoreTutorialAuthoringStoredTree = (input: {
+      binding: ProcedureTutorialAuthoringBinding;
+      completedEvent: ExecutionEventInput & { readonly createdAt: string };
+    }) => {
+      const { binding, completedEvent } = input;
+      const storedEvidence = database.getExecutionEvent(completedEvent.id);
+      if (storedEvidence === null) return { status: 'absent' as const };
+      if (
+        storedEvidence.eventType !== completedEvent.eventType ||
+        storedEvidence.createdAt !== completedEvent.createdAt ||
+        !isDeepStrictEqual(storedEvidence.payload, completedEvent.payload)
+      ) {
+        return { status: 'invalid' as const };
+      }
+      const stored = database.getProcedureTree(binding.storage.treeId, binding.storage.revision);
+      if (stored === null) return { status: 'invalid' as const };
+      try {
+        const record = publicProcedureTreeRecord(stored);
+        if (
+          record.tree.id !== binding.storage.treeId ||
+          record.tree.revision !== binding.storage.revision ||
+          record.integrity.contentSha256 !== binding.storage.contentSha256
+        ) {
+          return { status: 'invalid' as const };
+        }
+        return {
+          status: 'completed' as const,
+          storage: procedureTreeStoreResultSchema.parse({
+            result: 'duplicate',
+            record,
+            validation: procedureRuntimeValidation,
+            proposalCreated: false,
+            hostExecutionStarted: false,
+          }),
+        };
+      } catch {
+        return { status: 'invalid' as const };
+      }
+    };
+    procedureTutorialAuthoringRunCoordinator = createProcedureTutorialAuthoringRunCoordinator({
+      importCaption: (request) => procedureTutorialYoutubeImportCoordinator!.importCaption(request),
+      completedPacket: (requestId) =>
+        procedureTutorialYoutubeImportCoordinator!.completedPacket(requestId),
+      generateFromPacket: (input) =>
+        procedureAuthoringGenerationCoordinator!.generateFromPacket(input),
+      completedGenerationEvidence: (requestId) =>
+        procedureAuthoringGenerationCoordinator!.completedEvidence(requestId),
+      materialize: ({ packet, tree }) => materializeProcedureAuthoring({ packet, tree }),
+      storeWithBinding: ({ tree, completedEvent }) => persistProcedureTree(tree, completedEvent),
+      restoreStored: restoreTutorialAuthoringStoredTree,
+      isStorageFailureRetryable: (error) =>
+        !(error instanceof ProcedureTreeRevisionError) &&
+        !(error instanceof ProcedureTreeValidationError),
+      findProcedureAuthor: (providerId) =>
+        plannerProviderRegistry.findProcedureAuthor(providerId)?.descriptor ?? null,
+      existingEvents: existingProcedureTutorialAuthoringRunEvents,
       appendEvent: (event) => database.appendEvent(event),
     });
     plannerGenerationCoordinator = createPlannerGenerationCoordinator({
@@ -2457,6 +2546,118 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                 },
               ],
             };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.authoring.runs.create',
+        {
+          description:
+            'Start one asynchronous, selection-bound authoring run from a previously recorded exact YouTube caption track. The authorization must echo the exact available Provider descriptor previously reviewed by the user; any live disclosure drift is rejected before evidence or side effects. The run may perform the authorized caption network/quota operation and one explicitly selected Provider call that can transmit normalized captions and incur cost. It validates and materializes the candidate, then pauses for review of the exact packet, candidate, and materialized-tree hashes. It does not create a Proposal or execute the host, and it stores no ProcedureTree before a separate exact review approval.',
+          inputSchema: deferMcpInputValidation(procedureTutorialAuthoringRunCreateRequestSchema),
+          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialAuthoringRunCreateRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_authoring_run_create_request',
+              requestId,
+              message: 'Tutorial authoring run request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialAuthoringRunCoordinator!.create(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.authoring.runs.status',
+        {
+          description:
+            'Read the exact asynchronous selected-caption authoring run. Awaiting-review returns the complete Provider generation and deterministic materialization preview; completion means an immutable catalog-grounded candidate ProcedureTree was stored, not that Blender executed or verified it.',
+          inputSchema: deferMcpInputValidation(procedureTutorialAuthoringRunStatusRequestSchema),
+          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialAuthoringRunStatusRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_authoring_run_status_request',
+              requestId,
+              message: 'Tutorial authoring status request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialAuthoringRunCoordinator!.status(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.authoring.runs.review',
+        {
+          description:
+            'Store or discard one awaiting selected-caption authoring result. Store requires the exact review id, packet hash, candidate-tree hash, materialized-tree hash, and all three explicit confirmations; accepted storage atomically binds the full provenance event to the immutable candidate tree. This never creates or accepts a Proposal and never executes Blender.',
+          inputSchema: deferMcpInputValidation(procedureTutorialAuthoringReviewRequestSchema),
+          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialAuthoringReviewRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_authoring_review_request',
+              requestId,
+              message: 'Tutorial authoring review request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialAuthoringRunCoordinator!.review(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.authoring.runs.resume',
+        {
+          description:
+            'Resume only an exact recovery_required local materialization or atomic-storage stage. Caption download and Provider generation are never retried by this operation, preventing repeated quota use, billing, or a different selected track.',
+          inputSchema: deferMcpInputValidation(procedureTutorialAuthoringResumeRequestSchema),
+          outputSchema: procedureTutorialAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialAuthoringResumeRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_authoring_resume_request',
+              requestId,
+              message: 'Tutorial authoring resume request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialAuthoringRunCoordinator!.resume(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialAuthoringRunErrorResponse(error, requestId));
           }
         },
       );
@@ -4042,6 +4243,87 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send(procedureTutorialYoutubeImportErrorResponse(error, parsedRequest.data.requestId));
       }
     });
+    runtimeApp.post('/api/v1/procedure/tutorial/authoring/runs', async (request, reply) => {
+      const parsedRequest = procedureTutorialAuthoringRunCreateRequestSchema.safeParse(
+        request.body,
+      );
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_authoring_run_create_request',
+          requestId,
+          message: 'Tutorial authoring run request violates the strict public contract.',
+        });
+      }
+      try {
+        const status = procedureTutorialAuthoringRunCoordinator!.create(parsedRequest.data);
+        return reply
+          .code(status.status === 'accepted' || status.status === 'running' ? 202 : 200)
+          .send(status);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialAuthoringRunHttpStatus(error))
+          .send(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/authoring/runs/status', async (request, reply) => {
+      const parsedRequest = procedureTutorialAuthoringRunStatusRequestSchema.safeParse(
+        request.body,
+      );
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_authoring_run_status_request',
+          requestId,
+          message: 'Tutorial authoring status request violates the strict public contract.',
+        });
+      }
+      try {
+        return procedureTutorialAuthoringRunCoordinator!.status(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialAuthoringRunHttpStatus(error))
+          .send(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/authoring/runs/review', async (request, reply) => {
+      const parsedRequest = procedureTutorialAuthoringReviewRequestSchema.safeParse(request.body);
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_authoring_review_request',
+          requestId,
+          message: 'Tutorial authoring review request violates the strict public contract.',
+        });
+      }
+      try {
+        const status = procedureTutorialAuthoringRunCoordinator!.review(parsedRequest.data);
+        return reply.code(status.status === 'running' ? 202 : 200).send(status);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialAuthoringRunHttpStatus(error))
+          .send(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/authoring/runs/resume', async (request, reply) => {
+      const parsedRequest = procedureTutorialAuthoringResumeRequestSchema.safeParse(request.body);
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_authoring_resume_request',
+          requestId,
+          message: 'Tutorial authoring resume request violates the strict public contract.',
+        });
+      }
+      try {
+        const status = procedureTutorialAuthoringRunCoordinator!.resume(parsedRequest.data);
+        return reply.code(status.status === 'running' ? 202 : 200).send(status);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialAuthoringRunHttpStatus(error))
+          .send(procedureTutorialAuthoringRunErrorResponse(error, requestId));
+      }
+    });
     runtimeApp.post('/api/v1/procedure/tutorial/generate', async (request, reply) => {
       const parsedRequest = procedureTutorialTranscriptGenerateRequestSchema.safeParse(
         request.body,
@@ -5062,7 +5344,20 @@ export {
   createProcedureAuthoringGenerationCoordinator,
   procedureAuthoringGenerationEvidenceEventTypes,
   restoreProcedureAuthoringProviderInvocations,
+  type ProcedureAuthoringGenerationCompletedEvidence,
+  type ProcedureAuthoringGenerationCoordinator,
+  type ProcedureAuthoringGenerationCoordinatorOptions,
 } from './procedure-authoring-generation.js';
+export {
+  createProcedureTutorialAuthoringRunCoordinator,
+  procedureTutorialAuthoringRunErrorResponse,
+  procedureTutorialAuthoringRunEvidenceEventTypes,
+  procedureTutorialAuthoringRunHttpStatus,
+  ProcedureTutorialAuthoringRunError,
+  type ProcedureTutorialAuthoringRunCoordinator,
+  type ProcedureTutorialAuthoringRunCoordinatorOptions,
+  type ProcedureTutorialAuthoringRunErrorCode,
+} from './procedure-tutorial-authoring-run.js';
 export {
   buildProcedureAuthoringPromptPacket,
   computeProcedureAuthoringPromptPacketContentSha256,

@@ -146,6 +146,20 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)、
   [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md) 与
   [ADR 0083](docs/adr/0083-managed-youtube-oauth.md)。
+- **已选官方字幕到不可变候选树**：异步 authoring run 把已记录的精确 YouTube 字幕轨选择串成固定的
+  `caption_import → provider_generation → materialization → review → storage` 工作流。MCP 提供
+  `operatingline.procedure.tutorial.authoring.runs.create`、`...runs.status`、`...runs.review` 与
+  `...runs.resume`；对应 HTTP 入口使用 `/api/v1/procedure/tutorial/authoring/runs` 及其
+  `/status`、`/review`、`/resume` 子路径。前三阶段完成后固定暂停在 `awaiting_review`，并返回完整 Provider
+  generation 与 materialization preview；此时不会保存 ProcedureTree。Store 审阅必须匹配精确 review ID、
+  packet SHA-256、candidate tree SHA-256 和 materialized tree SHA-256，并逐项确认三份内容。通过后，不可变
+  ProcedureTree、operation index、存储审计与完整 authoring binding 在同一 transaction 中写入。Create 还
+  必须原样绑定已审阅的可用 Provider descriptor；最终 binding 保留 descriptor、generation completed event
+  与可用 runtime attestation 的内容摘要。外部字幕
+  下载与 Provider 生成不会在重启后自动重放；只有本地 materialization/storage 可凭精确 recovery receipt
+  显式恢复。完成态只表示 catalog-grounded candidate 已保存，不表示创建 Proposal、执行 Blender、通过
+  Observation 或形成 released 训练数据。该流程不消费媒体分析 manifest，也没有媒体 ASR fallback。见
+  [ADR 0085](docs/adr/0085-selected-caption-procedure-authoring-run.md)。
 - **经授权的 YouTube 教程媒体分析**：独立异步平面通过可信服务端 registry 核对精确 video ID、内容权利
   依据和另一条 `youtube_written_approval` 平台下载批准；两条引用必须不同，字幕 OAuth 编辑权限不能替代
   任一授权。配置完成后，固定运行 `download → probe → audio → asr → frames → ocr → segmentation` 全部七

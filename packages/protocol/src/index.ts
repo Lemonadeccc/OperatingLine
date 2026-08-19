@@ -28,6 +28,7 @@ export * from './procedure-authoring.js';
 export * from './procedure-authoring-provider.js';
 export * from './procedure-materialization.js';
 export * from './procedure-replay.js';
+export * from './procedure-tutorial-authoring-run.js';
 export * from './procedure-tutorial-import.js';
 export * from './procedure-tutorial-media.js';
 export * from './procedure-tutorial-youtube.js';

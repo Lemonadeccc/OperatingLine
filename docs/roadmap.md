@@ -319,7 +319,13 @@
         create/status 和显式 restart；失败只能从 download 全量重启且不复用部分阶段。未配置时安全报告
         unavailable；结果不会生成 ProcedureTree。见
         [ADR 0084](adr/0084-authorized-youtube-media-analysis.md)。
-  - [ ] 选择确认可视化 UI、媒体分析到完整 ProcedureTree 的一体化生成，以及大步骤/小步骤质量校准。
+  - [x] 已选官方字幕到不可变候选树的分阶段工作流：异步 run 固定执行选择绑定的 caption import、显式
+        Provider generation 和目录 materialization，再暂停并要求精确 review ID 与 packet/candidate/materialized
+        三哈希确认；通过后把 ProcedureTree 与完整 binding 证据原子存储。外部阶段不会在重启后自动重放，
+        完成态不表示 Proposal、宿主执行或验证。见
+        [ADR 0085](adr/0085-selected-caption-procedure-authoring-run.md)。
+  - [ ] 选择确认可视化 UI、媒体分析 manifest/ASR/OCR 到完整 ProcedureTree 的组合，以及大步骤/小步骤
+        质量校准。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

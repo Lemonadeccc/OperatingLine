@@ -20,6 +20,7 @@ import {
   guideProtocolVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialAuthoringRunStatusSchema,
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationResultSchema,
   procedureTutorialYoutubeTrackSelectionResultSchema,
@@ -370,6 +371,10 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.tutorial.youtube.tracks.recommend' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.select' },
             { name: 'operatingline.procedure.tutorial.youtube.import' },
+            { name: 'operatingline.procedure.tutorial.authoring.runs.create' },
+            { name: 'operatingline.procedure.tutorial.authoring.runs.status' },
+            { name: 'operatingline.procedure.tutorial.authoring.runs.review' },
+            { name: 'operatingline.procedure.tutorial.authoring.runs.resume' },
             { name: 'operatingline.procedure.tutorial.generate' },
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.providers.list' },
@@ -1449,6 +1454,466 @@ describe('OperatingLine runtime', () => {
         );
         expect(restored.status).toBe(200);
         await expect(restored.json()).resolves.toEqual(packet!);
+      } finally {
+        await restarted.stop();
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('runs selected YouTube captions through exact review and atomic Procedure storage', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-tutorial-authoring-run-test-'));
+    const databasePath = join(directory, 'events.db');
+    const captionDocument =
+      'WEBVTT\n\n00:01.000 --> 00:04.000\nAdd a UV sphere.\n\n00:05.000 --> 00:08.000\nMove and scale the eye.\n';
+    let trackListCalls = 0;
+    let captionCalls = 0;
+    let providerCalls = 0;
+    const source: ProcedureTutorialYoutubeCaptionSource = {
+      id: 'youtube_data_api_v3',
+      listTracks: async ({ videoId }) => {
+        trackListCalls += 1;
+        return {
+          videoId,
+          tracks: [
+            {
+              captionTrackId: 'caption-track-en',
+              lastUpdated: '2026-08-18T08:00:00Z',
+              trackKind: 'standard',
+              language: 'en',
+              name: 'English',
+              audioTrackType: 'primary',
+              isCC: true,
+              isLarge: false,
+              isEasyReader: false,
+              isDraft: false,
+              isAutoSynced: false,
+              status: 'serving',
+            },
+          ],
+        };
+      },
+      acquire: async ({ videoId, captionTrackId, requestedFormat }) => {
+        captionCalls += 1;
+        return {
+          video: {
+            uri: `https://www.youtube.com/watch?v=${videoId}`,
+            title: 'Authorized integrated Blender eye tutorial',
+            durationMs: 10_000,
+          },
+          captionDocument: {
+            format: 'webvtt',
+            content: captionDocument,
+            locale: 'en',
+            acquisition: {
+              source: 'youtube_data_api_v3',
+              authorization: 'oauth_video_edit_permission',
+              videoId,
+              captionTrackId,
+              trackLanguage: 'en',
+              trackKind: 'standard',
+              isDraft: false,
+              isAutoSynced: false,
+              status: 'serving',
+              lastUpdated: '2026-08-18T08:00:00Z',
+              requestedFormat,
+            },
+          },
+        };
+      },
+    };
+    const provider: PlannerProvider = {
+      descriptor: {
+        contractVersion: '1.0.0',
+        id: 'integrated-procedure-author',
+        version: '1.0.0',
+        displayName: 'Integrated Procedure author',
+        description: 'Deterministic provider for the integrated selected-caption workflow.',
+        availability: { available: true },
+        limits: { maxConcurrency: 1 },
+        dataHandling: {
+          executionLocation: 'local',
+          dataTransmission: 'none',
+          credentialManagement: 'provider_managed',
+        },
+      },
+      generate: async () => {
+        throw new Error('Initial-plan generation must not run in this test.');
+      },
+      authorProcedure: async ({ packet }) => {
+        providerCalls += 1;
+        return generatedProcedureCandidate(packet);
+      },
+    };
+    const trackListRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      youtube: {
+        videoId: 'dQw4w9WgXcQ',
+        authorization: {
+          networkFetchApproved: true,
+          quotaCostAcknowledged: true,
+          videoEditPermissionExpected: true,
+        },
+      },
+    } as const;
+    const selectionRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      trackListRequestId: trackListRequest.requestId,
+      videoId: trackListRequest.youtube.videoId,
+      captionTrackId: 'caption-track-en',
+      confirmation: {
+        explicitlyConfirmedByUser: true,
+        reason: { reasonCode: 'caption_quality_review' },
+      },
+    } as const;
+    const createRequest = {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      source: {
+        kind: 'selected_youtube_caption',
+        captionImport: {
+          formatVersion: '1.1.0',
+          requestId: randomUUID(),
+          selectionRequestId: selectionRequest.requestId,
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Create and position an eye from the exact selected YouTube captions.',
+          treeId: 'runtime.integrated.youtube.eye',
+          revision: 1,
+          locale: 'en',
+          youtube: {
+            videoId: trackListRequest.youtube.videoId,
+            captionTrackId: selectionRequest.captionTrackId,
+            requestedFormat: 'webvtt',
+            expectedTrackLanguage: 'en',
+            defaultConfidence: 0.91,
+            rightsStatus: 'permission_granted',
+            authorization: trackListRequest.youtube.authorization,
+          },
+        },
+      },
+      provider: {
+        generationRequestId: randomUUID(),
+        authorization: {
+          providerDescriptor: provider.descriptor,
+          explicitlyConfirmedByUser: true,
+          dataHandlingAcknowledged: true,
+          possibleProviderCostAcknowledged: true,
+          confirmedAt: '2026-08-19T08:00:00Z',
+        },
+      },
+    } as const;
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+
+    const readStatus = async (runtime: RunningRuntime, runId: string) => {
+      const response = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/tutorial/authoring/runs/status`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            requestId: createRequest.requestId,
+            runId,
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+      return procedureTutorialAuthoringRunStatusSchema.parse(await response.json());
+    };
+    const waitForStatus = async (
+      runtime: RunningRuntime,
+      runId: string,
+      expected: 'awaiting_review' | 'completed',
+    ) => {
+      let status = await readStatus(runtime, runId);
+      for (let attempt = 0; attempt < 40 && status.status !== expected; attempt += 1) {
+        await new Promise<void>((resolveWait) => setImmediate(resolveWait));
+        status = await readStatus(runtime, runId);
+      }
+      expect(status.status).toBe(expected);
+      return status;
+    };
+
+    try {
+      const runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+        youtubeCaptionSource: source,
+        plannerProviders: [provider],
+      });
+      let completedStatus: ReturnType<typeof procedureTutorialAuthoringRunStatusSchema.parse>;
+      try {
+        const listed = await callMcpTool(
+          runtime,
+          174,
+          'operatingline.procedure.tutorial.youtube.tracks.list',
+          trackListRequest,
+        );
+        expect(listed.result?.isError).not.toBe(true);
+        const selected = await callMcpTool(
+          runtime,
+          175,
+          'operatingline.procedure.tutorial.youtube.tracks.select',
+          selectionRequest,
+        );
+        expect(selected.result?.isError).not.toBe(true);
+
+        const created = await callMcpTool(
+          runtime,
+          176,
+          'operatingline.procedure.tutorial.authoring.runs.create',
+          createRequest,
+        );
+        expect(created.result?.isError).not.toBe(true);
+        const accepted = procedureTutorialAuthoringRunStatusSchema.parse(
+          created.result?.structuredContent,
+        );
+        expect(accepted).toMatchObject({
+          requestId: createRequest.requestId,
+          status: 'accepted',
+          completedStages: [],
+        });
+
+        const repeatedCreate = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/authoring/runs`,
+          { method: 'POST', headers, body: JSON.stringify(createRequest) },
+        );
+        expect([200, 202]).toContain(repeatedCreate.status);
+        await expect(repeatedCreate.json()).resolves.toMatchObject({
+          requestId: createRequest.requestId,
+          runId: accepted.runId,
+        });
+
+        const awaiting = await waitForStatus(runtime, accepted.runId, 'awaiting_review');
+        if (awaiting.status !== 'awaiting_review') throw new Error('expected review preview');
+        expect(awaiting).toMatchObject({
+          completedStages: ['caption_import', 'provider_generation', 'materialization'],
+          preview: {
+            generation: {
+              provider: { id: provider.descriptor.id, version: provider.descriptor.version },
+              packet: {
+                context: {
+                  requestedTreeId: createRequest.source.captionImport.treeId,
+                  tutorialProvenance: {
+                    transcript: {
+                      origin: 'youtube_data_api_v3',
+                      document: {
+                        acquisition: {
+                          selection: { requestId: selectionRequest.requestId },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              sideEffects: {
+                modelCalled: true,
+                procedureStored: false,
+                proposalCreated: false,
+                hostExecutionStarted: false,
+              },
+            },
+          },
+        });
+        expect(captionCalls).toBe(1);
+        expect(providerCalls).toBe(1);
+
+        const reviewRequest = {
+          formatVersion: '1.0.0',
+          requestId: createRequest.requestId,
+          runId: awaiting.runId,
+          reviewId: awaiting.reviewId,
+          review: {
+            decision: 'store',
+            packetContentSha256: awaiting.preview.generation.packet.integrity.contentSha256,
+            candidateTreeContentSha256: awaiting.preview.materialization.inputTreeContentSha256,
+            materializedTreeContentSha256: awaiting.preview.materialization.outputTreeContentSha256,
+            confirmations: {
+              exactPacketReviewed: true,
+              exactCandidateTreeReviewed: true,
+              exactMaterializedTreeReviewed: true,
+            },
+          },
+          reviewedAt: new Date().toISOString(),
+        } as const;
+        const mismatchedReview = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/authoring/runs/review`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...reviewRequest,
+              review: { ...reviewRequest.review, packetContentSha256: '0'.repeat(64) },
+            }),
+          },
+        );
+        expect(mismatchedReview.status).toBe(422);
+        await expect(mismatchedReview.json()).resolves.toMatchObject({
+          error: 'review_evidence_mismatch',
+          requestId: createRequest.requestId,
+        });
+
+        const reviewed = await callMcpTool(
+          runtime,
+          177,
+          'operatingline.procedure.tutorial.authoring.runs.review',
+          reviewRequest,
+        );
+        expect(reviewed.result?.isError).not.toBe(true);
+        completedStatus = await waitForStatus(runtime, awaiting.runId, 'completed');
+        if (completedStatus.status !== 'completed') throw new Error('expected completion');
+        expect(completedStatus.result).toMatchObject({
+          binding: {
+            source: {
+              captionImportRequestId: createRequest.source.captionImport.requestId,
+              selectionRequestId: selectionRequest.requestId,
+              videoId: trackListRequest.youtube.videoId,
+              captionTrackId: selectionRequest.captionTrackId,
+              packetContentSha256: reviewRequest.review.packetContentSha256,
+            },
+            generation: {
+              requestId: createRequest.provider.generationRequestId,
+              providerId: provider.descriptor.id,
+              providerVersion: provider.descriptor.version,
+              providerDescriptorContentSha256: createHash('sha256')
+                .update(canonicalizeProtocolJsonValue(provider.descriptor))
+                .digest('hex'),
+              completedEventId: `procedure-authoring-generation-completed:${createRequest.provider.generationRequestId}`,
+              completedEventContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+              candidateTreeContentSha256: reviewRequest.review.candidateTreeContentSha256,
+            },
+            review: {
+              reviewId: awaiting.reviewId,
+              materializedTreeContentSha256: reviewRequest.review.materializedTreeContentSha256,
+            },
+            storage: {
+              treeId: createRequest.source.captionImport.treeId,
+              revision: createRequest.source.captionImport.revision,
+              contentSha256: reviewRequest.review.materializedTreeContentSha256,
+            },
+          },
+          sideEffects: {
+            captionNetworkFetched: true,
+            captionContentDownloaded: true,
+            providerCalled: true,
+            procedureStored: true,
+            proposalCreated: false,
+            hostExecutionStarted: false,
+          },
+        });
+
+        const repeatedReview = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/authoring/runs/review`,
+          { method: 'POST', headers, body: JSON.stringify(reviewRequest) },
+        );
+        expect(repeatedReview.status).toBe(200);
+        await expect(repeatedReview.json()).resolves.toEqual(completedStatus);
+        expect(captionCalls).toBe(1);
+        expect(providerCalls).toBe(1);
+
+        const stored = await callMcpTool(runtime, 178, 'operatingline.procedure.get', {
+          treeId: createRequest.source.captionImport.treeId,
+          revision: createRequest.source.captionImport.revision,
+        });
+        expect(stored.result?.isError).not.toBe(true);
+        expect(stored.result?.structuredContent).toMatchObject({
+          tree: {
+            id: createRequest.source.captionImport.treeId,
+            revision: createRequest.source.captionImport.revision,
+          },
+          integrity: { contentSha256: reviewRequest.review.materializedTreeContentSha256 },
+        });
+        const guide = await fetch(`${runtime.baseUrl}/api/v1/guide`, { headers });
+        await expect(guide.json()).resolves.toEqual({ plan: null });
+
+        const resumeCompleted = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/tutorial/authoring/runs/resume`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              formatVersion: '1.0.0',
+              requestId: createRequest.requestId,
+              runId: awaiting.runId,
+              recoveryId: randomUUID(),
+              retryFromStage: 'storage',
+            }),
+          },
+        );
+        expect(resumeCompleted.status).toBe(409);
+        await expect(resumeCompleted.json()).resolves.toMatchObject({
+          error: 'recovery_not_required',
+          requestId: createRequest.requestId,
+        });
+      } finally {
+        await runtime.stop();
+      }
+
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        const completionEvents = database.listExecutionEventsByTypes([
+          'procedure.tutorial.authoring.completed',
+        ]);
+        expect(completionEvents).toHaveLength(1);
+        expect(completionEvents[0]?.payload).toMatchObject({
+          requestId: createRequest.requestId,
+          runId: completedStatus!.runId,
+          binding: {
+            source: { selectionRequestId: selectionRequest.requestId },
+            storage: { treeId: createRequest.source.captionImport.treeId },
+          },
+        });
+      } finally {
+        database.close();
+      }
+
+      const restoredSource: ProcedureTutorialYoutubeCaptionSource = {
+        id: 'youtube_data_api_v3',
+        listTracks: async () => {
+          throw new Error('Completed authoring restoration must not list tracks.');
+        },
+        acquire: async () => {
+          throw new Error('Completed authoring restoration must not fetch captions.');
+        },
+      };
+      const restoredProvider: PlannerProvider = {
+        ...provider,
+        authorProcedure: async () => {
+          throw new Error('Completed authoring restoration must not call the provider.');
+        },
+      };
+      const restarted = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+        youtubeCaptionSource: restoredSource,
+        plannerProviders: [restoredProvider],
+      });
+      try {
+        const restoredCreate = await callMcpTool(
+          restarted,
+          179,
+          'operatingline.procedure.tutorial.authoring.runs.create',
+          createRequest,
+        );
+        expect(restoredCreate.result?.isError).not.toBe(true);
+        expect(restoredCreate.result?.structuredContent).toEqual(completedStatus!);
+        const restoredStatus = await readStatus(restarted, completedStatus!.runId);
+        expect(restoredStatus).toEqual(completedStatus!);
+        expect(trackListCalls).toBe(1);
+        expect(captionCalls).toBe(1);
+        expect(providerCalls).toBe(1);
       } finally {
         await restarted.stop();
       }

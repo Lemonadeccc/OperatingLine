@@ -15,6 +15,7 @@ import {
   procedureTutorialTranscriptImportRequestSchema,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringGenerateRequest,
+  type ProcedureAuthoringGenerationCompletedEvent,
   type ProcedureAuthoringGenerationResult,
   type ProcedureAuthoringPromptPacket,
   type ProcedureAuthoringPromptRequest,
@@ -42,6 +43,7 @@ import {
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
 import {
   procedureAuthoringTutorialInputFromPacket,
+  validateProcedureAuthoringPromptPacketIntegrity,
   validateProcedureAuthoringCandidate,
 } from './procedure-authoring-prompt.js';
 
@@ -71,11 +73,22 @@ export interface ProcedureAuthoringGenerationCoordinatorOptions {
 
 export interface ProcedureAuthoringGenerationCoordinator {
   generate(request: ProcedureAuthoringGenerateRequest): Promise<ProcedureAuthoringGenerationResult>;
+  generateFromPacket(input: {
+    readonly requestId: string;
+    readonly providerId: string;
+    readonly packet: ProcedureAuthoringPromptPacket;
+  }): Promise<ProcedureAuthoringGenerationResult>;
   generateTutorialTranscript(
     request: ProcedureTutorialTranscriptGenerateRequest,
   ): Promise<ProcedureAuthoringGenerationResult>;
   completedResult(requestId: string): ProcedureAuthoringGenerationResult | null;
+  completedEvidence(requestId: string): ProcedureAuthoringGenerationCompletedEvidence | null;
   close(): Promise<void>;
+}
+
+export interface ProcedureAuthoringGenerationCompletedEvidence {
+  readonly eventId: string;
+  readonly event: ProcedureAuthoringGenerationCompletedEvent;
 }
 
 export function restoreProcedureAuthoringProviderInvocations(
@@ -164,6 +177,27 @@ function tutorialTranscriptEvidenceRequest(
   });
 }
 
+function packetEvidenceRequest(input: {
+  readonly requestId: string;
+  readonly providerId: string;
+  readonly packet: ProcedureAuthoringPromptPacket;
+}): ProcedureAuthoringGenerateRequest {
+  const context = input.packet.context;
+  return procedureAuthoringGenerateRequestSchema.parse({
+    requestId: input.requestId,
+    providerId: input.providerId,
+    targetAdapterId: context.catalogBinding.adapterId,
+    actionCatalogVersion: context.catalogBinding.actionCatalog.catalogVersion,
+    interactionCatalogVersion: context.catalogBinding.interactionCatalog.catalogVersion,
+    goal: context.goalProvenance.source.text,
+    treeId: context.requestedTreeId,
+    revision: context.recommendedRevision,
+    ...(context.goalProvenance.source.locale === undefined
+      ? {}
+      : { locale: context.goalProvenance.source.locale }),
+  });
+}
+
 function parseProviderOutput(output: unknown): ProcedureAuthoringCandidateTree {
   const parsed = procedureAuthoringCandidateTreeSchema.safeParse(
     sanitizePlannerProviderOutput(output),
@@ -185,6 +219,22 @@ function canonicalPacketPrompt(packet: ProcedureAuthoringPromptPacket): string {
 export function createProcedureAuthoringGenerationCoordinator(
   options: ProcedureAuthoringGenerationCoordinatorOptions,
 ): ProcedureAuthoringGenerationCoordinator {
+  const completedEvidenceByRequestId = new Map<
+    string,
+    ProcedureAuthoringGenerationCompletedEvidence
+  >();
+  for (const storedEvent of options.existingEvents) {
+    if (storedEvent.eventType !== 'procedure.authoring.provider.generation.completed') continue;
+    const event = procedureAuthoringGenerationCompletedEventSchema.parse(storedEvent.payload);
+    const requestId = event.request.requestId;
+    if (
+      storedEvent.id !== `procedure-authoring-generation-completed:${requestId}` ||
+      completedEvidenceByRequestId.has(requestId)
+    ) {
+      throw new Error('Procedure authoring completed evidence identity is invalid');
+    }
+    completedEvidenceByRequestId.set(requestId, { eventId: storedEvent.id, event });
+  }
   const invocationManager =
     options.invocationManager ??
     createPlannerProviderInvocationManager({
@@ -217,6 +267,7 @@ export function createProcedureAuthoringGenerationCoordinator(
     attemptContext: PlannerProviderAttemptContext,
     buildPacket: () => ProcedureAuthoringPromptPacket,
     evidenceRequest: (packet: ProcedureAuthoringPromptPacket) => ProcedureAuthoringGenerateRequest,
+    inputMode?: 'prepared_packet',
   ): Promise<ProcedureAuthoringGenerationResult> => {
     let packet: ProcedureAuthoringPromptPacket | null = null;
     let recordedRequest: ProcedureAuthoringGenerateRequest;
@@ -252,6 +303,7 @@ export function createProcedureAuthoringGenerationCoordinator(
         revision: packetContext.recommendedRevision,
         packetContentSha256: packet.integrity.contentSha256,
         packetFormatVersion: packet.formatVersion,
+        ...(inputMode === undefined ? {} : { inputMode }),
         ...(runtimeTreatment === undefined ? {} : { runtimeTreatment }),
         occurredAt: new Date().toISOString(),
       });
@@ -334,19 +386,32 @@ export function createProcedureAuthoringGenerationCoordinator(
         occurredAt: generatedAt,
       });
       const completedPayload = procedureAuthoringGenerationCompletedEventSchema.parse({
-        request: recordedRequest,
+        request:
+          inputMode === 'prepared_packet'
+            ? {
+                requestId: recordedRequest.requestId,
+                providerId: recordedRequest.providerId,
+                packetContentSha256: packet.integrity.contentSha256,
+              }
+            : recordedRequest,
         requestFingerprint,
         result,
+        ...(inputMode === undefined ? {} : { inputMode }),
         ...(runtimeAttestation === undefined ? {} : { runtimeAttestation }),
       });
+      const completedEvidence = {
+        eventId: `procedure-authoring-generation-completed:${request.requestId}`,
+        event: completedPayload,
+      } satisfies ProcedureAuthoringGenerationCompletedEvidence;
       appendEvidence(
         {
-          id: `procedure-authoring-generation-completed:${request.requestId}`,
+          id: completedEvidence.eventId,
           eventType: 'procedure.authoring.provider.generation.completed',
-          payload: completedPayload,
+          payload: completedEvidence.event,
         },
         'new_request_id',
       );
+      completedEvidenceByRequestId.set(request.requestId, completedEvidence);
       return result;
     } catch (error) {
       const safeError = safePlannerRuntimeError(error);
@@ -363,6 +428,7 @@ export function createProcedureAuthoringGenerationCoordinator(
           treeId: packetContext.requestedTreeId,
           revision: packetContext.recommendedRevision,
           packetContentSha256: packet.integrity.contentSha256,
+          ...(inputMode === undefined ? {} : { inputMode }),
           error: safeError.code,
           durationMs: Math.max(0, Date.now() - startedAt),
           occurredAt: new Date().toISOString(),
@@ -403,6 +469,38 @@ export function createProcedureAuthoringGenerationCoordinator(
       });
       return procedureAuthoringGenerationResultSchema.parse(result);
     },
+    generateFromPacket: async (input) => {
+      const packet = validateProcedureAuthoringPromptPacketIntegrity(input.packet);
+      const request = packetEvidenceRequest({
+        requestId: input.requestId,
+        providerId: input.providerId,
+        packet,
+      });
+      const requestFingerprint = plannerProviderRequestFingerprint({
+        requestId: request.requestId,
+        providerId: request.providerId,
+        packet,
+      });
+      const result = await invocationManager.execute({
+        requestId: request.requestId,
+        operation: 'procedure_authoring',
+        fingerprint: requestFingerprint,
+        providerId: request.providerId,
+        planKey: [request.targetAdapterId, request.treeId],
+        requiresReplan: false,
+        requiresProcedureAuthoring: true,
+        attempt: (attemptContext) =>
+          generateAttempt(
+            request,
+            requestFingerprint,
+            attemptContext,
+            () => packet,
+            () => request,
+            'prepared_packet',
+          ),
+      });
+      return procedureAuthoringGenerationResultSchema.parse(result);
+    },
     generateTutorialTranscript: async (requestInput) => {
       const request = procedureTutorialTranscriptGenerateRequestSchema.parse(requestInput);
       const requestFingerprint = plannerProviderRequestFingerprint(request);
@@ -429,6 +527,10 @@ export function createProcedureAuthoringGenerationCoordinator(
     completedResult: (requestId) => {
       const result = invocationManager.completedResult(requestId, 'procedure_authoring');
       return result === null ? null : procedureAuthoringGenerationResultSchema.parse(result);
+    },
+    completedEvidence: (requestId) => {
+      const evidence = completedEvidenceByRequestId.get(requestId);
+      return evidence === undefined ? null : structuredClone(evidence);
     },
     close: () => invocationManager.close(),
   };

@@ -84,16 +84,22 @@ const procedureTutorialYoutubeImportRequestCommonShape = {
   youtube: procedureTutorialYoutubeSourceSchema,
 } as const;
 
+const procedureTutorialYoutubeImportLegacyRequestSchema = z.strictObject({
+  formatVersion: z.literal(procedureTutorialYoutubeImportLegacyFormatVersion),
+  ...procedureTutorialYoutubeImportRequestCommonShape,
+});
+export const procedureTutorialYoutubeImportCurrentRequestSchema = z.strictObject({
+  formatVersion: z.literal(procedureTutorialYoutubeImportFormatVersion),
+  ...procedureTutorialYoutubeImportRequestCommonShape,
+  selectionRequestId: z.uuid(),
+});
+export type ProcedureTutorialYoutubeImportCurrentRequest = z.infer<
+  typeof procedureTutorialYoutubeImportCurrentRequestSchema
+>;
+
 export const procedureTutorialYoutubeImportRequestSchema = z.discriminatedUnion('formatVersion', [
-  z.strictObject({
-    formatVersion: z.literal(procedureTutorialYoutubeImportLegacyFormatVersion),
-    ...procedureTutorialYoutubeImportRequestCommonShape,
-  }),
-  z.strictObject({
-    formatVersion: z.literal(procedureTutorialYoutubeImportFormatVersion),
-    ...procedureTutorialYoutubeImportRequestCommonShape,
-    selectionRequestId: z.uuid(),
-  }),
+  procedureTutorialYoutubeImportLegacyRequestSchema,
+  procedureTutorialYoutubeImportCurrentRequestSchema,
 ]);
 export type ProcedureTutorialYoutubeImportRequest = z.infer<
   typeof procedureTutorialYoutubeImportRequestSchema
