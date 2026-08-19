@@ -160,7 +160,11 @@ importers:
         specifier: 7.4.0
         version: 7.4.0(zod@4.4.3)
 
-  packages/persistence: {}
+  packages/persistence:
+    dependencies:
+      '@operatingline/protocol':
+        specifier: workspace:*
+        version: link:../protocol
 
   packages/planner-provider-sdk:
     dependencies:

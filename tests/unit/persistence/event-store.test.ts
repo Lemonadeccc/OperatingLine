@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -8,6 +8,33 @@ import { Worker } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
 
 import { openOperatingLineDatabase } from '@operatingline/persistence';
+import {
+  canonicalizeProtocolJsonValue,
+  procedureRefinementCreateRequestSchema,
+  procedureRefinementReviewedEventSchema,
+  procedureRefinementReviewRequestSchema,
+  procedureRefinementRunStatusSchema,
+} from '@operatingline/protocol';
+
+function providerRequestFingerprint(value: unknown): string {
+  return protocolJsonContentSha256(value);
+}
+
+function protocolJsonContentSha256(value: unknown): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
+}
+
+const procedureRefinementValidation = {
+  computeCanonicalContentSha256: protocolJsonContentSha256,
+  parseCreateRequest: (input: unknown) => procedureRefinementCreateRequestSchema.parse(input),
+  parseReviewRequest: (input: unknown) => procedureRefinementReviewRequestSchema.parse(input),
+  parseReviewedEvent: (input: unknown) => procedureRefinementReviewedEventSchema.parse(input),
+  parseRunStatus: (input: unknown) => procedureRefinementRunStatusSchema.parse(input),
+};
+
+function openProcedureRefinementDatabase(filename: string) {
+  return openOperatingLineDatabase(filename, { procedureRefinementValidation });
+}
 
 function recordWorkSlotFromWorker(
   databasePath: string,
@@ -283,6 +310,418 @@ function companionDialogueRun(
       },
     },
     ...overrides,
+  };
+}
+
+function procedureRefinementRun(overrides: Record<string, unknown> = {}) {
+  const runId = randomUUID();
+  const dialogueRequestId = randomUUID();
+  const refinementRequestId = randomUUID();
+  const baseTree = JSON.parse(
+    readFileSync(resolve('protocol/fixtures/v1/snowman-eye.procedure.json'), 'utf8'),
+  ) as { id: string; revision: number; rootNodeId: string };
+  const storedBaseTree = {
+    sequence: 1,
+    tree: baseTree,
+    integrity: {
+      algorithm: 'sha256',
+      canonicalization: 'operatingline-json-value-v1',
+      contentSha256: 'a'.repeat(64),
+    },
+    storedAt: '2026-08-19T11:59:00.000Z',
+  };
+  const providerDescriptor = {
+    contractVersion: '1.0.0',
+    id: 'refinement.persistence-fixture',
+    version: '1.0.0',
+    displayName: 'Persistence Fixture',
+    description: 'Procedure refinement persistence fixture.',
+    availability: { available: true },
+    limits: { maxConcurrency: 1 },
+    dataHandling: {
+      executionLocation: 'local',
+      dataTransmission: 'none',
+      credentialManagement: 'provider_managed',
+    },
+  };
+  const runtimeTreatment = (
+    operation: 'procedure_refinement_dialogue' | 'procedure_refinement',
+  ) => ({
+    formatVersion: '1.0.0',
+    evidenceClass: 'runtime_attested_provider_treatment',
+    operation,
+    treatment: {
+      profile: {
+        descriptor: providerDescriptor,
+        vendor: 'Persistence Fixture',
+        implementation: { name: 'persistence-fixture', version: '1.0.0' },
+        model: {
+          requested: 'fixture-model',
+          resolvedRevision: null,
+          resolution: 'provider_did_not_disclose',
+        },
+        api: {
+          surface: operation,
+          version: 'v1',
+          sdkName: 'fixture-sdk',
+          sdkVersion: '1.0.0',
+          endpointClass: 'local',
+          serviceTier: null,
+          region: null,
+        },
+      },
+      generationSettings: {
+        normalizedParameters: { model: 'fixture-model' },
+        parametersSha256: (operation === 'procedure_refinement' ? 'b' : 'c').repeat(64),
+        seed: null,
+        determinism: 'non_deterministic',
+      },
+    },
+    costPolicy: {
+      possibleProviderCost: false,
+      basis: 'no_provider_cost',
+      publicStatement: 'The local fixture does not incur provider charges.',
+    },
+    treatmentContentSha256: (operation === 'procedure_refinement' ? 'd' : 'e').repeat(64),
+  });
+  const providerDisclosure = {
+    providerDescriptor,
+    dialogueRuntimeTreatment: runtimeTreatment('procedure_refinement_dialogue'),
+    refinementRuntimeTreatment: runtimeTreatment('procedure_refinement'),
+    inputPolicy: {
+      exactStoredBaseTreeSent: true,
+      exactSemanticRetrievalResultSent: true,
+      instructionSent: true,
+      dialogueHistorySent: true,
+      credentialsIncludedInTaskPayload: false,
+    },
+  };
+  const createRequest = {
+    formatVersion: '1.0.0',
+    runId,
+    dialogueRequestId,
+    refinementRequestId,
+    baseTree: storedBaseTree,
+    targetRevision: baseTree.revision + 1,
+    requestedScopeRootIds: [baseTree.rootNodeId],
+    semanticContext: {
+      status: 'completed',
+      requestId: randomUUID(),
+      retrievalId: randomUUID(),
+      resultContentSha256: 'f'.repeat(64),
+      completedEventContentSha256: '0'.repeat(64),
+      completedAt: '2026-08-19T11:59:30.000Z',
+    },
+    instruction: 'Make the head slightly larger.',
+    history: [],
+    providerDisclosure,
+    authorization: {
+      explicitlyConfirmedByUser: true,
+      dataHandlingAcknowledged: true,
+      possibleProviderCostAcknowledged: true,
+      authorizedProviderCallLimit: 2,
+      automaticRefinementAcknowledged: true,
+      noHostExecutionAcknowledged: true,
+      exactStoredBaseTreeDisclosed: true,
+      exactSemanticContextDisclosed: true,
+      dialogueAndRefinementRuntimeTreatmentsDisclosed: true,
+      providerInputPolicy: {
+        exactStoredBaseTreeSent: true,
+        exactSemanticRetrievalResultSent: true,
+        instructionSent: true,
+        dialogueHistorySent: true,
+        credentialsIncludedInTaskPayload: false,
+      },
+      confirmedAt: '2026-08-19T11:59:45.000Z',
+    },
+  };
+  const statusPayload = {
+    formatVersion: '1.0.0',
+    runId,
+    dialogueRequestId,
+    refinementRequestId,
+    baseTree: storedBaseTree,
+    targetRevision: baseTree.revision + 1,
+    scope: {
+      policyVersion: '1.0.0',
+      requestedRootIds: [baseTree.rootNodeId],
+      normalizedRootIds: [baseTree.rootNodeId],
+      rules: {
+        completeTreeRequired: true,
+        topLevelIdentityMutable: false,
+        outsideScopeMutable: false,
+        scopeRootAttachmentMutable: false,
+        descendantMoves: 'within_same_normalized_root',
+        newNodes: 'within_normalized_roots',
+        newCrossScopeDependencies: false,
+        changedLeafInteractionTracks: 'unavailable',
+        noOpAllowed: false,
+      },
+    },
+    semanticContext: createRequest.semanticContext,
+    providerDisclosure,
+    status: 'queued',
+    terminal: false,
+    assistantMessage: '',
+    assistantMessageRevision: 0,
+    semanticDecision: null,
+    preview: null,
+    review: null,
+    storedTree: null,
+    needsRevision: null,
+    error: null,
+    sideEffects: {
+      procedureStored: false,
+      proposalCreated: false,
+      hostExecutionStarted: false,
+    },
+    updatedAt: '2026-08-19T12:00:00.000Z',
+  };
+  return {
+    runId,
+    dialogueRequestId,
+    refinementRequestId,
+    treeId: baseTree.id,
+    baseRevision: baseTree.revision,
+    baseContentSha256: 'a'.repeat(64),
+    targetRevision: baseTree.revision + 1,
+    status: 'queued' as const,
+    assistantMessage: '',
+    assistantMessageRevision: 0,
+    createRequest,
+    statusPayload,
+    updatedAt: '2026-08-19T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function withProcedureRefinementStatus(
+  run: ReturnType<typeof procedureRefinementRun>,
+  status:
+    | 'queued'
+    | 'streaming'
+    | 'answered'
+    | 'refining'
+    | 'awaiting_review'
+    | 'needs_revision'
+    | 'completed'
+    | 'discarded'
+    | 'failed'
+    | 'interrupted',
+  assistantMessage: string,
+  assistantMessageRevision: number,
+  updatedAt: string,
+  statusPayloadOverrides: Record<string, unknown> = {},
+) {
+  return {
+    ...run,
+    status,
+    assistantMessage,
+    assistantMessageRevision,
+    updatedAt,
+    statusPayload: {
+      ...run.statusPayload,
+      status,
+      terminal: [
+        'answered',
+        'needs_revision',
+        'completed',
+        'discarded',
+        'failed',
+        'interrupted',
+      ].includes(status),
+      assistantMessage,
+      assistantMessageRevision,
+      updatedAt,
+      ...statusPayloadOverrides,
+    },
+  };
+}
+
+function awaitingProcedureRefinementRun() {
+  const queued = procedureRefinementRun();
+  const targetTree = structuredClone(queued.createRequest.baseTree.tree) as Record<string, unknown>;
+  targetTree['revision'] = queued.targetRevision;
+  targetTree['title'] = 'Snowman eye refined';
+  const binding = {
+    runRequestContentSha256: '1'.repeat(64),
+    baseTreeContentSha256: queued.baseContentSha256,
+    targetTreeContentSha256: protocolJsonContentSha256(targetTree),
+    scopeContentSha256: '3'.repeat(64),
+    semanticContextContentSha256: '4'.repeat(64),
+    assistantMessageContentSha256: '5'.repeat(64),
+    refinementPacketContentSha256: '6'.repeat(64),
+    providerOutputContentSha256: '7'.repeat(64),
+    localityReportContentSha256: '8'.repeat(64),
+  };
+  const providerResult = {
+    formatVersion: '1.0.0',
+    runId: queued.runId,
+    refinementRequestId: queued.refinementRequestId,
+    treeId: queued.treeId,
+    targetRevision: queued.targetRevision,
+    packetContentSha256: binding.refinementPacketContentSha256,
+    providerOutputContentSha256: binding.providerOutputContentSha256,
+    targetTreeContentSha256: binding.targetTreeContentSha256,
+    targetTree,
+  };
+  const localityReport = {
+    policyVersion: '1.0.0',
+    baseTree: { id: queued.treeId, revision: queued.baseRevision },
+    targetTree: { id: queued.treeId, revision: queued.targetRevision },
+    requestedRootIds: queued.statusPayload.scope.requestedRootIds,
+    normalizedRootIds: queued.statusPayload.scope.normalizedRootIds,
+    rules: queued.statusPayload.scope.rules,
+    findings: [],
+    totalFindingCount: 0,
+    changedNodeIds: [],
+    changedLeafIds: [],
+    newLeafIds: [],
+    deletedLeafIds: [],
+    unchangedLeafIds: [],
+    valid: true,
+  };
+  return withProcedureRefinementStatus(
+    queued,
+    'awaiting_review',
+    'I prepared the requested local refinement.',
+    1,
+    '2026-08-19T12:00:02.000Z',
+    {
+      semanticDecision: { kind: 'refine', confidence: 0.92, threshold: 0.8 },
+      preview: {
+        targetTree,
+        providerResult,
+        localityReport,
+        binding,
+        reviewReadyAt: '2026-08-19T12:00:02.000Z',
+      },
+    },
+  );
+}
+
+function procedureRefinementReview(
+  run: ReturnType<typeof awaitingProcedureRefinementRun>,
+  kind: 'store' | 'discard',
+  reviewId = randomUUID(),
+) {
+  const binding = run.statusPayload.preview!.binding;
+  const reviewRequest = {
+    formatVersion: '1.0.0',
+    runId: run.runId,
+    reviewId,
+    binding,
+    decision:
+      kind === 'store'
+        ? {
+            kind: 'store' as const,
+            confirmations: {
+              exactBaseTreeReviewed: true,
+              exactTargetTreeReviewed: true,
+              exactScopeReviewed: true,
+              exactSemanticContextReviewed: true,
+              exactProviderOutputReviewed: true,
+              exactLocalityReportReviewed: true,
+              noHostExecutionAcknowledged: true,
+            },
+          }
+        : { kind: 'discard' as const, reason: 'Not the intended shape.' },
+    reviewedAt: '2026-08-19T12:00:03.000Z',
+  };
+  const reviewedPayload = {
+    formatVersion: '1.0.0',
+    operation: 'procedure_refinement_review',
+    runId: run.runId,
+    reviewId,
+    requestFingerprint: providerRequestFingerprint(reviewRequest),
+    providerId: run.statusPayload.providerDisclosure.providerDescriptor.id,
+    providerVersion: run.statusPayload.providerDisclosure.providerDescriptor.version,
+    packetContentSha256: binding.refinementPacketContentSha256,
+    treatmentContentSha256:
+      run.statusPayload.providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+    previewBinding: binding,
+    reviewRequest,
+    finalStatus: kind === 'store' ? ('completed' as const) : ('discarded' as const),
+    procedureStored: kind === 'store',
+    durationMs: 0,
+    occurredAt: '2026-08-19T12:00:03.000Z',
+  };
+  return {
+    reviewRequest,
+    reviewedEvent: {
+      id: `procedure-refinement-reviewed:${reviewId}`,
+      eventType: 'procedure.refinement.reviewed',
+      payload: reviewedPayload,
+      createdAt: reviewedPayload.occurredAt,
+    },
+  };
+}
+
+function finalizedProcedureRefinementRun(
+  run: ReturnType<typeof awaitingProcedureRefinementRun>,
+  review: ReturnType<typeof procedureRefinementReview>['reviewRequest'],
+  kind: 'completed' | 'discarded',
+  storedTree: unknown = null,
+) {
+  return withProcedureRefinementStatus(
+    run,
+    kind,
+    run.assistantMessage,
+    run.assistantMessageRevision,
+    review.reviewedAt,
+    {
+      review: {
+        reviewId: review.reviewId,
+        decision: review.decision.kind,
+        reviewedAt: review.reviewedAt,
+      },
+      storedTree,
+      sideEffects: {
+        procedureStored: kind === 'completed',
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      },
+    },
+  );
+}
+
+function rebindProcedureRefinementRun(
+  run: ReturnType<typeof procedureRefinementRun>,
+  identity: Partial<{
+    runId: string;
+    dialogueRequestId: string;
+    refinementRequestId: string;
+    treeId: string;
+  }>,
+) {
+  const runId = identity.runId ?? run.runId;
+  const dialogueRequestId = identity.dialogueRequestId ?? run.dialogueRequestId;
+  const refinementRequestId = identity.refinementRequestId ?? run.refinementRequestId;
+  const treeId = identity.treeId ?? run.treeId;
+  const createBaseTree = structuredClone(run.createRequest.baseTree);
+  createBaseTree.tree.id = treeId;
+  const statusBaseTree = structuredClone(run.statusPayload.baseTree);
+  statusBaseTree.tree.id = treeId;
+  return {
+    ...run,
+    runId,
+    dialogueRequestId,
+    refinementRequestId,
+    treeId,
+    createRequest: {
+      ...run.createRequest,
+      runId,
+      dialogueRequestId,
+      refinementRequestId,
+      baseTree: createBaseTree,
+    },
+    statusPayload: {
+      ...run.statusPayload,
+      runId,
+      dialogueRequestId,
+      refinementRequestId,
+      baseTree: statusBaseTree,
+    },
   };
 }
 
@@ -1271,6 +1710,709 @@ describe('OperatingLine persistence', () => {
     database.close();
   });
 
+  it('durably records unique procedure refinement request identities and one active run per tree', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const first = procedureRefinementRun();
+    expect(database.recordProcedureRefinementRun(first)).toBe('accepted');
+    expect(database.recordProcedureRefinementRun(first)).toBe('duplicate');
+    expect(
+      database.recordProcedureRefinementRun(
+        withProcedureRefinementStatus(first, 'queued', '', 0, '2026-08-19T12:01:00Z'),
+      ),
+    ).toBe('conflict');
+
+    const duplicateDialogue = rebindProcedureRefinementRun(procedureRefinementRun(), {
+      dialogueRequestId: first.dialogueRequestId,
+    });
+    expect(database.recordProcedureRefinementRun(duplicateDialogue)).toBe('conflict');
+    const duplicateRefinement = rebindProcedureRefinementRun(procedureRefinementRun(), {
+      refinementRequestId: first.refinementRequestId,
+    });
+    expect(database.recordProcedureRefinementRun(duplicateRefinement)).toBe('conflict');
+    expect(database.recordProcedureRefinementRun(procedureRefinementRun())).toBe('conflict');
+
+    const otherTree = rebindProcedureRefinementRun(procedureRefinementRun(), {
+      treeId: 'robot.procedure',
+    });
+    expect(database.recordProcedureRefinementRun(otherTree)).toBe('accepted');
+    expect(database.listActiveProcedureRefinementRuns()).toEqual([first, otherTree]);
+    expect(database.listActiveProcedureRefinementRuns(first.treeId)).toEqual([first]);
+    database.close();
+  });
+
+  it('rejects non-public and nested sensitive procedure refinement payloads', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const run = procedureRefinementRun();
+    expect(() =>
+      database.recordProcedureRefinementRun({
+        ...run,
+        providerCredential: 'must-not-be-stored',
+      }),
+    ).toThrow(/unsupported persistence field/);
+    for (const sensitiveParameters of [
+      { apiKey: 'must-not-be-stored' },
+      { hiddenReasoning: 'must-not-be-stored' },
+      { nested: { rawProviderPayload: { response: 'must-not-be-stored' } } },
+    ]) {
+      expect(() =>
+        database.recordProcedureRefinementRun({
+          ...run,
+          createRequest: {
+            ...run.createRequest,
+            providerDisclosure: {
+              ...run.createRequest.providerDisclosure,
+              dialogueRuntimeTreatment: {
+                ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment,
+                treatment: {
+                  ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment.treatment,
+                  generationSettings: {
+                    ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment.treatment
+                      .generationSettings,
+                    normalizedParameters: sensitiveParameters,
+                  },
+                },
+              },
+            },
+          },
+        }),
+      ).toThrow();
+    }
+    expect(database.getProcedureRefinementRun(run.runId)).toBeNull();
+    database.close();
+  });
+
+  it('requires the protocol parser for every nested procedure refinement DTO', () => {
+    const run = procedureRefinementRun();
+    const unconfigured = openOperatingLineDatabase(':memory:');
+    expect(() => unconfigured.recordProcedureRefinementRun(run)).toThrow(
+      /protocol validation is not configured/,
+    );
+    unconfigured.close();
+
+    const database = openProcedureRefinementDatabase(':memory:');
+    expect(() =>
+      database.recordProcedureRefinementRun({
+        ...run,
+        createRequest: {
+          ...run.createRequest,
+          baseTree: { ...run.createRequest.baseTree, unexpected: true },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      database.recordProcedureRefinementRun({
+        ...run,
+        statusPayload: {
+          ...run.statusPayload,
+          scope: { ...run.statusPayload.scope, unexpected: true },
+        },
+      }),
+    ).toThrow();
+    expect(database.getProcedureRefinementRun(run.runId)).toBeNull();
+    database.close();
+  });
+
+  it('allows disclosed non-secret model reasoning settings', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const run = procedureRefinementRun();
+    const withReasoningSetting = {
+      ...run,
+      createRequest: {
+        ...run.createRequest,
+        providerDisclosure: {
+          ...run.createRequest.providerDisclosure,
+          dialogueRuntimeTreatment: {
+            ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment,
+            treatment: {
+              ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment.treatment,
+              generationSettings: {
+                ...run.createRequest.providerDisclosure.dialogueRuntimeTreatment.treatment
+                  .generationSettings,
+                normalizedParameters: { reasoning: { effort: 'medium' } },
+              },
+            },
+          },
+        },
+      },
+    };
+    withReasoningSetting.statusPayload = {
+      ...withReasoningSetting.statusPayload,
+      providerDisclosure: withReasoningSetting.createRequest.providerDisclosure,
+    };
+    expect(database.recordProcedureRefinementRun(withReasoningSetting)).toBe('accepted');
+    database.close();
+  });
+
+  it('enforces exact CAS and append-only assistant progress for procedure refinement runs', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const initial = procedureRefinementRun();
+    const additionalScopeRoot = 'snowman.head';
+    const queued = {
+      ...initial,
+      createRequest: {
+        ...initial.createRequest,
+        requestedScopeRootIds: [
+          ...initial.createRequest.requestedScopeRootIds,
+          additionalScopeRoot,
+        ],
+      },
+      statusPayload: {
+        ...initial.statusPayload,
+        scope: {
+          ...initial.statusPayload.scope,
+          requestedRootIds: [...initial.statusPayload.scope.requestedRootIds, additionalScopeRoot],
+        },
+      },
+    };
+    expect(database.recordProcedureRefinementRun(queued)).toBe('accepted');
+
+    const streaming = withProcedureRefinementStatus(
+      queued,
+      'streaming',
+      'I will refine',
+      1,
+      '2026-08-19T12:00:01.000Z',
+    );
+    expect(
+      database.transitionProcedureRefinementRun(streaming, {
+        status: 'queued',
+        assistantMessageRevision: 1,
+      }),
+    ).toBe(false);
+    expect(
+      database.transitionProcedureRefinementRun(streaming, {
+        status: 'queued',
+        assistantMessageRevision: 0,
+      }),
+    ).toBe(true);
+    expect(
+      database.transitionProcedureRefinementRun(
+        withProcedureRefinementStatus(
+          streaming,
+          'queued',
+          'I will refine',
+          1,
+          '2026-08-19T12:00:01.500Z',
+        ),
+        { status: 'streaming', assistantMessageRevision: 1 },
+      ),
+    ).toBe(false);
+
+    const rewritten = withProcedureRefinementStatus(
+      streaming,
+      'streaming',
+      'Rewritten response',
+      2,
+      '2026-08-19T12:00:02.000Z',
+    );
+    expect(
+      database.transitionProcedureRefinementRun(rewritten, {
+        status: 'streaming',
+        assistantMessageRevision: 1,
+      }),
+    ).toBe(false);
+    const skipped = withProcedureRefinementStatus(
+      streaming,
+      'streaming',
+      'I will refine the selected head',
+      3,
+      '2026-08-19T12:00:03.000Z',
+    );
+    expect(
+      database.transitionProcedureRefinementRun(skipped, {
+        status: 'streaming',
+        assistantMessageRevision: 1,
+      }),
+    ).toBe(false);
+
+    const appended = withProcedureRefinementStatus(
+      streaming,
+      'streaming',
+      'I will refine the selected head',
+      2,
+      '2026-08-19T12:00:04.000Z',
+    );
+    expect(
+      database.transitionProcedureRefinementRun(appended, {
+        status: 'streaming',
+        assistantMessageRevision: 1,
+      }),
+    ).toBe(true);
+    expect(
+      database.transitionProcedureRefinementRun(
+        {
+          ...appended,
+          statusPayload: {
+            ...appended.statusPayload,
+            scope: {
+              ...appended.statusPayload.scope,
+              normalizedRootIds: [additionalScopeRoot],
+            },
+          },
+        },
+        { status: 'streaming', assistantMessageRevision: 2 },
+      ),
+    ).toBe(false);
+    expect(
+      database.transitionProcedureRefinementRun(
+        withProcedureRefinementStatus(
+          appended,
+          'streaming',
+          appended.assistantMessage,
+          appended.assistantMessageRevision,
+          '2026-08-19T12:00:03.000Z',
+        ),
+        { status: 'streaming', assistantMessageRevision: 2 },
+      ),
+    ).toBe(false);
+    expect(database.getProcedureRefinementRun(queued.runId)).toEqual(appended);
+    database.close();
+  });
+
+  it('keeps procedure refinement identities and create authorization immutable', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const queued = procedureRefinementRun();
+    expect(database.recordProcedureRefinementRun(queued)).toBe('accepted');
+    const expected = { status: 'queued' as const, assistantMessageRevision: 0 };
+
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        { ...queued, targetRevision: queued.targetRevision + 1 },
+        expected,
+      ),
+    ).toThrow(/does not match its public payloads/);
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        {
+          ...queued,
+          createRequest: {
+            ...queued.createRequest,
+            dialogueRequestId: randomUUID(),
+          },
+        },
+        expected,
+      ),
+    ).toThrow(/does not match its public payloads/);
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        {
+          ...queued,
+          statusPayload: { ...queued.statusPayload, status: 'streaming' },
+        },
+        expected,
+      ),
+    ).toThrow(/does not match its public payloads/);
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        {
+          ...queued,
+          statusPayload: { ...queued.statusPayload, runId: randomUUID() },
+        },
+        expected,
+      ),
+    ).toThrow(/does not match its public payloads/);
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        {
+          ...queued,
+          statusPayload: {
+            ...queued.statusPayload,
+            assistantMessage: 'Contradictory message',
+            assistantMessageRevision: 1,
+          },
+        },
+        expected,
+      ),
+    ).toThrow(/does not match its public payloads/);
+    expect(() =>
+      database.transitionProcedureRefinementRun(
+        {
+          ...queued,
+          statusPayload: { ...queued.statusPayload, terminal: true },
+        },
+        expected,
+      ),
+    ).toThrow(/terminal must match status/);
+    expect(database.getProcedureRefinementRun(queued.runId)).toEqual(queued);
+    database.close();
+  });
+
+  it('does not transition a terminal procedure refinement run', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const queued = procedureRefinementRun();
+    const answered = withProcedureRefinementStatus(
+      queued,
+      'answered',
+      'The current tree already satisfies the request.',
+      1,
+      '2026-08-19T12:00:01.000Z',
+      { semanticDecision: { kind: 'answer', confidence: null, threshold: 0.8 } },
+    );
+    expect(database.recordProcedureRefinementRun(answered)).toBe('accepted');
+    expect(
+      database.transitionProcedureRefinementRun(
+        withProcedureRefinementStatus(
+          answered,
+          'answered',
+          answered.assistantMessage,
+          answered.assistantMessageRevision,
+          '2026-08-19T12:00:02.000Z',
+        ),
+        { status: 'answered', assistantMessageRevision: 1 },
+      ),
+    ).toBe(false);
+    expect(database.listActiveProcedureRefinementRuns(answered.treeId)).toEqual([]);
+    database.close();
+  });
+
+  it('reads active procedure refinement progress after reopening the database', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-procedure-refinement-'));
+    const databasePath = join(directory, 'events.sqlite');
+    try {
+      const queued = procedureRefinementRun();
+      const first = openProcedureRefinementDatabase(databasePath);
+      expect(first.recordProcedureRefinementRun(queued)).toBe('accepted');
+      const streaming = withProcedureRefinementStatus(
+        queued,
+        'streaming',
+        'Durable progress',
+        1,
+        '2026-08-19T12:00:01.000Z',
+      );
+      expect(
+        first.transitionProcedureRefinementRun(streaming, {
+          status: 'queued',
+          assistantMessageRevision: 0,
+        }),
+      ).toBe(true);
+      first.close();
+
+      const reopened = openProcedureRefinementDatabase(databasePath);
+      expect(reopened.getProcedureRefinementRun(queued.runId)).toEqual(streaming);
+      expect(reopened.listActiveProcedureRefinementRuns(queued.treeId)).toEqual([streaming]);
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('atomically stores the reviewed tree, both events, and the completed refinement run', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    const base = awaiting.createRequest.baseTree.tree as Record<string, unknown>;
+    expect(
+      database.recordProcedureTree({
+        treeId: awaiting.treeId,
+        revision: awaiting.baseRevision,
+        title: String(base['title']),
+        adapterId: String(base['adapterId']),
+        actionCatalogVersion: String(base['actionCatalogVersion']),
+        interactionCatalogVersion: String(base['interactionCatalogVersion']),
+        hostVersionRange: String(base['hostVersionRange']),
+        contentSha256: awaiting.baseContentSha256,
+        tree: base,
+      }),
+    ).toMatchObject({ result: 'accepted' });
+    expect(database.recordProcedureRefinementRun(awaiting)).toBe('accepted');
+    const review = procedureRefinementReview(awaiting, 'store');
+    const input = {
+      currentRun: awaiting,
+      ...review,
+      targetTree: awaiting.statusPayload.preview!.targetTree,
+      buildCompletedRun: (record: {
+        sequence: number;
+        tree: unknown;
+        contentSha256: string;
+        storedAt: string;
+      }) =>
+        finalizedProcedureRefinementRun(awaiting, review.reviewRequest, 'completed', {
+          sequence: record.sequence,
+          tree: record.tree,
+          integrity: {
+            algorithm: 'sha256',
+            canonicalization: 'operatingline-json-value-v1',
+            contentSha256: record.contentSha256,
+          },
+          storedAt: record.storedAt,
+        }),
+    };
+
+    const accepted = database.commitProcedureRefinementStoreReview(input);
+    expect(accepted).toMatchObject({
+      result: 'accepted',
+      record: {
+        treeId: awaiting.treeId,
+        revision: awaiting.targetRevision,
+        contentSha256: awaiting.statusPayload.preview!.binding.targetTreeContentSha256,
+        storedAt: review.reviewedEvent.createdAt,
+      },
+      run: { status: 'completed' },
+    });
+    if (accepted.result === 'conflict') throw new Error('review unexpectedly conflicted');
+    expect(accepted.run.statusPayload.storedTree).toMatchObject({
+      sequence: accepted.record.sequence,
+      storedAt: accepted.record.storedAt,
+    });
+    expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(accepted.run);
+    expect(database.getProcedureTree(awaiting.treeId)).toEqual(accepted.record);
+    expect(database.getExecutionEvent(review.reviewedEvent.id)?.payload).toEqual(
+      review.reviewedEvent.payload,
+    );
+    expect(
+      database.getExecutionEvent(`procedure-tree:${awaiting.treeId}:${awaiting.targetRevision}`),
+    ).toMatchObject({ eventType: 'procedure.tree.stored' });
+    expect(database.commitProcedureRefinementStoreReview(input)).toEqual({
+      result: 'duplicate',
+      run: accepted.run,
+      record: accepted.record,
+    });
+    database.close();
+  });
+
+  it('rejects a store review whose target hash does not match canonical tree content without side effects', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    const mismatchedHash = '0'.repeat(64);
+    awaiting.statusPayload.preview!.binding.targetTreeContentSha256 = mismatchedHash;
+    awaiting.statusPayload.preview!.providerResult.targetTreeContentSha256 = mismatchedHash;
+    const base = awaiting.createRequest.baseTree.tree as Record<string, unknown>;
+    expect(
+      database.recordProcedureTree({
+        treeId: awaiting.treeId,
+        revision: awaiting.baseRevision,
+        title: String(base['title']),
+        adapterId: String(base['adapterId']),
+        actionCatalogVersion: String(base['actionCatalogVersion']),
+        interactionCatalogVersion: String(base['interactionCatalogVersion']),
+        hostVersionRange: String(base['hostVersionRange']),
+        contentSha256: awaiting.baseContentSha256,
+        tree: base,
+      }),
+    ).toMatchObject({ result: 'accepted' });
+    expect(database.recordProcedureRefinementRun(awaiting)).toBe('accepted');
+    const review = procedureRefinementReview(awaiting, 'store');
+
+    expect(() =>
+      database.commitProcedureRefinementStoreReview({
+        currentRun: awaiting,
+        ...review,
+        targetTree: awaiting.statusPayload.preview!.targetTree,
+        buildCompletedRun: () => {
+          throw new Error('must not finalize a target with mismatched integrity');
+        },
+      }),
+    ).toThrow(/target tree content SHA-256 does not match canonical content/);
+    expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(awaiting);
+    expect(database.getProcedureTree(awaiting.treeId)?.revision).toBe(awaiting.baseRevision);
+    expect(database.getExecutionEvent(review.reviewedEvent.id)).toBeNull();
+    expect(
+      database.getExecutionEvent(`procedure-tree:${awaiting.treeId}:${awaiting.targetRevision}`),
+    ).toBeNull();
+    database.close();
+  });
+
+  it('discards a review without requiring target tree content to match its preview hash', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    const mismatchedHash = '0'.repeat(64);
+    awaiting.statusPayload.preview!.binding.targetTreeContentSha256 = mismatchedHash;
+    awaiting.statusPayload.preview!.providerResult.targetTreeContentSha256 = mismatchedHash;
+    expect(database.recordProcedureRefinementRun(awaiting)).toBe('accepted');
+    const review = procedureRefinementReview(awaiting, 'discard');
+
+    const discarded = database.commitProcedureRefinementDiscardReview({
+      currentRun: awaiting,
+      ...review,
+      buildDiscardedRun: () =>
+        finalizedProcedureRefinementRun(awaiting, review.reviewRequest, 'discarded'),
+    });
+
+    expect(discarded).toMatchObject({ result: 'accepted', run: { status: 'discarded' } });
+    expect(database.getProcedureTree(awaiting.treeId)).toBeNull();
+    expect(database.getExecutionEvent(review.reviewedEvent.id)).not.toBeNull();
+    database.close();
+  });
+
+  it('rolls back every store-review side effect when final run validation fails', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    const base = awaiting.createRequest.baseTree.tree as Record<string, unknown>;
+    database.recordProcedureTree({
+      treeId: awaiting.treeId,
+      revision: awaiting.baseRevision,
+      title: String(base['title']),
+      adapterId: String(base['adapterId']),
+      actionCatalogVersion: String(base['actionCatalogVersion']),
+      interactionCatalogVersion: String(base['interactionCatalogVersion']),
+      hostVersionRange: String(base['hostVersionRange']),
+      contentSha256: awaiting.baseContentSha256,
+      tree: base,
+    });
+    database.recordProcedureRefinementRun(awaiting);
+    const review = procedureRefinementReview(awaiting, 'store');
+    expect(() =>
+      database.commitProcedureRefinementStoreReview({
+        currentRun: awaiting,
+        ...review,
+        targetTree: awaiting.statusPayload.preview!.targetTree,
+        buildCompletedRun: () => {
+          throw new Error('injected finalization failure');
+        },
+      }),
+    ).toThrow(/injected finalization failure/);
+    expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(awaiting);
+    expect(database.getProcedureTree(awaiting.treeId)?.revision).toBe(awaiting.baseRevision);
+    expect(database.getExecutionEvent(review.reviewedEvent.id)).toBeNull();
+    expect(
+      database.getExecutionEvent(`procedure-tree:${awaiting.treeId}:${awaiting.targetRevision}`),
+    ).toBeNull();
+    database.close();
+  });
+
+  it('rejects store review after the latest base tree drifts', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    const base = awaiting.createRequest.baseTree.tree as Record<string, unknown>;
+    database.recordProcedureTree({
+      treeId: awaiting.treeId,
+      revision: awaiting.baseRevision,
+      title: String(base['title']),
+      adapterId: String(base['adapterId']),
+      actionCatalogVersion: String(base['actionCatalogVersion']),
+      interactionCatalogVersion: String(base['interactionCatalogVersion']),
+      hostVersionRange: String(base['hostVersionRange']),
+      contentSha256: awaiting.baseContentSha256,
+      tree: base,
+    });
+    database.recordProcedureRefinementRun(awaiting);
+    expect(
+      database.recordProcedureTree(
+        procedureTreeRecord(awaiting.targetRevision, {
+          treeId: awaiting.treeId,
+          contentSha256: 'b'.repeat(64),
+        }),
+      ),
+    ).toMatchObject({ result: 'accepted' });
+    const review = procedureRefinementReview(awaiting, 'store');
+    const result = database.commitProcedureRefinementStoreReview({
+      currentRun: awaiting,
+      ...review,
+      targetTree: awaiting.statusPayload.preview!.targetTree,
+      buildCompletedRun: () => {
+        throw new Error('must not finalize after base drift');
+      },
+    });
+    expect(result).toEqual({ result: 'conflict', latestRevision: awaiting.targetRevision });
+    expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(awaiting);
+    expect(database.getExecutionEvent(review.reviewedEvent.id)).toBeNull();
+    database.close();
+  });
+
+  it('atomically discards a review and lets only one competing decision win', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    expect(database.recordProcedureRefinementRun(awaiting)).toBe('accepted');
+    const discard = procedureRefinementReview(awaiting, 'discard');
+    const discardInput = {
+      currentRun: awaiting,
+      ...discard,
+      buildDiscardedRun: () =>
+        finalizedProcedureRefinementRun(awaiting, discard.reviewRequest, 'discarded'),
+    };
+    const accepted = database.commitProcedureRefinementDiscardReview(discardInput);
+    expect(accepted).toMatchObject({ result: 'accepted', run: { status: 'discarded' } });
+    expect(database.commitProcedureRefinementDiscardReview(discardInput)).toEqual({
+      result: 'duplicate',
+      run: accepted.run,
+    });
+
+    const competingStore = procedureRefinementReview(awaiting, 'store');
+    expect(
+      database.commitProcedureRefinementStoreReview({
+        currentRun: awaiting,
+        ...competingStore,
+        targetTree: awaiting.statusPayload.preview!.targetTree,
+        buildCompletedRun: () => {
+          throw new Error('losing review must not build a final run');
+        },
+      }),
+    ).toEqual({ result: 'conflict', latestRevision: null });
+    expect(database.getProcedureTree(awaiting.treeId)).toBeNull();
+    expect(database.getExecutionEvent(discard.reviewedEvent.id)).not.toBeNull();
+    expect(database.getExecutionEvent(competingStore.reviewedEvent.id)).toBeNull();
+    database.close();
+  });
+
+  it.each(['store', 'discard'] as const)(
+    'rejects %s review evidence whose provider binding is not the authorized disclosure',
+    (kind) => {
+      const database = openProcedureRefinementDatabase(':memory:');
+      const awaiting = awaitingProcedureRefinementRun();
+      database.recordProcedureRefinementRun(awaiting);
+      const review = procedureRefinementReview(awaiting, kind);
+      const reviewedEvent = {
+        ...review.reviewedEvent,
+        payload: {
+          ...review.reviewedEvent.payload,
+          providerId: 'different.authorized-looking-provider',
+        },
+      };
+      const invoke = () =>
+        kind === 'store'
+          ? database.commitProcedureRefinementStoreReview({
+              currentRun: awaiting,
+              reviewRequest: review.reviewRequest,
+              reviewedEvent,
+              targetTree: awaiting.statusPayload.preview!.targetTree,
+              buildCompletedRun: () => {
+                throw new Error('must not finalize unbound evidence');
+              },
+            })
+          : database.commitProcedureRefinementDiscardReview({
+              currentRun: awaiting,
+              reviewRequest: review.reviewRequest,
+              reviewedEvent,
+              buildDiscardedRun: () => {
+                throw new Error('must not finalize unbound evidence');
+              },
+            });
+      expect(invoke).toThrow(/not exactly bound/);
+      expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(awaiting);
+      expect(database.getExecutionEvent(review.reviewedEvent.id)).toBeNull();
+      expect(database.getProcedureTree(awaiting.treeId)).toBeNull();
+      database.close();
+    },
+  );
+
+  it('rejects a review timestamp that predates the exact preview readiness', () => {
+    const database = openProcedureRefinementDatabase(':memory:');
+    const awaiting = awaitingProcedureRefinementRun();
+    database.recordProcedureRefinementRun(awaiting);
+    const review = procedureRefinementReview(awaiting, 'discard');
+    const reviewRequest = {
+      ...review.reviewRequest,
+      reviewedAt: '2026-08-19T12:00:01.000Z',
+    };
+    const payload = {
+      ...review.reviewedEvent.payload,
+      requestFingerprint: providerRequestFingerprint(reviewRequest),
+      reviewRequest,
+    };
+    expect(() =>
+      database.commitProcedureRefinementDiscardReview({
+        currentRun: awaiting,
+        reviewRequest,
+        reviewedEvent: { ...review.reviewedEvent, payload },
+        buildDiscardedRun: () => {
+          throw new Error('must not finalize a stale review');
+        },
+      }),
+    ).toThrow(/not exactly bound/);
+    expect(database.getProcedureRefinementRun(awaiting.runId)).toEqual(awaiting);
+    expect(database.getExecutionEvent(review.reviewedEvent.id)).toBeNull();
+    database.close();
+  });
+
   it('stores and compare-and-set transitions one authorized initial plan run per target', () => {
     const database = openOperatingLineDatabase(':memory:');
     const goal = goalRequest();
@@ -1539,7 +2681,14 @@ describe('OperatingLine persistence', () => {
   it('stores append-only execution events', () => {
     const database = openOperatingLineDatabase(':memory:');
     const firstId = randomUUID();
-    database.appendEvent({
+    const appended = database.appendEvent({
+      id: firstId,
+      eventType: 'runtime.started',
+      payload: { adapter: 'fake-blender' },
+      createdAt: '2026-08-04T00:00:00.000Z',
+    });
+    expect(appended).toEqual({
+      sequence: 1,
       id: firstId,
       eventType: 'runtime.started',
       payload: { adapter: 'fake-blender' },
@@ -2053,7 +3202,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 17,
+        count: 18,
       });
       expect(
         inspected.prepare("PRAGMA table_list('procedure_leaf_replay_attestation_reports')").get(),

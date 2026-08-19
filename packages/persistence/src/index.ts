@@ -1,5 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
 
+import type {
+  ProcedureRefinementCreateRequest,
+  ProcedureRefinementReviewRequest,
+  ProcedureRefinementReviewedEvent,
+  ProcedureRefinementRunStatus,
+  ProcedureRefinementRunStatusValue,
+} from '@operatingline/protocol';
+
 const offsetIsoDateTimePattern =
   /^(\d{4})-(\d{2})-(\d{2})T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
@@ -180,6 +188,69 @@ export interface CompanionDialogueRunInput {
 }
 
 export type RecordCompanionDialogueRunResult = 'accepted' | 'duplicate' | 'conflict';
+
+export type DurableProcedureRefinementRunStatus = ProcedureRefinementRunStatusValue;
+
+export interface ProcedureRefinementRunInput {
+  runId: string;
+  dialogueRequestId: string;
+  refinementRequestId: string;
+  treeId: string;
+  baseRevision: number;
+  baseContentSha256: string;
+  targetRevision: number;
+  status: DurableProcedureRefinementRunStatus;
+  assistantMessage: string;
+  assistantMessageRevision: number;
+  createRequest: ProcedureRefinementCreateRequest;
+  statusPayload: ProcedureRefinementRunStatus;
+  updatedAt: string;
+}
+
+export interface ProcedureRefinementRunExpectedState {
+  status: DurableProcedureRefinementRunStatus;
+  assistantMessageRevision: number;
+}
+
+export type RecordProcedureRefinementRunResult = 'accepted' | 'duplicate' | 'conflict';
+
+export interface ProcedureRefinementStoreReviewInput {
+  currentRun: ProcedureRefinementRunInput;
+  reviewRequest: ProcedureRefinementReviewRequest;
+  reviewedEvent: ExecutionEventInput & { createdAt: string };
+  targetTree: unknown;
+  buildCompletedRun(storedTree: StoredProcedureTreeRecord): ProcedureRefinementRunInput;
+}
+
+export interface ProcedureRefinementDiscardReviewInput {
+  currentRun: ProcedureRefinementRunInput;
+  reviewRequest: ProcedureRefinementReviewRequest;
+  reviewedEvent: ExecutionEventInput & { createdAt: string };
+  buildDiscardedRun(): ProcedureRefinementRunInput;
+}
+
+export type CommitProcedureRefinementStoreReviewResult =
+  | {
+      result: 'accepted' | 'duplicate';
+      run: ProcedureRefinementRunInput;
+      record: StoredProcedureTreeRecord;
+    }
+  | { result: 'conflict'; latestRevision: number | null };
+
+export type CommitProcedureRefinementDiscardReviewResult =
+  { result: 'accepted' | 'duplicate'; run: ProcedureRefinementRunInput } | { result: 'conflict' };
+
+export interface ProcedureRefinementPayloadValidation {
+  computeCanonicalContentSha256?(input: unknown): string;
+  parseCreateRequest(input: unknown): ProcedureRefinementCreateRequest;
+  parseReviewRequest?(input: unknown): ProcedureRefinementReviewRequest;
+  parseReviewedEvent?(input: unknown): ProcedureRefinementReviewedEvent;
+  parseRunStatus(input: unknown): ProcedureRefinementRunStatus;
+}
+
+export interface OperatingLineDatabaseOptions {
+  procedureRefinementValidation?: ProcedureRefinementPayloadValidation;
+}
 
 export interface ProcedureTreeRecordInput {
   treeId: string;
@@ -499,6 +570,135 @@ const companionDialogueMutablePayloadFields = new Set([
   'updatedAt',
 ]);
 
+const terminalProcedureRefinementRunStatuses = new Set<DurableProcedureRefinementRunStatus>([
+  'answered',
+  'needs_revision',
+  'completed',
+  'discarded',
+  'failed',
+  'interrupted',
+]);
+
+const procedureRefinementRunTransitions: Readonly<
+  Record<DurableProcedureRefinementRunStatus, ReadonlySet<DurableProcedureRefinementRunStatus>>
+> = {
+  queued: new Set(['queued', 'streaming', 'failed', 'interrupted']),
+  streaming: new Set(['streaming', 'answered', 'refining', 'failed', 'interrupted']),
+  refining: new Set(['refining', 'awaiting_review', 'needs_revision', 'failed', 'interrupted']),
+  awaiting_review: new Set(['awaiting_review', 'completed', 'discarded', 'failed']),
+  answered: new Set(),
+  needs_revision: new Set(),
+  completed: new Set(),
+  discarded: new Set(),
+  failed: new Set(),
+  interrupted: new Set(),
+};
+
+function durableProcedureRefinementRun(
+  run: ProcedureRefinementRunInput,
+  validation: ProcedureRefinementPayloadValidation,
+): ProcedureRefinementRunInput {
+  const allowedEnvelopeFields = new Set([
+    'runId',
+    'dialogueRequestId',
+    'refinementRequestId',
+    'treeId',
+    'baseRevision',
+    'baseContentSha256',
+    'targetRevision',
+    'status',
+    'assistantMessage',
+    'assistantMessageRevision',
+    'createRequest',
+    'statusPayload',
+    'updatedAt',
+  ]);
+  if (Object.keys(run).some((key) => !allowedEnvelopeFields.has(key))) {
+    throw new Error('Procedure refinement run contains an unsupported persistence field');
+  }
+
+  const forbiddenPayloadKeys = new Set([
+    'apikey',
+    'accesstoken',
+    'refreshtoken',
+    'authorizationheader',
+    'clientsecret',
+    'secret',
+    'token',
+    'password',
+    'credential',
+    'credentials',
+    'hiddenreasoning',
+    'chainofthought',
+    'providerpayload',
+    'provideroutput',
+    'providerresponse',
+    'rawproviderpayload',
+    'rawprovideroutput',
+  ]);
+  const assertPublicPayload = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(assertPublicPayload);
+      return;
+    }
+    if (value === null || typeof value !== 'object') return;
+    for (const [key, entry] of Object.entries(value)) {
+      if (forbiddenPayloadKeys.has(key.replaceAll(/[^a-zA-Z0-9]/g, '').toLowerCase())) {
+        throw new Error('Procedure refinement run contains forbidden sensitive provider data');
+      }
+      assertPublicPayload(entry);
+    }
+  };
+  const createRequest = validation.parseCreateRequest(structuredClone(run.createRequest));
+  const statusPayload = validation.parseRunStatus(structuredClone(run.statusPayload));
+  assertPublicPayload(createRequest);
+  assertPublicPayload(statusPayload);
+  const identityMatches =
+    run.runId === createRequest.runId &&
+    run.runId === statusPayload.runId &&
+    run.dialogueRequestId === createRequest.dialogueRequestId &&
+    run.dialogueRequestId === statusPayload.dialogueRequestId &&
+    run.refinementRequestId === createRequest.refinementRequestId &&
+    run.refinementRequestId === statusPayload.refinementRequestId &&
+    run.treeId === createRequest.baseTree.tree.id &&
+    run.treeId === statusPayload.baseTree.tree.id &&
+    run.baseRevision === createRequest.baseTree.tree.revision &&
+    run.baseRevision === statusPayload.baseTree.tree.revision &&
+    run.baseContentSha256 === createRequest.baseTree.integrity.contentSha256 &&
+    run.baseContentSha256 === statusPayload.baseTree.integrity.contentSha256 &&
+    run.targetRevision === createRequest.targetRevision &&
+    run.targetRevision === statusPayload.targetRevision &&
+    run.status === statusPayload.status &&
+    run.assistantMessage === statusPayload.assistantMessage &&
+    run.assistantMessageRevision === statusPayload.assistantMessageRevision &&
+    run.updatedAt === statusPayload.updatedAt &&
+    canonicalJson(createRequest.baseTree) === canonicalJson(statusPayload.baseTree) &&
+    canonicalJson(createRequest.semanticContext) === canonicalJson(statusPayload.semanticContext) &&
+    canonicalJson(createRequest.providerDisclosure) ===
+      canonicalJson(statusPayload.providerDisclosure) &&
+    canonicalJson(createRequest.requestedScopeRootIds) ===
+      canonicalJson(statusPayload.scope.requestedRootIds);
+  if (!identityMatches) {
+    throw new Error('Procedure refinement run envelope does not match its public payloads');
+  }
+
+  return {
+    runId: run.runId,
+    dialogueRequestId: run.dialogueRequestId,
+    refinementRequestId: run.refinementRequestId,
+    treeId: run.treeId,
+    baseRevision: run.baseRevision,
+    baseContentSha256: run.baseContentSha256,
+    targetRevision: run.targetRevision,
+    status: run.status,
+    assistantMessage: run.assistantMessage,
+    assistantMessageRevision: run.assistantMessageRevision,
+    createRequest,
+    statusPayload,
+    updatedAt: run.updatedAt,
+  };
+}
+
 function companionDialogueImmutablePayload(run: CompanionDialogueRunInput): string {
   return canonicalJson(
     Object.fromEntries(
@@ -508,7 +708,7 @@ function companionDialogueImmutablePayload(run: CompanionDialogueRunInput): stri
 }
 
 export interface OperatingLineDatabase {
-  appendEvent(event: ExecutionEventInput): void;
+  appendEvent(event: ExecutionEventInput): StoredExecutionEvent;
   countEvents(): number;
   listExecutionEvents(afterSequence: number, limit: number): StoredExecutionEvent[];
   listExecutionEventsByTypes(eventTypes: readonly string[]): StoredExecutionEvent[];
@@ -600,6 +800,21 @@ export interface OperatingLineDatabase {
     expectedStatuses: readonly string[],
   ): boolean;
   listNonterminalCompanionDialogueRuns(): unknown[];
+  recordProcedureRefinementRun<T extends ProcedureRefinementRunInput>(
+    run: T,
+  ): RecordProcedureRefinementRunResult;
+  getProcedureRefinementRun(runId: string): unknown | null;
+  transitionProcedureRefinementRun<T extends ProcedureRefinementRunInput>(
+    run: T,
+    expected: ProcedureRefinementRunExpectedState,
+  ): boolean;
+  commitProcedureRefinementStoreReview(
+    input: ProcedureRefinementStoreReviewInput,
+  ): CommitProcedureRefinementStoreReviewResult;
+  commitProcedureRefinementDiscardReview(
+    input: ProcedureRefinementDiscardReviewInput,
+  ): CommitProcedureRefinementDiscardReviewResult;
+  listActiveProcedureRefinementRuns(treeId?: string): unknown[];
   recordProcedureTree(input: ProcedureTreeRecordInput): RecordProcedureTreeResult;
   getProcedureTree(treeId: string, revision?: number): StoredProcedureTreeRecord | null;
   listProcedureTrees(
@@ -626,7 +841,10 @@ export interface OperatingLineDatabase {
   close(): void;
 }
 
-export function openOperatingLineDatabase(filename: string): OperatingLineDatabase {
+export function openOperatingLineDatabase(
+  filename: string,
+  options: OperatingLineDatabaseOptions = {},
+): OperatingLineDatabase {
   const sqlite = new DatabaseSync(filename, { timeout: 5_000 });
   sqlite.exec('PRAGMA foreign_keys = ON;');
   if (filename !== ':memory:') {
@@ -1223,6 +1441,51 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
 
     INSERT OR IGNORE INTO schema_migrations (version, applied_at)
     VALUES (17, datetime('now'));
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_refinement_runs (
+      run_id TEXT PRIMARY KEY,
+      dialogue_request_id TEXT NOT NULL UNIQUE,
+      refinement_request_id TEXT NOT NULL UNIQUE,
+      tree_id TEXT NOT NULL,
+      base_revision INTEGER NOT NULL CHECK (base_revision > 0),
+      base_content_sha256 TEXT NOT NULL CHECK (
+        length(base_content_sha256) = 64
+        AND base_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      target_revision INTEGER NOT NULL CHECK (target_revision = base_revision + 1),
+      status TEXT NOT NULL CHECK (
+        status IN (
+          'queued',
+          'streaming',
+          'answered',
+          'refining',
+          'awaiting_review',
+          'needs_revision',
+          'completed',
+          'discarded',
+          'failed',
+          'interrupted'
+        )
+      ),
+      assistant_message TEXT NOT NULL,
+      assistant_message_revision INTEGER NOT NULL CHECK (assistant_message_revision >= 0),
+      create_request_payload TEXT NOT NULL,
+      status_payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      CHECK (run_id <> dialogue_request_id),
+      CHECK (run_id <> refinement_request_id),
+      CHECK (dialogue_request_id <> refinement_request_id)
+    ) STRICT;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS procedure_refinement_runs_active_tree
+    ON procedure_refinement_runs (tree_id)
+    WHERE status IN ('queued', 'streaming', 'refining', 'awaiting_review');
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (18, datetime('now'));
   `);
 
   const insertEvent = sqlite.prepare(`
@@ -2204,6 +2467,62 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     WHERE status IN ('queued', 'streaming', 'replanning')
     ORDER BY rowid
   `);
+  const findProcedureRefinementRun = sqlite.prepare(`
+    SELECT status, assistant_message, assistant_message_revision, create_request_payload, payload
+    FROM procedure_refinement_runs
+    WHERE run_id = ?
+  `);
+  const findProcedureRefinementRunIdCollision = sqlite.prepare(`
+    SELECT run_id
+    FROM procedure_refinement_runs
+    WHERE run_id IN (?, ?, ?)
+      OR dialogue_request_id IN (?, ?, ?)
+      OR refinement_request_id IN (?, ?, ?)
+    LIMIT 1
+  `);
+  const findActiveProcedureRefinementRunForTree = sqlite.prepare(`
+    SELECT run_id
+    FROM procedure_refinement_runs
+    WHERE tree_id = ?
+      AND status IN ('queued', 'streaming', 'refining', 'awaiting_review')
+    LIMIT 1
+  `);
+  const insertProcedureRefinementRun = sqlite.prepare(`
+    INSERT INTO procedure_refinement_runs (
+      run_id,
+      dialogue_request_id,
+      refinement_request_id,
+      tree_id,
+      base_revision,
+      base_content_sha256,
+      target_revision,
+      status,
+      assistant_message,
+      assistant_message_revision,
+      create_request_payload,
+      status_payload,
+      updated_at,
+      payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const updateProcedureRefinementRun = sqlite.prepare(`
+    UPDATE procedure_refinement_runs
+    SET
+      status = ?,
+      assistant_message = ?,
+      assistant_message_revision = ?,
+      status_payload = ?,
+      updated_at = ?,
+      payload = ?
+    WHERE run_id = ? AND status = ? AND assistant_message_revision = ?
+  `);
+  const listActiveProcedureRefinementRunRows = sqlite.prepare(`
+    SELECT payload
+    FROM procedure_refinement_runs
+    WHERE status IN ('queued', 'streaming', 'refining', 'awaiting_review')
+      AND (? IS NULL OR tree_id = ?)
+    ORDER BY rowid
+  `);
 
   const parseExecutionEventRow = (row: unknown): StoredExecutionEvent => {
     const candidate = row as {
@@ -2475,14 +2794,135 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
     };
   };
 
+  const validateProcedureTreeRecordInput = (input: ProcedureTreeRecordInput): void => {
+    if (
+      input.treeId.trim().length === 0 ||
+      input.title.trim().length === 0 ||
+      input.adapterId.trim().length === 0 ||
+      input.actionCatalogVersion.trim().length === 0 ||
+      input.interactionCatalogVersion.trim().length === 0 ||
+      input.hostVersionRange.trim().length === 0
+    ) {
+      throw new Error('Procedure tree identity fields must be nonempty');
+    }
+    if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
+      throw new Error('Procedure tree revision must be a positive safe integer');
+    }
+    if (!/^[a-f0-9]{64}$/.test(input.contentSha256)) {
+      throw new Error('Procedure tree content SHA-256 must be lowercase hexadecimal');
+    }
+    if (
+      input.atomicEvidence !== undefined &&
+      (input.atomicEvidence.id.trim().length === 0 ||
+        input.atomicEvidence.eventType.trim().length === 0 ||
+        !isOffsetIsoDateTime(input.atomicEvidence.createdAt))
+    ) {
+      throw new Error(
+        'Atomic procedure tree evidence identity fields must be nonempty and createdAt must be an ISO date-time with an offset',
+      );
+    }
+    validateShortcutSurfaceLifecycle(input.tree);
+  };
+
+  const recordProcedureTreeInTransaction = (
+    input: ProcedureTreeRecordInput,
+  ): RecordProcedureTreeResult => {
+    validateProcedureTreeRecordInput(input);
+    const payload = canonicalJson(input.tree);
+    const atomicEvidencePayload =
+      input.atomicEvidence === undefined ? undefined : canonicalJson(input.atomicEvidence.payload);
+    const latestRow = findLatestProcedureTree.get(input.treeId);
+    const latest = latestRow === undefined ? null : parseProcedureTreeRow(latestRow);
+    const existingRow = findProcedureTree.get(input.treeId, input.revision);
+    if (existingRow !== undefined) {
+      const existing = parseProcedureTreeRow(existingRow);
+      const duplicate =
+        existing.title === input.title &&
+        existing.adapterId === input.adapterId &&
+        existing.actionCatalogVersion === input.actionCatalogVersion &&
+        existing.interactionCatalogVersion === input.interactionCatalogVersion &&
+        existing.hostVersionRange === input.hostVersionRange &&
+        existing.contentSha256 === input.contentSha256 &&
+        canonicalJson(existing.tree) === payload;
+      const atomicEvidenceMatches = (() => {
+        if (input.atomicEvidence === undefined) return true;
+        const row = findEvent.get(input.atomicEvidence.id);
+        if (row === undefined) return false;
+        const event = parseExecutionEventRow(row);
+        return (
+          event.eventType === input.atomicEvidence.eventType &&
+          event.createdAt === input.atomicEvidence.createdAt &&
+          canonicalJson(event.payload) === atomicEvidencePayload
+        );
+      })();
+      return duplicate && atomicEvidenceMatches
+        ? { result: 'duplicate', record: existing }
+        : { result: 'conflict', latestRevision: latest?.revision ?? existing.revision };
+    }
+    if (latest !== null && latest.adapterId !== input.adapterId) {
+      return { result: 'conflict', latestRevision: latest.revision };
+    }
+    if (latest !== null && input.revision <= latest.revision) {
+      return { result: 'stale', latestRevision: latest.revision };
+    }
+
+    const storedAt = input.atomicEvidence?.createdAt ?? new Date().toISOString();
+    insertProcedureTree.run(
+      input.treeId,
+      input.revision,
+      input.title,
+      input.adapterId,
+      input.actionCatalogVersion,
+      input.interactionCatalogVersion,
+      input.hostVersionRange,
+      input.contentSha256,
+      storedAt,
+      payload,
+    );
+    indexProcedureOperations(input.treeId, input.revision);
+    insertEvent.run(
+      `procedure-tree:${input.treeId}:${input.revision}`,
+      'procedure.tree.stored',
+      canonicalJson({
+        treeId: input.treeId,
+        revision: input.revision,
+        title: input.title,
+        adapterId: input.adapterId,
+        actionCatalogVersion: input.actionCatalogVersion,
+        interactionCatalogVersion: input.interactionCatalogVersion,
+        hostVersionRange: input.hostVersionRange,
+        contentSha256: input.contentSha256,
+        storedAt,
+      }),
+      storedAt,
+    );
+    if (input.atomicEvidence !== undefined) {
+      if (atomicEvidencePayload === undefined) {
+        throw new Error('Atomic procedure tree evidence payload could not be encoded');
+      }
+      insertEvent.run(
+        input.atomicEvidence.id,
+        input.atomicEvidence.eventType,
+        atomicEvidencePayload,
+        input.atomicEvidence.createdAt,
+      );
+    }
+    const storedRow = findProcedureTree.get(input.treeId, input.revision);
+    if (storedRow === undefined) {
+      throw new Error('Procedure tree insertion could not be read back');
+    }
+    return { result: 'accepted', record: parseProcedureTreeRow(storedRow) };
+  };
+
   return {
     appendEvent(event) {
-      insertEvent.run(
-        event.id,
-        event.eventType,
-        canonicalJson(event.payload),
-        event.createdAt ?? new Date().toISOString(),
-      );
+      const createdAt = event.createdAt ?? new Date().toISOString();
+      insertEvent.run(event.id, event.eventType, canonicalJson(event.payload), createdAt);
+      const stored = findEvent.get(event.id);
+      if (stored === undefined) {
+        throw new Error('SQLite did not return the appended execution event');
+      }
+      return parseExecutionEventRow(stored);
     },
     countEvents() {
       const value = countEvents.get()?.value;
@@ -2529,126 +2969,11 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
       return row === undefined ? null : parseExecutionEventRow(row);
     },
     recordProcedureTree(input) {
-      if (
-        input.treeId.trim().length === 0 ||
-        input.title.trim().length === 0 ||
-        input.adapterId.trim().length === 0 ||
-        input.actionCatalogVersion.trim().length === 0 ||
-        input.interactionCatalogVersion.trim().length === 0 ||
-        input.hostVersionRange.trim().length === 0
-      ) {
-        throw new Error('Procedure tree identity fields must be nonempty');
-      }
-      if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
-        throw new Error('Procedure tree revision must be a positive safe integer');
-      }
-      if (!/^[a-f0-9]{64}$/.test(input.contentSha256)) {
-        throw new Error('Procedure tree content SHA-256 must be lowercase hexadecimal');
-      }
-      if (
-        input.atomicEvidence !== undefined &&
-        (input.atomicEvidence.id.trim().length === 0 ||
-          input.atomicEvidence.eventType.trim().length === 0 ||
-          !isOffsetIsoDateTime(input.atomicEvidence.createdAt))
-      ) {
-        throw new Error(
-          'Atomic procedure tree evidence identity fields must be nonempty and createdAt must be an ISO date-time with an offset',
-        );
-      }
-      validateShortcutSurfaceLifecycle(input.tree);
-      const payload = canonicalJson(input.tree);
-      const atomicEvidencePayload =
-        input.atomicEvidence === undefined
-          ? undefined
-          : canonicalJson(input.atomicEvidence.payload);
       sqlite.exec('BEGIN IMMEDIATE;');
       try {
-        const latestRow = findLatestProcedureTree.get(input.treeId);
-        const latest = latestRow === undefined ? null : parseProcedureTreeRow(latestRow);
-        const existingRow = findProcedureTree.get(input.treeId, input.revision);
-        if (existingRow !== undefined) {
-          const existing = parseProcedureTreeRow(existingRow);
-          const duplicate =
-            existing.title === input.title &&
-            existing.adapterId === input.adapterId &&
-            existing.actionCatalogVersion === input.actionCatalogVersion &&
-            existing.interactionCatalogVersion === input.interactionCatalogVersion &&
-            existing.hostVersionRange === input.hostVersionRange &&
-            existing.contentSha256 === input.contentSha256 &&
-            canonicalJson(existing.tree) === payload;
-          const atomicEvidenceMatches = (() => {
-            if (input.atomicEvidence === undefined) return true;
-            const row = findEvent.get(input.atomicEvidence.id);
-            if (row === undefined) return false;
-            const event = parseExecutionEventRow(row);
-            return (
-              event.eventType === input.atomicEvidence.eventType &&
-              event.createdAt === input.atomicEvidence.createdAt &&
-              canonicalJson(event.payload) === atomicEvidencePayload
-            );
-          })();
-          sqlite.exec('COMMIT;');
-          return duplicate && atomicEvidenceMatches
-            ? { result: 'duplicate', record: existing }
-            : { result: 'conflict', latestRevision: latest?.revision ?? existing.revision };
-        }
-        if (latest !== null && latest.adapterId !== input.adapterId) {
-          sqlite.exec('COMMIT;');
-          return { result: 'conflict', latestRevision: latest.revision };
-        }
-        if (latest !== null && input.revision <= latest.revision) {
-          sqlite.exec('COMMIT;');
-          return { result: 'stale', latestRevision: latest.revision };
-        }
-
-        const storedAt = input.atomicEvidence?.createdAt ?? new Date().toISOString();
-        insertProcedureTree.run(
-          input.treeId,
-          input.revision,
-          input.title,
-          input.adapterId,
-          input.actionCatalogVersion,
-          input.interactionCatalogVersion,
-          input.hostVersionRange,
-          input.contentSha256,
-          storedAt,
-          payload,
-        );
-        indexProcedureOperations(input.treeId, input.revision);
-        insertEvent.run(
-          `procedure-tree:${input.treeId}:${input.revision}`,
-          'procedure.tree.stored',
-          canonicalJson({
-            treeId: input.treeId,
-            revision: input.revision,
-            title: input.title,
-            adapterId: input.adapterId,
-            actionCatalogVersion: input.actionCatalogVersion,
-            interactionCatalogVersion: input.interactionCatalogVersion,
-            hostVersionRange: input.hostVersionRange,
-            contentSha256: input.contentSha256,
-            storedAt,
-          }),
-          storedAt,
-        );
-        if (input.atomicEvidence !== undefined) {
-          if (atomicEvidencePayload === undefined) {
-            throw new Error('Atomic procedure tree evidence payload could not be encoded');
-          }
-          insertEvent.run(
-            input.atomicEvidence.id,
-            input.atomicEvidence.eventType,
-            atomicEvidencePayload,
-            input.atomicEvidence.createdAt,
-          );
-        }
-        const storedRow = findProcedureTree.get(input.treeId, input.revision);
-        if (storedRow === undefined) {
-          throw new Error('Procedure tree insertion could not be read back');
-        }
-        const record = parseProcedureTreeRow(storedRow);
+        const result = recordProcedureTreeInTransaction(input);
         sqlite.exec('COMMIT;');
-        return { result: 'accepted', record };
+        return result;
       } catch (error) {
         sqlite.exec('ROLLBACK;');
         throw error;
@@ -3981,6 +4306,452 @@ export function openOperatingLineDatabase(filename: string): OperatingLineDataba
         const payload = (row as { payload?: unknown }).payload;
         if (typeof payload !== 'string') {
           throw new Error('SQLite returned an invalid companion dialogue run payload');
+        }
+        return JSON.parse(payload) as unknown;
+      });
+    },
+    recordProcedureRefinementRun(run) {
+      if (options.procedureRefinementValidation === undefined) {
+        throw new Error('Procedure refinement protocol validation is not configured');
+      }
+      const durableRun = durableProcedureRefinementRun(run, options.procedureRefinementValidation);
+      const payload = canonicalJson(durableRun);
+      const createRequestPayload = canonicalJson(durableRun.createRequest);
+      const statusPayload = canonicalJson(durableRun.statusPayload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findProcedureRefinementRun.get(durableRun.runId) as
+          { payload: string } | undefined;
+        if (existing !== undefined) {
+          sqlite.exec('COMMIT;');
+          return existing.payload === payload ? 'duplicate' : 'conflict';
+        }
+        const ids = [
+          durableRun.runId,
+          durableRun.dialogueRequestId,
+          durableRun.refinementRequestId,
+        ] as const;
+        if (
+          new Set(ids).size !== ids.length ||
+          findProcedureRefinementRunIdCollision.get(...ids, ...ids, ...ids) !== undefined ||
+          (!terminalProcedureRefinementRunStatuses.has(durableRun.status) &&
+            findActiveProcedureRefinementRunForTree.get(durableRun.treeId) !== undefined)
+        ) {
+          sqlite.exec('COMMIT;');
+          return 'conflict';
+        }
+        insertProcedureRefinementRun.run(
+          durableRun.runId,
+          durableRun.dialogueRequestId,
+          durableRun.refinementRequestId,
+          durableRun.treeId,
+          durableRun.baseRevision,
+          durableRun.baseContentSha256,
+          durableRun.targetRevision,
+          durableRun.status,
+          durableRun.assistantMessage,
+          durableRun.assistantMessageRevision,
+          createRequestPayload,
+          statusPayload,
+          durableRun.updatedAt,
+          payload,
+        );
+        sqlite.exec('COMMIT;');
+        return 'accepted';
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getProcedureRefinementRun(runId) {
+      const row = findProcedureRefinementRun.get(runId) as { payload?: unknown } | undefined;
+      if (row === undefined) return null;
+      if (typeof row.payload !== 'string') {
+        throw new Error('SQLite returned an invalid procedure refinement run payload');
+      }
+      return JSON.parse(row.payload) as unknown;
+    },
+    transitionProcedureRefinementRun(run, expected) {
+      if (options.procedureRefinementValidation === undefined) {
+        throw new Error('Procedure refinement protocol validation is not configured');
+      }
+      const durableRun = durableProcedureRefinementRun(run, options.procedureRefinementValidation);
+      const payload = canonicalJson(durableRun);
+      const createRequestPayload = canonicalJson(durableRun.createRequest);
+      const statusPayload = canonicalJson(durableRun.statusPayload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findProcedureRefinementRun.get(durableRun.runId) as
+          | {
+              status: DurableProcedureRefinementRunStatus;
+              assistant_message: string;
+              assistant_message_revision: number;
+              create_request_payload: string;
+              payload: string;
+            }
+          | undefined;
+        if (
+          existing === undefined ||
+          existing.status !== expected.status ||
+          existing.assistant_message_revision !== expected.assistantMessageRevision ||
+          terminalProcedureRefinementRunStatuses.has(existing.status) ||
+          !procedureRefinementRunTransitions[existing.status].has(durableRun.status)
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const stored = JSON.parse(existing.payload) as ProcedureRefinementRunInput;
+        const assistantProgressIsValid =
+          durableRun.assistantMessage === existing.assistant_message
+            ? durableRun.assistantMessageRevision === existing.assistant_message_revision
+            : durableRun.assistantMessageRevision === existing.assistant_message_revision + 1 &&
+              durableRun.assistantMessage.startsWith(existing.assistant_message);
+        if (
+          stored.dialogueRequestId !== durableRun.dialogueRequestId ||
+          stored.refinementRequestId !== durableRun.refinementRequestId ||
+          stored.treeId !== durableRun.treeId ||
+          stored.baseRevision !== durableRun.baseRevision ||
+          stored.baseContentSha256 !== durableRun.baseContentSha256 ||
+          stored.targetRevision !== durableRun.targetRevision ||
+          existing.create_request_payload !== createRequestPayload ||
+          canonicalJson(stored.statusPayload.scope) !==
+            canonicalJson(durableRun.statusPayload.scope) ||
+          Date.parse(durableRun.updatedAt) < Date.parse(stored.updatedAt) ||
+          !assistantProgressIsValid
+        ) {
+          sqlite.exec('COMMIT;');
+          return false;
+        }
+        const updated = updateProcedureRefinementRun.run(
+          durableRun.status,
+          durableRun.assistantMessage,
+          durableRun.assistantMessageRevision,
+          statusPayload,
+          durableRun.updatedAt,
+          payload,
+          durableRun.runId,
+          expected.status,
+          expected.assistantMessageRevision,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Procedure refinement run transition lost its expected state');
+        }
+        sqlite.exec('COMMIT;');
+        return true;
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    commitProcedureRefinementStoreReview(input) {
+      const validation = options.procedureRefinementValidation;
+      if (
+        validation?.computeCanonicalContentSha256 === undefined ||
+        validation?.parseReviewRequest === undefined ||
+        validation.parseReviewedEvent === undefined
+      ) {
+        throw new Error('Procedure refinement review protocol validation is not configured');
+      }
+      const currentRun = durableProcedureRefinementRun(input.currentRun, validation);
+      const reviewRequest = validation.parseReviewRequest(structuredClone(input.reviewRequest));
+      const reviewedPayload = validation.parseReviewedEvent(
+        structuredClone(input.reviewedEvent.payload),
+      );
+      const target = input.targetTree as Record<string, unknown>;
+      const preview = currentRun.statusPayload.preview;
+      const expectedRequestFingerprint = validation.computeCanonicalContentSha256(reviewRequest);
+      if (reviewedPayload.requestFingerprint !== expectedRequestFingerprint) {
+        throw new Error('Procedure refinement review request fingerprint is not exact');
+      }
+      if (
+        currentRun.status !== 'awaiting_review' ||
+        preview === null ||
+        reviewRequest.decision.kind !== 'store' ||
+        input.reviewedEvent.eventType !== 'procedure.refinement.reviewed' ||
+        input.reviewedEvent.id !== `procedure-refinement-reviewed:${reviewRequest.reviewId}` ||
+        input.reviewedEvent.createdAt !== reviewedPayload.occurredAt ||
+        reviewRequest.runId !== currentRun.runId ||
+        reviewedPayload.runId !== currentRun.runId ||
+        reviewedPayload.reviewId !== reviewRequest.reviewId ||
+        reviewedPayload.providerId !==
+          currentRun.statusPayload.providerDisclosure.providerDescriptor.id ||
+        reviewedPayload.providerVersion !==
+          currentRun.statusPayload.providerDisclosure.providerDescriptor.version ||
+        reviewedPayload.treatmentContentSha256 !==
+          currentRun.statusPayload.providerDisclosure.refinementRuntimeTreatment
+            .treatmentContentSha256 ||
+        Date.parse(reviewRequest.reviewedAt) < Date.parse(preview.reviewReadyAt) ||
+        canonicalJson(reviewedPayload.reviewRequest) !== canonicalJson(reviewRequest) ||
+        canonicalJson(reviewedPayload.previewBinding) !== canonicalJson(preview.binding) ||
+        canonicalJson(reviewRequest.binding) !== canonicalJson(preview.binding) ||
+        canonicalJson(input.targetTree) !== canonicalJson(preview.targetTree) ||
+        typeof target['id'] !== 'string' ||
+        typeof target['revision'] !== 'number' ||
+        typeof target['title'] !== 'string' ||
+        typeof target['adapterId'] !== 'string' ||
+        typeof target['actionCatalogVersion'] !== 'string' ||
+        typeof target['interactionCatalogVersion'] !== 'string' ||
+        typeof target['hostVersionRange'] !== 'string'
+      ) {
+        throw new Error('Procedure refinement store review is not exactly bound to its preview');
+      }
+      const targetTreeContentSha256 = validation.computeCanonicalContentSha256(
+        structuredClone(input.targetTree),
+      );
+      if (targetTreeContentSha256 !== preview.binding.targetTreeContentSha256) {
+        throw new Error(
+          'Procedure refinement target tree content SHA-256 does not match canonical content',
+        );
+      }
+      const treeInput: ProcedureTreeRecordInput = {
+        treeId: target['id'],
+        revision: target['revision'],
+        title: target['title'],
+        adapterId: target['adapterId'],
+        actionCatalogVersion: target['actionCatalogVersion'],
+        interactionCatalogVersion: target['interactionCatalogVersion'],
+        hostVersionRange: target['hostVersionRange'],
+        contentSha256: targetTreeContentSha256,
+        tree: input.targetTree,
+        atomicEvidence: input.reviewedEvent,
+      };
+      validateProcedureTreeRecordInput(treeInput);
+
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findProcedureRefinementRun.get(currentRun.runId) as
+          | {
+              status: DurableProcedureRefinementRunStatus;
+              assistant_message_revision: number;
+              payload: string;
+            }
+          | undefined;
+        if (existing !== undefined && existing.status === 'completed') {
+          const storedRun = JSON.parse(existing.payload) as ProcedureRefinementRunInput;
+          const eventRow = findEvent.get(input.reviewedEvent.id);
+          const recordRow = findProcedureTree.get(currentRun.treeId, currentRun.targetRevision);
+          const exactDuplicate =
+            storedRun.statusPayload.review?.reviewId === reviewRequest.reviewId &&
+            storedRun.statusPayload.review.decision === 'store' &&
+            canonicalJson(storedRun.statusPayload.preview?.binding) ===
+              canonicalJson(reviewRequest.binding) &&
+            eventRow !== undefined &&
+            canonicalJson(parseExecutionEventRow(eventRow)) ===
+              canonicalJson({
+                sequence: parseExecutionEventRow(eventRow).sequence,
+                ...input.reviewedEvent,
+              }) &&
+            recordRow !== undefined &&
+            canonicalJson(parseProcedureTreeRow(recordRow).tree) ===
+              canonicalJson(input.targetTree);
+          sqlite.exec('COMMIT;');
+          return exactDuplicate
+            ? {
+                result: 'duplicate',
+                run: storedRun,
+                record: parseProcedureTreeRow(recordRow),
+              }
+            : { result: 'conflict', latestRevision: storedRun.targetRevision };
+        }
+        if (
+          existing === undefined ||
+          existing.status !== 'awaiting_review' ||
+          existing.assistant_message_revision !== currentRun.assistantMessageRevision ||
+          existing.payload !== canonicalJson(currentRun) ||
+          findEvent.get(input.reviewedEvent.id) !== undefined
+        ) {
+          const latestRow = findLatestProcedureTree.get(currentRun.treeId);
+          sqlite.exec('COMMIT;');
+          return {
+            result: 'conflict',
+            latestRevision:
+              latestRow === undefined ? null : parseProcedureTreeRow(latestRow).revision,
+          };
+        }
+        const latestRow = findLatestProcedureTree.get(currentRun.treeId);
+        const latest = latestRow === undefined ? null : parseProcedureTreeRow(latestRow);
+        if (
+          latest === null ||
+          latest.revision !== currentRun.baseRevision ||
+          latest.contentSha256 !== currentRun.baseContentSha256
+        ) {
+          sqlite.exec('COMMIT;');
+          return { result: 'conflict', latestRevision: latest?.revision ?? null };
+        }
+        const treeResult = recordProcedureTreeInTransaction(treeInput);
+        if (treeResult.result !== 'accepted') {
+          sqlite.exec('ROLLBACK;');
+          return {
+            result: 'conflict',
+            latestRevision:
+              'record' in treeResult ? treeResult.record.revision : treeResult.latestRevision,
+          };
+        }
+        const completedRun = durableProcedureRefinementRun(
+          input.buildCompletedRun(structuredClone(treeResult.record)),
+          validation,
+        );
+        if (
+          completedRun.status !== 'completed' ||
+          completedRun.runId !== currentRun.runId ||
+          completedRun.assistantMessage !== currentRun.assistantMessage ||
+          completedRun.assistantMessageRevision !== currentRun.assistantMessageRevision ||
+          canonicalJson(completedRun.createRequest) !== canonicalJson(currentRun.createRequest) ||
+          canonicalJson(completedRun.statusPayload.preview?.binding) !==
+            canonicalJson(reviewRequest.binding) ||
+          completedRun.statusPayload.review?.reviewId !== reviewRequest.reviewId ||
+          completedRun.statusPayload.review.decision !== 'store' ||
+          canonicalJson(completedRun.statusPayload.storedTree?.tree) !==
+            canonicalJson(treeResult.record.tree) ||
+          completedRun.statusPayload.storedTree?.sequence !== treeResult.record.sequence ||
+          completedRun.statusPayload.storedTree.storedAt !== treeResult.record.storedAt
+        ) {
+          throw new Error('Completed refinement run does not match the atomic stored review');
+        }
+        const updated = updateProcedureRefinementRun.run(
+          completedRun.status,
+          completedRun.assistantMessage,
+          completedRun.assistantMessageRevision,
+          canonicalJson(completedRun.statusPayload),
+          completedRun.updatedAt,
+          canonicalJson(completedRun),
+          completedRun.runId,
+          'awaiting_review',
+          currentRun.assistantMessageRevision,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Procedure refinement store review lost its expected run state');
+        }
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', run: completedRun, record: treeResult.record };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    commitProcedureRefinementDiscardReview(input) {
+      const validation = options.procedureRefinementValidation;
+      if (
+        validation?.computeCanonicalContentSha256 === undefined ||
+        validation.parseReviewRequest === undefined ||
+        validation.parseReviewedEvent === undefined
+      ) {
+        throw new Error('Procedure refinement review protocol validation is not configured');
+      }
+      const currentRun = durableProcedureRefinementRun(input.currentRun, validation);
+      const reviewRequest = validation.parseReviewRequest(structuredClone(input.reviewRequest));
+      const reviewedPayload = validation.parseReviewedEvent(
+        structuredClone(input.reviewedEvent.payload),
+      );
+      const preview = currentRun.statusPayload.preview;
+      const expectedRequestFingerprint = validation.computeCanonicalContentSha256(reviewRequest);
+      if (reviewedPayload.requestFingerprint !== expectedRequestFingerprint) {
+        throw new Error('Procedure refinement review request fingerprint is not exact');
+      }
+      if (
+        currentRun.status !== 'awaiting_review' ||
+        preview === null ||
+        reviewRequest.decision.kind !== 'discard' ||
+        input.reviewedEvent.eventType !== 'procedure.refinement.reviewed' ||
+        input.reviewedEvent.id !== `procedure-refinement-reviewed:${reviewRequest.reviewId}` ||
+        input.reviewedEvent.createdAt !== reviewedPayload.occurredAt ||
+        reviewRequest.runId !== currentRun.runId ||
+        reviewedPayload.runId !== currentRun.runId ||
+        reviewedPayload.reviewId !== reviewRequest.reviewId ||
+        reviewedPayload.providerId !==
+          currentRun.statusPayload.providerDisclosure.providerDescriptor.id ||
+        reviewedPayload.providerVersion !==
+          currentRun.statusPayload.providerDisclosure.providerDescriptor.version ||
+        reviewedPayload.treatmentContentSha256 !==
+          currentRun.statusPayload.providerDisclosure.refinementRuntimeTreatment
+            .treatmentContentSha256 ||
+        Date.parse(reviewRequest.reviewedAt) < Date.parse(preview.reviewReadyAt) ||
+        canonicalJson(reviewedPayload.reviewRequest) !== canonicalJson(reviewRequest) ||
+        canonicalJson(reviewRequest.binding) !== canonicalJson(preview.binding)
+      ) {
+        throw new Error('Procedure refinement discard review is not exactly bound to its preview');
+      }
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existing = findProcedureRefinementRun.get(currentRun.runId) as
+          | {
+              status: DurableProcedureRefinementRunStatus;
+              assistant_message_revision: number;
+              payload: string;
+            }
+          | undefined;
+        if (existing !== undefined && existing.status === 'discarded') {
+          const storedRun = JSON.parse(existing.payload) as ProcedureRefinementRunInput;
+          const eventRow = findEvent.get(input.reviewedEvent.id);
+          const exactDuplicate =
+            storedRun.statusPayload.review?.reviewId === reviewRequest.reviewId &&
+            storedRun.statusPayload.review.decision === 'discard' &&
+            canonicalJson(storedRun.statusPayload.preview?.binding) ===
+              canonicalJson(reviewRequest.binding) &&
+            eventRow !== undefined &&
+            canonicalJson(parseExecutionEventRow(eventRow).payload) ===
+              canonicalJson(input.reviewedEvent.payload) &&
+            parseExecutionEventRow(eventRow).eventType === input.reviewedEvent.eventType &&
+            parseExecutionEventRow(eventRow).createdAt === input.reviewedEvent.createdAt;
+          sqlite.exec('COMMIT;');
+          return exactDuplicate ? { result: 'duplicate', run: storedRun } : { result: 'conflict' };
+        }
+        if (
+          existing === undefined ||
+          existing.status !== 'awaiting_review' ||
+          existing.assistant_message_revision !== currentRun.assistantMessageRevision ||
+          existing.payload !== canonicalJson(currentRun) ||
+          findEvent.get(input.reviewedEvent.id) !== undefined
+        ) {
+          sqlite.exec('COMMIT;');
+          return { result: 'conflict' };
+        }
+        const discardedRun = durableProcedureRefinementRun(input.buildDiscardedRun(), validation);
+        if (
+          discardedRun.status !== 'discarded' ||
+          discardedRun.runId !== currentRun.runId ||
+          discardedRun.assistantMessage !== currentRun.assistantMessage ||
+          discardedRun.assistantMessageRevision !== currentRun.assistantMessageRevision ||
+          canonicalJson(discardedRun.createRequest) !== canonicalJson(currentRun.createRequest) ||
+          canonicalJson(discardedRun.statusPayload.preview?.binding) !==
+            canonicalJson(reviewRequest.binding) ||
+          discardedRun.statusPayload.review?.reviewId !== reviewRequest.reviewId ||
+          discardedRun.statusPayload.review.decision !== 'discard'
+        ) {
+          throw new Error('Discarded refinement run does not match the atomic review');
+        }
+        insertEvent.run(
+          input.reviewedEvent.id,
+          input.reviewedEvent.eventType,
+          canonicalJson(reviewedPayload),
+          input.reviewedEvent.createdAt,
+        );
+        const updated = updateProcedureRefinementRun.run(
+          discardedRun.status,
+          discardedRun.assistantMessage,
+          discardedRun.assistantMessageRevision,
+          canonicalJson(discardedRun.statusPayload),
+          discardedRun.updatedAt,
+          canonicalJson(discardedRun),
+          discardedRun.runId,
+          'awaiting_review',
+          currentRun.assistantMessageRevision,
+        );
+        if (updated.changes !== 1) {
+          throw new Error('Procedure refinement discard review lost its expected run state');
+        }
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', run: discardedRun };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    listActiveProcedureRefinementRuns(treeId) {
+      return listActiveProcedureRefinementRunRows.all(treeId ?? null, treeId ?? null).map((row) => {
+        const payload = (row as { payload?: unknown }).payload;
+        if (typeof payload !== 'string') {
+          throw new Error('SQLite returned an invalid procedure refinement run payload');
         }
         return JSON.parse(payload) as unknown;
       });
