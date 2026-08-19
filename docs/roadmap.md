@@ -574,10 +574,14 @@
           checkpoint。见 [ADR 0074](adr/0074-bounded-observation-retries.md)。
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
           复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
-  - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
-        candidate，独立 semantic retrieval 也已能用真实 embedding 从 latest verified leaf 产生带完整证据的
-        vector-free RAG context；仍需把该 context 绑定进流式 Procedure 对话、自动局部树重规划与结果治理，
-        使不会 Blender 的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。
+  - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
+        证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
+        仅在固定 `0.8` 阈值后进行第二次自动局部树 refinement。完整 Provider tree 经过 scope sanitization、
+        locality、compile 和人工 review gate；store/discard 原子提交，重启不重放不确定的 Provider 调用。
+        见 [ADR 0086](adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
+        [ADR 0087](adr/0087-evidence-bound-procedure-refinement.md)。
+  - [ ] 从一句话零基线生成完整 ProcedureTree，以及可视化树编辑、评论和参数表单；当前 refinement 必须绑定
+        一棵 latest immutable base tree、明确 scope 和已完成 semantic retrieval receipt。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

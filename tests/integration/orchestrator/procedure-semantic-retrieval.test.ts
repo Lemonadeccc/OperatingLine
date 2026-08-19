@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
@@ -6,8 +6,11 @@ import { join, resolve } from 'node:path';
 
 import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
+  canonicalizeProtocolJsonValue,
+  procedureRefinementSemanticContextBindingSchema,
   procedureSemanticRetrievalProviderDisclosureListSchema,
   procedureSemanticRetrievalRequestSchema,
+  procedureSemanticRetrievalResultSchema,
   procedureTreeSchema,
   type PlannerProviderDescriptor,
 } from '@operatingline/protocol';
@@ -154,6 +157,10 @@ function expectNoVectorPayload(value: unknown): void {
   Object.values(value).forEach(expectNoVectorPayload);
 }
 
+function sha256(value: unknown): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
+}
+
 describe('Procedure semantic retrieval runtime', () => {
   it('lists embedders and ranks verified leaves over HTTP and MCP without replaying or leaking query text', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-semantic-retrieval-'));
@@ -241,7 +248,7 @@ describe('Procedure semantic retrieval runtime', () => {
         body: JSON.stringify(request),
       });
       expect(httpSearch.status).toBe(200);
-      const firstResult = (await httpSearch.json()) as Record<string, unknown>;
+      const firstResult = procedureSemanticRetrievalResultSchema.parse(await httpSearch.json());
       expect(firstResult).toMatchObject({
         requestId: request.requestId,
         effectiveFilters: { validationStatus: 'verified' },
@@ -255,6 +262,32 @@ describe('Procedure semantic retrieval runtime', () => {
         hostExecutionStarted: false,
       });
       expectNoVectorPayload(firstResult);
+
+      const receiptResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/refinement/semantic-context/${request.requestId}?formatVersion=1.0.0`,
+        { headers },
+      );
+      expect(receiptResponse.status).toBe(200);
+      const receipt = procedureRefinementSemanticContextBindingSchema.parse(
+        await receiptResponse.json(),
+      );
+      expect(receipt).toMatchObject({
+        status: 'completed',
+        requestId: request.requestId,
+        retrievalId: firstResult.retrievalId,
+        resultContentSha256: sha256(firstResult),
+        completedAt: firstResult.completedAt,
+      });
+      expect(receipt.completedEventContentSha256).toMatch(/^[a-f0-9]{64}$/);
+
+      const mcpReceipt = await callMcpTool(
+        runtime,
+        20,
+        'operatingline.procedure.refinement.semantic-context.get',
+        { formatVersion: '1.0.0', requestId: request.requestId },
+      );
+      expect(mcpReceipt.result?.isError).not.toBe(true);
+      expect(mcpReceipt.result?.structuredContent).toEqual(receipt);
 
       const mcpSearch = await callMcpTool(
         runtime,
@@ -307,6 +340,13 @@ describe('Procedure semantic retrieval runtime', () => {
       );
       expect(restored.result?.structuredContent).toEqual(firstResult);
       expect(embedProcedure).toHaveBeenCalledTimes(1);
+      const restoredReceipt = await callMcpTool(
+        runtime,
+        21,
+        'operatingline.procedure.refinement.semantic-context.get',
+        { formatVersion: '1.0.0', requestId: request.requestId },
+      );
+      expect(restoredReceipt.result?.structuredContent).toEqual(receipt);
 
       const drift = await fetch(`${runtime.baseUrl}/api/v1/procedure/semantic/search`, {
         method: 'POST',

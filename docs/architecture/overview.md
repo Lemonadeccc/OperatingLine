@@ -420,9 +420,10 @@ Job 不是可续跑的分阶段 checkpoint。可恢复失败只返回 `retryFrom
 不会降级成不完整分析。结果是媒体证据 manifest，不会调用 Provider、生成或存储 ProcedureTree、创建
 Proposal 或执行宿主。
 
-当前已经有独立、证据绑定的 live embedding semantic retrieval/RAG context，但它尚未接入媒体分析或
-Procedure refinement。媒体分析到完整 ProcedureTree 的组合、流式 Procedure 对话、可视化编辑器和训练
-导出仍未完成。完整边界见
+当前独立、证据绑定的 live embedding semantic retrieval/RAG context 已接入显式授权的流式 Procedure
+refinement：固定阈值最多触发第二次 Provider 调用，完整树经本地 scope sanitization、locality、compile 和
+人工 review gate 后才可原子保存，重启不会重放不确定的外部调用。它仍未接入媒体分析；媒体分析到完整
+ProcedureTree 的组合、从一句话零基线生成完整树、可视化编辑器和训练导出仍未完成。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -435,8 +436,9 @@ Procedure refinement。媒体分析到完整 ProcedureTree 的组合、流式 Pr
 [ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md)、
 [ADR 0083](../adr/0083-managed-youtube-oauth.md)、
 [ADR 0084](../adr/0084-authorized-youtube-media-analysis.md)、
-[ADR 0085](../adr/0085-selected-caption-procedure-authoring-run.md) 与
-[ADR 0086](../adr/0086-provider-neutral-procedure-semantic-retrieval.md)。
+[ADR 0085](../adr/0085-selected-caption-procedure-authoring-run.md)、
+[ADR 0086](../adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
+[ADR 0087](../adr/0087-evidence-bound-procedure-refinement.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

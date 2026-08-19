@@ -57,7 +57,7 @@ export interface ProcedureSemanticRetrievalCoordinatorOptions {
   readonly existingEvents: readonly StoredExecutionEvent[];
   readonly listProcedureTrees: () => readonly ProcedureTreeSummary[];
   readonly getProcedureTree: (treeId: string, revision: number) => StoredProcedureTree | null;
-  readonly appendEvent: (event: ExecutionEventInput) => void;
+  readonly appendEvent: (event: ExecutionEventInput) => StoredExecutionEvent;
   readonly now?: () => Date;
 }
 
@@ -65,7 +65,20 @@ export interface ProcedureSemanticRetrievalCoordinator {
   listProviders(): ProcedureSemanticRetrievalProviderDisclosureList;
   search(request: ProcedureSemanticRetrievalRequest): Promise<ProcedureSemanticRetrievalResult>;
   completedResult(requestId: string): ProcedureSemanticRetrievalResult | null;
+  completedEvidence(requestId: string): ProcedureSemanticRetrievalCompletedEvidence | null;
   close(): Promise<void>;
+}
+
+export interface ProcedureSemanticRetrievalCompletedEvidence {
+  readonly id: string;
+  readonly sequence: number;
+  readonly createdAt: string;
+  readonly occurredAt: string;
+  readonly requestId: string;
+  readonly retrievalId: string;
+  readonly resultContentSha256: string;
+  readonly eventContentSha256: string;
+  readonly result: ProcedureSemanticRetrievalResult;
 }
 
 interface CorpusDocument {
@@ -82,6 +95,17 @@ function sha256(value: string | Uint8Array): string {
 
 function canonicalSha256(value: unknown): string {
   return sha256(canonicalizeProtocolJsonValue(value));
+}
+
+function immutableClone<T>(value: T): T {
+  const clone = structuredClone(value);
+  const freeze = (candidate: unknown): void => {
+    if (candidate === null || typeof candidate !== 'object' || Object.isFrozen(candidate)) return;
+    Object.freeze(candidate);
+    for (const nested of Object.values(candidate)) freeze(nested);
+  };
+  freeze(clone);
+  return clone;
 }
 
 function descriptorsMatch(
@@ -446,6 +470,16 @@ export function restoreProcedureSemanticRetrievalInvocations(
     }
   >();
   for (const stored of events) {
+    if (
+      procedureSemanticRetrievalEvidenceEventTypes.includes(
+        stored.eventType as (typeof procedureSemanticRetrievalEvidenceEventTypes)[number],
+      ) &&
+      (!Number.isSafeInteger(stored.sequence) ||
+        stored.sequence < 1 ||
+        !Number.isFinite(Date.parse(stored.createdAt)))
+    ) {
+      throw new Error('Semantic retrieval stored evidence envelope is invalid');
+    }
     if (stored.eventType === 'procedure.semantic.retrieval.requested') {
       const event = procedureSemanticRetrievalRequestedEventSchema.parse(stored.payload);
       validateEvidenceScope(event);
@@ -517,24 +551,77 @@ export function restoreProcedureSemanticRetrievalInvocations(
   return restored;
 }
 
+function completedEvidenceFromStoredEvent(
+  stored: StoredExecutionEvent,
+): ProcedureSemanticRetrievalCompletedEvidence {
+  const event = procedureSemanticRetrievalCompletedEventSchema.parse(stored.payload);
+  if (
+    !Number.isSafeInteger(stored.sequence) ||
+    stored.sequence < 1 ||
+    !Number.isFinite(Date.parse(stored.createdAt)) ||
+    stored.eventType !== 'procedure.semantic.retrieval.completed' ||
+    stored.id !== `procedure-semantic-retrieval-completed:${event.requestId}` ||
+    event.resultContentSha256 !== canonicalSha256(event.result)
+  ) {
+    throw new Error('Semantic retrieval completed evidence integrity is invalid');
+  }
+  return immutableClone({
+    id: stored.id,
+    sequence: stored.sequence,
+    createdAt: stored.createdAt,
+    occurredAt: event.occurredAt,
+    requestId: event.requestId,
+    retrievalId: event.result.retrievalId,
+    resultContentSha256: event.resultContentSha256,
+    eventContentSha256: canonicalSha256(event),
+    result: event.result,
+  });
+}
+
+function restoreCompletedEvidence(
+  events: readonly StoredExecutionEvent[],
+): Map<string, ProcedureSemanticRetrievalCompletedEvidence> {
+  return new Map(
+    events
+      .filter((event) => event.eventType === 'procedure.semantic.retrieval.completed')
+      .map((event) => {
+        const evidence = completedEvidenceFromStoredEvent(event);
+        return [evidence.requestId, evidence] as const;
+      }),
+  );
+}
+
 export function createProcedureSemanticRetrievalCoordinator(
   options: ProcedureSemanticRetrievalCoordinatorOptions,
 ): ProcedureSemanticRetrievalCoordinator {
   const now = options.now ?? (() => new Date());
+  const restoredInvocations = restoreProcedureSemanticRetrievalInvocations(options.existingEvents);
+  const completedEvidenceByRequest = restoreCompletedEvidence(options.existingEvents);
   const invocationManager =
     options.invocationManager ??
     createPlannerProviderInvocationManager({
       registry: options.registry,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      restoredInvocations: restoreProcedureSemanticRetrievalInvocations(options.existingEvents),
+      restoredInvocations,
     });
 
   const appendEvidence = (
     event: ExecutionEventInput,
     retryMode: 'same_request_id' | 'new_request_id',
-  ) => {
+  ): StoredExecutionEvent => {
     try {
-      options.appendEvent(event);
+      const stored = options.appendEvent(event);
+      if (
+        !Number.isSafeInteger(stored.sequence) ||
+        stored.sequence < 1 ||
+        !Number.isFinite(Date.parse(stored.createdAt)) ||
+        stored.id !== event.id ||
+        stored.eventType !== event.eventType ||
+        canonicalSha256(stored.payload) !== canonicalSha256(event.payload)
+      ) {
+        throw new Error('Persisted semantic retrieval evidence does not match the append input');
+      }
+      return stored;
     } catch {
       throw new PlannerGenerationRuntimeError(
         'planner_persistence_failed',
@@ -625,6 +712,7 @@ export function createProcedureSemanticRetrievalCoordinator(
         attempt: async (attemptContext) => {
           const startedAt = Date.now();
           let requestRecorded = false;
+          let requestedSequence: number;
           let requestedEvidence: ReturnType<
             typeof procedureSemanticRetrievalRequestedEventSchema.parse
           > | null = null;
@@ -693,7 +781,7 @@ export function createProcedureSemanticRetrievalCoordinator(
               occurredAt,
             });
             requestedEvidence = requested;
-            appendEvidence(
+            const storedRequested = appendEvidence(
               {
                 id: `procedure-semantic-retrieval-requested:${request.requestId}`,
                 eventType: 'procedure.semantic.retrieval.requested',
@@ -701,6 +789,7 @@ export function createProcedureSemanticRetrievalCoordinator(
               },
               'same_request_id',
             );
+            requestedSequence = storedRequested.sequence;
             attemptContext.markAttempted();
             requestRecorded = true;
             const raw = await attemptContext.invoke((liveProvider, signal) =>
@@ -791,13 +880,24 @@ export function createProcedureSemanticRetrievalCoordinator(
               result,
               occurredAt: completedAt,
             });
-            appendEvidence(
+            const storedCompleted = appendEvidence(
               {
                 id: `procedure-semantic-retrieval-completed:${request.requestId}`,
                 eventType: 'procedure.semantic.retrieval.completed',
                 payload: completed,
               },
               'new_request_id',
+            );
+            if (storedCompleted.sequence <= requestedSequence) {
+              throw new PlannerGenerationRuntimeError(
+                'planner_persistence_failed',
+                'Procedure semantic retrieval completion evidence was persisted out of order',
+                'new_request_id',
+              );
+            }
+            completedEvidenceByRequest.set(
+              request.requestId,
+              completedEvidenceFromStoredEvent(storedCompleted),
             );
             return result;
           } catch (error) {
@@ -831,6 +931,10 @@ export function createProcedureSemanticRetrievalCoordinator(
     completedResult: (requestId) => {
       const result = invocationManager.completedResult(requestId, 'procedure_embedding');
       return result === null ? null : procedureSemanticRetrievalResultSchema.parse(result);
+    },
+    completedEvidence: (requestId) => {
+      const evidence = completedEvidenceByRequest.get(requestId);
+      return evidence === undefined ? null : immutableClone(evidence);
     },
     // The registry/invocation manager is shared by the orchestrator and owns its lifecycle.
     close: async () => undefined,

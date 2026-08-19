@@ -89,6 +89,14 @@ import {
   procedureSemanticRetrievalProviderDisclosureListSchema,
   procedureSemanticRetrievalRequestSchema,
   procedureSemanticRetrievalResultSchema,
+  procedureRefinementCreateRequestSchema,
+  procedureRefinementProviderDisclosureListSchema,
+  procedureRefinementReviewRequestSchema,
+  procedureRefinementReviewedEventSchema,
+  procedureRefinementRunStatusRequestSchema,
+  procedureRefinementRunStatusSchema,
+  procedureRefinementSemanticContextBindingSchema,
+  procedureRefinementSemanticContextReceiptRequestSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayCurrentStateRequestSchema,
@@ -178,6 +186,12 @@ import {
   restoreProcedureSemanticRetrievalInvocations,
   type ProcedureSemanticRetrievalCoordinator,
 } from './procedure-semantic-retrieval.js';
+import {
+  createProcedureRefinementCoordinator,
+  procedureRefinementEvidenceEventTypes,
+  restoreProcedureRefinementProviderInvocations,
+  type ProcedureRefinementCoordinator,
+} from './procedure-refinement-run.js';
 import {
   createProcedureTutorialAuthoringRunCoordinator,
   procedureTutorialAuthoringRunErrorResponse,
@@ -432,7 +446,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
       const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
       plannerProviderRegistryForCleanup = plannerProviderRegistry;
-      const database = openOperatingLineDatabase(options.databasePath);
+      const database = openOperatingLineDatabase(options.databasePath, {
+        procedureRefinementValidation: {
+          computeCanonicalContentSha256: (input) =>
+            createHash('sha256').update(canonicalizeProtocolJsonValue(input)).digest('hex'),
+          parseCreateRequest: (input) => procedureRefinementCreateRequestSchema.parse(input),
+          parseReviewRequest: (input) => procedureRefinementReviewRequestSchema.parse(input),
+          parseReviewedEvent: (input) => procedureRefinementReviewedEventSchema.parse(input),
+          parseRunStatus: (input) => procedureRefinementRunStatusSchema.parse(input),
+        },
+      });
       databaseForCleanup = database;
       const procedureLeafReplayCurrentStateCoordinator =
         createProcedureLeafReplayCurrentStateCoordinator(database);
@@ -468,6 +491,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
   let procedureSemanticRetrievalCoordinator: ProcedureSemanticRetrievalCoordinator | undefined;
+  let procedureRefinementCoordinator: ProcedureRefinementCoordinator | undefined;
   let procedureTutorialAuthoringRunCoordinator:
     ProcedureTutorialAuthoringRunCoordinator | undefined;
   let procedureTutorialYoutubeImportCoordinator:
@@ -483,6 +507,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => companionReplanRunCoordinator?.beginClose(),
     () => {
       companionDialogueRunCoordinator?.beginClose();
+      procedureRefinementCoordinator?.beginClose();
       procedureTutorialAuthoringRunCoordinator?.beginClose();
       procedureTutorialYoutubeImportCoordinator?.beginClose();
       procedureTutorialMediaCoordinator?.beginClose();
@@ -503,6 +528,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
     () => companionDialogueRunCoordinator?.close(),
+    () => procedureRefinementCoordinator?.close(),
     () => plannerProviderRegistry.close(),
     () => app?.close(),
     () => mcpHandler?.close(),
@@ -1373,6 +1399,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureSemanticRetrievalEvents = database.listExecutionEventsByTypes(
       procedureSemanticRetrievalEvidenceEventTypes,
     );
+    const existingProcedureRefinementEvents = database.listExecutionEventsByTypes(
+      procedureRefinementEvidenceEventTypes,
+    );
     const existingProcedureTutorialYoutubeEvents = database.listExecutionEventsByTypes(
       procedureTutorialYoutubeEvidenceEventTypes,
     );
@@ -1444,6 +1473,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ...restoreReplanPlannerProviderInvocations(existingPlannerReplanEvents),
         ...restoreProcedureAuthoringProviderInvocations(existingProcedureAuthoringGenerationEvents),
         ...restoreProcedureSemanticRetrievalInvocations(existingProcedureSemanticRetrievalEvents),
+        ...restoreProcedureRefinementProviderInvocations(existingProcedureRefinementEvents),
       ],
     });
     procedureSemanticRetrievalCoordinator = createProcedureSemanticRetrievalCoordinator({
@@ -1452,6 +1482,90 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       existingEvents: existingProcedureSemanticRetrievalEvents,
       listProcedureTrees: listAllProcedureTreeSummaries,
       getProcedureTree: (treeId, revision) => getProcedureTree({ treeId, revision }),
+      appendEvent: (event) => database.appendEvent(event),
+    });
+    procedureRefinementCoordinator = createProcedureRefinementCoordinator({
+      registry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      existingEvents: existingProcedureRefinementEvents,
+      getLatestProcedureTree: (treeId) => getProcedureTree({ treeId }),
+      completedSemanticEvidence: (requestId) =>
+        procedureSemanticRetrievalCoordinator!.completedEvidence(requestId),
+      compileCandidate: (tree) => {
+        validateAndCompileProcedureTree(tree);
+        return { valid: true };
+      },
+      recordRun: (run) => database.recordProcedureRefinementRun(run),
+      getRun: (runId) => database.getProcedureRefinementRun(runId),
+      transitionRun: (run, expected) => database.transitionProcedureRefinementRun(run, expected),
+      listActiveRuns: () => database.listActiveProcedureRefinementRuns(),
+      commitStoreReview: (input) => {
+        const result = database.commitProcedureRefinementStoreReview({
+          ...input,
+          buildCompletedRun: (storedTree) => {
+            const statusPayload = procedureRefinementRunStatusSchema.parse({
+              ...input.currentRun.statusPayload,
+              status: 'completed',
+              terminal: true,
+              review: {
+                reviewId: input.reviewRequest.reviewId,
+                decision: 'store',
+                reviewedAt: input.reviewRequest.reviewedAt,
+              },
+              storedTree: publicProcedureTreeRecord(storedTree),
+              sideEffects: {
+                procedureStored: true,
+                proposalCreated: false,
+                hostExecutionStarted: false,
+              },
+              updatedAt: input.reviewedEvent.createdAt,
+            });
+            return {
+              ...input.currentRun,
+              status: statusPayload.status,
+              statusPayload,
+              updatedAt: statusPayload.updatedAt,
+            };
+          },
+        });
+        if (result.result === 'conflict') {
+          throw new Error('Procedure refinement store review conflicts with durable state');
+        }
+        return result.run.statusPayload;
+      },
+      commitDiscardReview: (input) => {
+        const result = database.commitProcedureRefinementDiscardReview({
+          ...input,
+          buildDiscardedRun: () => {
+            const statusPayload = procedureRefinementRunStatusSchema.parse({
+              ...input.currentRun.statusPayload,
+              status: 'discarded',
+              terminal: true,
+              review: {
+                reviewId: input.reviewRequest.reviewId,
+                decision: 'discard',
+                reviewedAt: input.reviewRequest.reviewedAt,
+              },
+              sideEffects: {
+                procedureStored: false,
+                proposalCreated: false,
+                hostExecutionStarted: false,
+              },
+              updatedAt: input.reviewedEvent.createdAt,
+            });
+            return {
+              ...input.currentRun,
+              status: statusPayload.status,
+              statusPayload,
+              updatedAt: statusPayload.updatedAt,
+            };
+          },
+        });
+        if (result.result === 'conflict') {
+          throw new Error('Procedure refinement discard review conflicts with durable state');
+        }
+        return result.run.statusPayload;
+      },
       appendEvent: (event) => database.appendEvent(event),
     });
     procedureAuthoringGenerationCoordinator = createProcedureAuthoringGenerationCoordinator({
@@ -3459,6 +3573,134 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.refinement.providers.list',
+        {
+          description:
+            'List available providers for streamed semantic ProcedureTree refinement, including the exact runtime-treatment and input-policy attestations that a create request must authorize.',
+          inputSchema: z.strictObject({}),
+          outputSchema: procedureRefinementProviderDisclosureListSchema,
+        },
+        async () => mcpStructuredResult(procedureRefinementCoordinator!.listProviders()),
+      );
+
+      server.registerTool(
+        'operatingline.procedure.refinement.semantic-context.get',
+        {
+          description:
+            'Return the exact durable completion receipt needed to bind a prior Procedure semantic retrieval result into a refinement create request.',
+          inputSchema: deferMcpInputValidation(
+            procedureRefinementSemanticContextReceiptRequestSchema,
+          ),
+          outputSchema: procedureRefinementSemanticContextBindingSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureRefinementSemanticContextReceiptRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_refinement_semantic_context_receipt_request',
+              message:
+                'Procedure refinement semantic context receipt request violates the strict public contract',
+            });
+          }
+          const receipt = procedureRefinementCoordinator!.getSemanticContextReceipt(
+            parsedRequest.data.requestId,
+          );
+          return receipt === null
+            ? mcpError({
+                error: 'procedure_refinement_semantic_context_receipt_not_found',
+                requestId: parsedRequest.data.requestId,
+              })
+            : mcpStructuredResult(receipt);
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.refinement.run.create',
+        {
+          description:
+            'Create a durable streamed dialogue run that may produce a locally validated, reviewable ProcedureTree refinement. This never stores the candidate or starts host execution.',
+          inputSchema: deferMcpInputValidation(procedureRefinementCreateRequestSchema),
+          outputSchema: procedureRefinementRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureRefinementCreateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_refinement_create_request',
+              requestId: requestIdFromUnknown(requestInput),
+              message: 'Procedure refinement create request violates the strict public contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(procedureRefinementCoordinator!.create(parsedRequest.data));
+          } catch (error) {
+            return mcpError({
+              error: 'procedure_refinement_create_failed',
+              requestId: parsedRequest.data.runId,
+              message:
+                error instanceof Error ? error.message : 'Procedure refinement create failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.refinement.run.status',
+        {
+          description:
+            'Read the latest durable status and cumulative streamed assistant message for a ProcedureTree refinement run.',
+          inputSchema: deferMcpInputValidation(procedureRefinementRunStatusRequestSchema),
+          outputSchema: procedureRefinementRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureRefinementRunStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_refinement_status_request',
+              message: 'Procedure refinement status request violates the strict public contract',
+            });
+          }
+          const status = procedureRefinementCoordinator!.get(parsedRequest.data.runId);
+          return status === null
+            ? mcpError({
+                error: 'procedure_refinement_run_not_found',
+                runId: parsedRequest.data.runId,
+              })
+            : mcpStructuredResult(status);
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.refinement.run.review',
+        {
+          description:
+            'Atomically store or discard an exact review-bound ProcedureTree refinement preview. Storage never creates a proposal or starts host execution.',
+          inputSchema: deferMcpInputValidation(procedureRefinementReviewRequestSchema),
+          outputSchema: procedureRefinementRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureRefinementReviewRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_refinement_review_request',
+              message: 'Procedure refinement review request violates the strict public contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(procedureRefinementCoordinator!.review(parsedRequest.data));
+          } catch (error) {
+            return mcpError({
+              error: 'procedure_refinement_review_failed',
+              runId: parsedRequest.data.runId,
+              message:
+                error instanceof Error ? error.message : 'Procedure refinement review failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.search',
         {
           description:
@@ -4718,6 +4960,91 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return reply
           .code(plannerGenerationHttpStatus(error))
           .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
+    runtimeApp.get('/api/v1/procedure/refinement/providers', async () =>
+      procedureRefinementCoordinator!.listProviders(),
+    );
+    runtimeApp.get(
+      '/api/v1/procedure/refinement/semantic-context/:requestId',
+      async (request, reply) => {
+        const query = request.query as Record<string, unknown>;
+        const parsedRequest = procedureRefinementSemanticContextReceiptRequestSchema.safeParse({
+          ...query,
+          ...(request.params as Record<string, unknown>),
+        });
+        if (!parsedRequest.success || Object.hasOwn(query, 'requestId')) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_refinement_semantic_context_receipt_request',
+            issues: parsedRequest.success ? [] : parsedRequest.error.issues,
+          });
+        }
+        const receipt = procedureRefinementCoordinator!.getSemanticContextReceipt(
+          parsedRequest.data.requestId,
+        );
+        return receipt === null
+          ? reply.code(404).send({
+              error: 'procedure_refinement_semantic_context_receipt_not_found',
+              requestId: parsedRequest.data.requestId,
+            })
+          : receipt;
+      },
+    );
+    runtimeApp.post('/api/v1/procedure/refinement/runs', async (request, reply) => {
+      const parsedRequest = procedureRefinementCreateRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_refinement_create_request',
+          requestId: requestIdFromUnknown(request.body),
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return reply.code(202).send(procedureRefinementCoordinator!.create(parsedRequest.data));
+      } catch (error) {
+        return reply.code(409).send({
+          error: 'procedure_refinement_create_failed',
+          requestId: parsedRequest.data.runId,
+          message: error instanceof Error ? error.message : 'Procedure refinement create failed',
+        });
+      }
+    });
+    runtimeApp.get('/api/v1/procedure/refinement/runs/:runId', async (request, reply) => {
+      const query = request.query as Record<string, unknown>;
+      const parsedRequest = procedureRefinementRunStatusRequestSchema.safeParse({
+        ...query,
+        ...(request.params as Record<string, unknown>),
+      });
+      if (!parsedRequest.success || Object.hasOwn(query, 'runId')) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_refinement_status_request',
+          issues: parsedRequest.success ? [] : parsedRequest.error.issues,
+        });
+      }
+      const status = procedureRefinementCoordinator!.get(parsedRequest.data.runId);
+      return status === null
+        ? reply.code(404).send({
+            error: 'procedure_refinement_run_not_found',
+            runId: parsedRequest.data.runId,
+          })
+        : status;
+    });
+    runtimeApp.post('/api/v1/procedure/refinement/reviews', async (request, reply) => {
+      const parsedRequest = procedureRefinementReviewRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_refinement_review_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return procedureRefinementCoordinator!.review(parsedRequest.data);
+      } catch (error) {
+        return reply.code(409).send({
+          error: 'procedure_refinement_review_failed',
+          runId: parsedRequest.data.runId,
+          message: error instanceof Error ? error.message : 'Procedure refinement review failed',
+        });
       }
     });
     runtimeApp.post('/api/v1/procedure/search', async (request, reply) => {

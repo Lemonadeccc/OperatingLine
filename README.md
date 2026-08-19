@@ -91,6 +91,14 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   result，不自动重放 requested-only/failed 调用。该结果可作为后续 RAG context，但本入口不生成或保存
   新树、不创建 Proposal、不执行 Blender。首版不含持久 ANN/vector cache 或召回质量校准。见
   [ADR 0086](docs/adr/0086-provider-neutral-procedure-semantic-retrieval.md)。
+- **流式 ProcedureTree 语义局部精修**：MCP `operatingline.procedure.refinement.providers.list`、
+  `...semantic-context.get`、`...run.create`、`...run.status`、`...run.review` 与对应 HTTP
+  `/api/v1/procedure/refinement/*` 把 exact
+  completed semantic retrieval receipt、latest stored base tree、明确 scope 和 Provider treatment 绑定到
+  一个 durable run。第一轮对话流式保存累计文本；只有固定 `0.8` 阈值的 refine decision 才允许第二次也是
+  最后一次 Provider 调用。完整 Provider tree 经本地 scope sanitization、locality、compile 和九摘要 review
+  gate 后才能原子 store；discard 同样原子记录。重启不重放 requested-only 外部调用，任何入口都不会创建
+  Proposal 或执行 Blender。见 [ADR 0087](docs/adr/0087-evidence-bound-procedure-refinement.md)。
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
@@ -146,8 +154,11 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   上述 `procedure.tutorial.generate`；两者都把规范编码的完整 packet 交给 Provider，并立即执行同一
   identity/catalog/compile 门。requested/completed/failed 证据支持重启幂等，且不持久化原始字幕文档；
   结果仍不保存、物化、提案或执行。
-  当前已另行提供 evidence-bound semantic retrieval/RAG context，但还没有把它接入流式 Procedure 对话与
-  局部树 refinement；可视化编辑器和训练导出也仍未完成。见
+  evidence-bound semantic retrieval/RAG context 现在也可绑定到一次显式授权的 Procedure refinement run：
+  Runtime 先流式返回助手文本，只有语义置信度达到固定 `0.8` 才进行第二次也是最后一次 Provider 调用；
+  完整 Provider tree 经本地 scope sanitization、locality 和 compile gate 后才进入精确 review。Store/discard
+  审阅与终态在同一事务中提交，重启恢复不重放不确定的 Provider 调用，也不会创建 Proposal 或执行宿主。
+  可视化编辑器、从一句话零基线生成完整树和训练导出仍未完成。见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -157,8 +168,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0079](docs/adr/0079-authorized-youtube-caption-track-discovery.md)、
   [ADR 0080](docs/adr/0080-explicit-youtube-caption-track-recommendation.md) 与
   [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)、
-  [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md) 与
-  [ADR 0083](docs/adr/0083-managed-youtube-oauth.md)。
+  [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md)、
+  [ADR 0083](docs/adr/0083-managed-youtube-oauth.md)、
+  [ADR 0086](docs/adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
+  [ADR 0087](docs/adr/0087-evidence-bound-procedure-refinement.md)。
 - **已选官方字幕到不可变候选树**：异步 authoring run 把已记录的精确 YouTube 字幕轨选择串成固定的
   `caption_import → provider_generation → materialization → review → storage` 工作流。MCP 提供
   `operatingline.procedure.tutorial.authoring.runs.create`、`...runs.status`、`...runs.review` 与

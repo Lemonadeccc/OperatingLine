@@ -165,7 +165,10 @@ function stored(events: readonly ExecutionEventInput[]): StoredExecutionEvent[] 
     id: event.id,
     eventType: event.eventType,
     payload: event.payload,
-    createdAt: event.createdAt ?? '2026-08-19T00:00:00.000Z',
+    createdAt:
+      event.createdAt ??
+      ((event.payload as { occurredAt?: unknown }).occurredAt as string | undefined) ??
+      '2026-08-19T00:00:00.000Z',
   }));
 }
 
@@ -185,7 +188,16 @@ function setup(input: {
     existingEvents: input.existingEvents ?? [],
     listProcedureTrees: () => input.summaries ?? records.map(summary),
     getProcedureTree: (treeId, revision) => byIdentity.get(`${treeId}@${revision}`) ?? null,
-    appendEvent: (event) => events.push(event),
+    appendEvent: (event) => {
+      events.push(event);
+      return {
+        sequence: (input.existingEvents?.at(-1)?.sequence ?? 0) + events.length,
+        id: event.id,
+        eventType: event.eventType,
+        payload: structuredClone(event.payload),
+        createdAt: event.createdAt ?? '2026-08-19T01:00:00.000Z',
+      };
+    },
     now: () => new Date('2026-08-19T01:00:00.000Z'),
   });
   return { coordinator, events };
@@ -246,6 +258,95 @@ describe('Procedure semantic retrieval coordinator', () => {
     await expect(restarted.coordinator.search(baseRequest)).resolves.toEqual(expected);
     expect(restartedProvider.embedProcedure).not.toHaveBeenCalled();
     expect(restarted.coordinator.completedResult(baseRequest.requestId)).toEqual(expected);
+  });
+
+  it('exposes immutable persisted completion evidence after append and restart', async () => {
+    const first = setup({
+      provider: provider([
+        [1, 0],
+        [1, 0],
+      ]),
+    });
+    const expectedResult = await first.coordinator.search(baseRequest);
+    const completedEvent = first.events[1]!;
+    const liveEvidence = first.coordinator.completedEvidence(baseRequest.requestId);
+
+    expect(liveEvidence).toEqual({
+      id: `procedure-semantic-retrieval-completed:${baseRequest.requestId}`,
+      sequence: 2,
+      createdAt: '2026-08-19T01:00:00.000Z',
+      occurredAt: expectedResult.completedAt,
+      requestId: baseRequest.requestId,
+      retrievalId: expectedResult.retrievalId,
+      resultContentSha256: sha256(expectedResult),
+      eventContentSha256: sha256(completedEvent.payload),
+      result: expectedResult,
+    });
+    expect(Object.isFrozen(liveEvidence)).toBe(true);
+    expect(Object.isFrozen(liveEvidence!.result)).toBe(true);
+    expect(Object.isFrozen(liveEvidence!.result.hits)).toBe(true);
+
+    const restarted = setup({
+      provider: provider([]),
+      existingEvents: stored(first.events),
+    });
+    const restoredEvidence = restarted.coordinator.completedEvidence(baseRequest.requestId);
+    expect(restoredEvidence).toEqual(liveEvidence);
+    expect(restoredEvidence).not.toBe(liveEvidence);
+    expect(restoredEvidence!.result).not.toBe(liveEvidence!.result);
+  });
+
+  it('returns no completion evidence for missing, requested-only, or failed retrievals', async () => {
+    const missing = setup({ provider: provider([]) });
+    expect(missing.coordinator.completedEvidence(baseRequest.requestId)).toBeNull();
+
+    const requestedOnly = setup({
+      provider: provider([
+        [1, 0],
+        [1, 0],
+      ]),
+    });
+    await requestedOnly.coordinator.search(baseRequest);
+    const restartedRequested = setup({
+      provider: provider([]),
+      existingEvents: stored([requestedOnly.events[0]!]),
+    });
+    expect(restartedRequested.coordinator.completedEvidence(baseRequest.requestId)).toBeNull();
+
+    const failed = setup({
+      provider: provider([
+        [1, 0],
+        [0, 0],
+      ]),
+    });
+    await expect(failed.coordinator.search(baseRequest)).rejects.toMatchObject({
+      code: 'planner_output_invalid',
+    });
+    expect(failed.coordinator.completedEvidence(baseRequest.requestId)).toBeNull();
+    const restartedFailed = setup({
+      provider: provider([]),
+      existingEvents: stored(failed.events),
+    });
+    expect(restartedFailed.coordinator.completedEvidence(baseRequest.requestId)).toBeNull();
+  });
+
+  it('rejects tampered completed evidence before exposing it', async () => {
+    const first = setup({
+      provider: provider([
+        [1, 0],
+        [1, 0],
+      ]),
+    });
+    await first.coordinator.search(baseRequest);
+    const evidence = stored(first.events);
+    const tampered = structuredClone(evidence[1]!);
+    ((tampered.payload as Record<string, unknown>)['result'] as Record<string, unknown>)[
+      'durationMs'
+    ] = 123;
+
+    expect(() =>
+      setup({ provider: provider([]), existingEvents: [evidence[0]!, tampered] }),
+    ).toThrow('integrity');
   });
 
   it('uses protocol-stable code-unit identity ordering for equal cosine scores', async () => {

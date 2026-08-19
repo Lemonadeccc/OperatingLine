@@ -165,7 +165,11 @@ async function semanticResult(
       },
     ],
     getProcedureTree: () => baseTree,
-    appendEvent: () => undefined,
+    appendEvent: (event) => ({
+      ...event,
+      sequence: event.eventType === 'procedure.semantic.retrieval.requested' ? 1 : 2,
+      createdAt: '2026-08-19T08:01:00.000Z',
+    }),
     now: () => new Date('2026-08-19T08:01:00.000Z'),
   });
   return coordinator.search(request);
@@ -213,6 +217,13 @@ async function fixture() {
       providerDescriptor: descriptor,
       dialogueRuntimeTreatment,
       refinementRuntimeTreatment,
+      inputPolicy: {
+        exactStoredBaseTreeSent: true,
+        exactSemanticRetrievalResultSent: true,
+        instructionSent: true,
+        dialogueHistorySent: true,
+        credentialsIncludedInTaskPayload: false,
+      },
     },
     authorization: {
       explicitlyConfirmedByUser: true,
