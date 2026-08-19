@@ -25,6 +25,7 @@ mkdirSync(dirname(config.databasePath), { recursive: true });
 const plannerProvider = createOpenAIResponsesPlannerProvider({
   apiKey: config.apiKey,
   model: config.model,
+  ...(config.embeddingModel === undefined ? {} : { embeddingModel: config.embeddingModel }),
 });
 const youtubeOAuthAccessTokenProvider =
   config.youtubeOAuthClientId === undefined
@@ -58,6 +59,7 @@ logger.info(
     mcpEndpoint: runtime.mcpEndpoint,
     plannerProviderId: plannerProvider.descriptor.id,
     plannerProviderVersion: plannerProvider.descriptor.version,
+    procedureEmbeddingConfigured: plannerProvider.embedProcedure !== undefined,
     youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
     tutorialMediaAvailability: tutorialMediaRuntime.capabilities.availability,
   },

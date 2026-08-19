@@ -79,6 +79,18 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   路径、leaf 验证状态、轨迹、来源和证据；unavailable 轨迹不返回。分页使用独立的存储
   `indexSequence`，不把它当作 operation 顺序；接口不做向量/相似度检索，也不执行宿主动作。见
   [ADR 0044](docs/adr/0044-exact-procedure-operation-index.md)。
+- **证据绑定的 ProcedureTree 语义检索**：独立 MCP
+  `operatingline.procedure.semantic.providers.list` / `...semantic.search` 与 HTTP
+  `/api/v1/procedure/semantic/providers` / `/api/v1/procedure/semantic/search` 对 latest immutable tree 的
+  有界叶节点语料执行真实 embedding 检索。调用方必须原样确认可用 Provider 的 descriptor、embedding
+  model、API/runtime settings、数据传输和 cost policy；Runtime 会在调用前复核 live disclosure，拒绝任何
+  漂移。默认只召回 verified leaf。Runtime 只把 query、树/路径/叶节点语义及 available 交互轨迹发送给
+  Provider，不发送 source/evidence 原文；向量数量、维度和数值由核心校验，cosine 与稳定 tie-break 也由
+  核心计算。结果保留 Provider/model/treatment、query/corpus/batch/document SHA-256、真实 validation 和
+  完整 leaf context，但不公开或持久化向量。外部调用先写 requested evidence；重启只恢复 exact completed
+  result，不自动重放 requested-only/failed 调用。该结果可作为后续 RAG context，但本入口不生成或保存
+  新树、不创建 Proposal、不执行 Blender。首版不含持久 ANN/vector cache 或召回质量校准。见
+  [ADR 0086](docs/adr/0086-provider-neutral-procedure-semantic-retrieval.md)。
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
@@ -134,7 +146,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   上述 `procedure.tutorial.generate`；两者都把规范编码的完整 packet 交给 Provider，并立即执行同一
   identity/catalog/compile 门。requested/completed/failed 证据支持重启幂等，且不持久化原始字幕文档；
   结果仍不保存、物化、提案或执行。
-  当前仍没有向量/语义 RAG、流式 Procedure 对话、可视化编辑器或训练导出。见
+  当前已另行提供 evidence-bound semantic retrieval/RAG context，但还没有把它接入流式 Procedure 对话与
+  局部树 refinement；可视化编辑器和训练导出也仍未完成。见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -929,10 +942,13 @@ export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
 export OPERATINGLINE_PORT=43123
 export OPENAI_API_KEY='replace-with-your-openai-api-key'
 export OPERATINGLINE_OPENAI_MODEL='replace-with-an-explicit-model-id'
+# 仅在需要 Procedure semantic retrieval 时显式设置：
+export OPERATINGLINE_OPENAI_EMBEDDING_MODEL='replace-with-an-explicit-embedding-model-id'
 pnpm dev:openai
 ```
 
-该入口只注册 OpenAI provider，不会在后台自动调用模型。外部调用方仍须先读取
+该入口只注册 OpenAI provider，不会在后台自动调用模型。未设置独立 embedding model 时不会公布
+Procedure embedding 能力。外部调用方仍须先读取
 `operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
 提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`；Blender 路径则要求用户
 在 Goal Workspace 或 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Streamed dialogue

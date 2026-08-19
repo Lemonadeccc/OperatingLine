@@ -10,6 +10,7 @@ import {
   createOpenAIResponsesPlannerProviderFromEnv,
   OpenAIPlannerProviderError,
   type OpenAIDialogueResponsesRequest,
+  type OpenAIEmbeddingsRequest,
   type OpenAIResponsesClient,
   type OpenAIResponsesRequest,
   type OpenAIResponsesResult,
@@ -62,6 +63,142 @@ function input(signal = new AbortController().signal) {
 }
 
 describe('OpenAI Responses planner provider', () => {
+  it('exposes Procedure embeddings only with an explicit separate embedding model', async () => {
+    const responsesCreate = vi.fn(async () => ({ status: 'completed', output_text: '{}' }));
+    const embeddingsCreate = vi.fn(async () => ({
+      data: [
+        { index: 1, embedding: [0.3, 0.4] },
+        { index: 0, embedding: [0.1, 0.2] },
+      ],
+    }));
+    const withoutEmbeddings = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client: { responses: { create: responsesCreate } },
+    });
+    expect(withoutEmbeddings.embedProcedure).toBeUndefined();
+
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      embeddingModel: 'text-embedding-3-large',
+      client: {
+        responses: { create: responsesCreate },
+        embeddings: { create: embeddingsCreate },
+      },
+    });
+    const signal = new AbortController().signal;
+    await expect(
+      provider.embedProcedure?.({
+        requestId: 'c9544287-e87b-4729-9062-694d72bd4a2e',
+        documents: ['create a sphere', 'scale the selected object'],
+        signal,
+      }),
+    ).resolves.toEqual({
+      vectors: [
+        [0.1, 0.2],
+        [0.3, 0.4],
+      ],
+    });
+    expect(embeddingsCreate).toHaveBeenCalledWith(
+      {
+        model: 'text-embedding-3-large',
+        input: ['create a sphere', 'scale the selected object'],
+        encoding_format: 'float',
+      } satisfies OpenAIEmbeddingsRequest,
+      { signal },
+    );
+    expect(provider.describeRuntimeTreatment?.('procedure_embedding')).toMatchObject({
+      profile: {
+        model: { requested: 'text-embedding-3-large' },
+        api: { surface: 'embeddings' },
+      },
+      generationSettings: {
+        normalizedParameters: {
+          model: 'text-embedding-3-large',
+          encoding_format: 'float',
+        },
+      },
+      costPolicy: {
+        possibleProviderCost: true,
+        basis: 'provider_pricing',
+      },
+    });
+    expect(provider.describeRuntimeTreatment?.('initial_plan')).toMatchObject({
+      profile: {
+        model: { requested: 'gpt-5.4' },
+        api: { surface: 'responses' },
+      },
+    });
+    expect(provider.descriptor.description).toContain(
+      'Procedure embeddings use model text-embedding-3-large',
+    );
+  });
+
+  it('fails closed for invalid, oversized, failed, or aborted embedding requests', async () => {
+    const embeddingsCreate = vi.fn(async () => ({ data: [{}] }));
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      embeddingModel: 'text-embedding-3-small',
+      client: {
+        responses: { create: vi.fn() },
+        embeddings: { create: embeddingsCreate },
+      },
+    });
+    const base = {
+      requestId: '5f686163-6d7a-4ffb-a705-c665b2573ea3',
+      signal: new AbortController().signal,
+    };
+    await expect(provider.embedProcedure?.({ ...base, documents: [] })).rejects.toThrow(
+      'documents must contain 1-257',
+    );
+    await expect(
+      provider.embedProcedure?.({ ...base, documents: Array.from({ length: 258 }, () => 'x') }),
+    ).rejects.toThrow('documents must contain 1-257');
+    await expect(
+      provider.embedProcedure?.({ ...base, documents: ['valid'] }),
+    ).rejects.toMatchObject({ code: 'request_failed' });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      provider.embedProcedure?.({ ...base, documents: ['valid'], signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'request_aborted' });
+    expect(embeddingsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects missing, duplicate, or out-of-range embedding indices', async () => {
+    for (const data of [
+      [{ index: 0, embedding: [1] }],
+      [
+        { index: 0, embedding: [1] },
+        { index: 0, embedding: [2] },
+      ],
+      [
+        { index: 0, embedding: [1] },
+        { index: 2, embedding: [2] },
+      ],
+    ]) {
+      const provider = createOpenAIResponsesPlannerProvider({
+        apiKey: 'sk-test-secret',
+        model: 'gpt-5.4',
+        embeddingModel: 'text-embedding-3-small',
+        client: {
+          responses: { create: vi.fn() },
+          embeddings: { create: vi.fn(async () => ({ data })) },
+        },
+      });
+      await expect(
+        provider.embedProcedure?.({
+          requestId: '930d9ccd-169a-49e4-8699-c9647eb8f5b2',
+          documents: ['first', 'second'],
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({ code: 'request_failed' });
+    }
+  });
+
   it('sends a non-streaming, non-stored JSON-object request and parses output JSON', async () => {
     const { client, create } = makeClient({
       status: 'completed',
@@ -105,6 +242,12 @@ describe('OpenAI Responses planner provider', () => {
         },
         seed: null,
         determinism: 'non_deterministic',
+      },
+      costPolicy: {
+        possibleProviderCost: true,
+        basis: 'provider_pricing',
+        publicStatement:
+          'OpenAI API requests may incur charges under the pricing and billing terms of the configured OpenAI account.',
       },
     });
 

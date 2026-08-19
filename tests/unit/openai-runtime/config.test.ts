@@ -62,6 +62,27 @@ describe('opt-in OpenAI runtime configuration', () => {
     }
   });
 
+  it('enables Procedure embeddings only with an explicit embedding model', () => {
+    expect(
+      loadOpenAIRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_OPENAI_EMBEDDING_MODEL: ' text-embedding-model ',
+      }),
+    ).toMatchObject({ embeddingModel: 'text-embedding-model' });
+    expect(
+      loadOpenAIRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_OPENAI_EMBEDDING_MODEL: '   ',
+      }),
+    ).not.toHaveProperty('embeddingModel');
+    expect(() =>
+      loadOpenAIRuntimeConfig({
+        ...requiredEnvironment,
+        OPERATINGLINE_OPENAI_EMBEDDING_MODEL: 'x'.repeat(501),
+      }),
+    ).toThrow('OPERATINGLINE_OPENAI_EMBEDDING_MODEL');
+  });
+
   it('accepts an optional pre-authorized YouTube OAuth token without normalizing it', () => {
     expect(
       loadOpenAIRuntimeConfig({

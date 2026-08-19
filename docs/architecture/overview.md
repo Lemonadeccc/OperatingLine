@@ -420,8 +420,9 @@ Job 不是可续跑的分阶段 checkpoint。可恢复失败只返回 `retryFrom
 不会降级成不完整分析。结果是媒体证据 manifest，不会调用 Provider、生成或存储 ProcedureTree、创建
 Proposal 或执行宿主。
 
-当前仍没有媒体分析到完整 ProcedureTree 的一体化生成、向量/语义 RAG、流式 Procedure 对话、可视化编辑器
-或训练导出。完整边界见
+当前已经有独立、证据绑定的 live embedding semantic retrieval/RAG context，但它尚未接入媒体分析或
+Procedure refinement。媒体分析到完整 ProcedureTree 的组合、流式 Procedure 对话、可视化编辑器和训练
+导出仍未完成。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -432,8 +433,10 @@ Proposal 或执行宿主。
 [ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md) 与
 [ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)、
 [ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md)、
-[ADR 0083](../adr/0083-managed-youtube-oauth.md) 与
-[ADR 0084](../adr/0084-authorized-youtube-media-analysis.md)。
+[ADR 0083](../adr/0083-managed-youtube-oauth.md)、
+[ADR 0084](../adr/0084-authorized-youtube-media-analysis.md)、
+[ADR 0085](../adr/0085-selected-caption-procedure-authoring-run.md) 与
+[ADR 0086](../adr/0086-provider-neutral-procedure-semantic-retrieval.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
@@ -622,8 +625,8 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
 [ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
-shortcut/MCP recipe、真实 Blender 轨迹回放、语义 RAG、自动教学视频获取/转录/画面识别、可视化编辑器和
-训练治理仍在后续范围。
+shortcut/MCP recipe、真实 Blender 轨迹回放、semantic retrieval 到 authoring/refinement 的 RAG 组合、
+自动教学视频获取/转录/画面识别、可视化编辑器和训练治理仍在后续范围。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

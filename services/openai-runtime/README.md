@@ -24,6 +24,10 @@ pnpm dev:openai
 
 可选设置：
 
+- `OPERATINGLINE_OPENAI_EMBEDDING_MODEL`：明确的 embeddings 模型 ID。只有设置后，Provider 列表才公布
+  Procedure semantic retrieval 能力；它与 `OPERATINGLINE_OPENAI_MODEL` 独立，不会静默复用 Responses
+  模型。每次检索仍要求调用方确认精确 descriptor、embedding model、API/runtime settings、数据传输和
+  cost policy。
 - `OPERATINGLINE_DATABASE_PATH`：默认 `.data/operating-line-openai.db`。
 - `OPERATINGLINE_PORT`：默认 `0`，由系统选择空闲回环端口。
 - `OPERATINGLINE_ALLOW_LEGACY_COMPANIONS`：默认 `true`；设为严格的 `false` 后，拒绝未先建立可续租
@@ -68,6 +72,18 @@ pnpm dev:openai
 
 HTTP 对应入口为 `GET /api/v1/procedure/authoring/providers` 与
 `POST /api/v1/procedure/authoring/generate`。
+
+ProcedureTree 语义检索：
+
+1. 仅在需要该能力时设置 `OPERATINGLINE_OPENAI_EMBEDDING_MODEL`，然后调用
+   `operatingline.procedure.semantic.providers.list` 阅读包含 descriptor、embedding model、API/runtime
+   settings 与 cost policy 的完整 disclosure。
+2. 使用新 UUID、自然语言 query、该 disclosure 原样快照、`topK/minScore` 和逐项授权调用
+   `operatingline.procedure.semantic.search`。默认语料只含 latest verified leaf；可用 adapter/catalog
+   filter 缩小最多 256 个 leaf 的 bounded live batch。
+3. Runtime 不发送 source/evidence 原文，自己校验向量并计算 cosine。结果不含向量、不生成或保存树、
+   不创建 Proposal、不执行 Blender。HTTP 对应入口为 `GET /api/v1/procedure/semantic/providers` 与
+   `POST /api/v1/procedure/semantic/search`。
 
 若配置了上述 YouTube OAuth token，可在用户明确确认网络与配额消耗后先调用
 `operatingline.procedure.tutorial.youtube.tracks.list`，提交精确的 11 字符 video ID；结果只包含字幕轨元数据，

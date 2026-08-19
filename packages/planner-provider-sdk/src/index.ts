@@ -2,6 +2,7 @@ import type {
   PlannerDialoguePromptPacket,
   PlannerDialogueProviderResult,
   PlannerProviderDescriptor,
+  PlannerProviderCostPolicy,
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ProcedureAuthoringPromptPacket,
@@ -9,7 +10,7 @@ import type {
 } from '@operatingline/protocol';
 
 export type PlannerProviderRuntimeOperation =
-  'initial_plan' | 'local_replan' | 'procedure_authoring';
+  'initial_plan' | 'local_replan' | 'procedure_authoring' | 'procedure_embedding';
 
 export interface PlannerProviderRuntimeTreatmentDescription {
   readonly profile: PlannerProviderRuntimeProfile;
@@ -18,6 +19,7 @@ export interface PlannerProviderRuntimeTreatmentDescription {
     readonly seed: number | null;
     readonly determinism: 'deterministic' | 'seeded_best_effort' | 'non_deterministic' | 'unknown';
   };
+  readonly costPolicy?: PlannerProviderCostPolicy;
 }
 
 export interface PlannerProviderGenerateInput {
@@ -39,6 +41,19 @@ export interface PlannerProviderProcedureAuthoringInput {
   readonly signal: AbortSignal;
 }
 
+export const plannerProviderProcedureEmbeddingMaximumDocuments = 257 as const;
+export const plannerProviderProcedureEmbeddingMaximumDocumentCharacters = 32_768 as const;
+
+export interface PlannerProviderProcedureEmbeddingInput {
+  readonly requestId: string;
+  readonly documents: readonly string[];
+  readonly signal: AbortSignal;
+}
+
+export interface PlannerProviderProcedureEmbeddingResult {
+  readonly vectors: readonly (readonly number[])[];
+}
+
 export interface PlannerProviderDialogueTextDelta {
   readonly type: 'assistant_text_delta';
   readonly delta: string;
@@ -58,6 +73,9 @@ export interface PlannerProvider {
   ): PlannerProviderRuntimeTreatmentDescription;
   generate(input: PlannerProviderGenerateInput): Promise<unknown>;
   authorProcedure?(input: PlannerProviderProcedureAuthoringInput): Promise<unknown>;
+  embedProcedure?(
+    input: PlannerProviderProcedureEmbeddingInput,
+  ): Promise<PlannerProviderProcedureEmbeddingResult>;
   replan?(input: PlannerProviderReplanInput): Promise<unknown>;
   dialogue?(input: PlannerProviderDialogueInput): Promise<PlannerDialogueProviderResult>;
   close?(): void | Promise<void>;
@@ -67,6 +85,7 @@ export type {
   PlannerDialoguePromptPacket,
   PlannerDialogueProviderResult,
   PlannerProviderDescriptor,
+  PlannerProviderCostPolicy,
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ProcedureAuthoringPromptPacket,

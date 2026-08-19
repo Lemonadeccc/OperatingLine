@@ -89,6 +89,9 @@ Descriptor 是公开数据，不得包含 API Key、访问令牌、私有 endpoi
 持久化的公开运行证据。插件只能返回模型名、采样参数、公开 endpoint 分类等非秘密设置；API key、
 token、password、private/signing key、authorization header、cookie 或其他 credential 必须留在
 Provider 内部。Orchestrator 会在 Provider 调用和 requested event 落盘前递归拒绝 credential-like 参数名。
+`costPolicy` 是不含凭据的公开费用说明；现有规划和 Procedure authoring Provider 可省略，但实现
+`procedure_embedding` 时必须提供。语义检索会在授权前公开并绑定完整 runtime treatment 与费用说明，缺失时
+fail closed，不会调用 Provider。
 
 ## 运行与安全边界
 

@@ -5,6 +5,7 @@ export interface OpenAIRuntimeConfig {
   readonly allowLegacyCompanions: boolean;
   readonly apiKey: string;
   readonly databasePath: string;
+  readonly embeddingModel?: string;
   readonly model: string;
   readonly port: number;
   readonly youtubeAccessToken?: string;
@@ -41,6 +42,7 @@ export function loadOpenAIRuntimeConfig(
   const youtubeOAuthClientId = optionalYouTubeOAuthClientId(
     environment['OPERATINGLINE_YOUTUBE_OAUTH_CLIENT_ID'],
   );
+  const embeddingModel = optionalModel(environment['OPERATINGLINE_OPENAI_EMBEDDING_MODEL']);
   rejectAmbiguousYouTubeOAuthConfiguration(youtubeAccessToken, youtubeOAuthClientId);
   return {
     accessToken: requiredValue(environment, 'OPERATINGLINE_ACCESS_TOKEN'),
@@ -55,9 +57,19 @@ export function loadOpenAIRuntimeConfig(
     ),
     model: requiredValue(environment, 'OPERATINGLINE_OPENAI_MODEL'),
     port,
+    ...(embeddingModel === undefined ? {} : { embeddingModel }),
     ...(youtubeAccessToken === undefined ? {} : { youtubeAccessToken }),
     ...(youtubeOAuthClientId === undefined ? {} : { youtubeOAuthClientId }),
   };
+}
+
+function optionalModel(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (normalized === undefined || normalized.length === 0) return undefined;
+  if (normalized.length > 500) {
+    throw new Error('OPERATINGLINE_OPENAI_EMBEDDING_MODEL must be at most 500 characters');
+  }
+  return normalized;
 }
 
 function optionalYouTubeOAuthClientId(value: string | undefined): string | undefined {

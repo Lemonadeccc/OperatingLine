@@ -390,6 +390,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.store' },
             { name: 'operatingline.procedure.get' },
             { name: 'operatingline.procedure.list' },
+            { name: 'operatingline.procedure.semantic.providers.list' },
+            { name: 'operatingline.procedure.semantic.search' },
             { name: 'operatingline.procedure.search' },
             { name: 'operatingline.planning.context' },
             { name: 'operatingline.planning.evaluate' },

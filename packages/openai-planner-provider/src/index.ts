@@ -1,11 +1,15 @@
-import type {
-  PlannerProvider,
-  PlannerProviderDialogueInput,
-  PlannerProviderGenerateInput,
-  PlannerProviderProcedureAuthoringInput,
-  PlannerProviderReplanInput,
-  PlannerProviderRuntimeOperation,
-  PlannerProviderRuntimeTreatmentDescription,
+import {
+  plannerProviderProcedureEmbeddingMaximumDocumentCharacters,
+  plannerProviderProcedureEmbeddingMaximumDocuments,
+  type PlannerProvider,
+  type PlannerProviderDialogueInput,
+  type PlannerProviderGenerateInput,
+  type PlannerProviderProcedureEmbeddingInput,
+  type PlannerProviderProcedureEmbeddingResult,
+  type PlannerProviderProcedureAuthoringInput,
+  type PlannerProviderReplanInput,
+  type PlannerProviderRuntimeOperation,
+  type PlannerProviderRuntimeTreatmentDescription,
 } from '@operatingline/planner-provider-sdk';
 import {
   plannerDialogueProviderResultSchema,
@@ -25,6 +29,23 @@ const providerVersion = '0.1.0' as const;
 const defaultApiKeyEnvironmentVariable = 'OPENAI_API_KEY';
 const officialOpenAIBaseURL = 'https://api.openai.com/v1';
 export const openAIPlannerMaximumOutputTokens = 32_768 as const;
+export const openAIProcedureEmbeddingMaximumDocuments =
+  plannerProviderProcedureEmbeddingMaximumDocuments;
+export const openAIProcedureEmbeddingMaximumDocumentCharacters =
+  plannerProviderProcedureEmbeddingMaximumDocumentCharacters;
+
+export interface OpenAIEmbeddingsRequest {
+  readonly model: string;
+  readonly input: readonly string[];
+  readonly encoding_format: 'float';
+}
+
+export interface OpenAIEmbeddingsResult {
+  readonly data?: readonly {
+    readonly embedding?: readonly number[];
+    readonly index?: number;
+  }[];
+}
 
 export interface OpenAIResponsesRequest {
   readonly model: string;
@@ -85,10 +106,17 @@ export interface OpenAIResponsesClient {
       options: { readonly signal: AbortSignal },
     ): Promise<OpenAIResponsesResult | AsyncIterable<unknown>>;
   };
+  readonly embeddings?: {
+    create(
+      request: OpenAIEmbeddingsRequest,
+      options: { readonly signal: AbortSignal },
+    ): Promise<OpenAIEmbeddingsResult>;
+  };
 }
 
 export interface OpenAIResponsesPlannerProviderOptions {
   readonly model: string;
+  readonly embeddingModel?: string;
   readonly apiKey?: string;
   readonly id?: string;
   readonly baseURL?: string;
@@ -146,17 +174,23 @@ interface OpenAIModule {
 
 class OpenAIResponsesPlannerProvider implements PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
+  readonly embedProcedure?: NonNullable<PlannerProvider['embedProcedure']>;
 
   private client: OpenAIResponsesClient | undefined;
   private readonly options: OpenAIResponsesPlannerProviderOptions;
   private readonly model: string;
+  private readonly embeddingModel: string | undefined;
   private readonly apiKey: string | undefined;
 
   constructor(options: OpenAIResponsesPlannerProviderOptions) {
     this.model = requireNonBlank(options.model, 'model');
+    this.embeddingModel = normalizeOptionalModel(options.embeddingModel, 'embeddingModel');
     this.apiKey = normalizeOptional(options.apiKey);
     this.client = options.client;
     this.options = options;
+    if (this.embeddingModel !== undefined) {
+      this.embedProcedure = (input) => this.requestEmbeddings(input);
+    }
 
     const available = this.apiKey !== undefined;
     this.descriptor = plannerProviderDescriptorSchema.parse({
@@ -164,7 +198,10 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
       id: options.id ?? `openai-responses:${encodeProviderIdSegment(this.model)}`,
       version: providerVersion,
       displayName: 'OpenAI Responses Planner',
-      description: `OpenAI Responses API planner using model ${this.model}.`,
+      description:
+        this.embeddingModel === undefined
+          ? `OpenAI Responses API planner using model ${this.model}.`
+          : `OpenAI Responses API planner using model ${this.model}; Procedure embeddings use model ${this.embeddingModel}.`,
       availability: available
         ? { available: true }
         : {
@@ -189,10 +226,83 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
     return this.requestJson(input.renderedPrompt, input.signal);
   }
 
+  private async requestEmbeddings(
+    input: PlannerProviderProcedureEmbeddingInput,
+  ): Promise<PlannerProviderProcedureEmbeddingResult> {
+    if (this.embeddingModel === undefined) {
+      throw new OpenAIPlannerProviderError(
+        'not_configured',
+        'The OpenAI planner provider has no embedding model configured.',
+      );
+    }
+    assertEmbeddingDocuments(input.documents);
+    if (this.apiKey === undefined) {
+      throw new OpenAIPlannerProviderError(
+        'not_configured',
+        'The OpenAI planner provider is not configured.',
+      );
+    }
+    if (input.signal.aborted) {
+      throw abortedError();
+    }
+
+    try {
+      const client = await this.getClient();
+      if (client.embeddings === undefined) {
+        throw new Error('The OpenAI embeddings client is unavailable.');
+      }
+      const request = {
+        model: this.embeddingModel,
+        input: input.documents,
+        encoding_format: 'float',
+      } satisfies OpenAIEmbeddingsRequest;
+      const response = await client.embeddings.create(request, { signal: input.signal });
+      if (!Array.isArray(response.data)) {
+        throw new Error('The OpenAI embeddings response has no data array.');
+      }
+      const ordered = [...response.data].sort(
+        (left, right) => (left.index ?? -1) - (right.index ?? -1),
+      );
+      if (
+        ordered.length !== input.documents.length ||
+        ordered.some((entry, index) => !Number.isInteger(entry.index) || entry.index !== index)
+      ) {
+        throw new Error('The OpenAI embeddings response has invalid vector indices.');
+      }
+      return {
+        vectors: ordered.map((entry) => {
+          if (!Array.isArray(entry.embedding)) {
+            throw new Error('The OpenAI embeddings response contains no vector.');
+          }
+          return entry.embedding;
+        }),
+      };
+    } catch (error) {
+      if (error instanceof OpenAIPlannerProviderError) {
+        throw error;
+      }
+      if (input.signal.aborted) {
+        throw abortedError();
+      }
+      throw new OpenAIPlannerProviderError(
+        'request_failed',
+        'The OpenAI embedding request failed.',
+      );
+    }
+  }
+
   describeRuntimeTreatment(
-    _operation: PlannerProviderRuntimeOperation,
+    operation: PlannerProviderRuntimeOperation,
   ): PlannerProviderRuntimeTreatmentDescription {
     const endpoint = normalizeOptional(this.options.baseURL) ?? officialOpenAIBaseURL;
+    const embedding = operation === 'procedure_embedding';
+    const requestedModel = embedding ? this.embeddingModel : this.model;
+    if (requestedModel === undefined) {
+      throw new OpenAIPlannerProviderError(
+        'not_configured',
+        'The OpenAI planner provider has no embedding model configured.',
+      );
+    }
     return {
       profile: {
         descriptor: this.descriptor,
@@ -202,12 +312,12 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
           version: providerVersion,
         },
         model: {
-          requested: this.model,
+          requested: requestedModel,
           resolvedRevision: null,
           resolution: 'provider_did_not_disclose',
         },
         api: {
-          surface: 'responses',
+          surface: embedding ? 'embeddings' : 'responses',
           version: 'v1',
           sdkName: 'openai',
           sdkVersion: '7.4.0',
@@ -217,15 +327,26 @@ class OpenAIResponsesPlannerProvider implements PlannerProvider {
         },
       },
       generationSettings: {
-        normalizedParameters: {
-          model: this.model,
-          max_output_tokens: openAIPlannerMaximumOutputTokens,
-          store: false,
-          stream: false,
-          text: { format: { type: 'json_object' } },
-        },
+        normalizedParameters: embedding
+          ? {
+              model: requestedModel,
+              encoding_format: 'float',
+            }
+          : {
+              model: requestedModel,
+              max_output_tokens: openAIPlannerMaximumOutputTokens,
+              store: false,
+              stream: false,
+              text: { format: { type: 'json_object' } },
+            },
         seed: null,
         determinism: 'non_deterministic',
+      },
+      costPolicy: {
+        possibleProviderCost: true,
+        basis: 'provider_pricing',
+        publicStatement:
+          'OpenAI API requests may incur charges under the pricing and billing terms of the configured OpenAI account.',
       },
     };
   }
@@ -552,6 +673,27 @@ function requireNonBlank(value: string, name: string): string {
     throw new TypeError(`${name} must be at most 500 characters.`);
   }
   return normalized;
+}
+
+function normalizeOptionalModel(value: string | undefined, name: string): string | undefined {
+  return value === undefined ? undefined : requireNonBlank(value, name);
+}
+
+function assertEmbeddingDocuments(documents: readonly string[]): void {
+  if (
+    documents.length < 1 ||
+    documents.length > openAIProcedureEmbeddingMaximumDocuments ||
+    documents.some(
+      (document) =>
+        typeof document !== 'string' ||
+        document.length < 1 ||
+        document.length > openAIProcedureEmbeddingMaximumDocumentCharacters,
+    )
+  ) {
+    throw new TypeError(
+      `documents must contain 1-${openAIProcedureEmbeddingMaximumDocuments} non-empty strings of at most ${openAIProcedureEmbeddingMaximumDocumentCharacters} characters`,
+    );
+  }
 }
 
 function normalizeOptional(value: string | undefined): string | undefined {

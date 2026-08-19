@@ -345,6 +345,13 @@
         operation；MCP/HTTP 以 AND 组合的精确结构 selector 返回 revision、节点、验证状态、来源和证据。
         `indexSequence` 只用于存储分页，不表示操作顺序；结果没有相似度分数或 semantic embedding，也不
         启动宿主执行。见 [ADR 0044](adr/0044-exact-procedure-operation-index.md)。
+  - [x] Provider-neutral ProcedureTree 语义检索与 RAG context：显式授权后把自然语言 query 与 latest
+        immutable tree 的有界 leaf 文档交给支持 embedding/runtime treatment 的 Provider；默认只检索
+        verified leaf，且文档不含 source/evidence 原文。核心校验向量并计算稳定 cosine 排名，公开结果
+        保留完整 leaf、真实 validation 与 Provider/model/corpus/batch/document 内容摘要，但不含向量。
+        requested-only/failed 调用重启不自动重放，结果不保存新树、创建 Proposal 或执行宿主。首版仍是
+        bounded live batch，没有持久 vector cache/ANN 或召回 Human Eval。见
+        [ADR 0086](adr/0086-provider-neutral-procedure-semantic-retrieval.md)。
   - [x] 供应商无关的自然语言 Procedure 编写 packet：MCP/HTTP 将目标、固定来源证据、tree identity、
         精确 ActionCatalog/InteractionCatalog 与 candidate-only 响应 Schema 交给当前 MCP 宿主模型；
         当前只生成层级、语义 operation 和 Action 参数，菜单、快捷键与 MCP 轨迹强制 unavailable；目录和
@@ -568,8 +575,9 @@
     - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
           复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [ ] 句子到完整 ProcedureTree 的语义 RAG 与交互精修：显式 Provider coordinator 已能返回经严格验证的
-        candidate；仍需经验证的语义召回、流式 Procedure 对话、自动局部树重规划与结果治理，使不会 Blender
-        的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。
+        candidate，独立 semantic retrieval 也已能用真实 embedding 从 latest verified leaf 产生带完整证据的
+        vector-free RAG context；仍需把该 context 绑定进流式 Procedure 对话、自动局部树重规划与结果治理，
+        使不会 Blender 的用户能先审阅结构和参数，再对局部效果评论与精修；输入不依赖教学视频。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

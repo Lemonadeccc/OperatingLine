@@ -17,7 +17,11 @@ const maximumProviderOutputBytes = 2 * 1024 * 1024;
 const maximumGlobalConcurrency = 4;
 
 export type PlannerProviderOperation =
-  'initial_plan' | 'local_replan' | 'semantic_dialogue' | 'procedure_authoring';
+  | 'initial_plan'
+  | 'local_replan'
+  | 'semantic_dialogue'
+  | 'procedure_authoring'
+  | 'procedure_embedding';
 
 interface InvocationIdentity {
   readonly operation: PlannerProviderOperation;
@@ -54,6 +58,7 @@ export interface PlannerProviderInvocationRequest<TResult> extends InvocationIde
   readonly requiresReplan: boolean;
   readonly requiresDialogue?: boolean;
   readonly requiresProcedureAuthoring?: boolean;
+  readonly requiresProcedureEmbedding?: boolean;
   readonly attempt: (context: PlannerProviderAttemptContext) => Promise<TResult>;
 }
 
@@ -287,6 +292,17 @@ export function createPlannerProviderInvocationManager(
         throw new PlannerGenerationRuntimeError(
           'planner_procedure_authoring_not_supported',
           `Planner provider ${request.providerId} does not support Procedure authoring`,
+          'same_request_id',
+        );
+      }
+      if (
+        request.requiresProcedureEmbedding &&
+        (typeof registered.provider.embedProcedure !== 'function' ||
+          typeof registered.provider.describeRuntimeTreatment !== 'function')
+      ) {
+        throw new PlannerGenerationRuntimeError(
+          'planner_procedure_embedding_not_supported',
+          `Planner provider ${request.providerId} does not support attested Procedure embeddings`,
           'same_request_id',
         );
       }

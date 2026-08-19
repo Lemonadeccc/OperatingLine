@@ -286,6 +286,20 @@ export type PlannerProviderGenerationSettings = z.infer<
   typeof plannerProviderGenerationSettingsSchema
 >;
 
+export const plannerProviderCostPolicySchema = z.discriminatedUnion('possibleProviderCost', [
+  z.strictObject({
+    possibleProviderCost: z.literal(true),
+    basis: z.literal('provider_pricing'),
+    publicStatement: z.string().trim().min(1).max(1_000).regex(/\S/),
+  }),
+  z.strictObject({
+    possibleProviderCost: z.literal(false),
+    basis: z.literal('no_provider_cost'),
+    publicStatement: z.string().trim().min(1).max(1_000).regex(/\S/),
+  }),
+]);
+export type PlannerProviderCostPolicy = z.infer<typeof plannerProviderCostPolicySchema>;
+
 export const plannerProviderRuntimeTreatmentSchema = z.strictObject({
   profile: plannerProviderRuntimeProfileSchema,
   generationSettings: plannerProviderGenerationSettingsSchema,
@@ -508,6 +522,7 @@ export const plannerGenerationErrorCodeSchema = z.enum([
   'planner_provider_unavailable',
   'planner_dialogue_not_supported',
   'planner_procedure_authoring_not_supported',
+  'planner_procedure_embedding_not_supported',
   'planner_replan_not_supported',
   'planner_revision_request_not_found',
   'planner_revision_request_not_pending',

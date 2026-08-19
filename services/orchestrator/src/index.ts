@@ -86,6 +86,9 @@ import {
   procedureOperationSearchHitSchema,
   procedureOperationSearchRequestSchema,
   procedureOperationSearchResultSchema,
+  procedureSemanticRetrievalProviderDisclosureListSchema,
+  procedureSemanticRetrievalRequestSchema,
+  procedureSemanticRetrievalResultSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayCurrentStateRequestSchema,
@@ -169,6 +172,12 @@ import {
   restoreProcedureAuthoringProviderInvocations,
   type ProcedureAuthoringGenerationCoordinator,
 } from './procedure-authoring-generation.js';
+import {
+  createProcedureSemanticRetrievalCoordinator,
+  procedureSemanticRetrievalEvidenceEventTypes,
+  restoreProcedureSemanticRetrievalInvocations,
+  type ProcedureSemanticRetrievalCoordinator,
+} from './procedure-semantic-retrieval.js';
 import {
   createProcedureTutorialAuthoringRunCoordinator,
   procedureTutorialAuthoringRunErrorResponse,
@@ -458,6 +467,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
+  let procedureSemanticRetrievalCoordinator: ProcedureSemanticRetrievalCoordinator | undefined;
   let procedureTutorialAuthoringRunCoordinator:
     ProcedureTutorialAuthoringRunCoordinator | undefined;
   let procedureTutorialYoutubeImportCoordinator:
@@ -925,6 +935,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         storedAt: record.storedAt,
       });
 
+    const listAllProcedureTreeSummaries = () => {
+      const summaries: ReturnType<typeof publicProcedureTreeSummary>[] = [];
+      let afterSequence = 0;
+      while (true) {
+        const page = database.listProcedureTrees(afterSequence, 100);
+        summaries.push(...page.map(publicProcedureTreeSummary));
+        const lastSequence = page.at(-1)?.sequence;
+        if (page.length < 100) return summaries;
+        if (lastSequence === undefined || lastSequence <= afterSequence) {
+          throw new Error('ProcedureTree pagination did not advance');
+        }
+        afterSequence = lastSequence;
+      }
+    };
+
     type ProcedureTreeInput = ReturnType<typeof procedureTreeStoreRequestSchema.parse>['tree'];
     type AtomicProcedureTreeEvidence = NonNullable<
       Parameters<typeof database.recordProcedureTree>[0]['atomicEvidence']
@@ -1345,6 +1370,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureAuthoringGenerationEvents = database.listExecutionEventsByTypes(
       procedureAuthoringGenerationEvidenceEventTypes,
     );
+    const existingProcedureSemanticRetrievalEvents = database.listExecutionEventsByTypes(
+      procedureSemanticRetrievalEvidenceEventTypes,
+    );
     const existingProcedureTutorialYoutubeEvents = database.listExecutionEventsByTypes(
       procedureTutorialYoutubeEvidenceEventTypes,
     );
@@ -1415,7 +1443,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ...restoreInitialPlannerProviderInvocations(existingPlannerGenerationEvents),
         ...restoreReplanPlannerProviderInvocations(existingPlannerReplanEvents),
         ...restoreProcedureAuthoringProviderInvocations(existingProcedureAuthoringGenerationEvents),
+        ...restoreProcedureSemanticRetrievalInvocations(existingProcedureSemanticRetrievalEvents),
       ],
+    });
+    procedureSemanticRetrievalCoordinator = createProcedureSemanticRetrievalCoordinator({
+      registry: plannerProviderRegistry,
+      invocationManager: plannerProviderInvocationManager,
+      existingEvents: existingProcedureSemanticRetrievalEvents,
+      listProcedureTrees: listAllProcedureTreeSummaries,
+      getProcedureTree: (treeId, revision) => getProcedureTree({ treeId, revision }),
+      appendEvent: (event) => database.appendEvent(event),
     });
     procedureAuthoringGenerationCoordinator = createProcedureAuthoringGenerationCoordinator({
       registry: plannerProviderRegistry,
@@ -3378,6 +3415,50 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.semantic.providers.list',
+        {
+          description:
+            'List configured providers that support real Procedure leaf embeddings. Each exact disclosure includes the descriptor, embedding model, API/runtime settings, availability, data handling, and cost policy. The list contains no credentials and does not call an embedding endpoint.',
+          inputSchema: z.strictObject({}),
+          outputSchema: procedureSemanticRetrievalProviderDisclosureListSchema,
+        },
+        async () => {
+          const providerList = procedureSemanticRetrievalCoordinator!.listProviders();
+          return mcpStructuredResult(providerList);
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.semantic.search',
+        {
+          description:
+            'Search the latest stored ProcedureTree leaves with true embedding cosine similarity. The caller must copy and explicitly authorize the exact Provider descriptor, embedding model, API/runtime settings, data handling, and cost policy returned by providers.list; live drift is rejected before any embedding call. Validation defaults to verified. Returns ranked public leaves without vectors and never stores a ProcedureTree, creates a Proposal, or starts host execution.',
+          inputSchema: deferMcpInputValidation(procedureSemanticRetrievalRequestSchema),
+          outputSchema: procedureSemanticRetrievalResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureSemanticRetrievalRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError(
+              plannerGenerationErrorSchema.parse({
+                error: 'planner_invalid_request',
+                requestId: requestIdFromUnknown(requestInput),
+                message: 'Procedure semantic retrieval request violates the strict public contract',
+                retryMode: 'never',
+              }),
+            );
+          }
+          try {
+            return mcpStructuredResult(
+              await procedureSemanticRetrievalCoordinator!.search(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.search',
         {
           description:
@@ -4616,6 +4697,29 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/procedure/semantic/providers', async () =>
+      procedureSemanticRetrievalCoordinator!.listProviders(),
+    );
+    runtimeApp.post('/api/v1/procedure/semantic/search', async (request, reply) => {
+      const parsedRequest = procedureSemanticRetrievalRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send(
+          plannerGenerationErrorSchema.parse({
+            error: 'planner_invalid_request',
+            requestId: requestIdFromUnknown(request.body),
+            message: 'Procedure semantic retrieval request violates the strict public contract',
+            retryMode: 'never',
+          }),
+        );
+      }
+      try {
+        return await procedureSemanticRetrievalCoordinator!.search(parsedRequest.data);
+      } catch (error) {
+        return reply
+          .code(plannerGenerationHttpStatus(error))
+          .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+      }
+    });
     runtimeApp.post('/api/v1/procedure/search', async (request, reply) => {
       const parsedRequest = procedureOperationSearchRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -5491,6 +5595,11 @@ export {
 } from './planner-generation.js';
 export { evaluatePlanningQuality } from './planning-quality.js';
 export { createPlannerProviderRegistry } from './planner-provider-registry.js';
+export {
+  createProcedureSemanticRetrievalCoordinator,
+  procedureSemanticRetrievalEvidenceEventTypes,
+  restoreProcedureSemanticRetrievalInvocations,
+} from './procedure-semantic-retrieval.js';
 export {
   createPlannerReplanGenerationCoordinator,
   plannerReplanGenerationEvidenceEventTypes,
