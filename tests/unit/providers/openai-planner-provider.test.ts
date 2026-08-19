@@ -11,6 +11,7 @@ import {
   OpenAIPlannerProviderError,
   type OpenAIDialogueResponsesRequest,
   type OpenAIEmbeddingsRequest,
+  type OpenAIProcedureRefinementDialogueResponsesRequest,
   type OpenAIResponsesClient,
   type OpenAIResponsesRequest,
   type OpenAIResponsesResult,
@@ -27,6 +28,18 @@ const dialoguePacket = {
   renderedPrompt: 'Answer and call request_replan only for a clear Plan change.',
 } as Parameters<
   NonNullable<ReturnType<typeof createOpenAIResponsesPlannerProvider>['dialogue']>
+>[0]['packet'];
+const procedureRefinementDialoguePacket = {
+  renderedPrompt: 'Discuss the authorized ProcedureTree scope and request refinement if needed.',
+} as Parameters<
+  NonNullable<
+    ReturnType<typeof createOpenAIResponsesPlannerProvider>['procedureRefinementDialogue']
+  >
+>[0]['packet'];
+const procedureRefinementPacket = {
+  renderedPrompt: 'Return the complete refined ProcedureTree as JSON.',
+} as Parameters<
+  NonNullable<ReturnType<typeof createOpenAIResponsesPlannerProvider>['refineProcedure']>
 >[0]['packet'];
 
 function makeClient(response: OpenAIResponsesResult): {
@@ -234,6 +247,11 @@ describe('OpenAI Responses planner provider', () => {
       }),
       generationSettings: {
         normalizedParameters: {
+          endpoint: {
+            origin: 'https://api.openai.com',
+            pathSha256:
+              'sha256-utf8-v1:2d234c97703ce824eaa4d98fbd2701668ef5e63e46f1574f2ea72e7927b1f57e',
+          },
           model: 'gpt-5.4',
           max_output_tokens: 32_768,
           store: false,
@@ -265,6 +283,86 @@ describe('OpenAI Responses planner provider', () => {
       } satisfies OpenAIResponsesRequest,
       { signal },
     );
+  });
+
+  it('binds custom endpoint recipients into provider identity and exact runtime treatment', () => {
+    const first = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      baseURL: 'https://inference-a.example/v1/',
+    });
+    const second = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      baseURL: 'https://inference-b.example/service/v1',
+    });
+    const sameOriginDifferentPath = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      baseURL: 'https://inference-a.example/service/v1',
+    });
+    const sameExplicitIdA = createOpenAIResponsesPlannerProvider({
+      id: 'explicit-endpoint-provider',
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      baseURL: 'https://inference-a.example/v1',
+    });
+    const sameExplicitIdB = createOpenAIResponsesPlannerProvider({
+      id: 'explicit-endpoint-provider',
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      baseURL: 'https://inference-b.example/v1',
+    });
+
+    expect(first.descriptor.id).not.toBe(second.descriptor.id);
+    expect(first.descriptor.id).not.toBe(sameOriginDifferentPath.descriptor.id);
+    expect(first.descriptor.id).toContain(
+      ':endpoint-sha256-v1-5f6231bd2c6db10f68345665f08f994c5071626b78a96087f2e14f13622087c0',
+    );
+    expect(first.descriptor.description).toContain('https://inference-a.example');
+    expect(first.describeRuntimeTreatment?.('procedure_refinement_dialogue')).toMatchObject({
+      profile: { api: { endpointClass: 'self_hosted' } },
+      generationSettings: {
+        normalizedParameters: {
+          endpoint: {
+            origin: 'https://inference-a.example',
+            pathSha256:
+              'sha256-utf8-v1:2d234c97703ce824eaa4d98fbd2701668ef5e63e46f1574f2ea72e7927b1f57e',
+          },
+        },
+      },
+    });
+    expect(sameExplicitIdA.describeRuntimeTreatment?.('procedure_refinement_dialogue')).not.toEqual(
+      sameExplicitIdB.describeRuntimeTreatment?.('procedure_refinement_dialogue'),
+    );
+    expect(first.describeRuntimeTreatment?.('procedure_refinement_dialogue')).not.toEqual(
+      sameOriginDifferentPath.describeRuntimeTreatment?.('procedure_refinement_dialogue'),
+    );
+  });
+
+  it('rejects unsafe or credential-bearing custom provider endpoints', () => {
+    for (const baseURL of [
+      'https://user:secret@inference.example/v1',
+      'https://inference.example/v1?api_key=secret',
+      'https://inference.example/v1#secret',
+      'http://inference.example/v1',
+      'file:///tmp/provider',
+    ]) {
+      expect(() =>
+        createOpenAIResponsesPlannerProvider({
+          apiKey: 'sk-test-secret',
+          model: 'gpt-5.4',
+          baseURL,
+        }),
+      ).toThrow(/baseURL/);
+    }
+    expect(() =>
+      createOpenAIResponsesPlannerProvider({
+        apiKey: 'sk-test-secret',
+        model: 'gpt-5.4',
+        baseURL: 'http://127.0.0.1:11434/v1',
+      }),
+    ).not.toThrow();
   });
 
   it('uses the exact typed replan prompt and caller abort signal', async () => {
@@ -431,6 +529,187 @@ describe('OpenAI Responses planner provider', () => {
       assistantMessage: 'I can prepare that change for review.',
       decision: { kind: 'replan', confidence: 0.94 },
     });
+  });
+
+  it('discloses and streams a typed ProcedureTree refinement decision', async () => {
+    const { client, create } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'I can refine the selected leaf.' },
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_procedure_refinement',
+        arguments: '{"confidence":0.93}',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'I can refine the selected leaf.' }],
+            },
+            {
+              type: 'function_call',
+              name: 'request_procedure_refinement',
+              arguments: '{"confidence":0.93}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+    const emit = vi.fn();
+    const signal = new AbortController().signal;
+
+    expect(provider.procedureRefinementDialogue).toBeDefined();
+    expect(provider.refineProcedure).toBeDefined();
+    expect(provider.describeRuntimeTreatment?.('procedure_refinement_dialogue')).toMatchObject({
+      generationSettings: {
+        normalizedParameters: {
+          stream: true,
+          parallel_tool_calls: false,
+          tool_choice: 'auto',
+          tools: [{ type: 'function', name: 'request_procedure_refinement', strict: true }],
+        },
+        seed: null,
+        determinism: 'non_deterministic',
+      },
+    });
+    expect(provider.describeRuntimeTreatment?.('procedure_refinement')).toMatchObject({
+      generationSettings: {
+        normalizedParameters: {
+          stream: false,
+          text: { format: { type: 'json_object' } },
+        },
+        determinism: 'non_deterministic',
+      },
+    });
+    await expect(
+      provider.procedureRefinementDialogue?.({
+        requestId: '0ccca1c9-98b5-40dd-935c-96f193a39e9b',
+        packet: procedureRefinementDialoguePacket,
+        signal,
+        emit,
+      }),
+    ).resolves.toEqual({
+      assistantMessage: 'I can refine the selected leaf.',
+      decision: { kind: 'refine', confidence: 0.93, threshold: 0.8 },
+    });
+    expect(emit).toHaveBeenCalledWith({
+      type: 'assistant_text_delta',
+      delta: 'I can refine the selected leaf.',
+    });
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: procedureRefinementDialoguePacket.renderedPrompt,
+        stream: true,
+        tools: [
+          expect.objectContaining({
+            name: 'request_procedure_refinement',
+            strict: true,
+          }),
+        ],
+      } satisfies Partial<OpenAIProcedureRefinementDialogueResponsesRequest>),
+      { signal },
+    );
+  });
+
+  it('returns a full ProcedureTree JSON value without parsing it as trusted protocol data', async () => {
+    const targetTree = { id: 'tutorial.eye', revision: 4, nodes: [] };
+    const { client, create } = makeClient({
+      status: 'completed',
+      output_text: JSON.stringify(targetTree),
+    });
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(
+      provider.refineProcedure?.({
+        requestId: 'b73572af-48d8-4034-b42f-467eaa48b982',
+        packet: procedureRefinementPacket,
+        signal,
+      }),
+    ).resolves.toEqual(targetTree);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: procedureRefinementPacket.renderedPrompt,
+        store: false,
+        stream: false,
+        text: { format: { type: 'json_object' } },
+      }),
+      { signal },
+    );
+  });
+
+  it('keeps a below-threshold ProcedureTree refinement tool decision as an answer', async () => {
+    const { client } = makeStreamingClient([
+      { type: 'response.output_text.delta', delta: 'No scoped change is warranted.' },
+      {
+        type: 'response.function_call_arguments.done',
+        name: 'request_procedure_refinement',
+        arguments: '{"confidence":0.4}',
+      },
+      {
+        type: 'response.completed',
+        response: {
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'No scoped change is warranted.' }],
+            },
+            {
+              type: 'function_call',
+              name: 'request_procedure_refinement',
+              arguments: '{"confidence":0.4}',
+            },
+          ],
+        },
+      },
+    ]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.procedureRefinementDialogue?.({
+        requestId: 'f172b105-91e8-42b6-b15f-bb4195399aa3',
+        packet: procedureRefinementDialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).resolves.toEqual({
+      assistantMessage: 'No scoped change is warranted.',
+      decision: { kind: 'answer', confidence: 0.4, threshold: 0.8 },
+    });
+  });
+
+  it('rejects unknown ProcedureTree refinement stream events', async () => {
+    const { client } = makeStreamingClient([{ type: 'response.unrecognized' }]);
+    const provider = createOpenAIResponsesPlannerProvider({
+      apiKey: 'sk-test-secret',
+      model: 'gpt-5.4',
+      client,
+    });
+
+    await expect(
+      provider.procedureRefinementDialogue?.({
+        requestId: '4ddba10a-1219-4fd5-bc54-5b29793b039a',
+        packet: procedureRefinementDialoguePacket,
+        signal: new AbortController().signal,
+        emit: () => undefined,
+      }),
+    ).rejects.toMatchObject({ code: 'response_invalid_json' });
   });
 
   it('rejects malformed or duplicate replan calls without exposing provider payloads', async () => {

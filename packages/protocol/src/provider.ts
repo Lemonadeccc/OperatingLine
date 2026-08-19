@@ -523,6 +523,7 @@ export const plannerGenerationErrorCodeSchema = z.enum([
   'planner_dialogue_not_supported',
   'planner_procedure_authoring_not_supported',
   'planner_procedure_embedding_not_supported',
+  'planner_procedure_refinement_not_supported',
   'planner_replan_not_supported',
   'planner_revision_request_not_found',
   'planner_revision_request_not_pending',

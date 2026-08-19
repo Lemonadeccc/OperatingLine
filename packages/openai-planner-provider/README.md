@@ -1,7 +1,8 @@
 # `@operatingline/openai-planner-provider`
 
 可选的 OpenAI Responses API Planner Provider。它同时实现初始 `generate()`、完整 candidate
-ProcedureTree `authorProcedure()`、类型化局部 `replan()` 和流式 `dialogue()`，只依赖
+ProcedureTree `authorProcedure()`、类型化局部 `replan()`、流式 `dialogue()`，以及 ProcedureTree
+流式 refinement 对话与完整树 refinement，只依赖
 `@operatingline/planner-provider-sdk` 的边缘接口，不是 Orchestrator 核心依赖，也不会被默认
 `pnpm dev` 自动加载。
 
@@ -32,8 +33,12 @@ await startRuntime({
 - API Key 只传给官方 SDK，不出现在 descriptor、协议请求、公开错误或 Eval 证据中。
 - 未显式传 `baseURL` 时固定使用 `https://api.openai.com/v1`；不会继承
   `OPENAI_BASE_URL`、`OPENAI_ORG_ID`、`OPENAI_PROJECT_ID` 或 `OPENAI_CUSTOM_HEADERS`。若调用方
-  显式配置自定义 `baseURL`，它就是新的远端数据接收方，必须同步更新 provider identity 与披露。
-- `generate()` / `authorProcedure()` / `replan()` 固定为非流式 JSON Object 请求；`dialogue()` 使用 Responses SSE stream，
+  显式配置自定义 `baseURL`，它就是新的远端数据接收方：默认 provider ID 会加入稳定 endpoint
+  identity，runtime treatment 会披露规范化 origin 和非敏感 path identity。即使调用方显式固定 `id`，
+  不同 endpoint 的 treatment 也不会相同。带 userinfo、query、fragment 的 URL 会被拒绝；远端必须
+  使用 HTTPS，仅显式 loopback endpoint 可使用 HTTP。
+- `generate()` / `authorProcedure()` / `replan()` / `refineProcedure()` 固定为非流式 JSON Object 请求；
+  `dialogue()` 与 `procedureRefinementDialogue()` 使用 Responses SSE stream，
   `parallel_tool_calls: false` 和唯一 strict `request_replan({ confidence })` tool。四者都固定
   `store: false`、最多 `32,768` 个输出 token，官方 SDK `maxRetries: 0`、`logLevel: off`；
   OperatingLine 的持久 request ID 才是防止重复费用的重试边界，Planner Packet 不会因环境中的
@@ -53,6 +58,10 @@ await startRuntime({
   对账。无 tool call 为 answer；tool confidence 由 Runtime 再与固定 `0.8` 阈值比较。拒绝、不完整、重复
   tool、错误参数、超限输出或中断都 fail closed，不公开原始 Provider payload。一次 Blender 确认最多
   授权这次 dialogue 调用和一个随后发生的 typed replan；结果最多进入待审 Proposal。
+- `procedureRefinementDialogue()` 使用独立 strict `request_procedure_refinement({ confidence })` tool，
+  只返回有界 assistant delta 和类型化 answer/refine 决策；`refineProcedure()` 发送服务端构造的完整 packet，
+  并把解析后的未知 JSON 值交还 Runtime 做完整 ProcedureTree、identity、scope 与 locality 校验。两种 operation
+  分别披露真实 stream/tool 和非流式 JSON 设置；均不声称确定性，也不会自行保存或执行树。
 - Provider 只返回未经信任的 JSON 值，不调用 `guide.propose` 或 `replan.propose`，不投递 Companion，
   也不操作 Blender。局部生成结果必须由调用方携带 canonical `generationRequestId` 另行送审。
 - Provider 是进程内可信依赖，不是插件沙箱；目标、宿主状态和 ActionCatalog 会发送到远端。

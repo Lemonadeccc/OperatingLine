@@ -13,6 +13,7 @@ import {
   procedureAuthoringProviderRuntimeTreatmentAttestationSchema,
   procedureSemanticRetrievalProviderRuntimeOutputAttestationSchema,
   procedureSemanticRetrievalProviderRuntimeTreatmentAttestationSchema,
+  procedureRefinementProviderRuntimeTreatmentAttestationSchema,
   type PlannerProviderDescriptor,
   type PlannerProviderRuntimeOutputAttestation,
   type PlannerProviderRuntimeTreatmentAttestation,
@@ -20,6 +21,7 @@ import {
   type ProcedureAuthoringProviderRuntimeTreatmentAttestation,
   type ProcedureSemanticRetrievalProviderRuntimeOutputAttestation,
   type ProcedureSemanticRetrievalProviderRuntimeTreatmentAttestation,
+  type ProcedureRefinementProviderRuntimeTreatmentAttestation,
 } from '@operatingline/protocol';
 
 import { PlannerGenerationRuntimeError } from './planner-provider-errors.js';
@@ -85,11 +87,17 @@ export function snapshotPlannerProviderRuntimeTreatment(
 export function snapshotPlannerProviderRuntimeTreatment(
   provider: PlannerProvider,
   descriptor: PlannerProviderDescriptor,
+  operation: 'procedure_refinement_dialogue' | 'procedure_refinement',
+): ProcedureRefinementProviderRuntimeTreatmentAttestation | undefined;
+export function snapshotPlannerProviderRuntimeTreatment(
+  provider: PlannerProvider,
+  descriptor: PlannerProviderDescriptor,
   operation: PlannerProviderRuntimeOperation,
 ):
   | PlannerProviderRuntimeTreatmentAttestation
   | ProcedureAuthoringProviderRuntimeTreatmentAttestation
   | ProcedureSemanticRetrievalProviderRuntimeTreatmentAttestation
+  | ProcedureRefinementProviderRuntimeTreatmentAttestation
   | undefined {
   if (provider.describeRuntimeTreatment === undefined) return undefined;
   let described: ReturnType<NonNullable<PlannerProvider['describeRuntimeTreatment']>>;
@@ -151,6 +159,26 @@ export function snapshotPlannerProviderRuntimeTreatment(
       },
     } as const;
     return procedureSemanticRetrievalProviderRuntimeTreatmentAttestationSchema.parse({
+      ...content,
+      treatmentContentSha256: computePlannerProviderAttestationSha256(content),
+    });
+  }
+  if (operation === 'procedure_refinement_dialogue' || operation === 'procedure_refinement') {
+    if (described.costPolicy === undefined) {
+      throw new PlannerGenerationRuntimeError(
+        'planner_identity_mismatch',
+        'Procedure refinement provider did not disclose its cost policy',
+        'same_request_id',
+      );
+    }
+    const content = {
+      formatVersion: '1.0.0',
+      evidenceClass: 'runtime_attested_provider_treatment',
+      operation,
+      treatment: treatment.data,
+      costPolicy: described.costPolicy,
+    } as const;
+    return procedureRefinementProviderRuntimeTreatmentAttestationSchema.parse({
       ...content,
       treatmentContentSha256: computePlannerProviderAttestationSha256(content),
     });

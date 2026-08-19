@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "policyVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "requestedRootIds": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "uniqueItems": true
+    },
+    "normalizedRootIds": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "uniqueItems": true
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "completeTreeRequired": {
+          "type": "boolean",
+          "const": true
+        },
+        "topLevelIdentityMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "outsideScopeMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "scopeRootAttachmentMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "descendantMoves": {
+          "type": "string",
+          "const": "within_same_normalized_root"
+        },
+        "newNodes": {
+          "type": "string",
+          "const": "within_normalized_roots"
+        },
+        "newCrossScopeDependencies": {
+          "type": "boolean",
+          "const": false
+        },
+        "changedLeafInteractionTracks": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "noOpAllowed": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "completeTreeRequired",
+        "topLevelIdentityMutable",
+        "outsideScopeMutable",
+        "scopeRootAttachmentMutable",
+        "descendantMoves",
+        "newNodes",
+        "newCrossScopeDependencies",
+        "changedLeafInteractionTracks",
+        "noOpAllowed"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "policyVersion",
+    "requestedRootIds",
+    "normalizedRootIds",
+    "rules"
+  ],
+  "additionalProperties": false,
+  "description": "Server-produced normalized scope. Standard JSON Schema validates structure and uniqueness; the protocol parser/runtime additionally enforces that normalizedRootIds is a subset of requestedRootIds.",
+  "$comment": "Runtime invariant: normalizedRootIds must be selected from requestedRootIds.",
+  "$id": "https://operatingline.dev/schema/v1/procedure-refinement-scope.json"
+}

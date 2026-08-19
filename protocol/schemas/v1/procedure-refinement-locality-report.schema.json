@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "policyVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "baseTree": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "targetTree": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "revision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "requestedRootIds": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "uniqueItems": true
+    },
+    "normalizedRootIds": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      },
+      "uniqueItems": true
+    },
+    "rules": {
+      "type": "object",
+      "properties": {
+        "completeTreeRequired": {
+          "type": "boolean",
+          "const": true
+        },
+        "topLevelIdentityMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "outsideScopeMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "scopeRootAttachmentMutable": {
+          "type": "boolean",
+          "const": false
+        },
+        "descendantMoves": {
+          "type": "string",
+          "const": "within_same_normalized_root"
+        },
+        "newNodes": {
+          "type": "string",
+          "const": "within_normalized_roots"
+        },
+        "newCrossScopeDependencies": {
+          "type": "boolean",
+          "const": false
+        },
+        "changedLeafInteractionTracks": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "noOpAllowed": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "completeTreeRequired",
+        "topLevelIdentityMutable",
+        "outsideScopeMutable",
+        "scopeRootAttachmentMutable",
+        "descendantMoves",
+        "newNodes",
+        "newCrossScopeDependencies",
+        "changedLeafInteractionTracks",
+        "noOpAllowed"
+      ],
+      "additionalProperties": false
+    },
+    "findings": {
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "target_revision_invalid",
+              "immutable_tree_field_changed",
+              "scope_root_unknown",
+              "scope_root_missing",
+              "scope_root_attachment_changed",
+              "node_changed_outside_scope",
+              "node_added_outside_scope",
+              "node_moved_across_scope",
+              "node_kind_changed",
+              "dependency_added_across_scope",
+              "no_local_change",
+              "findings_truncated"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "nodeIds": {
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "nodeIds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "totalFindingCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "changedNodeIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "changedLeafIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "newLeafIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "deletedLeafIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "unchangedLeafIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+      }
+    },
+    "valid": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "policyVersion",
+    "baseTree",
+    "targetTree",
+    "requestedRootIds",
+    "normalizedRootIds",
+    "rules",
+    "findings",
+    "totalFindingCount",
+    "changedNodeIds",
+    "changedLeafIds",
+    "newLeafIds",
+    "deletedLeafIds",
+    "unchangedLeafIds",
+    "valid"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-refinement-locality-report.json"
+}

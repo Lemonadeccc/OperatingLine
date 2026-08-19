@@ -25,6 +25,16 @@ export interface RegisteredProcedureEmbeddingProvider extends RegisteredPlannerP
     Required<Pick<PlannerProvider, 'describeRuntimeTreatment' | 'embedProcedure'>>;
 }
 
+export interface RegisteredProcedureRefinementProvider extends RegisteredPlannerProvider {
+  readonly provider: PlannerProvider &
+    Required<
+      Pick<
+        PlannerProvider,
+        'describeRuntimeTreatment' | 'procedureRefinementDialogue' | 'refineProcedure'
+      >
+    >;
+}
+
 export interface RegisteredDialogueReplanningProvider extends RegisteredPlannerProvider {
   readonly provider: PlannerProvider & Required<Pick<PlannerProvider, 'dialogue' | 'replan'>>;
 }
@@ -33,11 +43,13 @@ export interface PlannerProviderRegistry {
   find(providerId: string): RegisteredPlannerProvider | null;
   findProcedureAuthor(providerId: string): RegisteredProcedureAuthoringProvider | null;
   findProcedureEmbedder(providerId: string): RegisteredProcedureEmbeddingProvider | null;
+  findProcedureRefiner(providerId: string): RegisteredProcedureRefinementProvider | null;
   findReplanner(providerId: string): RegisteredReplanningProvider | null;
   findDialogueReplanner(providerId: string): RegisteredDialogueReplanningProvider | null;
   list(): PlannerProviderList;
   listProcedureAuthors(): PlannerProviderList;
   listProcedureEmbedders(): PlannerProviderList;
+  listProcedureRefiners(): PlannerProviderList;
   listReplanners(): PlannerProviderList;
   listDialogueReplanners(): PlannerProviderList;
   close(): Promise<void>;
@@ -103,6 +115,15 @@ export function createPlannerProviderRegistry(
         ? (candidate as RegisteredProcedureEmbeddingProvider)
         : null;
     },
+    findProcedureRefiner: (providerId) => {
+      const candidate = registered.get(providerId);
+      return candidate !== undefined &&
+        typeof candidate.provider.describeRuntimeTreatment === 'function' &&
+        typeof candidate.provider.procedureRefinementDialogue === 'function' &&
+        typeof candidate.provider.refineProcedure === 'function'
+        ? (candidate as RegisteredProcedureRefinementProvider)
+        : null;
+    },
     findReplanner: (providerId) => {
       const candidate = registered.get(providerId);
       return candidate !== undefined && typeof candidate.provider.replan === 'function'
@@ -131,6 +152,15 @@ export function createPlannerProviderRegistry(
           (candidate): candidate is RegisteredProcedureEmbeddingProvider =>
             typeof candidate.provider.embedProcedure === 'function' &&
             typeof candidate.provider.describeRuntimeTreatment === 'function',
+        ),
+      ),
+    listProcedureRefiners: () =>
+      listProviders(
+        [...registered.values()].filter(
+          (candidate): candidate is RegisteredProcedureRefinementProvider =>
+            typeof candidate.provider.describeRuntimeTreatment === 'function' &&
+            typeof candidate.provider.procedureRefinementDialogue === 'function' &&
+            typeof candidate.provider.refineProcedure === 'function',
         ),
       ),
     listReplanners: () =>

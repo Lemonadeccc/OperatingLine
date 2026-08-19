@@ -21,7 +21,9 @@ export type PlannerProviderOperation =
   | 'local_replan'
   | 'semantic_dialogue'
   | 'procedure_authoring'
-  | 'procedure_embedding';
+  | 'procedure_embedding'
+  | 'procedure_refinement_dialogue'
+  | 'procedure_refinement';
 
 interface InvocationIdentity {
   readonly operation: PlannerProviderOperation;
@@ -59,6 +61,7 @@ export interface PlannerProviderInvocationRequest<TResult> extends InvocationIde
   readonly requiresDialogue?: boolean;
   readonly requiresProcedureAuthoring?: boolean;
   readonly requiresProcedureEmbedding?: boolean;
+  readonly requiresProcedureRefinement?: boolean;
   readonly attempt: (context: PlannerProviderAttemptContext) => Promise<TResult>;
 }
 
@@ -303,6 +306,18 @@ export function createPlannerProviderInvocationManager(
         throw new PlannerGenerationRuntimeError(
           'planner_procedure_embedding_not_supported',
           `Planner provider ${request.providerId} does not support attested Procedure embeddings`,
+          'same_request_id',
+        );
+      }
+      if (
+        request.requiresProcedureRefinement &&
+        (typeof registered.provider.describeRuntimeTreatment !== 'function' ||
+          typeof registered.provider.procedureRefinementDialogue !== 'function' ||
+          typeof registered.provider.refineProcedure !== 'function')
+      ) {
+        throw new PlannerGenerationRuntimeError(
+          'planner_procedure_refinement_not_supported',
+          `Planner provider ${request.providerId} does not support attested Procedure refinement`,
           'same_request_id',
         );
       }

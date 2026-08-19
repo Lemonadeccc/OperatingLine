@@ -72,6 +72,7 @@ export function plannerGenerationHttpStatus(error: unknown): number {
     case 'planner_dialogue_not_supported':
     case 'planner_procedure_embedding_not_supported':
     case 'planner_procedure_authoring_not_supported':
+    case 'planner_procedure_refinement_not_supported':
     case 'planner_replan_not_supported':
     case 'planner_replan_submission_invalid':
       return 422;

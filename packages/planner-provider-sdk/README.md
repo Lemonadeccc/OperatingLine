@@ -31,6 +31,17 @@ export interface PlannerProvider {
     renderedPrompt: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  procedureRefinementDialogue?(input: {
+    requestId: string;
+    packet: ProcedureRefinementDialoguePromptPacket;
+    signal: AbortSignal;
+    emit: (event: { type: 'assistant_text_delta'; delta: string }) => void;
+  }): Promise<ProcedureRefinementDialogueProviderResult>;
+  refineProcedure?(input: {
+    requestId: string;
+    packet: ProcedureRefinementPromptPacket;
+    signal: AbortSignal;
+  }): Promise<unknown>;
   close?(): void | Promise<void>;
 }
 ```
@@ -71,6 +82,11 @@ const runtime = await startRuntime({
 `operatingline.procedure.authoring.generate` 调用。`renderedPrompt` 是完整 packet 的规范 JSON 编码；返回值
 必须是 candidate-only ProcedureTree。Runtime 会重新核对 identity、来源、目录和 compile；成功也不自动
 保存、物化、提案或执行。
+
+Procedure refinement 使用两个独立的可选调用边界：`procedureRefinementDialogue()` 只能流式发送有界
+assistant 文本并返回类型化 answer/refine 决策；`refineProcedure()` 接收服务端构造并带完整性摘要的 packet，
+返回仍为不可信的 `unknown`。两次调用必须使用各自的持久 request ID，分别以
+`procedure_refinement_dialogue` 和 `procedure_refinement` 披露运行参数；SDK 本身不保存、合并或执行树。
 
 ## Descriptor 要求
 

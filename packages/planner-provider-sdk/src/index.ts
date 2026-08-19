@@ -6,11 +6,19 @@ import type {
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ProcedureAuthoringPromptPacket,
+  ProcedureRefinementDialoguePromptPacket,
+  ProcedureRefinementDialogueProviderResult,
+  ProcedureRefinementPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';
 
 export type PlannerProviderRuntimeOperation =
-  'initial_plan' | 'local_replan' | 'procedure_authoring' | 'procedure_embedding';
+  | 'initial_plan'
+  | 'local_replan'
+  | 'procedure_authoring'
+  | 'procedure_embedding'
+  | 'procedure_refinement_dialogue'
+  | 'procedure_refinement';
 
 export interface PlannerProviderRuntimeTreatmentDescription {
   readonly profile: PlannerProviderRuntimeProfile;
@@ -66,6 +74,19 @@ export interface PlannerProviderDialogueInput {
   readonly emit: (event: PlannerProviderDialogueTextDelta) => void;
 }
 
+export interface PlannerProviderProcedureRefinementDialogueInput {
+  readonly requestId: string;
+  readonly packet: ProcedureRefinementDialoguePromptPacket;
+  readonly signal: AbortSignal;
+  readonly emit: (event: PlannerProviderDialogueTextDelta) => void;
+}
+
+export interface PlannerProviderProcedureRefinementInput {
+  readonly requestId: string;
+  readonly packet: ProcedureRefinementPromptPacket;
+  readonly signal: AbortSignal;
+}
+
 export interface PlannerProvider {
   readonly descriptor: PlannerProviderDescriptor;
   describeRuntimeTreatment?(
@@ -78,6 +99,10 @@ export interface PlannerProvider {
   ): Promise<PlannerProviderProcedureEmbeddingResult>;
   replan?(input: PlannerProviderReplanInput): Promise<unknown>;
   dialogue?(input: PlannerProviderDialogueInput): Promise<PlannerDialogueProviderResult>;
+  procedureRefinementDialogue?(
+    input: PlannerProviderProcedureRefinementDialogueInput,
+  ): Promise<ProcedureRefinementDialogueProviderResult>;
+  refineProcedure?(input: PlannerProviderProcedureRefinementInput): Promise<unknown>;
   close?(): void | Promise<void>;
 }
 
@@ -89,5 +114,8 @@ export type {
   PlannerProviderRuntimeProfile,
   PlanningPromptPacket,
   ProcedureAuthoringPromptPacket,
+  ProcedureRefinementDialoguePromptPacket,
+  ProcedureRefinementDialogueProviderResult,
+  ProcedureRefinementPromptPacket,
   ReplanningPromptPacket,
 } from '@operatingline/protocol';

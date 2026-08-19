@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "assistantMessage": {
+      "type": "string",
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "decision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "answer"
+            },
+            "confidence": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 0.8
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "threshold": {
+              "type": "number",
+              "const": 0.8
+            }
+          },
+          "required": [
+            "kind",
+            "confidence",
+            "threshold"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "refine"
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.8,
+              "maximum": 1
+            },
+            "threshold": {
+              "type": "number",
+              "const": 0.8
+            }
+          },
+          "required": [
+            "kind",
+            "confidence",
+            "threshold"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "assistantMessage",
+    "decision"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-refinement-dialogue-provider-result.json"
+}
