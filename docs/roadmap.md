@@ -313,8 +313,13 @@
         在请求前刷新，invalid grant 按凭据摘要在进程内阻断并要求重新登录，避免旧刷新删除并发写入的新授权。Logout 总是删除本地凭据并报告远端撤销
         confirmed/uncertain；API 请求后的 401 不自动重放。兼容短期 token 保留但不能与 client ID 同时设置。
         见 [ADR 0083](adr/0083-managed-youtube-oauth.md)。
-  - [ ] 选择确认可视化 UI、视频媒体下载/语音转录、画面与按键识别、自动语义分段、证据帧，以及大步骤/
-        小步骤质量校准。
+  - [x] 经独立授权的 YouTube 教程媒体分析：可信服务端 registry 同时核对内容权利与独立的 YouTube 书面
+        下载批准；本地 yt-dlp、ffprobe、ffmpeg、whisper.cpp 和 Tesseract 固定执行下载、探测、音频、ASR、
+        证据帧、OCR 与确定性语义分段七阶段。私有 CAS 保存内容寻址产物，MCP/HTTP 提供 capabilities、异步
+        create/status 和显式 restart；失败只能从 download 全量重启且不复用部分阶段。未配置时安全报告
+        unavailable；结果不会生成 ProcedureTree。见
+        [ADR 0084](adr/0084-authorized-youtube-media-analysis.md)。
+  - [ ] 选择确认可视化 UI、媒体分析到完整 ProcedureTree 的一体化生成，以及大步骤/小步骤质量校准。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision

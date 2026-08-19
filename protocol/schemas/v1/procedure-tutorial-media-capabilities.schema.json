@@ -1,0 +1,245 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "serviceId": {
+          "type": "string",
+          "const": "operatingline.youtube_tutorial_media"
+        },
+        "serviceVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+        },
+        "availability": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "unavailableReasons": {
+          "minItems": 1,
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "tool_missing",
+              "model_missing",
+              "authorization_registry_missing",
+              "unsupported_platform",
+              "preflight_failed"
+            ]
+          }
+        }
+      },
+      "required": [
+        "formatVersion",
+        "serviceId",
+        "serviceVersion",
+        "availability",
+        "unavailableReasons"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "serviceId": {
+          "type": "string",
+          "const": "operatingline.youtube_tutorial_media"
+        },
+        "serviceVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]*$"
+        },
+        "availability": {
+          "type": "string",
+          "const": "available"
+        },
+        "analysisProfiles": {
+          "minItems": 1,
+          "maxItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "const": "youtube_tutorial_evidence_v1"
+          }
+        },
+        "supportedLocales": {
+          "minItems": 1,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$"
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "download"
+            },
+            {
+              "type": "string",
+              "const": "probe"
+            },
+            {
+              "type": "string",
+              "const": "audio"
+            },
+            {
+              "type": "string",
+              "const": "asr"
+            },
+            {
+              "type": "string",
+              "const": "frames"
+            },
+            {
+              "type": "string",
+              "const": "ocr"
+            },
+            {
+              "type": "string",
+              "const": "segmentation"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 7,
+          "maxItems": 7
+        },
+        "artifactMediaTypes": {
+          "minItems": 4,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "video/mp4",
+              "audio/wav",
+              "image/png",
+              "application/json"
+            ]
+          }
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "maxVideoDurationMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 86400000
+            },
+            "maxAnalysisWindowMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 86400000
+            },
+            "maxJobRuntimeMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 86400000
+            },
+            "maxFrames": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 120
+            },
+            "maxConcurrentJobs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            }
+          },
+          "required": [
+            "maxVideoDurationMs",
+            "maxAnalysisWindowMs",
+            "maxJobRuntimeMs",
+            "maxFrames",
+            "maxConcurrentJobs"
+          ],
+          "additionalProperties": false
+        },
+        "features": {
+          "type": "object",
+          "properties": {
+            "contentAddressedArtifacts": {
+              "type": "boolean",
+              "const": true
+            },
+            "resumableJobs": {
+              "type": "boolean",
+              "const": false
+            },
+            "explicitFullRestartAfterFailure": {
+              "type": "boolean",
+              "const": true
+            },
+            "deterministicSegmentation": {
+              "type": "boolean",
+              "const": true
+            },
+            "credentialFreePublicProtocol": {
+              "type": "boolean",
+              "const": true
+            },
+            "ocrTextCandidates": {
+              "type": "boolean",
+              "const": true
+            },
+            "shortcutCandidates": {
+              "type": "boolean",
+              "const": true
+            },
+            "uiElementRecognition": {
+              "type": "boolean",
+              "const": false
+            }
+          },
+          "required": [
+            "contentAddressedArtifacts",
+            "resumableJobs",
+            "explicitFullRestartAfterFailure",
+            "deterministicSegmentation",
+            "credentialFreePublicProtocol",
+            "ocrTextCandidates",
+            "shortcutCandidates",
+            "uiElementRecognition"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "formatVersion",
+        "serviceId",
+        "serviceVersion",
+        "availability",
+        "analysisProfiles",
+        "supportedLocales",
+        "stages",
+        "artifactMediaTypes",
+        "limits",
+        "features"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$id": "https://operatingline.dev/schema/v1/procedure-tutorial-media-capabilities.json"
+}

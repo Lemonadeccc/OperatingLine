@@ -117,7 +117,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   本地证据账本，不进入 packet 或 Provider 输入。OAuth 凭据不进入请求、日志或事件，原始字幕全文也不进入
   持久化事件。官方字幕下载要求授权账号能编辑目标视频，因此该入口不能抓取任意公开视频字幕。Managed
   OAuth 使用 `youtube.force-ssl`、loopback+PKCE 和操作系统凭据库完成登录/刷新/注销；API 请求本身返回
-  401 时不会自动重放。自动选轨、视频媒体下载或语音转录仍不在此入口范围。显式审阅 Provider 披露后，可改用 MCP
+  401 时不会自动重放。自动选轨仍不在此入口范围。独立的服务端媒体分析入口可在额外授权与本地工具配置后
+  下载视频并提取证据，但不会扩宽该官方字幕入口。显式审阅 Provider 披露后，可改用 MCP
   `operatingline.procedure.tutorial.generate` 或 HTTP `POST /api/v1/procedure/tutorial/generate`，在同一请求中
   解析文档、把只含摘要和规范化 cue 的 `1.2.0` packet 发送给所选 Provider，并立即执行候选校验与编译。
   教程候选的每个 semantic operation 必须引用至少一个给定视频 evidence；Runtime 不下载或转录视频，
@@ -145,6 +146,21 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   [ADR 0081](docs/adr/0081-persisted-youtube-caption-track-selection.md)、
   [ADR 0082](docs/adr/0082-selection-bound-youtube-caption-import.md) 与
   [ADR 0083](docs/adr/0083-managed-youtube-oauth.md)。
+- **经授权的 YouTube 教程媒体分析**：独立异步平面通过可信服务端 registry 核对精确 video ID、内容权利
+  依据和另一条 `youtube_written_approval` 平台下载批准；两条引用必须不同，字幕 OAuth 编辑权限不能替代
+  任一授权。配置完成后，固定运行 `download → probe → audio → asr → frames → ocr → segmentation` 全部七
+  阶段：yt-dlp 只负责授权视频获取，ffprobe/ffmpeg 负责媒体校验、16 kHz 单声道音频和证据帧，whisper.cpp
+  与 Tesseract 在本地生成 ASR、OCR 和快捷键候选，再进行确定性语义分段。媒体和派生产物进入私有 CAS，
+  文件输出与每任务 staging 都在执行期间受配额监控；启动预检和实际 job 使用同一份私有工具/模型快照，
+  公开结果只携带内容哈希引用、证据帧和这些显式配置入口/模型文件的快照 provenance；它不宣称覆盖解释器、
+  导入模块、动态库、内核或其他操作系统组件的传递依赖。MCP 提供
+  `operatingline.procedure.tutorial.media.capabilities`、`...jobs.create`、`...jobs.status`、
+  `...jobs.restart`；HTTP 提供 `GET /api/v1/procedure/tutorial/media/capabilities` 及
+  `POST /api/v1/procedure/tutorial/media/jobs`、`.../jobs/status`、`.../jobs/restart`。失败后不会复用任何部分
+  阶段；只有 `recovery_required` 的精确收据加重新确认的网络、下载、保留批准才能从 `download` 全量重启。
+  任一 registry、绝对路径、工具、模型、locale 或预检配置缺失/不安全时，capabilities 会明确返回
+  `unavailable`。分析 manifest 不会调用 Provider、生成或保存 ProcedureTree、创建 Proposal 或执行宿主。
+  见 [ADR 0084](docs/adr/0084-authorized-youtube-media-analysis.md)。
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
@@ -688,6 +704,37 @@ Data API 请求前刷新 access token；已发送请求返回 401 时只使缓�
 `OPERATINGLINE_YOUTUBE_OAUTH_ACCESS_TOKEN`；client ID 与短期 token 不能同时设置，否则启动会直接失败。
 未设置任一方式时相应工具保持可发现但返回 source unavailable。不要把真实 token 写入仓库、`.env` 模板或
 MCP/HTTP 请求。
+
+如需另行启用 YouTube 教程媒体分析，必须先取得内容权利依据和 YouTube 对下载行为的书面批准，并由 operator
+创建仅当前用户可读的可信 registry；字幕 OAuth 不能替代它。例如：
+
+```json
+{
+  "formatVersion": "1.0.0",
+  "authorizations": [
+    {
+      "authorizationId": "tutorial-authorization-0001",
+      "videoId": "abcdefghijk",
+      "rightsAuthorization": {
+        "basis": "rights_holder_permission",
+        "reference": "rights-record-0001"
+      },
+      "platformDownloadAuthorization": {
+        "basis": "youtube_written_approval",
+        "reference": "youtube-approval-0001"
+      },
+      "validFrom": "2026-08-19T00:00:00+08:00",
+      "expiresAt": "2026-08-20T00:00:00+08:00"
+    }
+  ]
+}
+```
+
+在 Unix 上把该文件设为 `0600`，再按 [.env.example](.env.example) 配置私有 CAS 根目录、registry、五个
+可执行文件、whisper 模型、Tesseract tessdata 目录、locale 和资源上限。所有路径必须是规范绝对路径；任一
+配置或预检失败时服务仍可启动，但媒体 capabilities 会 fail closed 为 `unavailable`。当前 Windows 运行时因
+无法用同一套 POSIX 所有权/权限合同证明快照私密性而明确报告 `unsupported_platform`。公开 MCP/HTTP 请求
+只传 registry 中的引用和近期确认时间，绝不传 registry 内容、凭据、cookie 或本地路径。
 
 一键配置当前机器上已安装的 Codex 和 Claude Code；缺少其中一个 CLI 时会跳过它：
 

@@ -392,8 +392,36 @@ Proposal 或执行宿主。官方字幕下载需要 OAuth 身份具备目标视�
 器；当前也不自动选轨。OAuth scope 固定为 `youtube.force-ssl`。Consent screen 为 Testing 的 Google 项目
 可能产生七天后过期的 refresh token，此时 status 返回需重新授权，Runtime 也会 fail closed。
 
-当前仍没有视频媒体下载/语音转录/画面识别、向量/语义 RAG、流式
-Procedure 对话、可视化编辑器或训练导出。完整边界见
+独立的教程媒体分析平面不复用字幕 OAuth 权限。Operator 必须在服务端可信 registry 中预先绑定精确 video
+ID、内容权利依据，以及另一条 YouTube 书面下载批准；公开请求只提交对应的不同引用和三项副作用确认，不接收
+凭据、cookie、URL、argv 或文件路径。Registry 路径、CAS 根目录、yt-dlp、ffprobe、ffmpeg、whisper.cpp、
+whisper 模型、Tesseract 和 tessdata 目录都必须由 composition root 配置为规范绝对路径。Registry 必须是
+当前用户拥有、无符号链接/硬链接、且 group/other 无访问权限的私有普通文件；CAS 根目录也必须是当前用户
+拥有的私有目录。当前 Windows 平台因不能沿用相同的 POSIX 私有快照证明而 fail closed 为 unsupported。
+
+MCP `operatingline.procedure.tutorial.media.capabilities` 与 HTTP
+`GET /api/v1/procedure/tutorial/media/capabilities` 可在无副作用下读取可用性、locale、限制和完整阶段。
+配置安全且预检通过时，MCP `operatingline.procedure.tutorial.media.jobs.create`、`...jobs.status`、
+`...jobs.restart` 分别对应 HTTP `POST /api/v1/procedure/tutorial/media/jobs`、`.../jobs/status`、
+`.../jobs/restart`。每个 job 固定执行 `download → probe → audio → asr → frames → ocr → segmentation`；
+yt-dlp 是唯一网络下载工具，其余探测、转码、ASR 与 OCR 都使用受限的本地进程合同。产物进入私有内容寻址
+存储，并以 `operatingline-media://sha256/<digest>`、证据帧、ASR/OCR/快捷键候选、确定性 semantic segments
+和工具/模型 provenance 返回。Composition root 先把配置的工具、whisper 模型和当前 locale 精确需要的
+Tesseract `.traineddata` 复制到私有只读运行时快照，再对快照预检；job 通过固定 `--tessdata-dir` 只使用这些
+快照，因而 provenance 绑定显式配置的 launcher、whisper 模型与 `.traineddata` 文件，而不是可被替换的原
+路径。该 provenance 不包含 launcher 解释器、动态库或操作系统组件的传递依赖；这些仍属于 operator 信任的
+本机运行时基座，包括导入模块与内核。它另行记录快照预检时的版本输出哈希，但不把该输出解释为传递依赖的
+不可变证明。下载、音频、帧、ASR 文件和每任务 staging 总量都在进程运行期间受配额监控，公开的最大分析
+窗口不会超过 16 kHz 单声道 PCM 上限。当前不提供 UI element recognition。
+
+Job 不是可续跑的分阶段 checkpoint。可恢复失败只返回 `retryFromStage: download` 和一次精确 recovery receipt；
+`jobs.restart` 要求重新确认网络、下载和保留副作用，清空阶段进度，从下载开始重跑全部七阶段，绝不复用先前
+部分阶段或产物。未配置、路径/权限不安全、工具/模型缺失或预检失败时，capabilities 明确保持 unavailable，
+不会降级成不完整分析。结果是媒体证据 manifest，不会调用 Provider、生成或存储 ProcedureTree、创建
+Proposal 或执行宿主。
+
+当前仍没有媒体分析到完整 ProcedureTree 的一体化生成、向量/语义 RAG、流式 Procedure 对话、可视化编辑器
+或训练导出。完整边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -403,8 +431,9 @@ Procedure 对话、可视化编辑器或训练导出。完整边界见
 [ADR 0079](../adr/0079-authorized-youtube-caption-track-discovery.md)、
 [ADR 0080](../adr/0080-explicit-youtube-caption-track-recommendation.md) 与
 [ADR 0081](../adr/0081-persisted-youtube-caption-track-selection.md)、
-[ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md) 与
-[ADR 0083](../adr/0083-managed-youtube-oauth.md)。
+[ADR 0082](../adr/0082-selection-bound-youtube-caption-import.md)、
+[ADR 0083](../adr/0083-managed-youtube-oauth.md) 与
+[ADR 0084](../adr/0084-authorized-youtube-media-analysis.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound

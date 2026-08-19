@@ -62,6 +62,11 @@ import {
   procedureAuthoringPromptRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
+  procedureTutorialMediaAnalysisRequestSchema,
+  procedureTutorialMediaCapabilitiesSchema,
+  procedureTutorialMediaJobStatusRequestSchema,
+  procedureTutorialMediaJobStatusSchema,
+  procedureTutorialMediaResumeRequestSchema,
   procedureTutorialYoutubeImportRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
@@ -174,6 +179,14 @@ import {
 } from './procedure-authoring-prompt.js';
 import { buildProcedureTutorialTranscriptPromptPacket } from './procedure-tutorial-transcript-import.js';
 import {
+  createProcedureTutorialMediaCoordinator,
+  procedureTutorialMediaCoordinatorErrorResponse,
+  procedureTutorialMediaCoordinatorHttpStatus,
+  procedureTutorialMediaEvidenceEventTypes,
+  type ProcedureTutorialMediaCoordinator,
+} from './procedure-tutorial-media-coordinator.js';
+import type { ProcedureTutorialMediaRuntime } from './procedure-tutorial-media-runtime.js';
+import {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,
   procedureTutorialYoutubeImportErrorResponse,
@@ -231,6 +244,7 @@ export interface StartRuntimeOptions {
   plannerProviders?: readonly PlannerProvider[];
   plannerProviderTimeoutMs?: number;
   youtubeCaptionSource?: ProcedureTutorialYoutubeCaptionSource;
+  tutorialMediaRuntime?: ProcedureTutorialMediaRuntime;
   companionLeases?: CompanionLeaseManagerOptions;
   port?: number;
 }
@@ -243,6 +257,43 @@ export interface RunningRuntime {
 }
 
 export const runtimeVersion = '0.1.0';
+
+function requestIdFromUnknown(input: unknown): string | null {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return null;
+  const requestId = z.uuid().safeParse((input as Record<string, unknown>)['requestId']);
+  return requestId.success ? requestId.data : null;
+}
+
+function tutorialMediaUnavailableResponse(
+  requestId: string | null,
+  runtime: ProcedureTutorialMediaRuntime,
+): {
+  readonly error: 'procedure_tutorial_media_unavailable';
+  readonly requestId: string | null;
+  readonly message: string;
+  readonly capabilities: ProcedureTutorialMediaRuntime['capabilities'];
+} {
+  return {
+    error: 'procedure_tutorial_media_unavailable',
+    requestId,
+    message: 'The server-side tutorial media analysis pipeline is unavailable.',
+    capabilities: runtime.capabilities,
+  };
+}
+
+function mcpError(response: object) {
+  return {
+    isError: true,
+    content: [{ type: 'text' as const, text: JSON.stringify(response) }],
+  };
+}
+
+function mcpStructuredResult<Value extends Record<string, unknown>>(value: Value) {
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify(value) }],
+    structuredContent: value,
+  };
+}
 
 const procedureRuntimeValidation = {
   procedureStructure: 'validated',
@@ -293,48 +344,100 @@ class ProcedureTreeValidationError extends Error {
 }
 
 export async function startRuntime(options: StartRuntimeOptions): Promise<RunningRuntime> {
-  if (options.accessToken.length < 16) {
-    throw new Error('OperatingLine access token must contain at least 16 characters');
-  }
-  if (options.databasePath.trim().length === 0) {
-    throw new Error('OperatingLine database path must not be empty');
-  }
-  const port = options.port ?? 0;
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new Error('OperatingLine port must be an integer between 0 and 65535');
-  }
-
-  const configuredAdapters = options.adapters ?? [];
-  const [adapterStatuses, adapterCatalogs] = await Promise.all([
-    Promise.all(configuredAdapters.map((adapter) => adapter.getStatus())),
-    Promise.all(
-      configuredAdapters.map((adapter) =>
-        adapter.getActionCatalog === undefined ? null : adapter.getActionCatalog(),
-      ),
-    ),
-  ]);
-  const adapters = adapterStatuses.map((adapter) => adapterStatusSchema.parse(adapter));
-  const adapterIds = new Set(adapters.map((adapter) => adapter.id));
-  if (adapterIds.size !== adapters.length) {
-    throw new Error('OperatingLine adapter ids must be unique');
-  }
-  const actionCatalogRegistry = createActionCatalogRegistry([
-    ...(options.actionCatalogs ?? []),
-    ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
-  ]);
-  const interactionCatalogRegistry = createInteractionCatalogRegistry(
-    options.interactionCatalogs ?? [],
+  const tutorialMediaRuntime =
+    options.tutorialMediaRuntime ??
+    ({
+      capabilities: {
+        availability: 'unavailable',
+        formatVersion: '1.0.0',
+        serviceId: 'operatingline.youtube_tutorial_media',
+        serviceVersion: runtimeVersion,
+        unavailableReasons: ['not_configured'],
+      },
+    } satisfies ProcedureTutorialMediaRuntime);
+  let tutorialMediaPipelineForCleanup = tutorialMediaRuntime.pipeline;
+  const {
+    port,
+    adapters,
     actionCatalogRegistry,
-  );
-  const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
-  const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
-  const database = openOperatingLineDatabase(options.databasePath);
-  const procedureLeafReplayCurrentStateCoordinator =
-    createProcedureLeafReplayCurrentStateCoordinator(database);
-  const guideRevisionRequestService = createGuideRevisionRequestService({
+    interactionCatalogRegistry,
+    companionLeaseManager,
+    plannerProviderRegistry,
     database,
-    actionCatalogRegistry,
-  });
+    procedureLeafReplayCurrentStateCoordinator,
+    guideRevisionRequestService,
+  } = await (async () => {
+    let databaseForCleanup: ReturnType<typeof openOperatingLineDatabase> | undefined;
+    let plannerProviderRegistryForCleanup:
+      ReturnType<typeof createPlannerProviderRegistry> | undefined;
+
+    try {
+      if (options.accessToken.length < 16) {
+        throw new Error('OperatingLine access token must contain at least 16 characters');
+      }
+      if (options.databasePath.trim().length === 0) {
+        throw new Error('OperatingLine database path must not be empty');
+      }
+      const port = options.port ?? 0;
+      if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+        throw new Error('OperatingLine port must be an integer between 0 and 65535');
+      }
+
+      const configuredAdapters = options.adapters ?? [];
+      const [adapterStatuses, adapterCatalogs] = await Promise.all([
+        Promise.all(configuredAdapters.map((adapter) => adapter.getStatus())),
+        Promise.all(
+          configuredAdapters.map((adapter) =>
+            adapter.getActionCatalog === undefined ? null : adapter.getActionCatalog(),
+          ),
+        ),
+      ]);
+      const adapters = adapterStatuses.map((adapter) => adapterStatusSchema.parse(adapter));
+      const adapterIds = new Set(adapters.map((adapter) => adapter.id));
+      if (adapterIds.size !== adapters.length) {
+        throw new Error('OperatingLine adapter ids must be unique');
+      }
+      const actionCatalogRegistry = createActionCatalogRegistry([
+        ...(options.actionCatalogs ?? []),
+        ...adapterCatalogs.filter((catalog): catalog is ActionCatalog => catalog !== null),
+      ]);
+      const interactionCatalogRegistry = createInteractionCatalogRegistry(
+        options.interactionCatalogs ?? [],
+        actionCatalogRegistry,
+      );
+      const companionLeaseManager = createCompanionLeaseManager(options.companionLeases);
+      const plannerProviderRegistry = createPlannerProviderRegistry(options.plannerProviders ?? []);
+      plannerProviderRegistryForCleanup = plannerProviderRegistry;
+      const database = openOperatingLineDatabase(options.databasePath);
+      databaseForCleanup = database;
+      const procedureLeafReplayCurrentStateCoordinator =
+        createProcedureLeafReplayCurrentStateCoordinator(database);
+      const guideRevisionRequestService = createGuideRevisionRequestService({
+        database,
+        actionCatalogRegistry,
+      });
+
+      return {
+        port,
+        adapters,
+        actionCatalogRegistry,
+        interactionCatalogRegistry,
+        companionLeaseManager,
+        plannerProviderRegistry,
+        database,
+        procedureLeafReplayCurrentStateCoordinator,
+        guideRevisionRequestService,
+      };
+    } catch (error) {
+      const tutorialMediaPipeline = tutorialMediaPipelineForCleanup;
+      tutorialMediaPipelineForCleanup = undefined;
+      return throwAfterCleanup(error, [
+        () => tutorialMediaPipeline?.close(),
+        () => plannerProviderRegistryForCleanup?.close(),
+        () => databaseForCleanup?.close(),
+      ]);
+    }
+  })();
   let app: ReturnType<typeof createMcpFastifyApp> | undefined;
   let mcpHandler: ReturnType<typeof createMcpHandler> | undefined;
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
@@ -344,6 +447,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ProcedureTutorialYoutubeImportCoordinator | undefined;
   let procedureTutorialYoutubeTrackSelectionCoordinator:
     ProcedureTutorialYoutubeTrackSelectionCoordinator | undefined;
+  let procedureTutorialMediaCoordinator: ProcedureTutorialMediaCoordinator | undefined;
   let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
   let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
@@ -353,6 +457,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => {
       companionDialogueRunCoordinator?.beginClose();
       procedureTutorialYoutubeImportCoordinator?.beginClose();
+      procedureTutorialMediaCoordinator?.beginClose();
     },
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
@@ -364,6 +469,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     },
     () => procedureTutorialYoutubeImportCoordinator?.close(),
+    () => procedureTutorialMediaCoordinator?.close(),
+    () => tutorialMediaPipelineForCleanup?.close(),
     () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
     () => companionDialogueRunCoordinator?.close(),
@@ -421,7 +528,6 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
       })),
     });
-
     const listKnownCompanionStates = (): CompanionStateReport[] =>
       database
         .listLatestCompanionStates()
@@ -1214,6 +1320,23 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureTutorialYoutubeEvents = database.listExecutionEventsByTypes(
       procedureTutorialYoutubeEvidenceEventTypes,
     );
+    if (
+      tutorialMediaRuntime.capabilities.availability === 'available' &&
+      tutorialMediaRuntime.pipeline !== undefined
+    ) {
+      procedureTutorialMediaCoordinator = createProcedureTutorialMediaCoordinator({
+        pipeline: tutorialMediaRuntime.pipeline,
+        existingEvents: database.listExecutionEventsByTypes(
+          procedureTutorialMediaEvidenceEventTypes,
+        ),
+        appendEvent: (event) => database.appendEvent(event),
+        maximumAnalysisWindowMs: tutorialMediaRuntime.capabilities.limits.maxAnalysisWindowMs,
+        maximumConcurrentJobs: tutorialMediaRuntime.maximumConcurrentJobs,
+        supportedLocales: tutorialMediaRuntime.capabilities.supportedLocales,
+      });
+      tutorialMediaPipelineForCleanup = undefined;
+      await procedureTutorialMediaCoordinator.ready();
+    }
     procedureTutorialYoutubeImportCoordinator = createProcedureTutorialYoutubeImportCoordinator({
       ...(options.youtubeCaptionSource === undefined
         ? {}
@@ -1860,6 +1983,121 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return {
             content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
           };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.capabilities',
+        {
+          description:
+            'Report whether the server-side authorized YouTube media analysis pipeline is configured, including its deterministic stages, supported locales, limits, and evidence features. This performs no download or analysis.',
+          inputSchema: z.strictObject({}),
+          outputSchema: procedureTutorialMediaCapabilitiesSchema,
+        },
+        async () => ({
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(tutorialMediaRuntime.capabilities),
+            },
+          ],
+          structuredContent: tutorialMediaRuntime.capabilities,
+        }),
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.jobs.create',
+        {
+          description:
+            'Start the complete authorized YouTube tutorial media evidence pipeline. Authorization references must already exist in the trusted server-side registry; this request never accepts credentials, executable paths, model paths, or arbitrary download URLs.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaAnalysisRequestSchema),
+          outputSchema: procedureTutorialMediaJobStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_analysis_request',
+              requestId,
+              message: 'Tutorial media analysis request violates the strict public contract.',
+            });
+          }
+          if (procedureTutorialMediaCoordinator === undefined) {
+            return mcpError(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+          }
+          try {
+            const job = procedureTutorialMediaCoordinator.create(parsedRequest.data);
+            return mcpStructuredResult(job);
+          } catch (error) {
+            return mcpError(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.jobs.status',
+        {
+          description:
+            'Read the latest persisted state of one tutorial media analysis job. Both the original request id and server-generated job id are required.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaJobStatusRequestSchema),
+          outputSchema: procedureTutorialMediaJobStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialMediaJobStatusRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_job_status_request',
+              requestId,
+              message: 'Tutorial media job status request violates the strict public contract.',
+            });
+          }
+          if (procedureTutorialMediaCoordinator === undefined) {
+            return mcpError(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaCoordinator.status(
+                parsedRequest.data.requestId,
+                parsedRequest.data.jobId,
+              ),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.jobs.restart',
+        {
+          description:
+            'Explicitly restart a recoverable tutorial media job from the download stage using the exact server recovery receipt and renewed network, download, and retention approvals. Partial artifact reuse is forbidden.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaResumeRequestSchema),
+          outputSchema: procedureTutorialMediaJobStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureTutorialMediaResumeRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_restart_request',
+              requestId,
+              message: 'Tutorial media restart request violates the strict public contract.',
+            });
+          }
+          if (procedureTutorialMediaCoordinator === undefined) {
+            return mcpError(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaCoordinator.resume(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+          }
         },
       );
 
@@ -3591,6 +3829,84 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.get('/api/v1/procedure/tutorial/media/capabilities', async () =>
+      procedureTutorialMediaCapabilitiesSchema.parse(tutorialMediaRuntime.capabilities),
+    );
+    runtimeApp.post('/api/v1/procedure/tutorial/media/jobs', async (request, reply) => {
+      const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.safeParse(request.body);
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_media_analysis_request',
+          requestId,
+          message: 'Tutorial media analysis request violates the strict public contract.',
+        });
+      }
+      if (procedureTutorialMediaCoordinator === undefined) {
+        return reply
+          .code(503)
+          .send(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+      }
+      try {
+        const job = procedureTutorialMediaCoordinator.create(parsedRequest.data);
+        return reply
+          .code(job.status === 'accepted' || job.status === 'running' ? 202 : 200)
+          .send(job);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialMediaCoordinatorHttpStatus(error))
+          .send(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/media/jobs/status', async (request, reply) => {
+      const parsedRequest = procedureTutorialMediaJobStatusRequestSchema.safeParse(request.body);
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_media_job_status_request',
+          requestId,
+          message: 'Tutorial media job status request violates the strict public contract.',
+        });
+      }
+      if (procedureTutorialMediaCoordinator === undefined) {
+        return reply
+          .code(503)
+          .send(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+      }
+      try {
+        return procedureTutorialMediaCoordinator.status(
+          parsedRequest.data.requestId,
+          parsedRequest.data.jobId,
+        );
+      } catch (error) {
+        return reply
+          .code(procedureTutorialMediaCoordinatorHttpStatus(error))
+          .send(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post('/api/v1/procedure/tutorial/media/jobs/restart', async (request, reply) => {
+      const parsedRequest = procedureTutorialMediaResumeRequestSchema.safeParse(request.body);
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_media_restart_request',
+          requestId,
+          message: 'Tutorial media restart request violates the strict public contract.',
+        });
+      }
+      if (procedureTutorialMediaCoordinator === undefined) {
+        return reply
+          .code(503)
+          .send(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+      }
+      try {
+        return reply.code(202).send(procedureTutorialMediaCoordinator.resume(parsedRequest.data));
+      } catch (error) {
+        return reply
+          .code(procedureTutorialMediaCoordinatorHttpStatus(error))
+          .send(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+      }
+    });
     runtimeApp.post('/api/v1/procedure/tutorial/import', async (request, reply) => {
       const parsedRequest = procedureTutorialTranscriptImportRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -4675,6 +4991,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           options.youtubeCaptionSource === undefined
             ? null
             : { id: options.youtubeCaptionSource.id, available: true },
+        tutorialMedia: tutorialMediaRuntime.capabilities,
         mcpEndpoint,
       },
     });
@@ -4760,6 +5077,23 @@ export {
   parseProcedureTutorialTranscriptImport,
   type ParsedProcedureTutorialTranscriptImport,
 } from './procedure-tutorial-transcript-import.js';
+export {
+  createProcedureTutorialMediaCoordinator,
+  procedureTutorialMediaCoordinatorErrorResponse,
+  procedureTutorialMediaCoordinatorHttpStatus,
+  procedureTutorialMediaEvidenceEventTypes,
+  ProcedureTutorialMediaCoordinatorError,
+  type ProcedureTutorialMediaCoordinator,
+  type ProcedureTutorialMediaCoordinatorErrorCode,
+  type ProcedureTutorialMediaCoordinatorOptions,
+} from './procedure-tutorial-media-coordinator.js';
+export {
+  createProcedureTutorialMediaRuntime,
+  createProcedureTutorialMediaRuntimeFromEnvironment,
+  type ProcedureTutorialMediaRuntime,
+  type ProcedureTutorialMediaRuntimeConfiguration,
+  type ProcedureTutorialMediaRuntimeEnvironment,
+} from './procedure-tutorial-media-runtime.js';
 export {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,

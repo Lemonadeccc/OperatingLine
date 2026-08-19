@@ -9,6 +9,7 @@ import {
 } from '@operatingline/blender-action-catalog';
 
 import { startRuntime } from './index.js';
+import { createProcedureTutorialMediaRuntimeFromEnvironment } from './procedure-tutorial-media-runtime.js';
 import { createYouTubeDataApiCaptionSource } from './youtube-caption-source.js';
 import { createDefaultYouTubeOAuthCredentialStore } from './youtube-oauth-credential-store.js';
 import { createYouTubeOAuthAccessTokenProvider } from './youtube-oauth.js';
@@ -44,6 +45,7 @@ const youtubeCaptionSource =
       ? undefined
       : createYouTubeDataApiCaptionSource({ accessToken: youtubeAccessToken })
     : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
+const tutorialMediaRuntime = await createProcedureTutorialMediaRuntimeFromEnvironment(process.env);
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const runtime = await startRuntime({
@@ -53,6 +55,7 @@ const runtime = await startRuntime({
   actionCatalogs: blenderActionCatalogs,
   interactionCatalogs: blenderInteractionCatalogs,
   ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
+  tutorialMediaRuntime,
   companionLeases: { allowLegacyCompanions },
   port: Number(process.env.OPERATINGLINE_PORT ?? 0),
 });
@@ -61,6 +64,7 @@ logger.info(
   {
     mcpEndpoint: runtime.mcpEndpoint,
     youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
+    tutorialMediaAvailability: tutorialMediaRuntime.capabilities.availability,
   },
   'runtime ready',
 );

@@ -10,6 +10,7 @@ import {
 import { createOpenAIResponsesPlannerProvider } from '@operatingline/openai-planner-provider';
 import {
   createDefaultYouTubeOAuthCredentialStore,
+  createProcedureTutorialMediaRuntimeFromEnvironment,
   createYouTubeDataApiCaptionSource,
   createYouTubeOAuthAccessTokenProvider,
   startRuntime,
@@ -38,6 +39,7 @@ const youtubeCaptionSource =
       ? undefined
       : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken })
     : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
+const tutorialMediaRuntime = await createProcedureTutorialMediaRuntimeFromEnvironment(process.env);
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,
@@ -46,6 +48,7 @@ const runtime = await startRuntime({
   interactionCatalogs: blenderInteractionCatalogs,
   plannerProviders: [plannerProvider],
   ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
+  tutorialMediaRuntime,
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,
 });
@@ -56,6 +59,7 @@ logger.info(
     plannerProviderId: plannerProvider.descriptor.id,
     plannerProviderVersion: plannerProvider.descriptor.version,
     youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
+    tutorialMediaAvailability: tutorialMediaRuntime.capabilities.availability,
   },
   'opt-in OpenAI runtime ready',
 );

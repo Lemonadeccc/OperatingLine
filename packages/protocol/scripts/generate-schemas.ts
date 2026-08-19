@@ -63,6 +63,12 @@ import {
   procedureTutorialTranscriptImportRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialYoutubeImportRequestSchema,
+  procedureTutorialMediaAnalysisRequestSchema,
+  procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaCapabilitiesSchema,
+  procedureTutorialMediaJobStatusSchema,
+  procedureTutorialMediaJobStatusRequestSchema,
+  procedureTutorialMediaResumeRequestSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationRequestSchema,
@@ -421,6 +427,36 @@ const schemas = [
     procedureTutorialYoutubeImportRequestSchema,
   ],
   [
+    'procedure-tutorial-media-analysis-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-analysis-request.json',
+    procedureTutorialMediaAnalysisRequestSchema,
+  ],
+  [
+    'procedure-tutorial-media-analysis-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-analysis-result.json',
+    procedureTutorialMediaAnalysisResultSchema,
+  ],
+  [
+    'procedure-tutorial-media-job-status.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-job-status.json',
+    procedureTutorialMediaJobStatusSchema,
+  ],
+  [
+    'procedure-tutorial-media-job-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-job-status-request.json',
+    procedureTutorialMediaJobStatusRequestSchema,
+  ],
+  [
+    'procedure-tutorial-media-resume-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-resume-request.json',
+    procedureTutorialMediaResumeRequestSchema,
+  ],
+  [
+    'procedure-tutorial-media-capabilities.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-capabilities.json',
+    procedureTutorialMediaCapabilitiesSchema,
+  ],
+  [
     'procedure-tutorial-youtube-track-list-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-list-request.json',
     procedureTutorialYoutubeTrackListRequestSchema,
@@ -637,8 +673,33 @@ const schemas = [
   ],
 ] as const;
 
+function hardenDraft7Tuples(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) hardenDraft7Tuples(item);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record['items'])) {
+    const length = record['items'].length;
+    if (length === 0) {
+      record['items'] = {};
+      delete record['additionalItems'];
+    } else {
+      record['additionalItems'] = false;
+    }
+    record['minItems'] = length;
+    record['maxItems'] = length;
+  }
+  for (const nested of Object.values(record)) hardenDraft7Tuples(nested);
+}
+
 for (const [filename, id, schema] of schemas) {
-  const jsonSchema = z.toJSONSchema(schema, { target: 'draft-2020-12' });
+  const mediaSchema = filename.startsWith('procedure-tutorial-media-');
+  const jsonSchema = z.toJSONSchema(schema, {
+    target: mediaSchema ? 'draft-7' : 'draft-2020-12',
+  });
+  if (mediaSchema) hardenDraft7Tuples(jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

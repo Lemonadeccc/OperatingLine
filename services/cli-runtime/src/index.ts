@@ -13,6 +13,7 @@ import {
 } from '@operatingline/cli-planner-provider';
 import {
   createDefaultYouTubeOAuthCredentialStore,
+  createProcedureTutorialMediaRuntimeFromEnvironment,
   createYouTubeDataApiCaptionSource,
   createYouTubeOAuthAccessTokenProvider,
   startRuntime,
@@ -41,6 +42,7 @@ const youtubeCaptionSource =
       ? undefined
       : createYouTubeDataApiCaptionSource({ accessToken: config.youtubeAccessToken })
     : createYouTubeDataApiCaptionSource({ accessTokenProvider: youtubeOAuthAccessTokenProvider });
+const tutorialMediaRuntime = await createProcedureTutorialMediaRuntimeFromEnvironment(process.env);
 const runtime = await startRuntime({
   databasePath: config.databasePath,
   accessToken: config.accessToken,
@@ -50,6 +52,7 @@ const runtime = await startRuntime({
   plannerProviders,
   plannerProviderTimeoutMs: config.plannerProviderTimeoutMs,
   ...(youtubeCaptionSource === undefined ? {} : { youtubeCaptionSource }),
+  tutorialMediaRuntime,
   companionLeases: { allowLegacyCompanions: config.allowLegacyCompanions },
   port: config.port,
 });
@@ -63,6 +66,7 @@ logger.info(
       availability: provider.descriptor.availability,
     })),
     youtubeCaptionSourceConfigured: youtubeCaptionSource !== undefined,
+    tutorialMediaAvailability: tutorialMediaRuntime.capabilities.availability,
   },
   'local AI client runtime ready',
 );
