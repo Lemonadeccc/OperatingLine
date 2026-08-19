@@ -6,10 +6,19 @@ import {
   plannerGenerationErrorCodeSchema,
   procedureRefinementConfidenceThreshold,
   procedureRefinementCreateRequestSchema,
+  procedureRefinementDialogueCompletedEventSchema,
+  procedureRefinementDialogueFailedEventSchema,
   procedureRefinementDialogueProviderResultSchema,
+  procedureRefinementDialogueRequestedEventSchema,
+  procedureRefinementGenerationCompletedEventSchema,
+  procedureRefinementGenerationFailedEventSchema,
+  procedureRefinementGenerationRequestedEventSchema,
   procedureRefinementLocalityReportSchema,
   procedureRefinementReviewRequestSchema,
+  procedureRefinementReviewedEventSchema,
   procedureRefinementRunStatusSchema,
+  procedureRefinementSemanticContextBindingSchema,
+  procedureRefinementSemanticContextReceiptRequestSchema,
   procedureRefinementScopeSchema,
   type ProcedureTree,
 } from '@operatingline/protocol';
@@ -91,6 +100,13 @@ const providerDisclosure = {
   providerDescriptor,
   dialogueRuntimeTreatment: runtimeTreatment('procedure_refinement_dialogue'),
   refinementRuntimeTreatment: runtimeTreatment('procedure_refinement'),
+  inputPolicy: {
+    exactStoredBaseTreeSent: true,
+    exactSemanticRetrievalResultSent: true,
+    instructionSent: true,
+    dialogueHistorySent: true,
+    credentialsIncludedInTaskPayload: false,
+  },
 } as const;
 
 const rules = {
@@ -196,6 +212,21 @@ function localityReport() {
   } as const;
 }
 
+function providerResult(runId: string, refinementRequestId: string) {
+  const target = targetTree();
+  return {
+    formatVersion: '1.0.0',
+    runId,
+    refinementRequestId,
+    treeId: target.id,
+    targetRevision: target.revision,
+    packetContentSha256: binding.refinementPacketContentSha256,
+    providerOutputContentSha256: binding.providerOutputContentSha256,
+    targetTreeContentSha256: binding.targetTreeContentSha256,
+    targetTree: target,
+  } as const;
+}
+
 describe('procedure refinement protocol', () => {
   it('exposes a distinct safe capability error for unsupported refinement providers', () => {
     expect(
@@ -207,9 +238,27 @@ describe('procedure refinement protocol', () => {
     const request = createRequest();
     expect(procedureRefinementCreateRequestSchema.parse(request)).toEqual(request);
     expect(
+      procedureRefinementSemanticContextReceiptRequestSchema.parse({
+        formatVersion: '1.0.0',
+        requestId: request.semanticContext.requestId,
+      }),
+    ).toEqual({
+      formatVersion: '1.0.0',
+      requestId: request.semanticContext.requestId,
+    });
+    expect(procedureRefinementSemanticContextBindingSchema.parse(request.semanticContext)).toEqual(
+      request.semanticContext,
+    );
+    expect(
       procedureRefinementCreateRequestSchema.safeParse({
         ...request,
         refinementRequestId: request.dialogueRequestId,
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureRefinementCreateRequestSchema.safeParse({
+        ...request,
+        dialogueRequestId: request.semanticContext.requestId,
       }).success,
     ).toBe(false);
     expect(
@@ -262,6 +311,12 @@ describe('procedure refinement protocol', () => {
       procedureRefinementDialogueProviderResultSchema.safeParse({
         assistantMessage: 'I can answer without changing the tree.',
         decision: { kind: 'answer', confidence: 0.79, threshold: 0.8 },
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureRefinementDialogueProviderResultSchema.safeParse({
+        assistantMessage: 'I will conservatively avoid changing the tree.',
+        decision: { kind: 'answer', confidence: null, threshold: 0.8 },
       }).success,
     ).toBe(true);
     expect(
@@ -356,6 +411,153 @@ describe('procedure refinement protocol', () => {
     ).toBe(true);
   });
 
+  it('persists strict dialogue and generation evidence without retaining invalid raw output', () => {
+    const request = createRequest();
+    const provider = providerDescriptor;
+    const dialogueScope = {
+      formatVersion: '1.0.0',
+      operation: 'procedure_refinement_dialogue',
+      runId: request.runId,
+      requestId: request.dialogueRequestId,
+      requestFingerprint: sha('1'),
+      providerId: provider.id,
+      providerVersion: provider.version,
+      packetContentSha256: sha('2'),
+      treatmentContentSha256: providerDisclosure.dialogueRuntimeTreatment.treatmentContentSha256,
+    } as const;
+    expect(
+      procedureRefinementDialogueRequestedEventSchema.safeParse({
+        ...dialogueScope,
+        occurredAt: '2026-08-19T08:01:01Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureRefinementDialogueRequestedEventSchema.safeParse({
+        ...dialogueScope,
+        requestId: request.runId,
+        occurredAt: '2026-08-19T08:01:01Z',
+      }).success,
+    ).toBe(false);
+    const dialogueResult = {
+      assistantMessage: 'I prepared a local refinement.',
+      decision: { kind: 'refine', confidence: 0.9, threshold: 0.8 },
+    } as const;
+    expect(
+      procedureRefinementDialogueCompletedEventSchema.safeParse({
+        ...dialogueScope,
+        resultContentSha256: sha('3'),
+        result: dialogueResult,
+        durationMs: 120,
+        occurredAt: '2026-08-19T08:01:02Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureRefinementDialogueFailedEventSchema.safeParse({
+        ...dialogueScope,
+        error: { code: 'provider_call_failed', message: 'Safe failure.', retryable: true },
+        durationMs: 120,
+        occurredAt: '2026-08-19T08:01:02Z',
+      }).success,
+    ).toBe(true);
+
+    const generationScope = {
+      ...dialogueScope,
+      operation: 'procedure_refinement',
+      requestId: request.refinementRequestId,
+      packetContentSha256: binding.refinementPacketContentSha256,
+      treatmentContentSha256: providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+    } as const;
+    expect(
+      procedureRefinementGenerationRequestedEventSchema.safeParse({
+        ...generationScope,
+        occurredAt: '2026-08-19T08:01:03Z',
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureRefinementGenerationCompletedEventSchema.safeParse({
+        ...generationScope,
+        outcome: {
+          kind: 'valid',
+          providerResult: providerResult(request.runId, request.refinementRequestId),
+        },
+        durationMs: 240,
+        occurredAt: '2026-08-19T08:01:04Z',
+      }).success,
+    ).toBe(true);
+    const invalid = {
+      ...generationScope,
+      outcome: {
+        kind: 'invalid',
+        providerOutputContentSha256: sha('9'),
+        safeMessage: 'Provider output did not satisfy the Procedure contract.',
+      },
+      durationMs: 240,
+      occurredAt: '2026-08-19T08:01:04Z',
+    } as const;
+    expect(procedureRefinementGenerationCompletedEventSchema.safeParse(invalid).success).toBe(true);
+    expect(
+      procedureRefinementGenerationCompletedEventSchema.safeParse({
+        ...invalid,
+        outcome: { ...invalid.outcome, rawProviderPayload: { secret: 'must not persist' } },
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureRefinementGenerationFailedEventSchema.safeParse({
+        ...generationScope,
+        error: { code: 'provider_call_failed', message: 'Safe failure.', retryable: false },
+        durationMs: 240,
+        occurredAt: '2026-08-19T08:01:04Z',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('binds reviewed evidence to the complete request, preview, and final side effect', () => {
+    const request = createRequest();
+    const reviewRequest = {
+      formatVersion: '1.0.0',
+      runId: request.runId,
+      reviewId: randomUUID(),
+      binding,
+      decision: {
+        kind: 'store',
+        confirmations: {
+          exactBaseTreeReviewed: true,
+          exactTargetTreeReviewed: true,
+          exactScopeReviewed: true,
+          exactSemanticContextReviewed: true,
+          exactProviderOutputReviewed: true,
+          exactLocalityReportReviewed: true,
+          noHostExecutionAcknowledged: true,
+        },
+      },
+      reviewedAt: '2026-08-19T08:04:00Z',
+    } as const;
+    const event = {
+      formatVersion: '1.0.0',
+      operation: 'procedure_refinement_review',
+      runId: request.runId,
+      reviewId: reviewRequest.reviewId,
+      requestFingerprint: sha('0'),
+      providerId: providerDescriptor.id,
+      providerVersion: providerDescriptor.version,
+      packetContentSha256: binding.refinementPacketContentSha256,
+      treatmentContentSha256: providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+      previewBinding: binding,
+      reviewRequest,
+      finalStatus: 'completed',
+      procedureStored: true,
+      durationMs: 10,
+      occurredAt: '2026-08-19T08:04:01Z',
+    } as const;
+    expect(procedureRefinementReviewedEventSchema.safeParse(event).success).toBe(true);
+    expect(
+      procedureRefinementReviewedEventSchema.safeParse({
+        ...event,
+        finalStatus: 'discarded',
+      }).success,
+    ).toBe(false);
+  });
+
   it('exposes cumulative streaming state and stores only a reviewed completed target', () => {
     const request = createRequest();
     const queued = {
@@ -396,7 +598,13 @@ describe('procedure refinement protocol', () => {
     ).toBe(true);
 
     const target = targetTree();
-    const preview = { targetTree: target, localityReport: localityReport(), binding };
+    const preview = {
+      targetTree: target,
+      providerResult: providerResult(request.runId, request.refinementRequestId),
+      localityReport: localityReport(),
+      binding,
+      reviewReadyAt: '2026-08-19T08:02:59Z',
+    };
     const awaiting = {
       ...queued,
       status: 'awaiting_review',
@@ -406,6 +614,33 @@ describe('procedure refinement protocol', () => {
       preview,
     } as const;
     expect(procedureRefinementRunStatusSchema.safeParse(awaiting).success).toBe(true);
+    const rawProviderTarget = structuredClone(preview.providerResult.targetTree);
+    rawProviderTarget.nodes.find((node) => node.id === leafId)!.title += ' before sanitization';
+    expect(
+      procedureRefinementRunStatusSchema.safeParse({
+        ...awaiting,
+        preview: {
+          ...preview,
+          providerResult: {
+            ...preview.providerResult,
+            targetTree: rawProviderTarget,
+            targetTreeContentSha256: sha('f'),
+          },
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      procedureRefinementRunStatusSchema.safeParse({
+        ...awaiting,
+        preview: {
+          ...preview,
+          providerResult: {
+            ...preview.providerResult,
+            packetContentSha256: sha('0'),
+          },
+        },
+      }).success,
+    ).toBe(false);
     expect(
       procedureRefinementRunStatusSchema.safeParse({
         ...awaiting,

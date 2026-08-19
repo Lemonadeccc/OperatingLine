@@ -3,8 +3,18 @@ import { resolve } from 'node:path';
 
 import {
   procedureRefinementCreateRequestSchema,
+  procedureRefinementDialogueCompletedEventSchema,
+  procedureRefinementDialogueFailedEventSchema,
   procedureRefinementDialogueProviderResultSchema,
+  procedureRefinementDialogueRequestedEventSchema,
+  procedureRefinementGenerationCompletedEventSchema,
+  procedureRefinementGenerationFailedEventSchema,
+  procedureRefinementGenerationRequestedEventSchema,
   procedureRefinementReviewRequestSchema,
+  procedureRefinementReviewedEventSchema,
+  procedureRefinementRunStatusSchema,
+  procedureRefinementSemanticContextBindingSchema,
+  procedureRefinementSemanticContextReceiptRequestSchema,
   procedureRefinementScopeSchema,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -107,6 +117,13 @@ const createRequest = {
     providerDescriptor,
     dialogueRuntimeTreatment: runtimeTreatment('procedure_refinement_dialogue'),
     refinementRuntimeTreatment: runtimeTreatment('procedure_refinement'),
+    inputPolicy: {
+      exactStoredBaseTreeSent: true,
+      exactSemanticRetrievalResultSent: true,
+      instructionSent: true,
+      dialogueHistorySent: true,
+      credentialsIncludedInTaskPayload: false,
+    },
   },
   authorization: {
     explicitlyConfirmedByUser: true,
@@ -145,6 +162,34 @@ const scope = {
   },
 } as const;
 
+const queuedStatus = {
+  formatVersion: '1.0.0',
+  runId: createRequest.runId,
+  dialogueRequestId: createRequest.dialogueRequestId,
+  refinementRequestId: createRequest.refinementRequestId,
+  baseTree: createRequest.baseTree,
+  targetRevision: createRequest.targetRevision,
+  scope,
+  semanticContext: createRequest.semanticContext,
+  providerDisclosure: createRequest.providerDisclosure,
+  status: 'queued',
+  terminal: false,
+  assistantMessage: '',
+  assistantMessageRevision: 0,
+  semanticDecision: null,
+  preview: null,
+  review: null,
+  storedTree: null,
+  needsRevision: null,
+  error: null,
+  sideEffects: {
+    procedureStored: false,
+    proposalCreated: false,
+    hostExecutionStarted: false,
+  },
+  updatedAt: '2026-08-19T08:02:00Z',
+} as const;
+
 const binding = {
   runRequestContentSha256: sha('1'),
   baseTreeContentSha256: sha('2'),
@@ -158,6 +203,94 @@ const binding = {
 } as const;
 
 describe('public Procedure refinement JSON Schemas', () => {
+  it('publishes the strict semantic completion receipt handoff', async () => {
+    const requestCases = [
+      {
+        value: {
+          formatVersion: '1.0.0',
+          requestId: createRequest.semanticContext.requestId,
+        },
+        accepted: true,
+      },
+      {
+        value: {
+          formatVersion: '1.0.0',
+          requestId: createRequest.semanticContext.requestId,
+          unexpected: true,
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of requestCases) {
+      expect(
+        procedureRefinementSemanticContextReceiptRequestSchema.safeParse(contractCase.value)
+          .success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-refinement-semantic-context-receipt-request.schema.json'),
+      requestCases,
+    );
+
+    const receiptCases = [
+      { value: createRequest.semanticContext, accepted: true },
+      {
+        value: { ...createRequest.semanticContext, completedEventContentSha256: 'invalid' },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of receiptCases) {
+      expect(
+        procedureRefinementSemanticContextBindingSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-refinement-semantic-context-receipt.schema.json'),
+      receiptCases,
+    );
+  });
+
+  it('publishes core run status state-machine relations', async () => {
+    const cases = [
+      { value: queuedStatus, accepted: true },
+      { value: { ...queuedStatus, terminal: true }, accepted: false },
+      {
+        value: {
+          ...queuedStatus,
+          status: 'completed',
+          terminal: true,
+          semanticDecision: { kind: 'refine', confidence: 0.8, threshold: 0.8 },
+          sideEffects: { ...queuedStatus.sideEffects, procedureStored: true },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...queuedStatus,
+          status: 'failed',
+          terminal: true,
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...queuedStatus,
+          sideEffects: { ...queuedStatus.sideEffects, procedureStored: true },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of cases) {
+      expect(procedureRefinementRunStatusSchema.safeParse(contractCase.value).success).toBe(
+        contractCase.accepted,
+      );
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-refinement-run-status.schema.json'),
+      cases,
+    );
+  });
+
   it('publishes a strict normalized scope contract', async () => {
     const cases = [
       { value: scope, accepted: true },
@@ -303,6 +436,157 @@ describe('public Procedure refinement JSON Schemas', () => {
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-refinement-review-request.schema.json'),
       cases,
+    );
+  });
+
+  it('publishes a safe discriminated generation outcome without raw provider payload', async () => {
+    const event = {
+      formatVersion: '1.0.0',
+      operation: 'procedure_refinement',
+      runId: createRequest.runId,
+      requestId: createRequest.refinementRequestId,
+      requestFingerprint: sha('a'),
+      providerId: providerDescriptor.id,
+      providerVersion: providerDescriptor.version,
+      packetContentSha256: binding.refinementPacketContentSha256,
+      treatmentContentSha256:
+        createRequest.providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+      outcome: {
+        kind: 'invalid',
+        providerOutputContentSha256: binding.providerOutputContentSha256,
+        safeMessage: 'Provider output did not satisfy the Procedure contract.',
+      },
+      durationMs: 5,
+      occurredAt: '2026-08-19T08:03:00Z',
+    } as const;
+    const cases = [
+      { value: event, accepted: true },
+      {
+        value: {
+          ...event,
+          outcome: { ...event.outcome, rawProviderPayload: { credential: 'forbidden' } },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of cases) {
+      expect(
+        procedureRefinementGenerationCompletedEventSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    }
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-refinement-generation-completed-event.schema.json'),
+      cases,
+    );
+  });
+
+  it('publishes strict requested, completed, and failed provider evidence envelopes', async () => {
+    const dialogueScope = {
+      formatVersion: '1.0.0',
+      operation: 'procedure_refinement_dialogue',
+      runId: createRequest.runId,
+      requestId: createRequest.dialogueRequestId,
+      requestFingerprint: sha('0'),
+      providerId: providerDescriptor.id,
+      providerVersion: providerDescriptor.version,
+      packetContentSha256: sha('1'),
+      treatmentContentSha256:
+        createRequest.providerDisclosure.dialogueRuntimeTreatment.treatmentContentSha256,
+    } as const;
+    const generationScope = {
+      ...dialogueScope,
+      operation: 'procedure_refinement',
+      requestId: createRequest.refinementRequestId,
+      packetContentSha256: binding.refinementPacketContentSha256,
+      treatmentContentSha256:
+        createRequest.providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+    } as const;
+    const cases = [
+      {
+        runtime: procedureRefinementDialogueRequestedEventSchema,
+        filename: 'procedure-refinement-dialogue-requested-event.schema.json',
+        value: { ...dialogueScope, occurredAt: '2026-08-19T08:02:01Z' },
+      },
+      {
+        runtime: procedureRefinementDialogueCompletedEventSchema,
+        filename: 'procedure-refinement-dialogue-completed-event.schema.json',
+        value: {
+          ...dialogueScope,
+          resultContentSha256: sha('2'),
+          result: {
+            assistantMessage: 'A refinement is appropriate.',
+            decision: { kind: 'refine', confidence: 0.9, threshold: 0.8 },
+          },
+          durationMs: 5,
+          occurredAt: '2026-08-19T08:02:02Z',
+        },
+      },
+      {
+        runtime: procedureRefinementDialogueFailedEventSchema,
+        filename: 'procedure-refinement-dialogue-failed-event.schema.json',
+        value: {
+          ...dialogueScope,
+          error: { code: 'provider_call_failed', message: 'Safe failure.', retryable: true },
+          durationMs: 5,
+          occurredAt: '2026-08-19T08:02:02Z',
+        },
+      },
+      {
+        runtime: procedureRefinementGenerationRequestedEventSchema,
+        filename: 'procedure-refinement-generation-requested-event.schema.json',
+        value: { ...generationScope, occurredAt: '2026-08-19T08:02:03Z' },
+      },
+      {
+        runtime: procedureRefinementGenerationFailedEventSchema,
+        filename: 'procedure-refinement-generation-failed-event.schema.json',
+        value: {
+          ...generationScope,
+          error: { code: 'provider_call_failed', message: 'Safe failure.', retryable: false },
+          durationMs: 5,
+          occurredAt: '2026-08-19T08:02:04Z',
+        },
+      },
+    ] as const;
+    for (const contractCase of cases) {
+      expect(contractCase.runtime.safeParse(contractCase.value).success).toBe(true);
+      await validatePublicJsonSchemaCases(publicSchema(contractCase.filename), [
+        { value: contractCase.value, accepted: true },
+        { value: { ...contractCase.value, unexpected: true }, accepted: false },
+      ]);
+    }
+  });
+
+  it('documents reviewed timestamp ordering as a runtime-only relation', async () => {
+    const reviewRequest = {
+      formatVersion: '1.0.0',
+      runId: createRequest.runId,
+      reviewId: '66666666-6666-4666-8666-666666666666',
+      binding,
+      decision: { kind: 'discard' },
+      reviewedAt: '2026-08-19T08:04:00Z',
+    } as const;
+    const staleEvent = {
+      formatVersion: '1.0.0',
+      operation: 'procedure_refinement_review',
+      runId: createRequest.runId,
+      reviewId: reviewRequest.reviewId,
+      requestFingerprint: sha('f'),
+      providerId: providerDescriptor.id,
+      providerVersion: providerDescriptor.version,
+      packetContentSha256: binding.refinementPacketContentSha256,
+      treatmentContentSha256:
+        createRequest.providerDisclosure.refinementRuntimeTreatment.treatmentContentSha256,
+      previewBinding: binding,
+      reviewRequest,
+      finalStatus: 'discarded',
+      procedureStored: false,
+      durationMs: 1,
+      occurredAt: '2026-08-19T08:03:59Z',
+    } as const;
+    expect(procedureRefinementReviewedEventSchema.safeParse(staleEvent).success).toBe(false);
+    await validatePublicJsonSchemaCases(
+      publicSchema('procedure-refinement-reviewed-event.schema.json'),
+      [{ value: staleEvent, accepted: true }],
     );
   });
 });

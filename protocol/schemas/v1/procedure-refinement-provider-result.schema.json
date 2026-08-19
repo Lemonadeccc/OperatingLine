@@ -1766,6 +1766,8 @@
     "targetTree"
   ],
   "additionalProperties": false,
+  "description": "Parsed provider result before local scope sanitization. The coordinator must recompute targetTreeContentSha256 from this exact targetTree before accepting the result.",
+  "$comment": "Runtime invariant: targetTreeContentSha256 is the canonical SHA-256 of this providerResult.targetTree, not the later sanitized preview target.",
   "$defs": {
     "__schema0": {
       "anyOf": [

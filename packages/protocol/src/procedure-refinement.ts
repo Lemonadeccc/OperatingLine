@@ -57,11 +57,23 @@ const procedureRefinementGenerationRuntimeTreatmentAttestationSchema =
     operation: z.literal('procedure_refinement'),
   });
 
+export const procedureRefinementProviderInputPolicySchema = z.strictObject({
+  exactStoredBaseTreeSent: z.literal(true),
+  exactSemanticRetrievalResultSent: z.literal(true),
+  instructionSent: z.literal(true),
+  dialogueHistorySent: z.literal(true),
+  credentialsIncludedInTaskPayload: z.literal(false),
+});
+export type ProcedureRefinementProviderInputPolicy = z.infer<
+  typeof procedureRefinementProviderInputPolicySchema
+>;
+
 export const procedureRefinementProviderDisclosureSchema = z
   .strictObject({
     providerDescriptor: availableProviderDescriptorSchema,
     dialogueRuntimeTreatment: procedureRefinementDialogueRuntimeTreatmentAttestationSchema,
     refinementRuntimeTreatment: procedureRefinementGenerationRuntimeTreatmentAttestationSchema,
+    inputPolicy: procedureRefinementProviderInputPolicySchema,
   })
   .superRefine((disclosure, context) => {
     for (const field of ['dialogueRuntimeTreatment', 'refinementRuntimeTreatment'] as const) {
@@ -137,6 +149,14 @@ export type ProcedureRefinementSemanticContextBinding = z.infer<
   typeof procedureRefinementSemanticContextBindingSchema
 >;
 
+export const procedureRefinementSemanticContextReceiptRequestSchema = z.strictObject({
+  formatVersion: procedureRefinementFormatVersionSchema,
+  requestId: z.uuid(),
+});
+export type ProcedureRefinementSemanticContextReceiptRequest = z.infer<
+  typeof procedureRefinementSemanticContextReceiptRequestSchema
+>;
+
 const requestedScopeRootIdsSchema = z
   .array(guideStepIdSchema)
   .min(1)
@@ -180,6 +200,7 @@ export const procedureRefinementScopeFindingSchema = z.strictObject({
   message: z.string().trim().min(1).max(1_000),
   nodeIds: z.array(guideStepIdSchema).max(256),
 });
+export type ProcedureRefinementScopeFinding = z.infer<typeof procedureRefinementScopeFindingSchema>;
 
 export const procedureRefinementScopeSchema = z
   .strictObject({
@@ -326,24 +347,23 @@ export const procedureRefinementCreateRequestSchema = z
       exactStoredBaseTreeDisclosed: z.literal(true),
       exactSemanticContextDisclosed: z.literal(true),
       dialogueAndRefinementRuntimeTreatmentsDisclosed: z.literal(true),
-      providerInputPolicy: z.strictObject({
-        exactStoredBaseTreeSent: z.literal(true),
-        exactSemanticRetrievalResultSent: z.literal(true),
-        instructionSent: z.literal(true),
-        dialogueHistorySent: z.literal(true),
-        credentialsIncludedInTaskPayload: z.literal(false),
-      }),
+      providerInputPolicy: procedureRefinementProviderInputPolicySchema,
       confirmedAt: timestampSchema,
     }),
   })
   .superRefine((request, context) => {
     if (
-      new Set([request.runId, request.dialogueRequestId, request.refinementRequestId]).size !== 3
+      new Set([
+        request.runId,
+        request.dialogueRequestId,
+        request.refinementRequestId,
+        request.semanticContext.requestId,
+      ]).size !== 4
     ) {
       context.addIssue({
         code: 'custom',
         path: ['runId'],
-        message: 'Run, dialogue, and refinement request ids must be distinct',
+        message: 'Run, semantic retrieval, dialogue, and refinement request ids must be distinct',
       });
     }
     if (request.targetRevision !== request.baseTree.tree.revision + 1) {
@@ -362,6 +382,18 @@ export const procedureRefinementCreateRequestSchema = z
         path: ['authorization', 'confirmedAt'],
         message:
           'Procedure refinement authorization must follow the completed semantic context receipt',
+      });
+    }
+    if (
+      !sameProtocolValue(
+        request.authorization.providerInputPolicy,
+        request.providerDisclosure.inputPolicy,
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'providerInputPolicy'],
+        message: 'Authorized provider input policy must exactly match the disclosed policy',
       });
     }
     const nodeIds = new Set(request.baseTree.tree.nodes.map((node) => node.id));
@@ -520,9 +552,154 @@ export const procedureRefinementProviderResultSchema = z
         message: 'Provider target tree must match the bound tree id and target revision',
       });
     }
+  })
+  .meta({
+    description:
+      'Parsed provider result before local scope sanitization. The coordinator must recompute targetTreeContentSha256 from this exact targetTree before accepting the result.',
+    $comment:
+      'Runtime invariant: targetTreeContentSha256 is the canonical SHA-256 of this providerResult.targetTree, not the later sanitized preview target.',
   });
 export type ProcedureRefinementProviderResult = z.infer<
   typeof procedureRefinementProviderResultSchema
+>;
+
+const procedureRefinementProviderEvidenceScopeShape = {
+  formatVersion: procedureRefinementFormatVersionSchema,
+  runId: z.uuid(),
+  requestId: z.uuid(),
+  requestFingerprint: evalContentSha256Schema,
+  providerId: plannerProviderDescriptorSchema.shape.id,
+  providerVersion: plannerProviderDescriptorSchema.shape.version,
+  packetContentSha256: evalContentSha256Schema,
+  treatmentContentSha256: evalContentSha256Schema,
+} as const;
+
+const procedureRefinementEvidenceFailureSchema = z.strictObject({
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(180)
+    .regex(/^[a-z0-9_]+$/),
+  message: z.string().trim().min(1).max(1_000).regex(/\S/),
+  retryable: z.boolean(),
+});
+
+function validateProviderEvidenceIds(
+  event: { runId: string; requestId: string },
+  context: z.RefinementCtx,
+): void {
+  if (event.runId === event.requestId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['requestId'],
+      message: 'Provider request id must differ from run id',
+    });
+  }
+}
+
+export const procedureRefinementDialogueRequestedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement_dialogue'),
+    occurredAt: timestampSchema,
+  })
+  .superRefine(validateProviderEvidenceIds);
+export type ProcedureRefinementDialogueRequestedEvent = z.infer<
+  typeof procedureRefinementDialogueRequestedEventSchema
+>;
+
+export const procedureRefinementDialogueCompletedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement_dialogue'),
+    resultContentSha256: evalContentSha256Schema,
+    result: procedureRefinementDialogueProviderResultSchema,
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: timestampSchema,
+  })
+  .superRefine(validateProviderEvidenceIds);
+export type ProcedureRefinementDialogueCompletedEvent = z.infer<
+  typeof procedureRefinementDialogueCompletedEventSchema
+>;
+
+export const procedureRefinementDialogueFailedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement_dialogue'),
+    error: procedureRefinementEvidenceFailureSchema,
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: timestampSchema,
+  })
+  .superRefine(validateProviderEvidenceIds);
+export type ProcedureRefinementDialogueFailedEvent = z.infer<
+  typeof procedureRefinementDialogueFailedEventSchema
+>;
+
+export const procedureRefinementGenerationRequestedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement'),
+    occurredAt: timestampSchema,
+  })
+  .superRefine(validateProviderEvidenceIds);
+export type ProcedureRefinementGenerationRequestedEvent = z.infer<
+  typeof procedureRefinementGenerationRequestedEventSchema
+>;
+
+export const procedureRefinementGenerationOutcomeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('valid'),
+    providerResult: procedureRefinementProviderResultSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('invalid'),
+    providerOutputContentSha256: evalContentSha256Schema,
+    safeMessage: z.string().trim().min(1).max(1_000).regex(/\S/),
+  }),
+]);
+export type ProcedureRefinementGenerationOutcome = z.infer<
+  typeof procedureRefinementGenerationOutcomeSchema
+>;
+
+export const procedureRefinementGenerationCompletedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement'),
+    outcome: procedureRefinementGenerationOutcomeSchema,
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: timestampSchema,
+  })
+  .superRefine((event, context) => {
+    validateProviderEvidenceIds(event, context);
+    if (
+      event.outcome.kind === 'valid' &&
+      (event.outcome.providerResult.runId !== event.runId ||
+        event.outcome.providerResult.refinementRequestId !== event.requestId ||
+        event.outcome.providerResult.packetContentSha256 !== event.packetContentSha256)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['outcome', 'providerResult'],
+        message: 'Valid generation evidence must bind the exact run, request, and packet',
+      });
+    }
+  });
+export type ProcedureRefinementGenerationCompletedEvent = z.infer<
+  typeof procedureRefinementGenerationCompletedEventSchema
+>;
+
+export const procedureRefinementGenerationFailedEventSchema = z
+  .strictObject({
+    ...procedureRefinementProviderEvidenceScopeShape,
+    operation: z.literal('procedure_refinement'),
+    error: procedureRefinementEvidenceFailureSchema,
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: timestampSchema,
+  })
+  .superRefine(validateProviderEvidenceIds);
+export type ProcedureRefinementGenerationFailedEvent = z.infer<
+  typeof procedureRefinementGenerationFailedEventSchema
 >;
 
 export const procedureRefinementReviewBindingSchema = z.strictObject({
@@ -579,6 +756,50 @@ export type ProcedureRefinementReviewRequest = z.infer<
   typeof procedureRefinementReviewRequestSchema
 >;
 
+export const procedureRefinementReviewedEventSchema = z
+  .strictObject({
+    formatVersion: procedureRefinementFormatVersionSchema,
+    operation: z.literal('procedure_refinement_review'),
+    runId: z.uuid(),
+    reviewId: z.uuid(),
+    requestFingerprint: evalContentSha256Schema,
+    providerId: plannerProviderDescriptorSchema.shape.id,
+    providerVersion: plannerProviderDescriptorSchema.shape.version,
+    packetContentSha256: evalContentSha256Schema,
+    treatmentContentSha256: evalContentSha256Schema,
+    previewBinding: procedureRefinementReviewBindingSchema,
+    reviewRequest: procedureRefinementReviewRequestSchema,
+    finalStatus: z.enum(['completed', 'discarded']),
+    procedureStored: z.boolean(),
+    durationMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    occurredAt: timestampSchema,
+  })
+  .superRefine((event, context) => {
+    const store = event.reviewRequest.decision.kind === 'store';
+    if (
+      event.reviewRequest.runId !== event.runId ||
+      event.reviewRequest.reviewId !== event.reviewId ||
+      !sameProtocolValue(event.reviewRequest.binding, event.previewBinding) ||
+      event.packetContentSha256 !== event.previewBinding.refinementPacketContentSha256 ||
+      event.finalStatus !== (store ? 'completed' : 'discarded') ||
+      event.procedureStored !== store ||
+      new Date(event.occurredAt).getTime() < new Date(event.reviewRequest.reviewedAt).getTime()
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Reviewed evidence must bind the exact request, preview, and final side effect',
+      });
+    }
+  })
+  .meta({
+    description:
+      'Durable review evidence. The runtime additionally enforces that occurredAt is not earlier than the embedded reviewRequest.reviewedAt.',
+    $comment: 'Runtime invariant: occurredAt must be greater than or equal to reviewedAt.',
+  });
+export type ProcedureRefinementReviewedEvent = z.infer<
+  typeof procedureRefinementReviewedEventSchema
+>;
+
 export const procedureRefinementRunStatusRequestSchema = z.strictObject({
   formatVersion: procedureRefinementFormatVersionSchema,
   runId: z.uuid(),
@@ -622,16 +843,172 @@ export const procedureRefinementSafeErrorSchema = z.strictObject({
 });
 
 export const procedureRefinementNeedsRevisionSchema = z.strictObject({
-  reason: z.enum(['provider_output_invalid', 'locality_validation_failed', 'no_meaningful_change']),
+  reason: z.enum([
+    'provider_output_invalid',
+    'locality_validation_failed',
+    'procedure_compilation_failed',
+    'no_meaningful_change',
+  ]),
   message: z.string().trim().min(1).max(1_000).regex(/\S/),
   findings: z.array(procedureRefinementScopeFindingSchema).max(256),
 });
+export type ProcedureRefinementNeedsRevision = z.infer<
+  typeof procedureRefinementNeedsRevisionSchema
+>;
 
-const reviewPreviewSchema = z.strictObject({
-  targetTree: procedureTreeSchema,
-  localityReport: procedureRefinementLocalityReportSchema,
-  binding: procedureRefinementReviewBindingSchema,
-});
+const reviewPreviewSchema = z
+  .strictObject({
+    targetTree: procedureTreeSchema,
+    providerResult: procedureRefinementProviderResultSchema,
+    localityReport: procedureRefinementLocalityReportSchema,
+    binding: procedureRefinementReviewBindingSchema,
+    reviewReadyAt: timestampSchema,
+  })
+  .meta({
+    description:
+      'Complete review preview. providerResult preserves the exact parsed provider tree, while targetTree is the separately hashed locally sanitized candidate.',
+  });
+
+const runStatusJsonSchemaConditions = [
+  {
+    if: {
+      properties: {
+        status: {
+          enum: ['answered', 'needs_revision', 'completed', 'discarded', 'failed', 'interrupted'],
+        },
+      },
+      required: ['status'],
+    },
+    then: { properties: { terminal: { const: true } }, required: ['terminal'] },
+    else: { properties: { terminal: { const: false } }, required: ['terminal'] },
+  },
+  {
+    if: {
+      properties: { status: { enum: ['queued', 'streaming'] } },
+      required: ['status'],
+    },
+    then: { properties: { semanticDecision: { type: 'null' } } },
+  },
+  {
+    if: {
+      properties: {
+        status: {
+          enum: ['refining', 'awaiting_review', 'needs_revision', 'completed', 'discarded'],
+        },
+      },
+      required: ['status'],
+    },
+    then: {
+      properties: {
+        semanticDecision: {
+          properties: { kind: { const: 'refine' } },
+          required: ['kind'],
+        },
+      },
+    },
+  },
+  {
+    if: { properties: { status: { const: 'answered' } }, required: ['status'] },
+    then: {
+      properties: {
+        semanticDecision: {
+          properties: { kind: { const: 'answer' } },
+          required: ['kind'],
+        },
+      },
+    },
+  },
+  {
+    if: {
+      properties: { status: { enum: ['awaiting_review', 'completed', 'discarded'] } },
+      required: ['status'],
+    },
+    then: { properties: { preview: { not: { type: 'null' } } } },
+  },
+  {
+    if: {
+      properties: {
+        status: { enum: ['queued', 'streaming', 'answered', 'refining', 'needs_revision'] },
+      },
+      required: ['status'],
+    },
+    then: { properties: { preview: { type: 'null' } } },
+  },
+  {
+    if: {
+      properties: { status: { enum: ['completed', 'discarded'] } },
+      required: ['status'],
+    },
+    then: { properties: { review: { not: { type: 'null' } } } },
+  },
+  {
+    if: {
+      properties: {
+        status: {
+          enum: [
+            'queued',
+            'streaming',
+            'answered',
+            'refining',
+            'awaiting_review',
+            'needs_revision',
+          ],
+        },
+      },
+      required: ['status'],
+    },
+    then: { properties: { review: { type: 'null' } } },
+  },
+  {
+    if: { properties: { status: { const: 'completed' } }, required: ['status'] },
+    then: {
+      properties: {
+        review: {
+          properties: { decision: { const: 'store' } },
+          required: ['decision'],
+        },
+        storedTree: { not: { type: 'null' } },
+        sideEffects: {
+          properties: { procedureStored: { const: true } },
+          required: ['procedureStored'],
+        },
+      },
+    },
+    else: {
+      properties: {
+        storedTree: { type: 'null' },
+        sideEffects: {
+          properties: { procedureStored: { const: false } },
+          required: ['procedureStored'],
+        },
+      },
+    },
+  },
+  {
+    if: { properties: { status: { const: 'discarded' } }, required: ['status'] },
+    then: {
+      properties: {
+        review: {
+          properties: { decision: { const: 'discard' } },
+          required: ['decision'],
+        },
+      },
+    },
+  },
+  {
+    if: { properties: { status: { const: 'needs_revision' } }, required: ['status'] },
+    then: { properties: { needsRevision: { not: { type: 'null' } } } },
+    else: { properties: { needsRevision: { type: 'null' } } },
+  },
+  {
+    if: {
+      properties: { status: { enum: ['failed', 'interrupted'] } },
+      required: ['status'],
+    },
+    then: { properties: { error: { not: { type: 'null' } } } },
+    else: { properties: { error: { type: 'null' } } },
+  },
+] as const;
 
 export const procedureRefinementRunStatusSchema = z
   .strictObject({
@@ -767,6 +1144,14 @@ export const procedureRefinementRunStatusSchema = z
       if (
         run.preview.targetTree.id !== run.baseTree.tree.id ||
         run.preview.targetTree.revision !== run.targetRevision ||
+        run.preview.providerResult.runId !== run.runId ||
+        run.preview.providerResult.refinementRequestId !== run.refinementRequestId ||
+        run.preview.providerResult.treeId !== run.baseTree.tree.id ||
+        run.preview.providerResult.targetRevision !== run.targetRevision ||
+        run.preview.providerResult.packetContentSha256 !==
+          run.preview.binding.refinementPacketContentSha256 ||
+        run.preview.providerResult.providerOutputContentSha256 !==
+          run.preview.binding.providerOutputContentSha256 ||
         !sameProtocolValue(
           run.preview.localityReport.requestedRootIds,
           run.scope.requestedRootIds,
@@ -786,6 +1171,13 @@ export const procedureRefinementRunStatusSchema = z
           code: 'custom',
           path: ['preview'],
           message: 'Review preview must contain the valid bound target revision',
+        });
+      }
+      if (new Date(run.preview.reviewReadyAt).getTime() > new Date(run.updatedAt).getTime()) {
+        context.addIssue({
+          code: 'custom',
+          path: ['preview', 'reviewReadyAt'],
+          message: 'Review readiness cannot be later than the current run update',
         });
       }
       if (run.preview.binding.baseTreeContentSha256 !== run.baseTree.integrity.contentSha256) {
@@ -828,6 +1220,17 @@ export const procedureRefinementRunStatusSchema = z
         code: 'custom',
         path: ['review'],
         message: 'Discarded runs require a discard review',
+      });
+    }
+    if (
+      run.preview !== null &&
+      run.review !== null &&
+      new Date(run.review.reviewedAt).getTime() < new Date(run.preview.reviewReadyAt).getTime()
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['review', 'reviewedAt'],
+        message: 'A review cannot precede the bound preview readiness time',
       });
     }
     if ((run.status === 'completed') !== (run.storedTree !== null)) {
@@ -875,6 +1278,11 @@ export const procedureRefinementRunStatusSchema = z
         message: 'Procedure storage occurs only after a completed store review',
       });
     }
+  })
+  .meta({
+    description:
+      'Durable Procedure refinement status. The public JSON Schema encodes the core status/terminal, decision, preview, review, stored-tree, revision, error, and storage-side-effect relations; runtime parsing additionally verifies cross-field identity, hashes, values, and timestamps.',
+    allOf: runStatusJsonSchemaConditions,
   });
 export type ProcedureRefinementRunStatus = z.infer<typeof procedureRefinementRunStatusSchema>;
 

@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "operation": {
+      "type": "string",
+      "const": "procedure_refinement_review"
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "reviewId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "requestFingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "providerVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "packetContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "treatmentContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "previewBinding": {
+      "type": "object",
+      "properties": {
+        "runRequestContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "baseTreeContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "targetTreeContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "scopeContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "semanticContextContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "assistantMessageContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "refinementPacketContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "providerOutputContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "localityReportContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "runRequestContentSha256",
+        "baseTreeContentSha256",
+        "targetTreeContentSha256",
+        "scopeContentSha256",
+        "semanticContextContentSha256",
+        "assistantMessageContentSha256",
+        "refinementPacketContentSha256",
+        "providerOutputContentSha256",
+        "localityReportContentSha256"
+      ],
+      "additionalProperties": false
+    },
+    "reviewRequest": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "runId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "reviewId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "binding": {
+          "type": "object",
+          "properties": {
+            "runRequestContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "baseTreeContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "targetTreeContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "scopeContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "semanticContextContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "assistantMessageContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "refinementPacketContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "providerOutputContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "localityReportContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "runRequestContentSha256",
+            "baseTreeContentSha256",
+            "targetTreeContentSha256",
+            "scopeContentSha256",
+            "semanticContextContentSha256",
+            "assistantMessageContentSha256",
+            "refinementPacketContentSha256",
+            "providerOutputContentSha256",
+            "localityReportContentSha256"
+          ],
+          "additionalProperties": false
+        },
+        "decision": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "store"
+                },
+                "confirmations": {
+                  "type": "object",
+                  "properties": {
+                    "exactBaseTreeReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "exactTargetTreeReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "exactScopeReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "exactSemanticContextReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "exactProviderOutputReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "exactLocalityReportReviewed": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "noHostExecutionAcknowledged": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "exactBaseTreeReviewed",
+                    "exactTargetTreeReviewed",
+                    "exactScopeReviewed",
+                    "exactSemanticContextReviewed",
+                    "exactProviderOutputReviewed",
+                    "exactLocalityReportReviewed",
+                    "noHostExecutionAcknowledged"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "confirmations"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "discard"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000,
+                  "pattern": "\\S"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "reviewedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "runId",
+        "reviewId",
+        "binding",
+        "decision",
+        "reviewedAt"
+      ],
+      "additionalProperties": false
+    },
+    "finalStatus": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "discarded"
+      ]
+    },
+    "procedureStored": {
+      "type": "boolean"
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "operation",
+    "runId",
+    "reviewId",
+    "requestFingerprint",
+    "providerId",
+    "providerVersion",
+    "packetContentSha256",
+    "treatmentContentSha256",
+    "previewBinding",
+    "reviewRequest",
+    "finalStatus",
+    "procedureStored",
+    "durationMs",
+    "occurredAt"
+  ],
+  "additionalProperties": false,
+  "description": "Durable review evidence. The runtime additionally enforces that occurredAt is not earlier than the embedded reviewRequest.reviewedAt.",
+  "$comment": "Runtime invariant: occurredAt must be greater than or equal to reviewedAt.",
+  "$id": "https://operatingline.dev/schema/v1/procedure-refinement-reviewed-event.json"
+}

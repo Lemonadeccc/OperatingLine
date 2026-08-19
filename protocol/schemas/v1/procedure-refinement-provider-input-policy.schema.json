@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "exactStoredBaseTreeSent": {
+      "type": "boolean",
+      "const": true
+    },
+    "exactSemanticRetrievalResultSent": {
+      "type": "boolean",
+      "const": true
+    },
+    "instructionSent": {
+      "type": "boolean",
+      "const": true
+    },
+    "dialogueHistorySent": {
+      "type": "boolean",
+      "const": true
+    },
+    "credentialsIncludedInTaskPayload": {
+      "type": "boolean",
+      "const": false
+    }
+  },
+  "required": [
+    "exactStoredBaseTreeSent",
+    "exactSemanticRetrievalResultSent",
+    "instructionSent",
+    "dialogueHistorySent",
+    "credentialsIncludedInTaskPayload"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-refinement-provider-input-policy.json"
+}
