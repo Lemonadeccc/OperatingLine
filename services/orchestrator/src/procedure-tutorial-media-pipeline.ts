@@ -444,7 +444,7 @@ export function createProcedureTutorialMediaPipeline(
           : publicPipelineError(error, null);
       }
       if (closing) controller.abort();
-      let currentStage: ProcedureTutorialMediaStage | null = null;
+      let currentStage: ProcedureTutorialMediaStage | null = 'download';
       let deadlineStage: ProcedureTutorialMediaStage | null = null;
       let monitorError: ProcedureTutorialMediaPipelineError | undefined;
       let stopMonitor!: () => void;
