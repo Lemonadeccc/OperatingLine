@@ -310,7 +310,20 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.34.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.35.0');
+    const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
+      (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
+    );
+    expect(availableMcpRecipes.map((recipe) => recipe.actionName)).toEqual([
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_icosphere',
+      'blender.mesh.create_plane',
+      'blender.mesh.create_cube',
+    ]);
+    const uvSphereMcp = availableMcpRecipes[0]?.procedureMaterialization?.mcp;
+    for (const recipe of availableMcpRecipes) {
+      expect(recipe.procedureMaterialization?.mcp).toEqual(uvSphereMcp);
+    }
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -664,7 +677,11 @@ describe('interaction catalog registry', () => {
         parameterBinding: 'ordered_parameter_operations',
         projection: 'candidate_only',
       },
-      mcp: { availability: 'unavailable' },
+      mcp: {
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        toolName: 'operatingline.blender.action.execute',
+      },
     });
     const icosphereShortcut = icosphereMaterialization?.shortcut;
     if (icosphereShortcut?.availability !== 'available') {
@@ -924,8 +941,8 @@ describe('interaction catalog registry', () => {
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
+        availability: 'available',
+        toolName: 'operatingline.blender.action.execute',
       },
     });
     expect(
@@ -961,8 +978,8 @@ describe('interaction catalog registry', () => {
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       },
       mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
+        availability: 'available',
+        toolName: 'operatingline.blender.action.execute',
       },
     });
     expect(
@@ -1519,6 +1536,32 @@ describe('interaction catalog registry', () => {
       toolName: 'operatingline.blender.action.execute',
       authorization: 'accepted_replay_next_step',
     });
+  });
+
+  it('freezes InteractionCatalog 1.34.0 before expanding action-level MCP materialization', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.34.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '38a01825bc709f4db0df18dcc822c02596bb6001d536092880b562ba27791796',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    expect(frozen.catalogVersion).toBe('1.34.0');
+    expect(
+      frozen.recipes
+        .filter((recipe) => recipe.procedureMaterialization?.mcp.availability === 'available')
+        .map((recipe) => recipe.actionName),
+    ).toEqual(['blender.mesh.create_uv_sphere']);
+    expect(
+      blenderInteractionCatalog.recipes
+        .filter((recipe) => recipe.procedureMaterialization?.mcp.availability === 'available')
+        .map((recipe) => recipe.actionName),
+    ).toEqual([
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_icosphere',
+      'blender.mesh.create_plane',
+      'blender.mesh.create_cube',
+    ]);
   });
 
   it('keeps the latest TypeScript and Blender extension catalogs byte-identical', () => {

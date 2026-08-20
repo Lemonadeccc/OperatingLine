@@ -2478,6 +2478,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
       if (result.status === 'succeeded') {
         const checkpoint = report.nativeUndoCheckpoint;
+        const authorizedStartPayload = database.getCompanionStateReport(
+          execution.expectedState.reportId,
+        );
+        const parsedAuthorizedStart = companionStateReportSchema.safeParse(authorizedStartPayload);
+        const authorizedStart = parsedAuthorizedStart.success
+          ? parsedAuthorizedStart.data
+          : undefined;
+        const authorizedStartReceipt = database.getManagedReplayReceipt(
+          'companion_state_report',
+          execution.expectedState.reportId,
+        );
+        const startCheckpoint = authorizedStart?.nativeUndoCheckpoint;
         const expectedObservations = execution.step.expectedObservations;
         const observationsMatch =
           report.observations.length === expectedObservations.length &&
@@ -2495,6 +2507,30 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             'Succeeded action result does not match the dispatched Observation success gate',
             409,
             'action_execution_observation_mismatch',
+          );
+        }
+        if (
+          authorizedStart === undefined ||
+          authorizedStartReceipt === null ||
+          authorizedStartReceipt.authentication !== 'negotiated_companion_lease' ||
+          authorizedStartReceipt.adapterId !== execution.target.adapterId ||
+          authorizedStartReceipt.instanceId !== execution.target.instanceId ||
+          authorizedStartReceipt.sessionFingerprintSha256 !== sessionFingerprintSha256 ||
+          authorizedStart.reportId !== execution.expectedState.reportId ||
+          authorizedStart.sequence !== execution.expectedState.sequence ||
+          authorizedStart.adapterId !== execution.target.adapterId ||
+          authorizedStart.instanceId !== execution.target.instanceId ||
+          authorizedStart.plan?.id !== execution.plan.id ||
+          authorizedStart.plan.revision !== execution.plan.revision ||
+          authorizedStart.planContentSha256 !== execution.planContentSha256 ||
+          authorizedStart.executionId !== execution.executionId ||
+          startCheckpoint?.operation !== 'start' ||
+          checkpoint?.previousCheckpointId !== startCheckpoint.checkpointId
+        ) {
+          return actionExecutionRejected(
+            'Succeeded action result does not continue its authorized Start native Undo checkpoint',
+            409,
+            'action_execution_checkpoint_chain_invalid',
           );
         }
         if (
@@ -2645,7 +2681,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly the UV Sphere leaf from one already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, or Plane leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },

@@ -50,6 +50,10 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.execute');
     expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.status');
     expect(operatingLineMcpInstructions).toContain('accepted and started, untouched');
+    expect(operatingLineMcpInstructions).toContain('UV Sphere, Icosphere, Cube, or Plane replays');
+    expect(operatingLineMcpInstructions).toContain(
+      'Torus, Cone, Cylinder, and every other action-level MCP path remain unavailable',
+    );
     expect(operatingLineMcpInstructions).toContain(
       'never accepts arbitrary actions, Python, plan ids, step ids, or action parameters',
     );

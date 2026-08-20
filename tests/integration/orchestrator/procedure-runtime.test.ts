@@ -83,12 +83,13 @@ function replayNativeUndoCheckpoint(input: {
   readonly occurredAt: string;
   readonly operation?: 'next' | 'recheck';
   readonly completedStepIds?: readonly string[];
+  readonly previousCheckpointId?: string;
 }) {
   return {
     formatVersion: '1.0.0' as const,
     evidenceClass: 'companion_reported_native_undo_checkpoint' as const,
     checkpointId: randomUUID(),
-    previousCheckpointId: randomUUID(),
+    previousCheckpointId: input.previousCheckpointId ?? randomUUID(),
     operation: input.operation ?? ('next' as const),
     committedAt: new Date(Date.parse(input.occurredAt) - 1).toISOString(),
     marker: {
@@ -109,6 +110,16 @@ function replayNativeUndoCheckpoint(input: {
       receiptStepIds: [input.stepId],
     },
   };
+}
+
+async function waitUntilAfter(isoTimestamp: string): Promise<void> {
+  const timestamp = Date.parse(isoTimestamp);
+  for (let attempt = 0; attempt < 100 && Date.now() <= timestamp; attempt += 1) {
+    await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
+  }
+  if (Date.now() <= timestamp) {
+    throw new Error(`Clock did not advance beyond ${isoTimestamp} within the bounded wait`);
+  }
 }
 
 interface McpToolResponse {
@@ -1446,7 +1457,7 @@ describe('procedure compilation runtime', () => {
         ).result?.structuredContent,
       );
       expect(icosphereMaterialization).toMatchObject({
-        formatVersion: '1.3.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
         },
@@ -1456,7 +1467,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.mesh.create_icosphere.native',
             menu: 'materialized',
             shortcut: 'materialized',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -1596,7 +1607,27 @@ describe('procedure compilation runtime', () => {
       expect(
         icosphereShortcut.operations.flatMap((operation) => Object.keys(operation.parameters)),
       ).not.toContain('resourceId');
-      expect(icosphereLeaf.mcpTracks[0]).toMatchObject({ availability: 'unavailable' });
+      expect(icosphereLeaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'available',
+          modality: 'mcp',
+          operations: [
+            expect.objectContaining({
+              serverName: 'operating-line',
+              toolName: 'operatingline.blender.action.execute',
+              arguments: {
+                formatVersion: '1.0.0',
+                requestId: '$runtime.requestId',
+                replayId: '$runtime.replayId',
+                expectedState: '$runtime.expectedState',
+              },
+              argumentSource: 'accepted_leaf_action',
+              actionArguments: icosphereLeaf.action.arguments,
+              resultBinding: 'snowman.head.eyes.left.companion_state_report',
+            }),
+          ],
+        }),
+      ]);
       const icosphereHttpMaterialization = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/authoring/materialize`,
         {
@@ -4109,7 +4140,7 @@ describe('procedure compilation runtime', () => {
     }
   });
 
-  it('executes only the accepted UV Sphere replay cursor through action-level MCP', async () => {
+  it('gates an accepted UV Sphere orchestration result on its exact Start checkpoint chain', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -4338,6 +4369,7 @@ describe('procedure compilation runtime', () => {
         sequence: number,
         occurredAt: string,
         parameters: Record<string, unknown>,
+        previousCheckpointId?: string,
       ) => ({
         ...startReport,
         reportId: randomUUID(),
@@ -4361,6 +4393,7 @@ describe('procedure compilation runtime', () => {
           executionId,
           stepId: replayRequest.leafId,
           occurredAt,
+          ...(previousCheckpointId === undefined ? {} : { previousCheckpointId }),
         }),
         occurredAt,
       });
@@ -4535,16 +4568,38 @@ describe('procedure compilation runtime', () => {
         error: 'action_execution_report_stale',
       });
 
-      const succeededAt = new Date(afterDispatch + 4_000).toISOString();
-      const successReport = successReportFor(
+      const mismatchedCheckpointAt = new Date(afterDispatch + 4_000).toISOString();
+      const mismatchedCheckpointReport = successReportFor(
         startReport.sequence + 6,
+        mismatchedCheckpointAt,
+        expectedObservation.parameters,
+      );
+      await postState(mismatchedCheckpointReport);
+      const mismatchedCheckpointResult = await postResult(
+        resultFor(
+          {
+            reportId: mismatchedCheckpointReport.reportId,
+            sequence: mismatchedCheckpointReport.sequence,
+          },
+          new Date(afterDispatch + 4_001).toISOString(),
+        ),
+      );
+      expect(mismatchedCheckpointResult.status).toBe(409);
+      await expect(mismatchedCheckpointResult.json()).resolves.toMatchObject({
+        error: 'action_execution_checkpoint_chain_invalid',
+      });
+
+      const succeededAt = new Date(afterDispatch + 5_000).toISOString();
+      const successReport = successReportFor(
+        startReport.sequence + 7,
         succeededAt,
         expectedObservation.parameters,
+        startReport.nativeUndoCheckpoint.checkpointId,
       );
       await postState(successReport);
       const result = resultFor(
         { reportId: successReport.reportId, sequence: successReport.sequence },
-        new Date(afterDispatch + 4_001).toISOString(),
+        new Date(afterDispatch + 5_001).toISOString(),
       );
       const actionResultResponse = await postResult(result);
       expect(actionResultResponse.status).toBe(200);
@@ -4563,6 +4618,459 @@ describe('procedure compilation runtime', () => {
       await runtime.stop();
     }
   });
+
+  it('rejects a frozen InteractionCatalog 1.34 Icosphere binding at action execution', async () => {
+    const frozenInteractionCatalog = blenderInteractionCatalogs.find(
+      (catalog) => catalog.catalogVersion === '1.34.0',
+    );
+    if (frozenInteractionCatalog === undefined) {
+      throw new Error('Expected the frozen Blender InteractionCatalog 1.34.0 snapshot');
+    }
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: frozenInteractionCatalog.actionCatalogVersion,
+          interactionCatalogVersion: frozenInteractionCatalog.catalogVersion,
+          goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const replayRequest = {
+        formatVersion: '1.0.0',
+        replayId: randomUUID(),
+        targetInstanceId,
+        leafId: 'snowman.head.eyes.left',
+        replayMode: 'managed_action',
+        packet,
+        tree: icosphereReplayAuthoringCandidateFixture(packet),
+      } as const;
+      const proposedMcp = await callMcpTool(
+        runtime,
+        8951,
+        'operatingline.procedure.replay.propose',
+        replayRequest,
+      );
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+      const proposed = procedureLeafReplayProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed.binding.materialization).toMatchObject({
+        catalogBinding: { interactionCatalogVersion: '1.34.0' },
+        coverage: [expect.objectContaining({ mcp: 'unavailable' })],
+      });
+
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const proposal = proposed.binding.proposal;
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            protocolVersion: guideProtocolVersion,
+            decisionId: randomUUID(),
+            proposalId: proposal.proposalId,
+            adapterId: 'blender',
+            instanceId: targetInstanceId,
+            decision: 'accepted',
+            occurredAt: new Date().toISOString(),
+          }),
+        },
+      );
+      expect(decisionResponse.status).toBe(200);
+
+      const executionId = randomUUID();
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const startedAt = new Date().toISOString();
+      const startReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 1,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: startedAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: startedAt,
+      } as const;
+      const startResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startResponse.status).toBe(200);
+
+      const execution = await callMcpTool(runtime, 8952, 'operatingline.blender.action.execute', {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: replayRequest.replayId,
+        expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+      });
+      expect(execution.result?.isError).toBe(true);
+      expect(execution.result?.content?.[0]?.text).toContain(
+        'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
+      );
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  // This table proves the orchestration result gate for each newly authorized primitive.
+  // The later topology-attestation cases prove their stronger geometry claims.
+  it.each([
+    {
+      primitive: 'icosphere',
+      actionName: 'blender.mesh.create_icosphere',
+      goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
+      fixture: icosphereReplayAuthoringCandidateFixture,
+    },
+    {
+      primitive: 'cube',
+      actionName: 'blender.mesh.create_cube',
+      goal: '创建一个边长 2.5、位置精确的 Cube。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'cube'),
+    },
+    {
+      primitive: 'plane',
+      actionName: 'blender.mesh.create_plane',
+      goal: '创建一个边长 12.5、位置精确的 Plane。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'plane'),
+    },
+  ])(
+    'gates the accepted $primitive orchestration result on its exact action-level MCP and Start checkpoint',
+    async ({ primitive, actionName, goal, fixture }) => {
+      const runtime = await startRuntime({
+        databasePath: ':memory:',
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      try {
+        const targetInstanceId = randomUUID();
+        const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            targetAdapterId: 'blender',
+            actionCatalogVersion: blenderActionCatalog.catalogVersion,
+            interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+            goal,
+            treeId: 'snowman.eye.left.procedure',
+            revision: 1,
+            locale: 'zh-CN',
+          }),
+        });
+        expect(promptResponse.status).toBe(200);
+        const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+        const tree = fixture(packet);
+        const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+          (node) => node['kind'] === 'leaf',
+        );
+        if (leaf === undefined) throw new Error(`Expected one ${primitive} replay leaf`);
+        const replayRequest = {
+          formatVersion: '1.0.0',
+          replayId: randomUUID(),
+          targetInstanceId,
+          leafId: String(leaf['id']),
+          replayMode: 'managed_action',
+          packet,
+          tree,
+        } as const;
+        const proposedMcp = await callMcpTool(
+          runtime,
+          896,
+          'operatingline.procedure.replay.propose',
+          replayRequest,
+        );
+        expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+        const proposed = procedureLeafReplayProposalResultSchema.parse(
+          proposedMcp.result?.structuredContent,
+        );
+        expect(proposed.binding).toMatchObject({
+          actionName,
+          claims: { mcpTrack: 'catalog_grounded_not_executed' },
+          materialization: {
+            formatVersion: '1.4.0',
+            coverage: [expect.objectContaining({ mcp: 'materialized' })],
+          },
+        });
+        const proposal = proposed.binding.proposal;
+        const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
+        const expectedObservation = step?.expectedObservations[0];
+        if (
+          step?.action === null ||
+          step?.action === undefined ||
+          expectedObservation === undefined
+        ) {
+          throw new Error(`Expected one executable ${primitive} replay step`);
+        }
+        expect(step.action).toEqual({
+          adapterId: 'blender',
+          name: actionName,
+          arguments: leaf['action'] instanceof Object ? leaf['action']['arguments'] : undefined,
+        });
+
+        const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+        });
+        expect(sessionResponse.status).toBe(200);
+        const session = (await sessionResponse.json()) as { leaseId: string };
+        const leaseHeaders = {
+          ...headers,
+          'x-operatingline-companion-lease': session.leaseId,
+        };
+        const decisionResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+          {
+            method: 'POST',
+            headers: leaseHeaders,
+            body: JSON.stringify({
+              protocolVersion: guideProtocolVersion,
+              decisionId: randomUUID(),
+              proposalId: proposal.proposalId,
+              adapterId: 'blender',
+              instanceId: targetInstanceId,
+              decision: 'accepted',
+              occurredAt: new Date().toISOString(),
+            }),
+          },
+        );
+        expect(decisionResponse.status).toBe(200);
+
+        const executionId = randomUUID();
+        const planContentSha256 = computePlanContentSha256(proposal.plan);
+        const startedAt = new Date().toISOString();
+        const startReport = {
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence: 1,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion: '4.5.3 LTS',
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256,
+          executionId,
+          phase: 'running',
+          activeStepId: null,
+          completedStepIds: [],
+          transition: 'walkthrough_started',
+          stepId: null,
+          observations: [],
+          observationGate: null,
+          artifactAttestation: null,
+          nativeUndoCheckpoint: {
+            formatVersion: '1.0.0',
+            evidenceClass: 'companion_reported_native_undo_checkpoint',
+            checkpointId: randomUUID(),
+            previousCheckpointId: null,
+            operation: 'start',
+            committedAt: startedAt,
+            marker: { key: '_operating_line_native_history_v1', matched: true },
+            journal: {
+              entryPresent: true,
+              snapshotMatchesSession: true,
+              artifactsBackedUp: true,
+            },
+            session: {
+              plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+              planContentSha256,
+              executionId,
+              activeStepId: null,
+              completedStepIds: [],
+              receiptStepIds: [],
+            },
+          },
+          error: null,
+          occurredAt: startedAt,
+        } as const;
+        const startResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(startReport),
+        });
+        expect(startResponse.status).toBe(200);
+
+        const actionRequest = {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId: replayRequest.replayId,
+          expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+        } as const;
+        const queuedMcp = await callMcpTool(
+          runtime,
+          897,
+          'operatingline.blender.action.execute',
+          actionRequest,
+        );
+        expect(queuedMcp.result?.isError, queuedMcp.result?.content?.[0]?.text).not.toBe(true);
+        expect(
+          companionActionExecutionStatusSchema.parse(queuedMcp.result?.structuredContent),
+        ).toMatchObject({
+          requestId: actionRequest.requestId,
+          replayId: replayRequest.replayId,
+          status: 'queued',
+          step,
+        });
+
+        const actionPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+        actionPollUrl.searchParams.set('adapterId', 'blender');
+        actionPollUrl.searchParams.set('instanceId', targetInstanceId);
+        const deliveryResponse = await fetch(actionPollUrl, { headers: leaseHeaders });
+        expect(deliveryResponse.status).toBe(200);
+        const delivery = companionActionPollDeliverySchema.parse(
+          await deliveryResponse.json(),
+        ).request;
+        expect(delivery).not.toBeNull();
+        expect(delivery).toMatchObject({
+          requestId: actionRequest.requestId,
+          replayId: replayRequest.replayId,
+          proposalId: proposal.proposalId,
+          executionId,
+          expectedState: actionRequest.expectedState,
+          step: {
+            id: replayRequest.leafId,
+            action: step.action,
+          },
+        });
+
+        await waitUntilAfter(delivery!.dispatchedAt);
+        const succeededAt = new Date().toISOString();
+        const successReport = {
+          ...startReport,
+          reportId: randomUUID(),
+          sequence: startReport.sequence + 1,
+          phase: 'completed' as const,
+          activeStepId: replayRequest.leafId,
+          completedStepIds: [replayRequest.leafId],
+          transition: 'step_succeeded' as const,
+          stepId: replayRequest.leafId,
+          observations: [
+            {
+              kind: expectedObservation.kind,
+              satisfied: true,
+              details: {
+                parameters: structuredClone(expectedObservation.parameters),
+                supported: true,
+              },
+            },
+          ],
+          nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+            planId: proposal.plan.id,
+            planRevision: proposal.plan.revision,
+            planContentSha256,
+            executionId,
+            stepId: replayRequest.leafId,
+            occurredAt: succeededAt,
+            operation: 'next',
+            previousCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+          }),
+          occurredAt: succeededAt,
+        };
+        const successStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(successReport),
+        });
+        expect(successStateResponse.status).toBe(200);
+
+        const result = {
+          formatVersion: '1.0.0',
+          requestId: delivery!.requestId,
+          replayId: delivery!.replayId,
+          deliveryId: delivery!.deliveryId,
+          target: delivery!.target,
+          proposalId: delivery!.proposalId,
+          plan: delivery!.plan,
+          planContentSha256: delivery!.planContentSha256,
+          executionId: delivery!.executionId,
+          expectedState: delivery!.expectedState,
+          stepId: delivery!.step.id,
+          status: 'succeeded',
+          report: { reportId: successReport.reportId, sequence: successReport.sequence },
+          error: null,
+          occurredAt: new Date().toISOString(),
+        } as const;
+        const resultResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/action-result`, {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(result),
+        });
+        expect(resultResponse.status).toBe(200);
+        await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+        const statusMcp = await callMcpTool(runtime, 898, 'operatingline.blender.action.status', {
+          requestId: actionRequest.requestId,
+        });
+        expect(
+          companionActionExecutionStatusSchema.parse(statusMcp.result?.structuredContent),
+        ).toMatchObject({ status: 'succeeded', result });
+      } finally {
+        await runtime.stop();
+      }
+    },
+  );
 
   it('attests only an approved terminal managed UV Sphere replay without upgrading UI tracks', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-current-state-replay-'));
@@ -6026,7 +6534,7 @@ describe('procedure compilation runtime', () => {
                 leafId: replayRequest.leafId,
                 menu: 'materialized',
                 shortcut: 'materialized',
-                mcp: 'unavailable',
+                mcp: 'materialized',
               }),
             ],
           },
@@ -6059,22 +6567,6 @@ describe('procedure compilation runtime', () => {
         { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
       );
       expect(decisionResponse.status).toBe(200);
-
-      const unavailableActionExecution = await callMcpTool(
-        runtime,
-        9021,
-        'operatingline.blender.action.execute',
-        {
-          formatVersion: '1.0.0',
-          requestId: randomUUID(),
-          replayId: replayRequest.replayId,
-          expectedState: { reportId: randomUUID(), sequence: 1 },
-        },
-      );
-      expect(unavailableActionExecution.result?.isError).toBe(true);
-      expect(unavailableActionExecution.result?.content?.[0]?.text).toContain(
-        'lacks the exact catalog-grounded managed primitive MCP call',
-      );
 
       const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
       const observationParameters = step?.expectedObservations[0]?.parameters;
@@ -6235,6 +6727,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
       geometryDetailKeys: ['sizeMatches'] as const,
       shortcutCoverage: 'materialized' as const,
+      mcpCoverage: 'materialized' as const,
     },
     {
       primitive: 'plane' as const,
@@ -6244,6 +6737,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
       geometryDetailKeys: ['sizeMatches'] as const,
       shortcutCoverage: 'materialized' as const,
+      mcpCoverage: 'materialized' as const,
     },
     {
       primitive: 'torus' as const,
@@ -6253,6 +6747,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 576, edgeCount: 1152, faceCount: 576 },
       geometryDetailKeys: ['geometryMatches'] as const,
       shortcutCoverage: 'unavailable' as const,
+      mcpCoverage: 'unavailable' as const,
     },
     {
       primitive: 'cone' as const,
@@ -6262,6 +6757,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'] as const,
       shortcutCoverage: 'unavailable' as const,
+      mcpCoverage: 'unavailable' as const,
     },
     {
       primitive: 'cylinder' as const,
@@ -6271,6 +6767,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'] as const,
       shortcutCoverage: 'unavailable' as const,
+      mcpCoverage: 'unavailable' as const,
     },
   ])(
     'attests an approved managed $primitive replay with exact geometry and topology',
@@ -6282,6 +6779,7 @@ describe('procedure compilation runtime', () => {
       topology,
       geometryDetailKeys,
       shortcutCoverage,
+      mcpCoverage,
     }) => {
       const runtime = await startRuntime({
         databasePath: ':memory:',
@@ -6339,6 +6837,8 @@ describe('procedure compilation runtime', () => {
             claims: {
               shortcutTrack:
                 shortcutCoverage === 'materialized' ? 'candidate_not_executed' : 'unavailable',
+              mcpTrack:
+                mcpCoverage === 'materialized' ? 'catalog_grounded_not_executed' : 'unavailable',
             },
             materialization: {
               coverage: [
@@ -6346,7 +6846,7 @@ describe('procedure compilation runtime', () => {
                   leafId: replayRequest.leafId,
                   menu: 'materialized',
                   shortcut: shortcutCoverage,
-                  mcp: 'unavailable',
+                  mcp: mcpCoverage,
                 }),
               ],
             },

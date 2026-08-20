@@ -1232,7 +1232,7 @@ describe('procedure authoring materialization', () => {
     ).toThrow('does not match its InteractionCatalog recipe');
   });
 
-  it('materializes the exact Icosphere ordered menu and F9 shortcut without inventing MCP support', () => {
+  it('materializes the exact Icosphere menu, shortcut, and action-level MCP operation', () => {
     const input = icosphereCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -1245,14 +1245,14 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Icosphere leaf');
     }
 
-    expect(result.formatVersion).toBe('1.3.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_icosphere.native',
         menu: 'materialized',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     const menuTrack = leaf.menuTracks[0];
@@ -1400,12 +1400,38 @@ describe('procedure authoring materialization', () => {
     expect(
       shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
     ).not.toContain('resourceId');
-    expect(leaf.mcpTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'mcp',
-        reason: 'No approved action-level MCP tool is available.',
-      }),
+    expect(leaf.mcpTracks).toHaveLength(1);
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') {
+      throw new Error('expected available Icosphere MCP track');
+    }
+    expect(mcpTrack.operations).toEqual([
+      {
+        id: 'blender.mesh.create_icosphere.native.mcp.execute',
+        order: 1,
+        semanticRefs: leaf.semanticOperations.map((operation) => operation.id),
+        description: 'Execute blender.mesh.create_icosphere as the accepted replay next step',
+        evidenceRefs: [
+          ...new Set(leaf.semanticOperations.flatMap((operation) => operation.evidenceRefs)),
+        ],
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        argumentSource: 'accepted_leaf_action',
+        actionArguments: {
+          resourceId: 'tutorial.icosphere.detail',
+          objectName: 'OperatingLine.IcosphereDetail',
+          subdivisions: 3,
+          radius: 1.75,
+          location: [-1.25, 2.5, 0.75],
+        },
+        resultBinding: `${leaf.id}.companion_state_report`,
+      },
     ]);
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);
@@ -2277,7 +2303,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Cube ordered menu and candidate shortcut without inventing MCP support', () => {
+  it('materializes the exact Cube menu, shortcut, and action-level MCP operation', () => {
     const input = cubeCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -2290,14 +2316,14 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Cube leaf');
     }
 
-    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_cube.native',
         menu: 'materialized',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     const menuTrack = leaf.menuTracks[0];
@@ -2426,18 +2452,43 @@ describe('procedure authoring materialization', () => {
     expect(
       shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
     ).not.toContain('resourceId');
-    expect(leaf.mcpTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'mcp',
-        reason: 'No approved action-level MCP tool is available.',
-      }),
+    expect(leaf.mcpTracks).toHaveLength(1);
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') {
+      throw new Error('expected available Cube MCP track');
+    }
+    expect(mcpTrack.operations).toEqual([
+      {
+        id: 'blender.mesh.create_cube.native.mcp.execute',
+        order: 1,
+        semanticRefs: leaf.semanticOperations.map((operation) => operation.id),
+        description: 'Execute blender.mesh.create_cube as the accepted replay next step',
+        evidenceRefs: [
+          ...new Set(leaf.semanticOperations.flatMap((operation) => operation.evidenceRefs)),
+        ],
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        argumentSource: 'accepted_leaf_action',
+        actionArguments: {
+          resourceId: 'tutorial.cube.body',
+          objectName: 'OperatingLine.CubeBody',
+          size: 2.5,
+          location: [-1, 2, 0.5],
+        },
+        resultBinding: `${leaf.id}.companion_state_report`,
+      },
     ]);
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Plane ordered menu and candidate shortcut without inventing MCP support', () => {
+  it('materializes the exact Plane menu, shortcut, and action-level MCP operation', () => {
     const input = planeCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -2450,14 +2501,14 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Plane leaf');
     }
 
-    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_plane.native',
         menu: 'materialized',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     const menuTrack = leaf.menuTracks[0];
@@ -2586,12 +2637,37 @@ describe('procedure authoring materialization', () => {
     expect(
       shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
     ).not.toContain('resourceId');
-    expect(leaf.mcpTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'mcp',
-        reason: 'No approved action-level MCP tool is available.',
-      }),
+    expect(leaf.mcpTracks).toHaveLength(1);
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') {
+      throw new Error('expected available Plane MCP track');
+    }
+    expect(mcpTrack.operations).toEqual([
+      {
+        id: 'blender.mesh.create_plane.native.mcp.execute',
+        order: 1,
+        semanticRefs: leaf.semanticOperations.map((operation) => operation.id),
+        description: 'Execute blender.mesh.create_plane as the accepted replay next step',
+        evidenceRefs: [
+          ...new Set(leaf.semanticOperations.flatMap((operation) => operation.evidenceRefs)),
+        ],
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        argumentSource: 'accepted_leaf_action',
+        actionArguments: {
+          resourceId: 'tutorial.plane.ground',
+          objectName: 'OperatingLine.GroundPlane',
+          size: 12.5,
+          location: [0, 0, -1.25],
+        },
+        resultBinding: `${leaf.id}.companion_state_report`,
+      },
     ]);
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);

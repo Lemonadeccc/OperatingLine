@@ -256,7 +256,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.34.0');
+    expect(catalog.catalogVersion).toBe('1.35.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -316,30 +316,33 @@ describe('interaction catalog protocol', () => {
       '1.32.0',
       '1.33.0',
       '1.34.0',
+      '1.35.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
       (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
     );
-    expect(availableMcpRecipes).toHaveLength(1);
-    expect(availableMcpRecipes[0]).toMatchObject({
-      actionName: 'blender.mesh.create_uv_sphere',
-      procedureMaterialization: {
-        mcp: {
-          availability: 'available',
-          source: 'catalog.action_level_mcp',
-          semanticBinding: 'all_leaf_operations',
-          parameterBinding: 'accepted_action_arguments',
-          serverName: 'operating-line',
-          toolName: 'operatingline.blender.action.execute',
-          authorization: 'accepted_replay_next_step',
-          resultBinding: 'companion_state_report',
-        },
-      },
-    });
+    expect(availableMcpRecipes.map((recipe) => recipe.actionName)).toEqual([
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_icosphere',
+      'blender.mesh.create_plane',
+      'blender.mesh.create_cube',
+    ]);
+    for (const recipe of availableMcpRecipes) {
+      expect(recipe.procedureMaterialization?.mcp).toEqual({
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'accepted_action_arguments',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_state_report',
+      });
+    }
     expect(
       catalog.recipes
-        .filter((recipe) => recipe.actionName !== 'blender.mesh.create_uv_sphere')
+        .filter((recipe) => !availableMcpRecipes.includes(recipe))
         .every((recipe) => recipe.procedureMaterialization?.mcp.availability !== 'available'),
     ).toBe(true);
     const frozen117 = blenderInteractionCatalogs.find(
@@ -583,10 +586,10 @@ describe('interaction catalog protocol', () => {
         ]),
         omittedActionArguments: [expect.objectContaining({ argumentName: 'resourceId' })],
       }),
-      mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
-      },
+      mcp: expect.objectContaining({
+        availability: 'available',
+        toolName: 'operatingline.blender.action.execute',
+      }),
     });
     const plane = recipeFor(catalog, 'blender.mesh.create_plane');
     expect(plane.procedureMaterialization).toEqual({
@@ -657,10 +660,10 @@ describe('interaction catalog protocol', () => {
         projection: 'candidate_only',
         operations: expect.any(Array),
       }),
-      mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
-      },
+      mcp: expect.objectContaining({
+        availability: 'available',
+        toolName: 'operatingline.blender.action.execute',
+      }),
     });
     const planeShortcut = plane.procedureMaterialization?.shortcut;
     if (planeShortcut?.availability !== 'available') {
@@ -823,10 +826,10 @@ describe('interaction catalog protocol', () => {
         availability: 'available',
         operations: expect.any(Array),
       }),
-      mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
-      },
+      mcp: expect.objectContaining({
+        availability: 'available',
+        toolName: 'operatingline.blender.action.execute',
+      }),
     });
     const cubeShortcut = cube.procedureMaterialization?.shortcut;
     if (cubeShortcut?.availability !== 'available') {

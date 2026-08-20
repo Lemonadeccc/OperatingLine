@@ -147,6 +147,16 @@ function installExtendedIcosphereShortcut(catalog: InteractionCatalog) {
 function extendedCatalog(): InteractionCatalog {
   const catalog = structuredClone(blenderInteractionCatalog);
   installExtendedIcosphereShortcut(catalog);
+  const recipe = catalog.recipes.find(
+    (candidate) => candidate.actionName === 'blender.mesh.create_icosphere',
+  );
+  if (recipe?.procedureMaterialization === undefined) {
+    throw new Error('Expected Icosphere materialization fixture');
+  }
+  recipe.procedureMaterialization.mcp = {
+    availability: 'unavailable',
+    reason: 'This fixture isolates shortcut surface result-version selection.',
+  };
   return interactionCatalogSchema.parse(catalog);
 }
 

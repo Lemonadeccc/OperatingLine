@@ -455,7 +455,8 @@ stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.33.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.32.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.35.0` 精确绑定 ActionCatalog `1.22.0`，冻结只授权 UV Sphere action-level MCP 的 `1.34.0`；`1.34.0`
+另冻结 `1.33.0`。当前目录为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 `1.33.0` 另以 `procedureMaterialization.semantic` 明确声明 location、radius 与 objectName 到语义操作的
 stable path 与转换；物化结果把这些声明连同菜单和快捷键绑定汇总为 `parameterProjection 1.0.0`，供编辑器
@@ -500,7 +501,8 @@ transform scale。Cube 与 Plane 还各自声明 candidate-only 六步 shortcut�
 `Shift+A → Mesh → Cube` 或 `Shift+A → Mesh → Plane`（默认 `size: 2`、origin）、`G X`、`G Y`、
 `G Z`、`S` 与 `F2`。
 三个轴向移动用 `vector3_x/y/z` 绑定 accepted `location`，`S` 用封闭 `divide_by_two` 绑定
-`size / 2`，`F2` 绑定 `objectName`；`resourceId` 显式省略，MCP unavailable。
+`size / 2`，`F2` 绑定 `objectName`；`resourceId` 显式省略。`1.35.0` 为 Cube 与 Plane 显式授权
+action-level MCP；更早目录中的 unavailable binding 不会获得新权限。
 Torus 另行声明六步 ordered menu，在 operator step 按顺序以 identity 投影绑定 `majorSegments`、
 `minorSegments`，固定 literal `mode: MAJOR_MINOR`，再绑定 `majorRadius`、`minorRadius`，随后绑定 Location 与
 Object Name，并省略 `resourceId`；
@@ -523,6 +525,16 @@ Cylinder 同样声明六步 ordered menu：四步 guidance operator 严格按序
 `+Z` 对齐 `end-start`，本地 `-Z` 端对应 `start`，本地 `+Z` 端对应
 `end`，两端使用同一 `radius`，且不声称与 managed executor quaternion/roll 精确等价。
 `resourceId` 省略，shortcut/MCP unavailable。
+`1.35.0` 还为 UV Sphere、Icosphere、Cube 与 Plane 的 accepted leaf 物化唯一
+`operatingline.blender.action.execute` operation。公开请求只携带 request/replay identity 与当前 report CAS；
+Runtime 从精确版本 replay binding 推导 Action 和完整参数，不接受调用方提供的 action、arguments、operator 或
+Python。执行继续受 decision → Start → lease → CAS → trusted report → 强 Observation → Blender 原生 Undo
+checkpoint 链约束；成功 `next` checkpoint 必须直接引用 CAS 所绑定的 Start checkpoint，dispatch 后的不确定
+重启进入 `recovery_required`。`1.34.0` 历史 binding 仍只允许 UV
+Sphere；Torus、Cone 与 Cylinder 在 `1.35.0` 中仍为 unavailable。该 managed Action 入口不把 menu/shortcut
+grounding 升级为逐控件或逐按键执行证据。见
+[ADR 0089](../adr/0089-accepted-uv-sphere-action-level-mcp.md) 与
+[ADR 0090](../adr/0090-simple-primitive-action-level-mcp.md)。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
@@ -597,12 +609,14 @@ binding 原子入库，Proposal 仍必须由同一 Blender 实例人工 Accept�
 `procedure.replay.finalize` 只关联这条认证链；Plan hash、execution、
 step、host version 和强 Observation 任一不匹配都会 fail closed。最终 attestation 与 replay 事件为追加式，
 可进入 Eval/replay 导出。其证据范围严格是 managed Action 结果：menu 为
-`catalog_grounded_not_executed`、shortcut 按物化事实为 `candidate_not_executed` 或 `unavailable`、MCP 为
-`unavailable`。新的 finalization 还要求 terminal report 携带 `next` 原生 Undo checkpoint：它必须在报告时
+`catalog_grounded_not_executed`、shortcut 按物化事实为 `candidate_not_executed` 或 `unavailable`，MCP
+按 replay 固定的目录版本为 `catalog_grounded_not_executed` 或 `unavailable`。新的 finalization 还要求
+terminal report 携带 `next` 原生 Undo checkpoint：它必须在报告时
 与 Scene marker、journal snapshot、完整 Plan/hash/execution、唯一 leaf receipt 和产物备份一致；attestation
 因此声明 `nativeUndoCheckpoint: companion_reported_current_at_report`，并同时声明
-`currentHostStateAfterReport: not_verified`。合同仍不声称逐控件 UI 回放、快捷键等价、具体 UI 执行入口、
-action-level MCP 调用或报告之后的当前宿主状态。调用方可另行创建持久、唯一的 current-state challenge；只有
+`currentHostStateAfterReport: not_verified`。该 finalization 合同本身仍不声称逐控件 UI 回放、快捷键等价、
+具体 UI 执行入口、action-level MCP 调用或报告之后的当前宿主状态；使用 action-level MCP 时，独立的
+execution status 才证明对应入口。调用方可另行创建持久、唯一的 current-state challenge；只有
 精确目标协商 lease 会收到它，Blender 主线程只读复算强 Observation 与当前 Undo journal，Runtime 按
 session/step/observation/checkpoint mismatch 或 verified 保存 completed evidence。每次结果仍只覆盖其 response
 report 时刻，下一次“当前”查询必须使用新的 verification ID。挑战可使用直接成功或

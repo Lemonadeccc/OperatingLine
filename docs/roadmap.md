@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.33.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.32.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.35.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.34.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
@@ -577,8 +577,16 @@
     - [x] 同 Action 有界重试证明：每次失败都先补偿并发出 `retry_scheduled`；成功摘要或最终
           `exhausted` 证据与 accepted Plan 的两次/三次上限绑定，且只在最终成功时产生一个原生 Undo
           checkpoint。见 [ADR 0074](adr/0074-bounded-observation-retries.md)。
-    - [ ] 真实逐控件 menu/shortcut executor、action-level MCP executor，以及七种已证明 primitive 之外的
-          复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
+    - [x] 首批 action-level MCP executor：InteractionCatalog `1.34.0` 只授权已接受 UV Sphere replay；
+          `1.35.0` 冻结该历史版本，并新增 Icosphere、Cube 与 Plane。四者都复用严格
+          `operatingline.blender.action.execute`，公开请求不接受 action/arguments；Runtime 从精确版本 binding
+          推导参数，并继续强制 decision/Start/lease/CAS/trusted report/Observation/原生 Undo 链，成功 `next`
+          checkpoint 必须直接引用 CAS 绑定的 Start checkpoint。旧 binding 不继承新权限，Torus/Cone/Cylinder
+          仍 unavailable。见
+          [ADR 0089](adr/0089-accepted-uv-sphere-action-level-mcp.md) 与
+          [ADR 0090](adr/0090-simple-primitive-action-level-mcp.md)。
+    - [ ] 真实逐控件 menu/shortcut executor、Torus/Cone/Cylinder action-level MCP 独立证据批，以及七种已证明
+          primitive 之外的复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
         仅在固定 `0.8` 阈值后进行第二次自动局部树 refinement。完整 Provider tree 经过 scope sanitization、

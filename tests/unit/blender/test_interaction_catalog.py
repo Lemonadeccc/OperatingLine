@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.34.0")
+        self.assertEqual(catalog.catalog_version, "1.35.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -862,10 +862,7 @@ class InteractionCatalogTests(unittest.TestCase):
             tuple(item.argument_name for item in icosphere_shortcut.omitted_action_arguments),
             ("resourceId",),
         )
-        self.assertEqual(
-            icosphere.procedure_materialization.mcp.availability,
-            "unavailable",
-        )
+        self.assertEqual(icosphere.procedure_materialization.mcp, mcp)
         subdivide = next(
             recipe
             for recipe in catalog.recipes
@@ -1155,13 +1152,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 ),
             ),
         )
-        self.assertEqual(
-            (
-                plane.procedure_materialization.mcp.availability,
-                plane.procedure_materialization.mcp.reason,
-            ),
-            ("unavailable", "No approved action-level MCP tool is available."),
-        )
+        self.assertEqual(plane.procedure_materialization.mcp, mcp)
         cube = next(
             recipe
             for recipe in catalog.recipes
@@ -1253,13 +1244,7 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("size", "divide_by_two"),
         )
-        self.assertEqual(
-            (
-                cube.procedure_materialization.mcp.availability,
-                cube.procedure_materialization.mcp.reason,
-            ),
-            ("unavailable", "No approved action-level MCP tool is available."),
-        )
+        self.assertEqual(cube.procedure_materialization.mcp, mcp)
         cone = next(
             recipe
             for recipe in catalog.recipes
@@ -1989,6 +1974,33 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertEqual(
             tuple(item.argument_name for item in shortcut.omitted_action_arguments),
             ("targetId", "resultMeshId", "resultMeshName"),
+        )
+
+    def test_loads_byte_frozen_single_action_level_mcp_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.34.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "38a01825bc709f4db0df18dcc822c02596bb6001d536092880b562ba27791796",
+        )
+        self.assertEqual(frozen.catalog_version, "1.34.0")
+        self.assertEqual(
+            tuple(
+                recipe.action_name
+                for recipe in frozen.recipes
+                if recipe.procedure_materialization is not None
+                and recipe.procedure_materialization.mcp.availability == "available"
+            ),
+            ("blender.mesh.create_uv_sphere",),
         )
 
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
