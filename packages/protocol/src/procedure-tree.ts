@@ -193,6 +193,8 @@ export const mcpProcedureCallSchema = z.strictObject({
   serverName: z.string().min(1),
   toolName: z.string().min(1),
   arguments: z.record(z.string().min(1), z.json()),
+  argumentSource: z.literal('accepted_leaf_action').optional(),
+  actionArguments: z.record(z.string().min(1), z.json()).optional(),
   resultBinding: guideStepIdSchema.optional(),
 });
 export type McpProcedureCall = z.infer<typeof mcpProcedureCallSchema>;

@@ -2505,22 +2505,74 @@
                                 ]
                               },
                               "mcp": {
-                                "type": "object",
-                                "properties": {
-                                  "availability": {
-                                    "type": "string",
-                                    "const": "unavailable"
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "availability": {
+                                        "type": "string",
+                                        "const": "unavailable"
+                                      },
+                                      "reason": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "availability",
+                                      "reason"
+                                    ],
+                                    "additionalProperties": false
                                   },
-                                  "reason": {
-                                    "type": "string",
-                                    "minLength": 1
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "availability": {
+                                        "type": "string",
+                                        "const": "available"
+                                      },
+                                      "source": {
+                                        "type": "string",
+                                        "const": "catalog.action_level_mcp"
+                                      },
+                                      "semanticBinding": {
+                                        "type": "string",
+                                        "const": "all_leaf_operations"
+                                      },
+                                      "parameterBinding": {
+                                        "type": "string",
+                                        "const": "accepted_action_arguments"
+                                      },
+                                      "serverName": {
+                                        "type": "string",
+                                        "const": "operating-line"
+                                      },
+                                      "toolName": {
+                                        "type": "string",
+                                        "const": "operatingline.blender.action.execute"
+                                      },
+                                      "authorization": {
+                                        "type": "string",
+                                        "const": "accepted_replay_next_step"
+                                      },
+                                      "resultBinding": {
+                                        "type": "string",
+                                        "const": "companion_state_report"
+                                      }
+                                    },
+                                    "required": [
+                                      "availability",
+                                      "source",
+                                      "semanticBinding",
+                                      "parameterBinding",
+                                      "serverName",
+                                      "toolName",
+                                      "authorization",
+                                      "resultBinding"
+                                    ],
+                                    "additionalProperties": false
                                   }
-                                },
-                                "required": [
-                                  "availability",
-                                  "reason"
-                                ],
-                                "additionalProperties": false
+                                ]
                               }
                             },
                             "required": [

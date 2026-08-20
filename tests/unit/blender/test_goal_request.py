@@ -1,5 +1,6 @@
 """Focused pure-Python coverage for Blender's initial goal request."""
 
+from copy import deepcopy
 from importlib import import_module
 from queue import Empty
 from pathlib import Path
@@ -102,6 +103,58 @@ class GoalRequestPayloadTests(unittest.TestCase):
 
 
 class GoalRequestTransportTests(unittest.TestCase):
+    @staticmethod
+    def _action_delivery(instance_id: str) -> dict:
+        return {
+            "formatVersion": "1.0.0",
+            "requestId": str(uuid.uuid4()),
+            "replayId": str(uuid.uuid4()),
+            "deliveryId": str(uuid.uuid4()),
+            "target": {"adapterId": "blender", "instanceId": instance_id},
+            "proposalId": str(uuid.uuid4()),
+            "plan": {"id": "uv-sphere-plan", "revision": 1},
+            "planContentSha256": "a" * 64,
+            "executionId": str(uuid.uuid4()),
+            "expectedState": {"reportId": str(uuid.uuid4()), "sequence": 2},
+            "step": {
+                "id": "uv-sphere.create",
+                "parentId": "root",
+                "order": 1,
+                "dependsOn": [],
+                "title": "Create sphere",
+                "intent": "Create a UV Sphere",
+                "explanation": "Create exactly one reviewed sphere.",
+                "state": "ready",
+                "action": {
+                    "adapterId": "blender",
+                    "name": "blender.mesh.create_uv_sphere",
+                    "arguments": {
+                        "resourceId": "uv-sphere",
+                        "objectName": "OperatingLine.ActionSphere",
+                        "radius": 1.0,
+                        "location": [0.0, 0.0, 0.0],
+                    },
+                },
+                "anchors": [],
+                "expectedObservations": [
+                    {
+                        "kind": "resource_exists",
+                        "parameters": {"resourceId": "uv-sphere"},
+                    }
+                ],
+                "observationPolicy": {
+                    "mode": "success_gate",
+                    "failureStrategy": "rollback_step",
+                },
+                "rollback": {
+                    "mode": "compensating_action",
+                    "checkpointRequired": False,
+                },
+            },
+            "requestedAt": "2026-08-20T12:00:00Z",
+            "dispatchedAt": "2026-08-20T12:00:01Z",
+        }
+
     def _session_response(self, path, body):
         if path == "/api/v1/companion/session":
             self.assertEqual(body["contractVersion"], "1.0.0")
@@ -220,6 +273,8 @@ class GoalRequestTransportTests(unittest.TestCase):
                     "proposalPlanContentSha256": None,
                     "procedureReplayCurrentStateRequest": request,
                 }
+            if path.startswith("/api/v1/companion/action?"):
+                return {"request": None}
             raise AssertionError(f"Unexpected request: {path}")
 
         transport._request_json = request_json
@@ -234,6 +289,247 @@ class GoalRequestTransportTests(unittest.TestCase):
         )
         with self.assertRaises(Empty):
             transport.incoming.get_nowait()
+
+    def test_action_poll_strictly_validates_and_deduplicates_requests(self) -> None:
+        instance_id = str(uuid.uuid4())
+        delivery = self._action_delivery(instance_id)
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+        )
+        transport._request_json = lambda *_args, **_kwargs: {"request": delivery}
+
+        transport._poll_action_request()
+        transport._poll_action_request()
+
+        self.assertEqual(
+            transport.incoming.get_nowait(),
+            {"kind": "action_execute_request", "request": delivery},
+        )
+        with self.assertRaises(Empty):
+            transport.incoming.get_nowait()
+
+        for mutation, message in (
+            (("extra", True), "invalid fields"),
+            (("requestId", "not-a-uuid"), "must be a UUID"),
+            (("planContentSha256", "A" * 64), "SHA-256 is invalid"),
+        ):
+            invalid = deepcopy(delivery)
+            invalid[mutation[0]] = mutation[1]
+            invalid["requestId"] = (
+                invalid["requestId"]
+                if mutation[0] == "requestId"
+                else str(uuid.uuid4())
+            )
+            transport._request_json = (
+                lambda *_args, candidate=invalid, **_kwargs: {"request": candidate}
+            )
+            with self.assertRaisesRegex(ValueError, message):
+                transport._poll_action_request()
+
+    def test_action_result_waits_for_state_delivery_and_flushes_on_shutdown(self) -> None:
+        instance_id = str(uuid.uuid4())
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+            poll_interval=10.0,
+        )
+        delivery = self._action_delivery(instance_id)
+        state_report = {
+            "reportId": str(uuid.uuid4()),
+            "sequence": 3,
+        }
+        result = {
+            key: deepcopy(delivery[key])
+            for key in (
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "deliveryId",
+                "target",
+                "proposalId",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "expectedState",
+            )
+        }
+        result.update(
+            {
+                "stepId": delivery["step"]["id"],
+                "status": "succeeded",
+                "report": state_report,
+                "error": None,
+                "occurredAt": "2026-08-20T12:00:02Z",
+            }
+        )
+        calls = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                return self._session_response(path, body)
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/state":
+                calls.append((path, deepcopy(body)))
+                return {"result": "accepted"}
+            if path == "/api/v1/companion/action-result":
+                calls.append((path, deepcopy(body)))
+                return {"result": "accepted"}
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport._poll_action_request = lambda: None
+        transport._establish_session()
+        transport.send_report(state_report)
+        transport.submit_action_result(result)
+        transport.start()
+        transport.stop(flush_timeout=0.5)
+        self.assertTrue(transport.wait_stopped(1.0))
+        self.assertEqual(
+            [path for path, _body in calls],
+            ["/api/v1/companion/state", "/api/v1/companion/action-result"],
+        )
+        self.assertEqual(transport.last_delivered_sequence, 3)
+
+    def test_action_result_http_4xx_is_permanent_and_not_retried(self) -> None:
+        instance_id = str(uuid.uuid4())
+        delivery = self._action_delivery(instance_id)
+        result = {
+            key: deepcopy(delivery[key])
+            for key in (
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "deliveryId",
+                "target",
+                "proposalId",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "expectedState",
+            )
+        }
+        result.update(
+            {
+                "stepId": delivery["step"]["id"],
+                "status": "rejected",
+                "report": None,
+                "error": "stale expected state",
+                "occurredAt": "2026-08-20T12:00:02Z",
+            }
+        )
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+            poll_interval=10.0,
+        )
+        attempts = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                return self._session_response(path, body)
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/action-result":
+                attempts.append(deepcopy(body))
+                raise HTTPError(path, 409, "Conflict", {}, None)
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport.submit_action_result(result)
+        transport.start()
+        deadline = time.monotonic() + 1.0
+        rejected = None
+        while time.monotonic() < deadline:
+            try:
+                message = transport.incoming.get_nowait()
+            except Empty:
+                time.sleep(0.01)
+                continue
+            if message.get("kind") == "action_result_rejected":
+                rejected = message
+                break
+        transport.stop(flush_timeout=0.5)
+        self.assertTrue(transport.wait_stopped(1.0))
+        self.assertEqual(attempts, [result])
+        self.assertEqual(rejected["requestId"], result["requestId"])
+
+    def test_unrelated_later_report_does_not_unlock_action_result(self) -> None:
+        instance_id = str(uuid.uuid4())
+        delivery = self._action_delivery(instance_id)
+        referenced_report = {
+            "reportId": str(uuid.uuid4()),
+            "sequence": 3,
+        }
+        unrelated_report = {
+            "reportId": str(uuid.uuid4()),
+            "sequence": 4,
+        }
+        result = {
+            key: deepcopy(delivery[key])
+            for key in (
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "deliveryId",
+                "target",
+                "proposalId",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "expectedState",
+            )
+        }
+        result.update(
+            {
+                "stepId": delivery["step"]["id"],
+                "status": "succeeded",
+                "report": referenced_report,
+                "error": None,
+                "occurredAt": "2026-08-20T12:00:02Z",
+            }
+        )
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+            poll_interval=10.0,
+        )
+        state_delivered = threading.Event()
+        action_attempts = []
+
+        def request_json(_method, path, body=None, **_kwargs):
+            if path == "/api/v1/companion/session":
+                return self._session_response(path, body)
+            if path == "/api/v1/replan/providers":
+                return {"providers": []}
+            if path == "/api/v1/companion/state":
+                state_delivered.set()
+                return {"result": "accepted"}
+            if path == "/api/v1/companion/action-result":
+                action_attempts.append(deepcopy(body))
+                return {"result": "accepted"}
+            raise AssertionError(f"Unexpected request: {path}")
+
+        transport._request_json = request_json
+        transport._poll = lambda: None
+        transport._poll_action_request = lambda: None
+        transport._establish_session()
+        transport.send_report(unrelated_report)
+        transport.submit_action_result(result)
+        transport.start()
+        self.assertTrue(state_delivered.wait(timeout=1.0))
+        time.sleep(0.05)
+        transport.stop(flush_timeout=0.05)
+        self.assertTrue(transport.wait_stopped(1.0))
+        self.assertEqual(action_attempts, [])
+        self.assertEqual(transport.last_delivered_sequence, 4)
 
     def test_stop_flush_never_reestablishes_a_cleared_or_existing_session(self) -> None:
         transport = CompanionTransport(

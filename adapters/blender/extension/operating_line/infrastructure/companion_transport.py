@@ -173,13 +173,16 @@ class CompanionTransport:
         self.replan_runs: Queue[dict[str, Any]] = Queue()
         self.dialogue_runs: Queue[dict[str, Any]] = Queue()
         self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
+        self.action_results: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._flush_deadline = 0.0
         self._last_delivered_sequence = 0
+        self._last_delivered_report_identity: tuple[str, int] | None = None
         self._session_snapshot: CompanionSessionSnapshot | None = None
         self._seen_replay_current_state_verification_ids: set[str] = set()
+        self._seen_action_request_ids: set[str] = set()
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -259,6 +262,12 @@ class CompanionTransport:
 
     def send_report(self, report: dict[str, Any]) -> None:
         self.outgoing.put(report)
+
+    def submit_action_result(self, result: dict[str, Any]) -> None:
+        """Queue a terminal action result after its referenced state report."""
+        if not isinstance(result, dict):
+            raise ValueError("Action result must be an object")
+        self.action_results.put(dict(result))
 
     def accept_plan(
         self,
@@ -404,8 +413,10 @@ class CompanionTransport:
         }
         if (
             path.startswith("/api/v1/companion/guide?")
+            or path.startswith("/api/v1/companion/action?")
             or path == "/api/v1/companion/state"
             or path == "/api/v1/companion/proposal-decision"
+            or path == "/api/v1/companion/action-result"
         ):
             session = self._session_snapshot
             if session is None:
@@ -740,6 +751,185 @@ class CompanionTransport:
                 )
         self._poll_revision_history()
         self._poll_revision_branches()
+        if session.negotiated_guide_protocol_version == "1.5.0":
+            self._poll_action_request()
+
+    @staticmethod
+    def _validated_required_uuid(value: Any, label: str) -> str:
+        validated = CompanionTransport._validated_optional_uuid(value, label)
+        if validated is None:
+            raise ValueError(f"{label} must be a UUID")
+        return validated
+
+    @staticmethod
+    def _validate_action_step(step: Any) -> None:
+        if not isinstance(step, dict):
+            raise ValueError("Action execution step must be an object")
+        required = {
+            "id",
+            "parentId",
+            "order",
+            "dependsOn",
+            "title",
+            "intent",
+            "explanation",
+            "state",
+            "action",
+            "anchors",
+            "expectedObservations",
+            "rollback",
+        }
+        allowed = required | {"observationPolicy"}
+        actual = set(step)
+        if not required.issubset(actual) or not actual.issubset(allowed):
+            CompanionTransport._validate_exact_keys(step, required, "Action execution step")
+        if not isinstance(step["id"], str) or not step["id"]:
+            raise ValueError("Action execution step id must be non-empty text")
+        if step["parentId"] is not None and not isinstance(step["parentId"], str):
+            raise ValueError("Action execution step parent id must be text or null")
+        if (
+            isinstance(step["order"], bool)
+            or not isinstance(step["order"], int)
+            or step["order"] < 0
+        ):
+            raise ValueError("Action execution step order must be a non-negative integer")
+        if not isinstance(step["dependsOn"], list) or not all(
+            isinstance(item, str) and item for item in step["dependsOn"]
+        ):
+            raise ValueError("Action execution step dependencies must be step ids")
+        for field in ("title", "intent", "explanation", "state"):
+            if not isinstance(step[field], str) or not step[field]:
+                raise ValueError(f"Action execution step {field} must be non-empty text")
+        if not isinstance(step["anchors"], list):
+            raise ValueError("Action execution anchors must be an array")
+        if not isinstance(step["expectedObservations"], list):
+            raise ValueError("Action execution observations must be an array")
+        action = step["action"]
+        if not isinstance(action, dict):
+            raise ValueError("Action execution step must contain an action")
+        CompanionTransport._validate_exact_keys(
+            action, {"adapterId", "name", "arguments"}, "Action execution binding"
+        )
+        if action["adapterId"] != "blender" or action["name"] != (
+            "blender.mesh.create_uv_sphere"
+        ):
+            raise ValueError("Action execution is restricted to UV Sphere")
+        if not isinstance(action["arguments"], dict):
+            raise ValueError("Action execution arguments must be an object")
+        rollback = step["rollback"]
+        if not isinstance(rollback, dict):
+            raise ValueError("Action execution rollback must be an object")
+        CompanionTransport._validate_exact_keys(
+            rollback, {"mode", "checkpointRequired"}, "Action execution rollback"
+        )
+        if not isinstance(rollback["mode"], str) or not isinstance(
+            rollback["checkpointRequired"], bool
+        ):
+            raise ValueError("Action execution rollback has invalid values")
+        if "observationPolicy" in step and not isinstance(
+            step["observationPolicy"], dict
+        ):
+            raise ValueError("Action execution observation policy must be an object")
+
+    def _validate_action_delivery(self, delivery: Any) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Action execution delivery must be an object")
+        self._validate_exact_keys(
+            delivery,
+            {
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "deliveryId",
+                "target",
+                "proposalId",
+                "plan",
+                "planContentSha256",
+                "executionId",
+                "expectedState",
+                "step",
+                "requestedAt",
+                "dispatchedAt",
+            },
+            "Action execution delivery",
+        )
+        if delivery["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported action execution format version")
+        for field in (
+            "requestId",
+            "replayId",
+            "deliveryId",
+            "proposalId",
+            "executionId",
+        ):
+            self._validated_required_uuid(delivery[field], f"Action execution {field}")
+        target = delivery["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Action execution target must be an object")
+        self._validate_exact_keys(
+            target, {"adapterId", "instanceId"}, "Action execution target"
+        )
+        if target["adapterId"] != "blender" or target["instanceId"] != self._instance_id:
+            raise ValueError("Action execution targets a different Blender instance")
+        self._validated_required_uuid(target["instanceId"], "Action execution instance id")
+        plan = delivery["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("Action execution plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision"}, "Action execution plan")
+        if not isinstance(plan["id"], str) or not plan["id"]:
+            raise ValueError("Action execution plan id must be non-empty text")
+        if (
+            isinstance(plan["revision"], bool)
+            or not isinstance(plan["revision"], int)
+            or plan["revision"] <= 0
+        ):
+            raise ValueError("Action execution plan revision must be positive")
+        if (
+            not isinstance(delivery["planContentSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(delivery["planContentSha256"]) is None
+        ):
+            raise ValueError("Action execution plan content SHA-256 is invalid")
+        expected_state = delivery["expectedState"]
+        if not isinstance(expected_state, dict):
+            raise ValueError("Action execution expected state must be an object")
+        self._validate_exact_keys(
+            expected_state, {"reportId", "sequence"}, "Action execution expected state"
+        )
+        self._validated_required_uuid(
+            expected_state["reportId"], "Action execution expected report id"
+        )
+        if (
+            isinstance(expected_state["sequence"], bool)
+            or not isinstance(expected_state["sequence"], int)
+            or expected_state["sequence"] <= 0
+        ):
+            raise ValueError("Action execution expected sequence must be positive")
+        self._validate_action_step(delivery["step"])
+        self._validate_expiry(delivery["requestedAt"], "Action execution requested time")
+        self._validate_expiry(delivery["dispatchedAt"], "Action execution dispatched time")
+        return delivery
+
+    def _poll_action_request(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/action?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Action execution poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        validated = self._validate_action_delivery(delivery)
+        request_id = validated["requestId"]
+        if request_id in self._seen_action_request_ids:
+            return
+        if len(self._seen_action_request_ids) >= 256:
+            self._seen_action_request_ids.pop()
+        self._seen_action_request_ids.add(request_id)
+        self.incoming.put(
+            {"kind": "action_execute_request", "request": dict(validated)}
+        )
 
     def _validated_replay_current_state_request(
         self,
@@ -1025,6 +1215,7 @@ class CompanionTransport:
         next_session_attempt_at = 0.0
         session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
         pending_report: dict[str, Any] | None = None
+        pending_action_result: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
         pending_goal_request: dict[str, Any] | None = None
@@ -1048,11 +1239,13 @@ class CompanionTransport:
         while (
             not self._stop.is_set()
             or pending_report is not None
+            or pending_action_result is not None
             or pending_decision is not None
             or pending_revision_request is not None
             or pending_goal_request is not None
             or pending_dialogue_run is not None
             or not self.outgoing.empty()
+            or not self.action_results.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
             or not self.goal_requests.empty()
@@ -1538,11 +1731,86 @@ class CompanionTransport:
                         raise ValueError("Runtime rejected or did not acknowledge state report")
                     request_succeeded = True
                     sequence = pending_report.get("sequence")
-                    if isinstance(sequence, int):
+                    report_id = pending_report.get("reportId")
+                    previous_sequence = self._last_delivered_sequence
+                    if isinstance(sequence, int) and not isinstance(sequence, bool):
                         self._last_delivered_sequence = max(
                             self._last_delivered_sequence, sequence
                         )
+                    if (
+                        isinstance(report_id, str)
+                        and isinstance(sequence, int)
+                        and not isinstance(sequence, bool)
+                        and sequence >= previous_sequence
+                    ):
+                        self._last_delivered_report_identity = (report_id, sequence)
                     pending_report = None
+                if pending_action_result is None:
+                    try:
+                        pending_action_result = self.action_results.get_nowait()
+                    except Empty:
+                        pass
+                if pending_action_result is not None:
+                    result_report = pending_action_result.get("report")
+                    report_identity = (
+                        (
+                            result_report.get("reportId"),
+                            result_report.get("sequence"),
+                        )
+                        if (
+                            isinstance(result_report, dict)
+                            and isinstance(result_report.get("reportId"), str)
+                            and isinstance(result_report.get("sequence"), int)
+                            and not isinstance(result_report.get("sequence"), bool)
+                        )
+                        else None
+                    )
+                    if (
+                        result_report is None
+                        or (
+                            report_identity is not None
+                            and report_identity == self._last_delivered_report_identity
+                            and report_identity[1] == self._last_delivered_sequence
+                        )
+                    ):
+                        request_id = pending_action_result.get("requestId")
+                        try:
+                            response = self._request_json(
+                                "POST",
+                                "/api/v1/companion/action-result",
+                                pending_action_result,
+                            )
+                            self._validate_exact_keys(
+                                response, {"result"}, "Action execution result ack"
+                            )
+                            if response["result"] not in {"accepted", "duplicate"}:
+                                raise ValueError(
+                                    "Runtime rejected or did not acknowledge action result"
+                                )
+                        except HTTPError as error:
+                            if not 400 <= error.code < 500:
+                                raise
+                            self.incoming.put(
+                                {
+                                    "kind": "action_result_rejected",
+                                    "requestId": request_id,
+                                    "message": (
+                                        "Runtime permanently rejected action result "
+                                        f"(HTTP {error.code})"
+                                    ),
+                                }
+                            )
+                            pending_action_result = None
+                            request_succeeded = True
+                        else:
+                            self.incoming.put(
+                                {
+                                    "kind": "action_result_acknowledged",
+                                    "requestId": request_id,
+                                }
+                            )
+                            pending_action_result = None
+                            request_succeeded = True
                 now = time.monotonic()
                 if not self._stop.is_set() and now >= next_poll:
                     self._poll()

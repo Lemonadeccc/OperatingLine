@@ -132,6 +132,10 @@ class ProcedureMaterializationChannel:
         ]
         | None
     ) = None
+    server_name: str | None = None
+    tool_name: str | None = None
+    authorization: str | None = None
+    result_binding: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1344,6 +1348,58 @@ def _parse_shortcut_materialization(
     )
 
 
+def _parse_mcp_materialization(
+    value: Any, recipe_id: str
+) -> ProcedureMaterializationChannel:
+    label = f"Interaction recipe {recipe_id} procedureMaterialization mcp"
+    raw = _expect_object(value, label)
+    availability = _expect_string(raw.get("availability"), f"{label} availability")
+    if availability == "unavailable":
+        return _parse_unavailable_materialization(raw, label)
+    if availability != "available":
+        raise ValueError(f"{label} has unknown availability")
+    _expect_exact_keys(
+        raw,
+        required={
+            "availability",
+            "source",
+            "semanticBinding",
+            "parameterBinding",
+            "serverName",
+            "toolName",
+            "authorization",
+            "resultBinding",
+        },
+        label=label,
+    )
+    expected = {
+        "source": "catalog.action_level_mcp",
+        "semanticBinding": "all_leaf_operations",
+        "parameterBinding": "accepted_action_arguments",
+        "serverName": "operating-line",
+        "toolName": "operatingline.blender.action.execute",
+        "authorization": "accepted_replay_next_step",
+        "resultBinding": "companion_state_report",
+    }
+    for key, expected_value in expected.items():
+        if raw[key] != expected_value:
+            raise ValueError(f"{label} has unsupported {key}")
+    if recipe_id != "blender.mesh.create_uv_sphere.native":
+        raise ValueError(
+            f"{label} action-level MCP is restricted to blender.mesh.create_uv_sphere"
+        )
+    return ProcedureMaterializationChannel(
+        availability="available",
+        source=expected["source"],
+        semantic_binding=expected["semanticBinding"],
+        parameter_binding=expected["parameterBinding"],
+        server_name=expected["serverName"],
+        tool_name=expected["toolName"],
+        authorization=expected["authorization"],
+        result_binding=expected["resultBinding"],
+    )
+
+
 def _parse_procedure_materialization(
     value: Any,
     recipe_id: str,
@@ -1462,7 +1518,7 @@ def _parse_procedure_materialization(
         shortcut=_parse_shortcut_materialization(
             raw["shortcut"], recipe_id, guidance
         ),
-        mcp=_parse_unavailable_materialization(raw["mcp"], f"{label} mcp"),
+        mcp=_parse_mcp_materialization(raw["mcp"], recipe_id),
         semantic=(
             _parse_semantic_materialization(raw["semantic"], recipe_id)
             if "semantic" in raw
@@ -1705,6 +1761,14 @@ def _validate_ordered_parameter_operations(
     materialization = recipe.procedure_materialization
     if materialization is None:
         return
+    if (
+        materialization.mcp.availability == "available"
+        and recipe.action_name != "blender.mesh.create_uv_sphere"
+    ):
+        raise ValueError(
+            f"Interaction recipe {recipe.id} action-level MCP is restricted to "
+            "blender.mesh.create_uv_sphere"
+        )
     semantic = materialization.semantic
     if semantic is not None:
         _validate_parameter_assignment_coverage(

@@ -7,11 +7,13 @@ import {
   parseProcedureTree,
   procedureAuthoringExtendedShortcutMaterializedTreeSchema,
   procedureAuthoringMaterializationExtendedShortcutFormatVersion,
+  procedureAuthoringMaterializationMcpFormatVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
+  procedureAuthoringMcpMaterializedTreeSchema,
   procedureParameterProjectionFormatVersion,
   projectProcedureParameter,
   procedureTreeExtendedShortcutFormatVersion,
@@ -27,6 +29,7 @@ import {
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringMaterializedTree,
   type ProcedureAuthoringExtendedShortcutMaterializedTree,
+  type ProcedureAuthoringMcpMaterializedTree,
   type ProcedureAuthoringMaterializationResult,
   type ProcedureLeafNode,
   type ProcedureParameterBinding,
@@ -44,9 +47,12 @@ export interface ProcedureAuthoringMaterialization {
     | typeof procedureAuthoringMaterializationLegacyFormatVersion
     | typeof procedureAuthoringMaterializationOrderedMenuFormatVersion
     | typeof procedureAuthoringMaterializationFormatVersion
-    | typeof procedureAuthoringMaterializationExtendedShortcutFormatVersion;
+    | typeof procedureAuthoringMaterializationExtendedShortcutFormatVersion
+    | typeof procedureAuthoringMaterializationMcpFormatVersion;
   readonly tree:
-    ProcedureAuthoringMaterializedTree | ProcedureAuthoringExtendedShortcutMaterializedTree;
+    | ProcedureAuthoringMaterializedTree
+    | ProcedureAuthoringExtendedShortcutMaterializedTree
+    | ProcedureAuthoringMcpMaterializedTree;
   readonly coverage: MaterializationCoverage;
   readonly inputTreeContentSha256: string;
   readonly outputTreeContentSha256: string;
@@ -631,6 +637,8 @@ function materializeLeaf(
       : undefined;
   const shortcutDeclaration =
     declaration?.shortcut.availability === 'available' ? declaration.shortcut : undefined;
+  const mcpDeclaration =
+    declaration?.mcp.availability === 'available' ? declaration.mcp : undefined;
   const projectedSemanticOperations = materializeSemanticParameters(leaf, recipe);
   const semanticOperations = [...projectedSemanticOperations].sort(
     (left, right) => left.order - right.order,
@@ -765,33 +773,63 @@ function materializeLeaf(
             }),
           },
         ];
-  const mcpTracks = [
-    unavailableTrack(
-      leaf,
-      'mcp',
-      recipe,
-      declaration?.mcp.reason ??
-        (recipe === undefined
-          ? 'No InteractionCatalog recipe is available for this leaf action.'
-          : 'The InteractionCatalog recipe does not declare MCP materialization.'),
-    ),
-  ];
+  const mcpTracks =
+    mcpDeclaration === undefined
+      ? [
+          unavailableTrack(
+            leaf,
+            'mcp',
+            recipe,
+            declaration?.mcp.availability === 'unavailable'
+              ? declaration.mcp.reason
+              : recipe === undefined
+                ? 'No InteractionCatalog recipe is available for this leaf action.'
+                : 'The InteractionCatalog recipe does not declare MCP materialization.',
+          ),
+        ]
+      : [
+          {
+            id: `${recipe!.id}.mcp`,
+            availability: 'available' as const,
+            title: `${recipe!.title} action-level MCP projection`,
+            preconditions: [],
+            modality: 'mcp' as const,
+            operations: [
+              {
+                id: `${recipe!.id}.mcp.execute`,
+                order: 1,
+                semanticRefs: [...semanticRefs],
+                description: `Execute ${leaf.action!.name} as the accepted replay next step`,
+                evidenceRefs: [...evidenceRefs],
+                serverName: mcpDeclaration.serverName,
+                toolName: mcpDeclaration.toolName,
+                arguments: {
+                  formatVersion: '1.0.0',
+                  requestId: '$runtime.requestId',
+                  replayId: '$runtime.replayId',
+                  expectedState: '$runtime.expectedState',
+                },
+                argumentSource: 'accepted_leaf_action' as const,
+                actionArguments: structuredClone(leaf.action!.arguments),
+                resultBinding: `${leaf.id}.companion_state_report`,
+              },
+            ],
+          },
+        ];
 
-  const coverage: MaterializationCoverage[number] = menuAvailable
+  const baseCoverage: Omit<MaterializationCoverage[number], 'mcp'> = menuAvailable
     ? shortcutDeclaration === undefined
       ? {
           leafId: leaf.id,
           recipeId: recipe!.id,
           menu: 'materialized',
           shortcut: 'unavailable',
-          mcp: 'unavailable',
         }
       : {
           leafId: leaf.id,
           recipeId: recipe!.id,
           menu: 'materialized',
           shortcut: 'materialized',
-          mcp: 'unavailable',
         }
     : shortcutDeclaration === undefined
       ? {
@@ -799,15 +837,17 @@ function materializeLeaf(
           recipeId: recipe?.id ?? null,
           menu: 'unavailable',
           shortcut: 'unavailable',
-          mcp: 'unavailable',
         }
       : {
           leafId: leaf.id,
           recipeId: recipe!.id,
           menu: 'unavailable',
           shortcut: 'materialized',
-          mcp: 'unavailable',
         };
+  const coverage = {
+    ...baseCoverage,
+    mcp: mcpDeclaration === undefined ? ('unavailable' as const) : ('materialized' as const),
+  } as MaterializationCoverage[number];
 
   const parameterProjection = materializeParameterProjection(
     { ...leaf, semanticOperations: projectedSemanticOperations },
@@ -899,6 +939,10 @@ export function materializeProcedureAuthoringCandidate(
       )
     );
   });
+  const usesMcpMaterialization = orderedCandidateLeaves.some((leaf) => {
+    const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
+    return recipe?.procedureMaterialization?.mcp.availability === 'available';
+  });
   for (const leaf of orderedCandidateLeaves) {
     if (leaf.action === null) continue;
     const action = actionsByName.get(leaf.action.name);
@@ -941,21 +985,25 @@ export function materializeProcedureAuthoringCandidate(
     ),
   });
   validateProcedureTreeParameterProjectionCatalog(parsedTree, interactionCatalog);
-  const tree = usesExtendedShortcutMaterialization
-    ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
-    : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);
+  const tree = usesMcpMaterialization
+    ? procedureAuthoringMcpMaterializedTreeSchema.parse(parsedTree)
+    : usesExtendedShortcutMaterialization
+      ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
+      : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);
   const coverage = stableProcedureLeafOrder(tree).map(
     (leaf) => materializedByLeafId.get(leaf.id)!.coverage,
   );
 
   return {
-    formatVersion: usesExtendedShortcutMaterialization
-      ? procedureAuthoringMaterializationExtendedShortcutFormatVersion
-      : usesShortcutMaterialization
-        ? procedureAuthoringMaterializationFormatVersion
-        : usesOrderedParameterOperations
-          ? procedureAuthoringMaterializationOrderedMenuFormatVersion
-          : procedureAuthoringMaterializationLegacyFormatVersion,
+    formatVersion: usesMcpMaterialization
+      ? procedureAuthoringMaterializationMcpFormatVersion
+      : usesExtendedShortcutMaterialization
+        ? procedureAuthoringMaterializationExtendedShortcutFormatVersion
+        : usesShortcutMaterialization
+          ? procedureAuthoringMaterializationFormatVersion
+          : usesOrderedParameterOperations
+            ? procedureAuthoringMaterializationOrderedMenuFormatVersion
+            : procedureAuthoringMaterializationLegacyFormatVersion,
     tree,
     coverage,
     inputTreeContentSha256: sha256(candidate),

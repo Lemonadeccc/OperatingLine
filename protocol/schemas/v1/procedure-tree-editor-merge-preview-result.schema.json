@@ -1268,6 +1268,20 @@
                                           "$ref": "#/$defs/__schema6"
                                         }
                                       },
+                                      "argumentSource": {
+                                        "type": "string",
+                                        "const": "accepted_leaf_action"
+                                      },
+                                      "actionArguments": {
+                                        "type": "object",
+                                        "propertyNames": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                          "$ref": "#/$defs/__schema7"
+                                        }
+                                      },
                                       "resultBinding": {
                                         "type": "string",
                                         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -2440,7 +2454,7 @@
                         "const": "add"
                       },
                       "after": {
-                        "$ref": "#/$defs/__schema7"
+                        "$ref": "#/$defs/__schema8"
                       }
                     },
                     "required": [
@@ -2525,7 +2539,7 @@
                         "const": "remove"
                       },
                       "before": {
-                        "$ref": "#/$defs/__schema8"
+                        "$ref": "#/$defs/__schema9"
                       }
                     },
                     "required": [
@@ -2610,10 +2624,10 @@
                         "const": "replace"
                       },
                       "before": {
-                        "$ref": "#/$defs/__schema9"
+                        "$ref": "#/$defs/__schema10"
                       },
                       "after": {
-                        "$ref": "#/$defs/__schema10"
+                        "$ref": "#/$defs/__schema11"
                       }
                     },
                     "required": [
@@ -2843,7 +2857,7 @@
                                 "const": true
                               },
                               "value": {
-                                "$ref": "#/$defs/__schema11"
+                                "$ref": "#/$defs/__schema12"
                               }
                             },
                             "required": [
@@ -2877,7 +2891,7 @@
                                 "const": true
                               },
                               "value": {
-                                "$ref": "#/$defs/__schema11"
+                                "$ref": "#/$defs/__schema12"
                               }
                             },
                             "required": [
@@ -2911,7 +2925,7 @@
                                 "const": true
                               },
                               "value": {
-                                "$ref": "#/$defs/__schema11"
+                                "$ref": "#/$defs/__schema12"
                               }
                             },
                             "required": [
@@ -2964,7 +2978,7 @@
                             "const": true
                           },
                           "value": {
-                            "$ref": "#/$defs/__schema11"
+                            "$ref": "#/$defs/__schema12"
                           }
                         },
                         "required": [
@@ -3264,7 +3278,7 @@
                         "const": true
                       },
                       "value": {
-                        "$ref": "#/$defs/__schema11"
+                        "$ref": "#/$defs/__schema12"
                       }
                     },
                     "required": [
@@ -3298,7 +3312,7 @@
                         "const": true
                       },
                       "value": {
-                        "$ref": "#/$defs/__schema11"
+                        "$ref": "#/$defs/__schema12"
                       }
                     },
                     "required": [
@@ -3332,7 +3346,7 @@
                         "const": true
                       },
                       "value": {
-                        "$ref": "#/$defs/__schema11"
+                        "$ref": "#/$defs/__schema12"
                       }
                     },
                     "required": [
@@ -3754,6 +3768,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema11"
+          }
+        }
+      ]
+    },
+    "__schema12": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema12"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema12"
           }
         }
       ]

@@ -5202,13 +5202,18 @@ def assert_companion_and_plan_semantics() -> None:
         "integration-token-123456",
         str(uuid.uuid4()),
     )
-    delivery_transport._request_json = lambda *_args, **_kwargs: {
-        "protocolVersion": "1.1.0",
-        "plan": deepcopy(dynamic_plan),
-        "planContentSha256": dynamic_plan_content_sha256,
-        "proposal": None,
-        "proposalPlanContentSha256": None,
-    }
+    def delivery_request(_method, path, *_args, **_kwargs):
+        if path.startswith("/api/v1/companion/action?"):
+            return {"request": None}
+        return {
+            "protocolVersion": "1.1.0",
+            "plan": deepcopy(dynamic_plan),
+            "planContentSha256": dynamic_plan_content_sha256,
+            "proposal": None,
+            "proposalPlanContentSha256": None,
+        }
+
+    delivery_transport._request_json = delivery_request
     delivery_transport._session_snapshot = CompanionSessionSnapshot(
         lease_id=str(uuid.uuid4()),
         negotiated_guide_protocol_version="1.1.0",
@@ -5323,6 +5328,14 @@ def assert_companion_and_plan_semantics() -> None:
             parsed_path = urlsplit(self.path)
             if parsed_path.path == "/api/v1/companion/guide":
                 assert self.headers.get("x-operatingline-companion-lease") is not None
+            if parsed_path.path == "/api/v1/companion/action":
+                assert self.headers.get("x-operatingline-companion-lease") is not None
+                assert parse_qs(parsed_path.query) == {
+                    "adapterId": ["blender"],
+                    "instanceId": [companion.instance_id],
+                }
+                self._reply({"request": None})
+                return
             if parsed_path.path == "/redirect":
                 self.send_response(302)
                 self.send_header("Location", "http://192.0.2.1/credential-leak")
@@ -9271,6 +9284,120 @@ def assert_subdivision_surface_round_trip_and_guards() -> None:
     assert boundary_session.back() is not None
 
 
+def assert_action_level_uv_sphere_companion_execution() -> None:
+    """Execute only the exact accepted next UV Sphere through canonical Next."""
+    controller = operating_line.get_companion()
+    session = operating_line.get_session()
+    assert not session.receipts
+    assert bpy.ops.operating_line.start() == {"FINISHED"}
+    start_report = deepcopy(controller.last_report)
+    assert start_report["transition"] == "walkthrough_started"
+    first_step = deepcopy(ACTION_STEPS[0])
+    proposal_id = str(uuid.uuid4())
+
+    class ActionFakeTransport:
+        running = True
+        session_snapshot = FAKE_SESSION_VIEW
+
+        def __init__(self):
+            self.incoming = Queue()
+            self.results = []
+            self.reports = []
+            self.events = []
+            self.last_delivered_sequence = start_report["sequence"]
+
+        def submit_action_result(self, result):
+            self.results.append(deepcopy(result))
+            self.events.append(("result", result["requestId"]))
+
+        def send_report(self, report):
+            self.reports.append(deepcopy(report))
+            self.events.append(("report", report["reportId"]))
+
+    transport = ActionFakeTransport()
+    original_transport = controller._transport
+    controller._transport = transport
+    controller._last_accepted_proposal_id = proposal_id
+
+    def delivery() -> dict:
+        return {
+            "formatVersion": "1.0.0",
+            "requestId": str(uuid.uuid4()),
+            "replayId": str(uuid.uuid4()),
+            "deliveryId": str(uuid.uuid4()),
+            "target": {
+                "adapterId": "blender",
+                "instanceId": controller.instance_id,
+            },
+            "proposalId": proposal_id,
+            "plan": {"id": session.plan_id, "revision": session.revision},
+            "planContentSha256": session.plan_content_sha256,
+            "executionId": session.execution_id,
+            "expectedState": {
+                "reportId": start_report["reportId"],
+                "sequence": start_report["sequence"],
+            },
+            "step": deepcopy(first_step),
+            "requestedAt": "2026-08-20T12:00:00Z",
+            "dispatchedAt": "2026-08-20T12:00:01Z",
+        }
+
+    rejected = []
+    stale = delivery()
+    stale["expectedState"]["reportId"] = str(uuid.uuid4())
+    rejected.append(stale)
+    wrong_arguments = delivery()
+    wrong_arguments["step"]["action"]["arguments"]["radius"] += 0.25
+    rejected.append(wrong_arguments)
+    wrong_plan = delivery()
+    wrong_plan["plan"]["revision"] += 1
+    rejected.append(wrong_plan)
+    wrong_proposal = delivery()
+    wrong_proposal["proposalId"] = str(uuid.uuid4())
+    rejected.append(wrong_proposal)
+
+    scene_before = {item.as_pointer() for item in bpy.data.objects}
+    for invalid in rejected:
+        transport.incoming.put(
+            {"kind": "action_execute_request", "request": invalid}
+        )
+        controller.pump()
+        assert transport.results[-1]["status"] == "rejected"
+        assert transport.results[-1]["report"] is None
+        assert session.active_index == -1
+        assert {item.as_pointer() for item in bpy.data.objects} == scene_before
+
+    accepted = delivery()
+    transport.incoming.put(
+        {"kind": "action_execute_request", "request": accepted}
+    )
+    controller.pump()
+    result = transport.results[-1]
+    assert result["status"] == "succeeded"
+    assert result["error"] is None
+    assert result["stepId"] == first_step["id"]
+    assert result["report"] == {
+        "reportId": controller.last_report["reportId"],
+        "sequence": controller.last_report["sequence"],
+    }
+    assert controller.last_report["transition"] == "step_succeeded"
+    assert controller.last_report["nativeUndoCheckpoint"]["operation"] == "next"
+    assert all(item["satisfied"] is True for item in controller.last_report["observations"])
+    assert transport.events[-2:] == [
+        ("report", controller.last_report["reportId"]),
+        ("result", accepted["requestId"]),
+    ]
+    assert session.active_index == 0
+    assert bpy.data.objects.get(first_step["action"]["arguments"]["objectName"]) is not None
+
+    assert bpy.ops.operating_line.back() == {"FINISHED"}
+    assert session.active_index == -1
+    if overlay_enabled():
+        assert bpy.ops.operating_line.toggle_overlay() == {"FINISHED"}
+    controller._last_accepted_proposal_id = None
+    controller._transport = original_transport
+
+
 def main() -> None:
     original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
     original_add_draw = bpy.types.VIEW3D_MT_add.draw
@@ -9457,6 +9584,7 @@ def main() -> None:
     assert_icosphere_guided_menu_round_trip()
     assert_cube_guided_menu_round_trip()
     assert registered_companion.install_plan(deepcopy(BUNDLED_PLAN)) is True
+    assert_action_level_uv_sphere_companion_execution()
     assert_companion_and_plan_semantics()
     assert_dialogue_proposal_round_trip()
     assert_dialogue_proposal_first_failure_promotes_review()

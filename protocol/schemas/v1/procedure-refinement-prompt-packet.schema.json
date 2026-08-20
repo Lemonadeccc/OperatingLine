@@ -1187,6 +1187,20 @@
                                               "$ref": "#/$defs/__schema6"
                                             }
                                           },
+                                          "argumentSource": {
+                                            "type": "string",
+                                            "const": "accepted_leaf_action"
+                                          },
+                                          "actionArguments": {
+                                            "type": "object",
+                                            "propertyNames": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                              "$ref": "#/$defs/__schema7"
+                                            }
+                                          },
                                           "resultBinding": {
                                             "type": "string",
                                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
@@ -2933,7 +2947,7 @@
                                     "minLength": 1
                                   },
                                   "additionalProperties": {
-                                    "$ref": "#/$defs/__schema7"
+                                    "$ref": "#/$defs/__schema8"
                                   }
                                 },
                                 "parametersSha256": {
@@ -4100,6 +4114,20 @@
                                         },
                                         "additionalProperties": {
                                           "$ref": "#/$defs/__schema6"
+                                        }
+                                      },
+                                      "argumentSource": {
+                                        "type": "string",
+                                        "const": "accepted_leaf_action"
+                                      },
+                                      "actionArguments": {
+                                        "type": "object",
+                                        "propertyNames": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                          "$ref": "#/$defs/__schema7"
                                         }
                                       },
                                       "resultBinding": {
@@ -5508,6 +5536,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema7"
+          }
+        }
+      ]
+    },
+    "__schema8": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema8"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema8"
           }
         }
       ]

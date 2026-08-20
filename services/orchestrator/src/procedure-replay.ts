@@ -320,6 +320,7 @@ export function prepareProcedureLeafReplay(
     throw new ProcedureLeafReplayError(`Managed leaf replay does not support ${leaf.action.name}`);
   }
   const actionName = parsedActionName.data;
+  const requiresMaterializedMcp = actionName === 'blender.mesh.create_uv_sphere';
   const actionContract = replayActionContracts[actionName];
 
   const executablePlanSteps = materialization.compilation.plan.steps.filter(
@@ -366,11 +367,11 @@ export function prepareProcedureLeafReplay(
     leafCoverage?.leafId !== leaf.id ||
     leafCoverage.menu !== 'materialized' ||
     !shortcutCoverageValid ||
-    leafCoverage.mcp !== 'unavailable' ||
+    leafCoverage.mcp !== (requiresMaterializedMcp ? 'materialized' : 'unavailable') ||
     leafCoverage.recipeId === null
   ) {
     throw new ProcedureLeafReplayError(
-      'Replay leaf requires one catalog-grounded menu, an explicit shortcut state, and unavailable MCP',
+      'Replay leaf requires catalog-grounded menu/shortcut/MCP coverage for its managed action',
     );
   }
   if (
@@ -380,7 +381,7 @@ export function prepareProcedureLeafReplay(
     leaf.shortcutTracks[0]?.availability !==
       (leafCoverage.shortcut === 'materialized' ? 'available' : 'unavailable') ||
     leaf.mcpTracks.length !== 1 ||
-    leaf.mcpTracks[0]?.availability !== 'unavailable'
+    leaf.mcpTracks[0]?.availability !== (requiresMaterializedMcp ? 'available' : 'unavailable')
   ) {
     throw new ProcedureLeafReplayError(
       'Replay materialization tracks do not match the bounded catalog-grounding contract',
@@ -457,7 +458,8 @@ export function buildProcedureLeafReplayBinding(input: {
       menuTrack: 'catalog_grounded_not_executed',
       shortcutTrack:
         leafCoverage?.shortcut === 'materialized' ? 'candidate_not_executed' : 'unavailable',
-      mcpTrack: 'unavailable',
+      mcpTrack:
+        leafCoverage?.mcp === 'materialized' ? 'catalog_grounded_not_executed' : 'unavailable',
     },
     createdAt: input.createdAt,
   };
@@ -764,7 +766,7 @@ export function buildProcedureLeafReplayAttestation(input: {
       managedActionResult: 'verified',
       menuTrack: 'catalog_grounded_not_executed',
       shortcutTrack: binding.claims.shortcutTrack,
-      mcpTrack: 'unavailable',
+      mcpTrack: binding.claims.mcpTrack,
       nativeUndoCheckpoint: 'companion_reported_current_at_report',
       currentHostStateAfterReport: 'not_verified',
     },
@@ -1126,7 +1128,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
       recoveryOutcome: automaticRollback ? 'not_required' : 'companion_reported_verified',
       menuTrack: 'catalog_grounded_not_executed',
       shortcutTrack: binding.claims.shortcutTrack,
-      mcpTrack: 'unavailable',
+      mcpTrack: binding.claims.mcpTrack,
       failureNativeUndoCheckpoint:
         failureCheckpoint === undefined
           ? 'not_verified_at_failure_report'

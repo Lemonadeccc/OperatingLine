@@ -254,7 +254,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         managedActionResult: 'pending',
         menuTrack: 'catalog_grounded_not_executed',
         shortcutTrack: 'candidate_not_executed',
-        mcpTrack: 'unavailable',
+        mcpTrack: 'catalog_grounded_not_executed',
       },
       createdAt: occurredAt,
     } as const;
@@ -353,7 +353,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         managedActionResult: 'pending',
         menuTrack: 'catalog_grounded_not_executed',
         shortcutTrack: 'candidate_not_executed',
-        mcpTrack: 'unavailable',
+        mcpTrack: 'catalog_grounded_not_executed',
       },
       createdAt: occurredAt,
     } as const;
@@ -464,7 +464,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         managedActionResult: 'verified',
         menuTrack: 'catalog_grounded_not_executed',
         shortcutTrack: 'candidate_not_executed',
-        mcpTrack: 'unavailable',
+        mcpTrack: 'catalog_grounded_not_executed',
       },
       attestedAt: occurredAt,
     } as const;
@@ -733,7 +733,7 @@ describe('public single-leaf procedure replay JSON Schemas', () => {
         recoveryOutcome: 'companion_reported_verified',
         menuTrack: 'catalog_grounded_not_executed',
         shortcutTrack: 'candidate_not_executed',
-        mcpTrack: 'unavailable',
+        mcpTrack: 'catalog_grounded_not_executed',
         failureNativeUndoCheckpoint: 'companion_reported_current_at_failure_report',
         terminalNativeUndoCheckpoint: 'companion_reported_current_at_recovery_report',
         currentHostStateAfterReport: 'not_verified',

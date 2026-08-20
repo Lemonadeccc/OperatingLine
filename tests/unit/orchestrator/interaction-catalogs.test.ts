@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.33.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.34.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -1494,6 +1494,30 @@ describe('interaction catalog registry', () => {
     expect(frozenUvSphere?.procedureMaterialization?.semantic).toBeUndefined();
     expect(activeUvSphere?.procedureMaterialization?.semantic).toMatchObject({
       source: 'catalog.semantic_parameter_projections',
+    });
+  });
+
+  it('freezes InteractionCatalog 1.33.0 before action-level MCP materialization', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.33.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'ca5a8ac2b7772408ae34f3767dc14aa6ea093dabb8c6062eef30af227d320980',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenUvSphere = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    );
+    const activeUvSphere = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    );
+    expect(frozenUvSphere?.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'unavailable',
+    });
+    expect(activeUvSphere?.procedureMaterialization?.mcp).toMatchObject({
+      availability: 'available',
+      toolName: 'operatingline.blender.action.execute',
+      authorization: 'accepted_replay_next_step',
     });
   });
 

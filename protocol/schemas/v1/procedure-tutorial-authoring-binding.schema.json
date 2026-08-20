@@ -1055,6 +1055,303 @@
             "coverage"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "formatVersion": {
+              "type": "string",
+              "const": "1.4.0"
+            },
+            "packetContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "inputTreeContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "outputTreeContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "catalogBinding": {
+              "type": "object",
+              "properties": {
+                "adapterId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "actionCatalogVersion": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                },
+                "interactionCatalogVersion": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                },
+                "interactionCatalogContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "adapterId",
+                "actionCatalogVersion",
+                "interactionCatalogVersion",
+                "interactionCatalogContentSha256"
+              ],
+              "additionalProperties": false
+            },
+            "validation": {
+              "type": "object",
+              "properties": {
+                "packetIntegrity": {
+                  "type": "string",
+                  "const": "validated"
+                },
+                "installedCatalogBinding": {
+                  "type": "string",
+                  "const": "validated"
+                },
+                "authoringCandidateContract": {
+                  "type": "string",
+                  "const": "validated"
+                },
+                "procedureCompilation": {
+                  "type": "string",
+                  "const": "validated"
+                },
+                "interactionGrounding": {
+                  "type": "string",
+                  "const": "validated_against_installed_interaction_catalog"
+                }
+              },
+              "required": [
+                "packetIntegrity",
+                "installedCatalogBinding",
+                "authoringCandidateContract",
+                "procedureCompilation",
+                "interactionGrounding"
+              ],
+              "additionalProperties": false
+            },
+            "procedureStored": {
+              "type": "boolean",
+              "const": false
+            },
+            "proposalCreated": {
+              "type": "boolean",
+              "const": false
+            },
+            "hostExecutionStarted": {
+              "type": "boolean",
+              "const": false
+            },
+            "coverage": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "leafId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "recipeId": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "menu": {
+                        "type": "string",
+                        "enum": [
+                          "materialized",
+                          "unavailable"
+                        ]
+                      },
+                      "shortcut": {
+                        "type": "string",
+                        "enum": [
+                          "materialized",
+                          "unavailable"
+                        ]
+                      },
+                      "mcp": {
+                        "type": "string",
+                        "const": "materialized"
+                      }
+                    },
+                    "required": [
+                      "leafId",
+                      "recipeId",
+                      "menu",
+                      "shortcut",
+                      "mcp"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "leafId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "recipeId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "menu": {
+                            "type": "string",
+                            "const": "materialized"
+                          },
+                          "shortcut": {
+                            "type": "string",
+                            "const": "materialized"
+                          },
+                          "mcp": {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        },
+                        "required": [
+                          "leafId",
+                          "recipeId",
+                          "menu",
+                          "shortcut",
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "leafId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "recipeId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "menu": {
+                            "type": "string",
+                            "const": "materialized"
+                          },
+                          "shortcut": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "mcp": {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        },
+                        "required": [
+                          "leafId",
+                          "recipeId",
+                          "menu",
+                          "shortcut",
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "leafId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "recipeId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "menu": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "shortcut": {
+                            "type": "string",
+                            "const": "materialized"
+                          },
+                          "mcp": {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        },
+                        "required": [
+                          "leafId",
+                          "recipeId",
+                          "menu",
+                          "shortcut",
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "leafId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "recipeId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "menu": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "shortcut": {
+                            "type": "string",
+                            "const": "unavailable"
+                          },
+                          "mcp": {
+                            "type": "string",
+                            "const": "unavailable"
+                          }
+                        },
+                        "required": [
+                          "leafId",
+                          "recipeId",
+                          "menu",
+                          "shortcut",
+                          "mcp"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "required": [
+            "formatVersion",
+            "packetContentSha256",
+            "inputTreeContentSha256",
+            "outputTreeContentSha256",
+            "catalogBinding",
+            "validation",
+            "procedureStored",
+            "proposalCreated",
+            "hostExecutionStarted",
+            "coverage"
+          ],
+          "additionalProperties": false
         }
       ]
     },

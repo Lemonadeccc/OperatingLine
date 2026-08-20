@@ -362,6 +362,8 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
+            { name: 'operatingline.blender.action.execute' },
+            { name: 'operatingline.blender.action.status' },
             { name: 'operatingline.procedure.tutorial.media.capabilities' },
             { name: 'operatingline.procedure.tutorial.media.jobs.create' },
             { name: 'operatingline.procedure.tutorial.media.jobs.status' },

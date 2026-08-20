@@ -148,7 +148,7 @@ const procedureLeafReplayClaimsSchema = z.strictObject({
   managedActionResult: z.literal('pending'),
   menuTrack: z.literal('catalog_grounded_not_executed'),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
-  mcpTrack: z.literal('unavailable'),
+  mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
 });
 
 const procedureLeafReplayBindingContentSchema = z.strictObject({
@@ -234,6 +234,19 @@ export const procedureLeafReplayBindingSchema = procedureLeafReplayBindingConten
         code: 'custom',
         path: ['claims', 'shortcutTrack'],
         message: 'Replay shortcut claim must match materialization coverage',
+      });
+    }
+    const expectedMcpClaim =
+      coverage?.mcp === 'materialized'
+        ? 'catalog_grounded_not_executed'
+        : coverage?.mcp === 'unavailable'
+          ? 'unavailable'
+          : null;
+    if (binding.claims.mcpTrack !== expectedMcpClaim) {
+      context.addIssue({
+        code: 'custom',
+        path: ['claims', 'mcpTrack'],
+        message: 'Replay MCP claim must match the action-level materialization coverage',
       });
     }
     if (
@@ -848,7 +861,7 @@ const procedureLeafReplayVerificationScopeSchema = z.strictObject({
   managedActionResult: z.literal('verified'),
   menuTrack: z.literal('catalog_grounded_not_executed'),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
-  mcpTrack: z.literal('unavailable'),
+  mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   nativeUndoCheckpoint: z.literal('companion_reported_current_at_report').optional(),
   currentHostStateAfterReport: z.literal('not_verified').optional(),
 });
@@ -1087,7 +1100,7 @@ const procedureLeafReplayFailureRecoveryVerificationScopeSchema = z.strictObject
   recoveryOutcome: z.enum(['not_required', 'companion_reported_verified']),
   menuTrack: z.literal('catalog_grounded_not_executed'),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
-  mcpTrack: z.literal('unavailable'),
+  mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   failureNativeUndoCheckpoint: z.enum([
     'companion_reported_current_at_failure_report',
     'not_verified_at_failure_report',

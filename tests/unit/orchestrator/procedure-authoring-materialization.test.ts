@@ -13,6 +13,7 @@ import {
 import {
   canonicalizeProtocolJsonValue,
   procedureAuthoringCandidateTreeSchema,
+  procedureAuthoringMaterializationResultSchema,
   validateProcedureTree,
   type ActionCatalog,
   type InteractionCatalog,
@@ -752,7 +753,7 @@ describe('procedure authoring materialization', () => {
       blenderActionCatalog,
       blenderInteractionCatalog,
     );
-    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.formatVersion).toBe('1.4.0');
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     expect(leaf?.kind).toBe('leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected leaf');
@@ -822,7 +823,7 @@ describe('procedure authoring materialization', () => {
         recipeId: 'blender.mesh.create_uv_sphere.native',
         menu: 'materialized',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     const shortcutTrack = leaf.shortcutTracks[0];
@@ -897,12 +898,64 @@ describe('procedure authoring materialization', () => {
     expect(
       shortcutTrack.operations.flatMap((operation) => Object.keys(operation.parameters)),
     ).not.toContain('resourceId');
+    expect(leaf.mcpTracks).toHaveLength(1);
     expect(leaf.mcpTracks[0]).toMatchObject({
       id: 'blender.mesh.create_uv_sphere.native.mcp',
-      availability: 'unavailable',
-      reason: 'No approved action-level MCP tool is available.',
+      availability: 'available',
       modality: 'mcp',
     });
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') throw new Error('expected available MCP track');
+    expect(mcpTrack.operations).toEqual([
+      {
+        id: 'blender.mesh.create_uv_sphere.native.mcp.execute',
+        order: 1,
+        semanticRefs: leaf.semanticOperations.map((operation) => operation.id),
+        description: 'Execute blender.mesh.create_uv_sphere as the accepted replay next step',
+        evidenceRefs: [
+          ...new Set(leaf.semanticOperations.flatMap((operation) => operation.evidenceRefs)),
+        ],
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        argumentSource: 'accepted_leaf_action',
+        actionArguments: {
+          resourceId: 'snowman.eye.left',
+          objectName: 'OperatingLine.EyeLeft',
+          location: [0.32, -0.86, 2.14],
+          radius: 0.12,
+        },
+        resultBinding: 'snowman.head.eyes.left.companion_state_report',
+      },
+    ]);
+    const forgedTool = structuredClone(result);
+    const forgedToolLeaf = forgedTool.tree.nodes.find((node) => node.kind === 'leaf');
+    if (
+      forgedToolLeaf?.kind !== 'leaf' ||
+      forgedToolLeaf.mcpTracks[0]?.availability !== 'available'
+    ) {
+      throw new Error('expected forged MCP fixture');
+    }
+    forgedToolLeaf.mcpTracks[0].operations[0]!.toolName = 'evil.execute_python';
+    expect(procedureAuthoringMaterializationResultSchema.safeParse(forgedTool).success).toBe(false);
+
+    const forgedArguments = structuredClone(result);
+    const forgedArgumentsLeaf = forgedArguments.tree.nodes.find((node) => node.kind === 'leaf');
+    if (
+      forgedArgumentsLeaf?.kind !== 'leaf' ||
+      forgedArgumentsLeaf.mcpTracks[0]?.availability !== 'available'
+    ) {
+      throw new Error('expected forged MCP arguments fixture');
+    }
+    forgedArgumentsLeaf.mcpTracks[0].operations[0]!.actionArguments['radius'] = 99;
+    expect(procedureAuthoringMaterializationResultSchema.safeParse(forgedArguments).success).toBe(
+      false,
+    );
     expect(leaf.parameterProjection).toMatchObject({
       formatVersion: '1.0.0',
       provenance: {
@@ -2943,14 +2996,14 @@ describe('procedure authoring materialization', () => {
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected shortcut-only leaf');
 
-    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: shortcutOnlyCatalog.recipes[0]!.id,
         menu: 'unavailable',
         shortcut: 'materialized',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.menuTracks[0]).toMatchObject({
@@ -2988,7 +3041,7 @@ describe('procedure authoring materialization', () => {
     ]);
   });
 
-  it('uses result format 1.2.0 when a shortcut leaf is mixed with an actionless leaf', () => {
+  it('uses result format 1.4.0 when an MCP leaf is mixed with an actionless leaf', () => {
     const input = candidate();
     const orderedLeaf = input.nodes.find((node) => node.kind === 'leaf');
     if (orderedLeaf?.kind !== 'leaf') throw new Error('expected leaf');
@@ -3007,7 +3060,7 @@ describe('procedure authoring materialization', () => {
       blenderInteractionCatalog,
     );
 
-    expect(result.formatVersion).toBe('1.2.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(
       result.coverage.map(({ leafId, recipeId, menu }) => ({ leafId, recipeId, menu })),
     ).toEqual([

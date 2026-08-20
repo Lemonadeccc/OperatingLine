@@ -18,6 +18,13 @@ import type { PlannerProvider } from '@operatingline/planner-provider-sdk';
 import {
   actionCatalogRequestSchema,
   adapterStatusSchema,
+  companionActionExecutionCreateRequestSchema,
+  companionActionExecutionResultSchema,
+  companionActionExecutionStatusRequestSchema,
+  companionActionExecutionStatusSchema,
+  companionActionPollDeliverySchema,
+  companionActionPollRequestSchema,
+  companionActionResultAckSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunStatusRequestSchema,
   companionHeartbeatRequestSchema,
@@ -136,6 +143,9 @@ import {
   replanningPromptPacketSchema,
   replanningPromptRequestSchema,
   type ActionCatalog,
+  type CompanionActionExecutionCreateRequest,
+  type CompanionActionExecutionResult,
+  type CompanionActionExecutionStatus,
   type CompanionStateReport,
   type GuidePlan,
   type GuideGoalRequest,
@@ -150,6 +160,10 @@ import {
 import { z } from 'zod';
 
 import { createActionCatalogRegistry } from './action-catalogs.js';
+import {
+  BlenderActionExecutionError,
+  createBlenderActionExecutionCoordinator,
+} from './blender-action-execution.js';
 import {
   CompanionDialogueRunRequestError,
   createCompanionDialogueRunCoordinator,
@@ -2177,6 +2191,334 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({ database });
+
+    const actionExecutionRejected = (
+      message: string,
+      statusCode: number = 409,
+      code = 'action_execution_not_authorized',
+    ): never => {
+      throw new BlenderActionExecutionError(code, statusCode, message);
+    };
+
+    const requireUvSphereMcpTrack = (binding: ProcedureLeafReplayBinding) => {
+      const leaf = binding.materialization.tree.nodes.find(
+        (node) => node.kind === 'leaf' && node.id === binding.leafId,
+      );
+      if (leaf?.kind !== 'leaf' || leaf.action === null) {
+        return actionExecutionRejected('Replay binding has no executable leaf');
+      }
+      const action = leaf.action;
+      if (
+        binding.actionName !== 'blender.mesh.create_uv_sphere' ||
+        action.adapterId !== 'blender' ||
+        action.name !== 'blender.mesh.create_uv_sphere'
+      ) {
+        return actionExecutionRejected(
+          'This action-level executor is restricted to blender.mesh.create_uv_sphere',
+          422,
+          'action_execution_unsupported_action',
+        );
+      }
+      const track = leaf.mcpTracks[0];
+      const operation =
+        track?.availability === 'available' && track.operations.length === 1
+          ? track.operations[0]
+          : undefined;
+      if (
+        leaf.mcpTracks.length !== 1 ||
+        track?.availability !== 'available' ||
+        operation === undefined ||
+        operation.serverName !== 'operating-line' ||
+        operation.toolName !== 'operatingline.blender.action.execute' ||
+        operation.argumentSource !== 'accepted_leaf_action' ||
+        !sameProcedureLeafReplayValue(operation.actionArguments, action.arguments) ||
+        !sameProcedureLeafReplayValue(operation.arguments, {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        }) ||
+        operation.resultBinding !== `${leaf.id}.companion_state_report`
+      ) {
+        return actionExecutionRejected(
+          'Replay binding lacks the exact catalog-grounded UV Sphere MCP call',
+        );
+      }
+      return { action, leaf, operation };
+    };
+
+    const authorizeBlenderActionExecution = (
+      request: CompanionActionExecutionCreateRequest,
+    ): {
+      execution: CompanionActionExecutionStatus;
+      sessionFingerprintSha256: string;
+    } => {
+      const { binding, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureLeafReplayEvidence(request.replayId);
+      if (decision.decision !== 'accepted') {
+        return actionExecutionRejected('The replay proposal was not accepted by the target user');
+      }
+      const { action } = requireUvSphereMcpTrack(binding);
+      const proposal = binding.proposal;
+      if (
+        proposal.targetAdapterId !== 'blender' ||
+        proposal.targetInstanceId !== binding.targetInstanceId ||
+        decision.adapterId !== 'blender' ||
+        decision.instanceId !== binding.targetInstanceId ||
+        decision.proposalId !== proposal.proposalId
+      ) {
+        return actionExecutionRejected('Replay proposal, decision, and target identities differ');
+      }
+      if (
+        proposalReceipt.subjectType !== 'replay_proposal' ||
+        proposalReceipt.subjectId !== proposal.proposalId ||
+        proposalReceipt.authentication !== 'orchestrator_internal' ||
+        proposalReceipt.adapterId !== 'blender' ||
+        proposalReceipt.instanceId !== binding.targetInstanceId ||
+        proposalReceipt.sessionFingerprintSha256 !== null ||
+        decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+        decisionReceipt.subjectId !== decision.decisionId ||
+        decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+        decisionReceipt.adapterId !== 'blender' ||
+        decisionReceipt.instanceId !== binding.targetInstanceId ||
+        decisionReceipt.sessionFingerprintSha256 === null
+      ) {
+        return actionExecutionRejected(
+          'The accepted replay lacks a negotiated Companion session receipt',
+        );
+      }
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      if (planContentSha256 !== binding.planContentSha256) {
+        return actionExecutionRejected('Replay proposal plan hash differs from its binding');
+      }
+      const executableSteps = proposal.plan.steps.filter((step) => step.action !== null);
+      const step = executableSteps[0];
+      if (
+        executableSteps.length !== 1 ||
+        step?.id !== binding.leafId ||
+        step.action?.adapterId !== 'blender' ||
+        step.action.name !== 'blender.mesh.create_uv_sphere' ||
+        !sameProcedureLeafReplayValue(step.action.arguments, action.arguments)
+      ) {
+        return actionExecutionRejected(
+          'Accepted replay plan does not contain the exact single UV Sphere leaf action',
+        );
+      }
+
+      const latest = listCompanionStates().find(
+        (report) =>
+          report.adapterId === 'blender' && report.instanceId === binding.targetInstanceId,
+      );
+      if (latest === undefined) {
+        return actionExecutionRejected(
+          'The accepted target Companion is not currently present',
+          409,
+          'action_execution_companion_unavailable',
+        );
+      }
+      if (
+        latest.reportId !== request.expectedState.reportId ||
+        latest.sequence !== request.expectedState.sequence
+      ) {
+        return actionExecutionRejected(
+          'The expected Companion state is stale; refresh companions and retry with a new requestId',
+          409,
+          'action_execution_state_changed',
+        );
+      }
+      if (
+        latest.plan?.id !== proposal.plan.id ||
+        latest.plan.revision !== proposal.plan.revision ||
+        latest.planContentSha256 !== planContentSha256 ||
+        latest.executionId === null ||
+        latest.phase !== 'running' ||
+        latest.transition !== 'walkthrough_started' ||
+        latest.activeStepId !== null ||
+        latest.completedStepIds.length !== 0 ||
+        latest.nativeUndoCheckpoint?.operation !== 'start' ||
+        (latest.observationGate !== undefined && latest.observationGate !== null) ||
+        latest.error !== null
+      ) {
+        return actionExecutionRejected(
+          'The target Companion is not at the started, untouched accepted replay cursor',
+          409,
+          'action_execution_state_not_ready',
+        );
+      }
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        latest.reportId,
+      );
+      if (
+        reportReceipt === null ||
+        reportReceipt.subjectType !== 'companion_state_report' ||
+        reportReceipt.subjectId !== latest.reportId ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== 'blender' ||
+        reportReceipt.instanceId !== binding.targetInstanceId ||
+        reportReceipt.sessionFingerprintSha256 !== decisionReceipt.sessionFingerprintSha256 ||
+        proposalReceipt.sequence >= decisionReceipt.sequence ||
+        decisionReceipt.sequence >= reportReceipt.sequence ||
+        Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
+        Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt) ||
+        Date.parse(decision.occurredAt) > Date.parse(latest.occurredAt)
+      ) {
+        return actionExecutionRejected(
+          'The expected Companion state is not an ordered receipt after replay acceptance',
+          409,
+          'action_execution_evidence_order_invalid',
+        );
+      }
+      const requestedAt = new Date().toISOString();
+      return {
+        execution: companionActionExecutionStatusSchema.parse({
+          formatVersion: request.formatVersion,
+          requestId: request.requestId,
+          replayId: request.replayId,
+          target: { adapterId: 'blender', instanceId: binding.targetInstanceId },
+          proposalId: proposal.proposalId,
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256,
+          executionId: latest.executionId,
+          expectedState: request.expectedState,
+          step,
+          requestedAt,
+          status: 'queued',
+          updatedAt: requestedAt,
+        }),
+        sessionFingerprintSha256: decisionReceipt.sessionFingerprintSha256,
+      };
+    };
+
+    const validateBlenderActionExecutionResult = (
+      result: CompanionActionExecutionResult,
+      sessionFingerprintSha256: string,
+      execution: CompanionActionExecutionStatus,
+    ): void => {
+      if (result.status === 'rejected') {
+        if (result.report !== null) {
+          return actionExecutionRejected(
+            'A locally rejected action request must not claim an execution report',
+          );
+        }
+        return;
+      }
+      if (result.report === null) {
+        return actionExecutionRejected('Executed action result must reference its state report');
+      }
+      const reportPayload = database.getCompanionStateReport(result.report.reportId);
+      if (reportPayload === null) {
+        return actionExecutionRejected(
+          'Action result references an unknown Companion state report',
+          409,
+          'action_execution_report_missing',
+        );
+      }
+      const report = companionStateReportSchema.parse(reportPayload);
+      const latestReport = listKnownCompanionStates().find(
+        (candidate) =>
+          candidate.adapterId === result.target.adapterId &&
+          candidate.instanceId === result.target.instanceId,
+      );
+      if (latestReport?.reportId !== report.reportId || latestReport.sequence !== report.sequence) {
+        return actionExecutionRejected(
+          'Action result report is no longer the target Companion current state',
+          409,
+          'action_execution_report_stale',
+        );
+      }
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        report.reportId,
+      );
+      if (
+        reportReceipt === null ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== result.target.adapterId ||
+        reportReceipt.instanceId !== result.target.instanceId ||
+        reportReceipt.sessionFingerprintSha256 !== sessionFingerprintSha256
+      ) {
+        return actionExecutionRejected(
+          'Action result report is not authenticated by the dispatched Companion session',
+        );
+      }
+      if (
+        report.reportId !== result.report.reportId ||
+        report.sequence !== result.report.sequence ||
+        report.sequence <= result.expectedState.sequence ||
+        report.adapterId !== result.target.adapterId ||
+        report.instanceId !== result.target.instanceId ||
+        report.plan?.id !== result.plan.id ||
+        report.plan.revision !== result.plan.revision ||
+        report.planContentSha256 !== result.planContentSha256 ||
+        report.executionId !== result.executionId ||
+        report.stepId !== result.stepId
+      ) {
+        return actionExecutionRejected(
+          'Action result report differs from the dispatched plan, cursor, or step identity',
+        );
+      }
+      const dispatchedAt = execution.dispatchedAt;
+      if (
+        dispatchedAt === undefined ||
+        Date.parse(reportReceipt.receivedAt) <= Date.parse(dispatchedAt) ||
+        Date.parse(report.occurredAt) < Date.parse(dispatchedAt) ||
+        Date.parse(result.occurredAt) < Date.parse(report.occurredAt)
+      ) {
+        return actionExecutionRejected(
+          'Action result evidence predates its immutable delivery',
+          409,
+          'action_execution_evidence_predates_dispatch',
+        );
+      }
+      if (result.status === 'succeeded') {
+        const checkpoint = report.nativeUndoCheckpoint;
+        const expectedObservations = execution.step.expectedObservations;
+        const observationsMatch =
+          report.observations.length === expectedObservations.length &&
+          expectedObservations.every((expected, index) => {
+            const observation = report.observations[index];
+            return (
+              observation?.kind === expected.kind &&
+              observation.satisfied &&
+              observation.details['supported'] === true &&
+              sameProcedureLeafReplayValue(observation.details['parameters'], expected.parameters)
+            );
+          });
+        if (expectedObservations.length === 0 || !observationsMatch) {
+          return actionExecutionRejected(
+            'Succeeded action result does not match the dispatched Observation success gate',
+            409,
+            'action_execution_observation_mismatch',
+          );
+        }
+        if (
+          report.transition !== 'step_succeeded' ||
+          report.phase !== 'completed' ||
+          report.activeStepId !== result.stepId ||
+          report.completedStepIds.length !== 1 ||
+          report.completedStepIds[0] !== result.stepId ||
+          (report.observationGate !== undefined && report.observationGate !== null) ||
+          report.error !== null ||
+          checkpoint?.operation !== 'next' ||
+          Date.parse(checkpoint.committedAt) < Date.parse(dispatchedAt) ||
+          checkpoint.session.receiptStepIds.length !== 1 ||
+          checkpoint.session.receiptStepIds[0] !== result.stepId
+        ) {
+          return actionExecutionRejected(
+            'Succeeded action result lacks its Observation success gate or native Undo receipt',
+          );
+        }
+        return;
+      }
+      if (report.transition !== 'error' && report.transition !== 'step_observation_failed') {
+        return actionExecutionRejected(
+          'Failed action result must reference an error or Observation-gate failure report',
+        );
+      }
+    };
+
     const replanningService = createReplanningService({
       database,
       actionCatalogRegistry,
@@ -2291,6 +2633,114 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           const request = actionCatalogRequestSchema.parse(requestInput);
           return {
             content: [{ type: 'text', text: JSON.stringify(actionCatalogRegistry.get(request)) }],
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.action.execute',
+        {
+          description:
+            'Queue exactly the UV Sphere leaf from one already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+          inputSchema: companionActionExecutionCreateRequestSchema,
+          outputSchema: companionActionExecutionStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = companionActionExecutionCreateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_action_execution_request',
+                    message: 'Action execution request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const existing = actionExecutionCoordinator.findForCreate(parsedRequest.data);
+            const execution =
+              existing ??
+              (() => {
+                const authorization = authorizeBlenderActionExecution(parsedRequest.data);
+                return actionExecutionCoordinator.queue(
+                  authorization.execution,
+                  authorization.sessionFingerprintSha256,
+                );
+              })();
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+              structuredContent: execution,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error:
+                      error instanceof BlenderActionExecutionError
+                        ? error.code
+                        : 'action_execution_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Action execution could not be safely authorized',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.action.status',
+        {
+          description:
+            'Return the durable state of one previously queued Blender action execution. A recovery_required result means delivery became indeterminate after restart and will never be replayed automatically.',
+          inputSchema: companionActionExecutionStatusRequestSchema,
+          outputSchema: companionActionExecutionStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = companionActionExecutionStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_action_execution_status_request',
+                    message: 'Action execution status request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          const execution = actionExecutionCoordinator.get(parsedRequest.data.requestId);
+          if (execution === null) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'action_execution_not_found',
+                    message: 'The action execution request was not found',
+                  }),
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+            structuredContent: execution,
           };
         },
       );
@@ -5651,6 +6101,95 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           ? {}
           : { procedureReplayCurrentStateRequest: replayCurrentStateRequest }),
       });
+    });
+    runtimeApp.get('/api/v1/companion/action', async (request, reply) => {
+      const parsedRequest = companionActionPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_action_poll_request',
+          message: 'Companion action poll violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Action execution delivery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'action_execution_protocol_unsupported',
+            message: 'Action execution requires Guide protocol 1.5 native Undo evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const delivery = actionExecutionCoordinator.poll(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          sessionFingerprintSha256,
+        );
+        return companionActionPollDeliverySchema.parse({ request: delivery });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderActionExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/action-result', async (request, reply) => {
+      const parsedResult = companionActionExecutionResultSchema.safeParse(request.body);
+      if (!parsedResult.success) {
+        return reply.code(400).send({
+          error: 'invalid_action_execution_result',
+          message: 'Companion action result violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Action execution results require a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          parsedResult.data.target.adapterId,
+          parsedResult.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'action_execution_protocol_unsupported',
+            message: 'Action execution results require Guide protocol 1.5 evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const result = actionExecutionCoordinator.complete(
+          parsedResult.data,
+          sessionFingerprintSha256,
+          (candidate, execution) =>
+            validateBlenderActionExecutionResult(candidate, sessionFingerprintSha256, execution),
+        );
+        return companionActionResultAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderActionExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
     });
     runtimeApp.post('/api/v1/companion/revision-request', async (request, reply) => {
       const parsedRequest = guideRevisionRequestSchema.safeParse(request.body);

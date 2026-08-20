@@ -280,6 +280,26 @@ export type ShortcutProcedureMaterialization = z.infer<
   typeof shortcutProcedureMaterializationSchema
 >;
 
+export const availableMcpProcedureMaterializationSchema = z.strictObject({
+  availability: z.literal('available'),
+  source: z.literal('catalog.action_level_mcp'),
+  semanticBinding: z.literal('all_leaf_operations'),
+  parameterBinding: z.literal('accepted_action_arguments'),
+  serverName: z.literal('operating-line'),
+  toolName: z.literal('operatingline.blender.action.execute'),
+  authorization: z.literal('accepted_replay_next_step'),
+  resultBinding: z.literal('companion_state_report'),
+});
+export type AvailableMcpProcedureMaterialization = z.infer<
+  typeof availableMcpProcedureMaterializationSchema
+>;
+
+export const mcpProcedureMaterializationSchema = z.union([
+  unavailableProcedureMaterializationSchema,
+  availableMcpProcedureMaterializationSchema,
+]);
+export type McpProcedureMaterialization = z.infer<typeof mcpProcedureMaterializationSchema>;
+
 export const semanticParameterProjectionSchema = z.strictObject({
   id: guideStepIdSchema,
   semanticAction: guideStepIdSchema,
@@ -302,7 +322,7 @@ export const procedureMaterializationSchema = z.strictObject({
   semantic: semanticProcedureMaterializationSchema.optional(),
   menu: menuProcedureMaterializationSchema,
   shortcut: shortcutProcedureMaterializationSchema,
-  mcp: unavailableProcedureMaterializationSchema,
+  mcp: mcpProcedureMaterializationSchema,
 });
 export type ProcedureMaterialization = z.infer<typeof procedureMaterializationSchema>;
 
@@ -892,6 +912,13 @@ function validateRecipe(recipe: InteractionRecipe): void {
         `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} is not explicitly closed`,
       );
     }
+  }
+
+  const mcp = recipe.procedureMaterialization?.mcp;
+  if (mcp?.availability === 'available' && recipe.actionName !== 'blender.mesh.create_uv_sphere') {
+    throw new Error(
+      `Interaction recipe ${recipe.id} action-level MCP is restricted to blender.mesh.create_uv_sphere`,
+    );
   }
 
   const stepIds = new Set<string>();

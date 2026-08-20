@@ -14,7 +14,7 @@ describe('OperatingLine MCP instructions', () => {
     expect(firstClientPreview).toContain('operatingline.guide.propose');
     expect(firstClientPreview).toContain('Never send model output to operatingline.guide.publish');
     expect(firstClientPreview).toContain('only enters Blender review');
-    expect(firstClientPreview).toContain('never permits host execution');
+    expect(firstClientPreview).toContain('Guide proposals never permit host execution');
     expect(operatingLineMcpInstructions).toContain('operatingline.procedure.tutorial.import');
     expect(operatingLineMcpInstructions).toContain('operatingline.procedure.tutorial.generate');
     expect(operatingLineMcpInstructions).toContain(
@@ -47,5 +47,15 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain(
       'neither stores the tree, creates a Proposal, or executes the host',
     );
+    expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.execute');
+    expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.status');
+    expect(operatingLineMcpInstructions).toContain('accepted and started, untouched');
+    expect(operatingLineMcpInstructions).toContain(
+      'never accepts arbitrary actions, Python, plan ids, step ids, or action parameters',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'recovery_required means delivery became indeterminate',
+    );
+    expect(operatingLineMcpInstructions).not.toContain('the MCP track remains unavailable');
   });
 });

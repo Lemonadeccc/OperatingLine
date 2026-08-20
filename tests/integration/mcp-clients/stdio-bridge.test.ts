@@ -46,7 +46,7 @@ describe('Claude Desktop stdio bridge', () => {
       await client.connect(transport);
       expect(client.getProtocolEra()).toBe('modern');
       expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
-      expect(client.getInstructions()).toContain('connection never permits host execution');
+      expect(client.getInstructions()).toContain('Guide proposals never permit host execution');
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toContain('operatingline.health');
       const health = await client.callTool({ name: 'operatingline.health', arguments: {} });

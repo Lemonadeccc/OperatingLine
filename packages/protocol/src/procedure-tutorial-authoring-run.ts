@@ -179,6 +179,7 @@ export const procedureTutorialAuthoringMaterializationSummarySchema = z.discrimi
     materializationOptions[1].omit({ tree: true, compilation: true }),
     materializationOptions[2].omit({ tree: true, compilation: true }),
     materializationOptions[3].omit({ tree: true, compilation: true }),
+    materializationOptions[4].omit({ tree: true, compilation: true }),
   ],
 );
 export type ProcedureTutorialAuthoringMaterializationSummary = z.infer<

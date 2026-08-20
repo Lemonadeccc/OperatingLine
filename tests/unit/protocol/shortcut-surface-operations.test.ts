@@ -495,7 +495,7 @@ describe('shortcut-led operator property protocol', () => {
       blenderActionCatalog,
       blenderInteractionCatalog,
     );
-    expect(legacy.formatVersion).toBe('1.2.0');
+    expect(legacy.formatVersion).toBe('1.4.0');
     expect(legacy.tree.formatVersion).toBe('1.0.0');
     const legacyLeaf = legacy.tree.nodes.find((node) => node.kind === 'leaf');
     if (legacyLeaf?.kind !== 'leaf') throw new Error('Expected leaf');

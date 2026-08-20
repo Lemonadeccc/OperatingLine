@@ -318,7 +318,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.33.0")
+        self.assertEqual(catalog.catalog_version, "1.34.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -692,8 +692,16 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertEqual(
             sphere.procedure_materialization.mcp.availability,
-            "unavailable",
+            "available",
         )
+        mcp = sphere.procedure_materialization.mcp
+        self.assertEqual(mcp.source, "catalog.action_level_mcp")
+        self.assertEqual(mcp.semantic_binding, "all_leaf_operations")
+        self.assertEqual(mcp.parameter_binding, "accepted_action_arguments")
+        self.assertEqual(mcp.server_name, "operating-line")
+        self.assertEqual(mcp.tool_name, "operatingline.blender.action.execute")
+        self.assertEqual(mcp.authorization, "accepted_replay_next_step")
+        self.assertEqual(mcp.result_binding, "companion_state_report")
         icosphere = next(
             recipe
             for recipe in catalog.recipes
@@ -3555,6 +3563,26 @@ class InteractionCatalogTests(unittest.TestCase):
                 "available menu materialization cannot represent panel targets",
             ):
                 load_interaction_catalog(unsupported_target_path, ACTION_CATALOG_PATH)
+
+    def test_rejects_unapproved_action_level_mcp_declarations(self) -> None:
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        for field, value in (
+            ("toolName", "evil.execute_python"),
+            ("authorization", "none"),
+            ("serverName", "untrusted"),
+        ):
+            with self.subTest(field=field):
+                forged = deepcopy(raw)
+                forged["recipes"][0]["procedureMaterialization"]["mcp"][field] = value
+                with self.assertRaisesRegex(ValueError, f"unsupported {field}"):
+                    self._load_raw(forged)
+
+        extra = deepcopy(raw)
+        extra["recipes"][0]["procedureMaterialization"]["mcp"][
+            "arguments"
+        ] = {"python": "import bpy"}
+        with self.assertRaisesRegex(ValueError, "unknown field arguments"):
+            self._load_raw(extra)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,14 @@ import { z } from 'zod';
 import {
   actionCatalogSchema,
   adapterStatusSchema,
+  companionActionExecutionCreateRequestSchema,
+  companionActionExecutionDeliverySchema,
+  companionActionExecutionResultSchema,
+  companionActionExecutionStatusRequestSchema,
+  companionActionExecutionStatusSchema,
+  companionActionPollDeliverySchema,
+  companionActionPollRequestSchema,
+  companionActionResultAckSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunSchema,
   companionDialogueRunStatusRequestSchema,
@@ -183,6 +191,46 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'companion-action-execution-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-execution-create-request.json',
+    companionActionExecutionCreateRequestSchema,
+  ],
+  [
+    'companion-action-execution-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-execution-delivery.json',
+    companionActionExecutionDeliverySchema,
+  ],
+  [
+    'companion-action-execution-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-execution-result.json',
+    companionActionExecutionResultSchema,
+  ],
+  [
+    'companion-action-execution-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-execution-status-request.json',
+    companionActionExecutionStatusRequestSchema,
+  ],
+  [
+    'companion-action-execution-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-execution-status.json',
+    companionActionExecutionStatusSchema,
+  ],
+  [
+    'companion-action-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-poll-request.json',
+    companionActionPollRequestSchema,
+  ],
+  [
+    'companion-action-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-poll-delivery.json',
+    companionActionPollDeliverySchema,
+  ],
+  [
+    'companion-action-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-action-result-ack.json',
+    companionActionResultAckSchema,
+  ],
   [
     'procedure-tree-editor-branch-create-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-create-request.json',

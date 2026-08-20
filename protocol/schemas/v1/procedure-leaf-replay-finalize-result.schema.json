@@ -3759,7 +3759,10 @@
             },
             "mcpTrack": {
               "type": "string",
-              "const": "unavailable"
+              "enum": [
+                "catalog_grounded_not_executed",
+                "unavailable"
+              ]
             },
             "nativeUndoCheckpoint": {
               "type": "string",

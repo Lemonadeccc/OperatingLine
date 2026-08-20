@@ -63,6 +63,7 @@ import interactionCatalog1290Json from '../v1/interaction-catalog-1.29.0.json' w
 import interactionCatalog1300Json from '../v1/interaction-catalog-1.30.0.json' with { type: 'json' };
 import interactionCatalog1310Json from '../v1/interaction-catalog-1.31.0.json' with { type: 'json' };
 import interactionCatalog1320Json from '../v1/interaction-catalog-1.32.0.json' with { type: 'json' };
+import interactionCatalog1330Json from '../v1/interaction-catalog-1.33.0.json' with { type: 'json' };
 import interactionCatalogJson from '../v1/interaction-catalog.json' with { type: 'json' };
 
 export const blenderActionCatalog: ActionCatalog = actionCatalogSchema.parse(catalogJson);
@@ -185,6 +186,9 @@ const blenderInteractionCatalog1310: InteractionCatalog = interactionCatalogSche
 const blenderInteractionCatalog1320: InteractionCatalog = interactionCatalogSchema.parse(
   interactionCatalog1320Json,
 );
+const blenderInteractionCatalog1330: InteractionCatalog = interactionCatalogSchema.parse(
+  interactionCatalog1330Json,
+);
 export const blenderInteractionCatalog: InteractionCatalog =
   interactionCatalogSchema.parse(interactionCatalogJson);
 export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.freeze([
@@ -221,6 +225,7 @@ export const blenderInteractionCatalogs: readonly InteractionCatalog[] = Object.
   blenderInteractionCatalog1300,
   blenderInteractionCatalog1310,
   blenderInteractionCatalog1320,
+  blenderInteractionCatalog1330,
   blenderInteractionCatalog,
 ]);
 
@@ -257,4 +262,5 @@ validateInteractionCatalog(blenderInteractionCatalog1290, blenderActionCatalogs[
 validateInteractionCatalog(blenderInteractionCatalog1300, blenderActionCatalogs[20]!);
 validateInteractionCatalog(blenderInteractionCatalog1310, blenderActionCatalogs[21]!);
 validateInteractionCatalog(blenderInteractionCatalog1320, blenderActionCatalog);
+validateInteractionCatalog(blenderInteractionCatalog1330, blenderActionCatalog);
 validateInteractionCatalog(blenderInteractionCatalog, blenderActionCatalog);

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { canonicalizeProtocolJsonValue } from './canonical-json-value.js';
+
 import { guideStepIdSchema } from './guide.js';
 import {
   procedureAuthoringCandidateTreeSchema,
@@ -7,12 +9,15 @@ import {
 } from './procedure-authoring.js';
 import {
   menuProcedureTrackSchema,
+  mcpProcedureCallSchema,
   procedurePreconditionSchema,
   procedureCompilationResultSchema,
   procedureGroupNodeSchema,
   procedureLeafNodeSchema,
+  procedureNodeSchema,
   procedureTreeExtendedShortcutFormatVersion,
   procedureTreeFormatVersion,
+  procedureTreeFormatVersionSchema,
   procedureTreeSchema,
   extendedShortcutProcedureOperationSchema,
   shortcutProcedureOperationSchema,
@@ -23,11 +28,13 @@ export const procedureAuthoringMaterializationLegacyFormatVersion = '1.0.0' as c
 export const procedureAuthoringMaterializationOrderedMenuFormatVersion = '1.1.0' as const;
 export const procedureAuthoringMaterializationFormatVersion = '1.2.0' as const;
 export const procedureAuthoringMaterializationExtendedShortcutFormatVersion = '1.3.0' as const;
+export const procedureAuthoringMaterializationMcpFormatVersion = '1.4.0' as const;
 export const procedureAuthoringMaterializationFormatVersionSchema = z.enum([
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializationFormatVersion,
   procedureAuthoringMaterializationExtendedShortcutFormatVersion,
+  procedureAuthoringMaterializationMcpFormatVersion,
 ]);
 
 const procedureAuthoringMaterializationContentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -47,6 +54,38 @@ const procedureAuthoringUnavailableMcpTrackSchema = z.strictObject({
   reason: z.string().min(1),
   modality: z.literal('mcp'),
 });
+
+const procedureAuthoringMaterializedMcpCallSchema = mcpProcedureCallSchema.safeExtend({
+  serverName: z.literal('operating-line'),
+  toolName: z.literal('operatingline.blender.action.execute'),
+  arguments: z.strictObject({
+    formatVersion: z.literal('1.0.0'),
+    requestId: z.literal('$runtime.requestId'),
+    replayId: z.literal('$runtime.replayId'),
+    expectedState: z.literal('$runtime.expectedState'),
+  }),
+  argumentSource: z.literal('accepted_leaf_action'),
+  actionArguments: z.record(z.string().min(1), z.json()),
+  resultBinding: guideStepIdSchema,
+});
+
+const procedureAuthoringMaterializedMcpTrackSchema = z.strictObject({
+  id: guideStepIdSchema,
+  availability: z.literal('available'),
+  title: z.string().min(1),
+  preconditions: z.array(procedurePreconditionSchema),
+  modality: z.literal('mcp'),
+  operations: z.array(procedureAuthoringMaterializedMcpCallSchema).length(1),
+});
+
+function sameCanonicalJsonValue(left: unknown, right: unknown): boolean {
+  const leftBytes = canonicalizeProtocolJsonValue(left);
+  const rightBytes = canonicalizeProtocolJsonValue(right);
+  return (
+    leftBytes.byteLength === rightBytes.byteLength &&
+    leftBytes.every((value, index) => value === rightBytes[index])
+  );
+}
 
 const procedureAuthoringMaterializedShortcutOperationSchema =
   shortcutProcedureOperationSchema.safeExtend({
@@ -139,6 +178,54 @@ const procedureAuthoringExtendedShortcutMaterializedLeafSchema = procedureLeafNo
     }),
   },
 );
+
+export const procedureAuthoringMcpMaterializedTreeSchema = procedureTreeSchema.safeExtend({
+  formatVersion: procedureTreeFormatVersionSchema,
+  nodes: z
+    .array(procedureNodeSchema)
+    .min(1)
+    .superRefine((nodes, context) => {
+      const availableMcpTracks = nodes.flatMap((node) =>
+        node.kind === 'leaf'
+          ? node.mcpTracks.filter((track) => track.availability === 'available')
+          : [],
+      );
+      if (
+        availableMcpTracks.length === 0 ||
+        availableMcpTracks.some(
+          (track) => !procedureAuthoringMaterializedMcpTrackSchema.safeParse(track).success,
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Materialization result 1.4.0 requires strict action-level MCP tracks',
+        });
+      }
+      for (const node of nodes) {
+        if (node.kind !== 'leaf') continue;
+        for (const track of node.mcpTracks) {
+          if (track.availability !== 'available') continue;
+          const operation = track.operations[0];
+          if (
+            node.action === null ||
+            operation === undefined ||
+            operation.resultBinding !== `${node.id}.companion_state_report` ||
+            !sameCanonicalJsonValue(operation.actionArguments, node.action.arguments)
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: ['nodes'],
+              message:
+                'Action-level MCP grounding must deep-copy the accepted leaf action arguments and bind its companion state report',
+            });
+          }
+        }
+      }
+    }),
+});
+export type ProcedureAuthoringMcpMaterializedTree = z.infer<
+  typeof procedureAuthoringMcpMaterializedTreeSchema
+>;
 
 const procedureAuthoringExtendedShortcutMaterializedNodeSchema = z.discriminatedUnion('kind', [
   procedureGroupNodeSchema,
@@ -308,6 +395,31 @@ const procedureAuthoringExtendedShortcutMaterializationCoverageArraySchema = z
   })
   .meta({ contains: materializedShortcutCoverageJsonSchema });
 
+const procedureAuthoringMcpMaterializationCoverageSchema = z.strictObject({
+  leafId: guideStepIdSchema,
+  recipeId: guideStepIdSchema,
+  menu: z.enum(['materialized', 'unavailable']),
+  shortcut: z.enum(['materialized', 'unavailable']),
+  mcp: z.literal('materialized'),
+});
+
+const procedureAuthoringMcpMaterializationCoverageArraySchema = z
+  .array(
+    z.union([
+      procedureAuthoringMcpMaterializationCoverageSchema,
+      procedureAuthoringShortcutMaterializationCoverageSchema,
+    ]),
+  )
+  .min(1)
+  .superRefine((coverage, context) => {
+    if (!coverage.some((entry) => entry.mcp === 'materialized')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Materialization result 1.4.0 requires at least one materialized MCP track',
+      });
+    }
+  });
+
 export const procedureAuthoringMaterializationRequestSchema = z.strictObject({
   packet: procedureAuthoringPromptPacketSchema,
   tree: procedureAuthoringCandidateTreeSchema,
@@ -363,6 +475,12 @@ const procedureAuthoringExtendedShortcutMaterializationResultShape = {
   tree: procedureAuthoringExtendedShortcutMaterializedTreeSchema,
 } as const;
 
+const procedureAuthoringMcpMaterializationResultShape = {
+  ...procedureAuthoringMaterializationResultBaseShape,
+  coverage: procedureAuthoringMcpMaterializationCoverageArraySchema,
+  tree: procedureAuthoringMcpMaterializedTreeSchema,
+} as const;
+
 export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnion('formatVersion', [
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationLegacyFormatVersion),
@@ -379,6 +497,10 @@ export const procedureAuthoringMaterializationResultSchema = z.discriminatedUnio
   z.strictObject({
     formatVersion: z.literal(procedureAuthoringMaterializationExtendedShortcutFormatVersion),
     ...procedureAuthoringExtendedShortcutMaterializationResultShape,
+  }),
+  z.strictObject({
+    formatVersion: z.literal(procedureAuthoringMaterializationMcpFormatVersion),
+    ...procedureAuthoringMcpMaterializationResultShape,
   }),
 ]);
 export type ProcedureAuthoringMaterializationResult = z.infer<

@@ -92,6 +92,7 @@ class CompanionController:
         self._last_rejected_proposal: tuple[Any, ...] | None = None
         self._delivered_proposal_plan_content_sha256: str | None = None
         self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
+        self._last_accepted_proposal_id: str | None = None
         self._artifact_attestation_execution_id: str | None = None
         self._artifact_attestation: dict[str, Any] | None = None
 
@@ -226,6 +227,7 @@ class CompanionController:
         self._reap_stopping_transports(wait_timeout)
         self.pending_plan = None
         self.pending_plan_content_sha256 = None
+        self._last_accepted_proposal_id = None
         if not preserve_proposal_review:
             self.proposed_plan = None
             self.proposal_session = None
@@ -1068,6 +1070,9 @@ class CompanionController:
         from .. import get_session, replace_session
 
         replacement = self._validated_session(plan, plan_content_sha256)
+        # Only an explicit accept_proposal() call may authorize remote action
+        # execution for a plan. Any other installation path revokes that proof.
+        self._last_accepted_proposal_id = None
         plan_content_sha256 = replacement.plan_content_sha256
         plan_id = replacement.plan_id
         revision = replacement.revision
@@ -1753,6 +1758,7 @@ class CompanionController:
             return False
         transport = self._transport
         decision = self._queue_proposal_decision(proposal_id, "accepted")
+        self._last_accepted_proposal_id = proposal_id
         self.proposed_plan = None
         self.proposal_session = None
         self._active_revision_lineage = accepted_lineage
@@ -1880,6 +1886,210 @@ class CompanionController:
             self.goal_request.clear()
         return True
 
+    @staticmethod
+    def _source_step(session: DemoSession, step_id: str) -> dict[str, Any] | None:
+        source = session.source_plan_copy()
+        if not isinstance(source, dict):
+            return None
+        steps = source.get("steps")
+        if not isinstance(steps, list):
+            return None
+        for step in steps:
+            if isinstance(step, dict) and step.get("id") == step_id:
+                return step
+        return None
+
+    @staticmethod
+    def _action_result_payload(
+        delivery: dict[str, Any],
+        *,
+        status: str,
+        report: dict[str, Any] | None,
+        error: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "formatVersion": delivery["formatVersion"],
+            "requestId": delivery["requestId"],
+            "replayId": delivery["replayId"],
+            "deliveryId": delivery["deliveryId"],
+            "target": deepcopy(delivery["target"]),
+            "proposalId": delivery["proposalId"],
+            "plan": deepcopy(delivery["plan"]),
+            "planContentSha256": delivery["planContentSha256"],
+            "executionId": delivery["executionId"],
+            "expectedState": deepcopy(delivery["expectedState"]),
+            "stepId": delivery["step"]["id"],
+            "status": status,
+            "report": (
+                {
+                    "reportId": report["reportId"],
+                    "sequence": report["sequence"],
+                }
+                if report is not None
+                else None
+            ),
+            "error": error,
+            "occurredAt": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+
+    def _reject_action_execution(
+        self, delivery: Any, message: str
+    ) -> None:
+        transport = self._transport
+        if transport is None or not isinstance(delivery, dict):
+            return
+        try:
+            result = self._action_result_payload(
+                delivery,
+                status="rejected",
+                report=None,
+                error=message,
+            )
+        except (KeyError, TypeError):
+            self.error = message
+            self.status = "Action execution rejected"
+            return
+        transport.submit_action_result(result)
+        self.error = message
+        self.status = "Action execution rejected"
+
+    def _handle_action_execute_request(self, delivery: Any) -> None:
+        """Validate and invoke exactly the accepted session's canonical next step."""
+        from .. import get_session
+
+        transport = self._transport
+        if transport is None:
+            return
+        if not isinstance(delivery, dict):
+            self.error = "Action execution delivery must be an object"
+            self.status = "Action execution rejected"
+            return
+
+        try:
+            session = get_session()
+            plan = delivery["plan"]
+            target = delivery["target"]
+            expected_state = delivery["expectedState"]
+            delivered_step = delivery["step"]
+            last_report = self.last_report
+            if delivery.get("formatVersion") != "1.0.0":
+                raise ValueError("Unsupported action execution format version")
+            if target != {"adapterId": "blender", "instanceId": self.instance_id}:
+                raise ValueError("Action execution targets a different Companion")
+            if self._last_accepted_proposal_id != delivery.get("proposalId"):
+                raise ValueError("Action execution proposal was not accepted locally")
+            if (
+                self.proposed_plan is not None
+                or bool(self._proposal_candidates)
+                or self.pending_plan is not None
+            ):
+                raise ValueError("A plan or proposal is still pending review")
+            if session.observation_blocked:
+                raise ValueError("The current Observation success gate is blocked")
+            if not session.started or session.execution_id is None:
+                raise ValueError("The accepted walkthrough is not running")
+            if plan != {"id": session.plan_id, "revision": session.revision}:
+                raise ValueError("Action execution plan does not match the active session")
+            if delivery.get("planContentSha256") != session.plan_content_sha256:
+                raise ValueError("Action execution plan hash does not match the active session")
+            if delivery.get("executionId") != session.execution_id:
+                raise ValueError("Action execution id does not match the active session")
+            if not isinstance(last_report, dict) or expected_state != {
+                "reportId": last_report.get("reportId"),
+                "sequence": last_report.get("sequence"),
+            }:
+                raise ValueError("Action execution expected state is stale")
+            if last_report.get("protocolVersion") != "1.5.0":
+                raise ValueError("Action execution requires native Undo protocol 1.5")
+            if (
+                isinstance(expected_state.get("sequence"), bool)
+                or not isinstance(expected_state.get("sequence"), int)
+                or expected_state["sequence"]
+                > getattr(
+                    transport,
+                    "last_delivered_sequence",
+                    self.last_delivered_sequence,
+                )
+            ):
+                raise ValueError("Action execution expected state was not delivered")
+            next_index = session.active_index + 1
+            if next_index < 0 or next_index >= len(session.steps):
+                raise ValueError("The accepted walkthrough has no next step")
+            candidate = session.steps[next_index]
+            source_step = self._source_step(session, candidate.id)
+            if source_step is None or source_step != delivered_step:
+                raise ValueError("Action execution step does not match the exact next step")
+            action = delivered_step.get("action")
+            if not isinstance(action, dict) or action != {
+                "adapterId": "blender",
+                "name": "blender.mesh.create_uv_sphere",
+                "arguments": action.get("arguments"),
+            }:
+                raise ValueError("Action execution is restricted to UV Sphere")
+            if not isinstance(action["arguments"], dict):
+                raise ValueError("Action execution arguments must be an object")
+        except (IndexError, KeyError, TypeError, ValueError) as error:
+            self._reject_action_execution(delivery, str(error))
+            return
+
+        previous_report_id = last_report["reportId"]
+        execution_error: str | None = None
+        try:
+            operator_result = bpy.ops.operating_line.next()
+            if "FINISHED" not in operator_result:
+                execution_error = "Canonical Next operator did not finish"
+        except Exception as error:  # Blender operators may surface RNA exceptions.
+            execution_error = f"Canonical Next operator failed ({type(error).__name__})"
+
+        report = self.last_report
+        if not isinstance(report, dict) or report.get("reportId") == previous_report_id:
+            report = self.report(
+                "error",
+                step=candidate,
+                error=execution_error or "Canonical Next produced no state report",
+            )
+        observations = report.get("observations")
+        checkpoint = report.get("nativeUndoCheckpoint")
+        succeeded = (
+            execution_error is None
+            and report.get("transition") == "step_succeeded"
+            and report.get("stepId") == delivered_step["id"]
+            and report.get("plan") == plan
+            and report.get("planContentSha256") == delivery["planContentSha256"]
+            and report.get("executionId") == delivery["executionId"]
+            and isinstance(observations, list)
+            and bool(observations)
+            and all(
+                isinstance(observation, dict)
+                and observation.get("satisfied") is True
+                for observation in observations
+            )
+            and isinstance(checkpoint, dict)
+            and checkpoint.get("operation") == "next"
+        )
+        error_message = None
+        if not succeeded:
+            error_message = (
+                execution_error
+                or report.get("error")
+                or "Canonical Next did not produce verified UV Sphere success evidence"
+            )
+        result = self._action_result_payload(
+            delivery,
+            status="succeeded" if succeeded else "failed",
+            report=report,
+            error=error_message,
+        )
+        transport.submit_action_result(result)
+        if succeeded:
+            self.error = ""
+            self.status = f"Action step {delivered_step['id']} succeeded"
+        else:
+            self.error = str(error_message)
+            self.status = "Action execution failed"
+
     def pump(self) -> float | None:
         from .. import get_session
 
@@ -1905,7 +2115,9 @@ class CompanionController:
                     message = transport.incoming.get_nowait()
                 except Empty:
                     break
-                if message.get("kind") == "plan":
+                if message.get("kind") == "action_execute_request":
+                    self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") == "plan":
                     plan = message.get("plan")
                     try:
                         self.install_plan(
@@ -2186,6 +2398,11 @@ class CompanionController:
                     except (KeyError, TypeError, ValueError) as error:
                         self.error = str(error)
                         self.status = "Replay current-state request rejected"
+                elif message.get("kind") == "action_result_rejected":
+                    self.error = str(
+                        message.get("message", "Runtime rejected action result")
+                    )
+                    self.status = "Action result rejected"
                 elif message.get("kind") == "session_established":
                     self.error = ""
                     session = get_session()
