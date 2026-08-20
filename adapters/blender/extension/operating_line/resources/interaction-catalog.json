@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.38.0",
+  "catalogVersion": "1.39.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -3303,7 +3303,7 @@
             {
               "kind": "selection",
               "label": "Active Target",
-              "value": "Exactly one accepted target Mesh object is active and selected"
+              "value": "Exactly the unmodified factory Cube (8 vertices, 12 edges, 6 polygons) is active and selected"
             },
             { "kind": "keymap", "label": "Keymap", "value": "Blender" },
             { "kind": "modal_state", "label": "Modal UI", "value": "None" },
@@ -3394,7 +3394,26 @@
               "argumentName": "modifierName",
               "reason": "The native shortcut creates Blender's default modifier name rather than the accepted managed name."
             }
-          ]
+          ],
+          "proofExecution": {
+            "executorId": "blender.subdivision_surface_f9.event_simulate.v1",
+            "targetProfile": "factory_cube_8_12_6",
+            "executionBoundary": "blender_window_event_simulate",
+            "osHidInput": false,
+            "managedActionExecuted": false,
+            "managedReceiptCreated": false,
+            "authorization": "accepted_replay_next_step",
+            "transport": "event_simulate",
+            "hostVersions": ["4.5.3", "5.1.1"],
+            "operationIds": [
+              "shortcut.add_subdivision_surface_level_one",
+              "shortcut.open_adjust_last_operation",
+              "shortcut.set_viewport_level",
+              "shortcut.close_adjust_last_operation"
+            ],
+            "strongObservationKind": "subdivision_surface_shortcut_ready",
+            "nativeUndoCheckpointRequired": true
+          }
         },
         "mcp": {
           "availability": "unavailable",

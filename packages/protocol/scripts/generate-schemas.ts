@@ -29,6 +29,23 @@ import {
   companionHeartbeatResponseSchema,
   companionSessionHelloRequestSchema,
   companionSessionHelloResponseSchema,
+  companionShortcutProofCreateRequestSchema,
+  companionShortcutProofDeliverySchema,
+  companionShortcutProofHistoryTransitionReconciliationAckSchema,
+  companionShortcutProofPollDeliverySchema,
+  companionShortcutProofPollRequestSchema,
+  companionShortcutProofProgressSchema,
+  companionShortcutProofProgressAckSchema,
+  companionShortcutProofRecoveryAckResponseSchema,
+  companionShortcutProofRecoveryAckSchema,
+  companionShortcutProofRecoveryDeliverySchema,
+  companionShortcutProofRecoveryRequestSchema,
+  companionShortcutProofResultSchema,
+  companionShortcutProofResultAckSchema,
+  companionShortcutProofStatusRequestSchema,
+  companionShortcutProofStatusSchema,
+  companionShortcutProofTerminalReconciliationAckSchema,
+  companionShortcutProofTerminalReconciliationDeliverySchema,
   companionStateReportSchema,
   evalExportBundleSchema,
   evalExportRequestSchema,
@@ -106,6 +123,12 @@ import {
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
   procedureLeafReplayProposalResultSchema,
+  procedureShortcutProofAttestationSchema,
+  procedureShortcutProofBindingSchema,
+  procedureShortcutProofFailureCheckpointSchema,
+  procedureShortcutProofProposalRequestSchema,
+  procedureShortcutProofProposalRecordSchema,
+  procedureShortcutProofProposalResultSchema,
   procedureTreeSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
@@ -191,6 +214,91 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'companion-shortcut-proof-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-create-request.json',
+    companionShortcutProofCreateRequestSchema,
+  ],
+  [
+    'companion-shortcut-proof-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-delivery.json',
+    companionShortcutProofDeliverySchema,
+  ],
+  [
+    'companion-shortcut-proof-progress.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-progress.json',
+    companionShortcutProofProgressSchema,
+  ],
+  [
+    'companion-shortcut-proof-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-result.json',
+    companionShortcutProofResultSchema,
+  ],
+  [
+    'companion-shortcut-proof-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-status-request.json',
+    companionShortcutProofStatusRequestSchema,
+  ],
+  [
+    'companion-shortcut-proof-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-status.json',
+    companionShortcutProofStatusSchema,
+  ],
+  [
+    'companion-shortcut-proof-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-poll-request.json',
+    companionShortcutProofPollRequestSchema,
+  ],
+  [
+    'companion-shortcut-proof-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-poll-delivery.json',
+    companionShortcutProofPollDeliverySchema,
+  ],
+  [
+    'companion-shortcut-proof-progress-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-progress-ack.json',
+    companionShortcutProofProgressAckSchema,
+  ],
+  [
+    'companion-shortcut-proof-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-result-ack.json',
+    companionShortcutProofResultAckSchema,
+  ],
+  [
+    'companion-shortcut-proof-recovery-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-recovery-delivery.json',
+    companionShortcutProofRecoveryDeliverySchema,
+  ],
+  [
+    'companion-shortcut-proof-recovery-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-recovery-ack.json',
+    companionShortcutProofRecoveryAckSchema,
+  ],
+  [
+    'companion-shortcut-proof-recovery-ack-response.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-recovery-ack-response.json',
+    companionShortcutProofRecoveryAckResponseSchema,
+  ],
+  [
+    'companion-shortcut-proof-terminal-reconciliation-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-terminal-reconciliation-delivery.json',
+    companionShortcutProofTerminalReconciliationDeliverySchema,
+  ],
+  [
+    'companion-shortcut-proof-terminal-reconciliation-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-terminal-reconciliation-ack.json',
+    companionShortcutProofTerminalReconciliationAckSchema,
+  ],
+  [
+    'companion-shortcut-proof-history-transition-reconciliation-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-history-transition-reconciliation-ack.json',
+    companionShortcutProofHistoryTransitionReconciliationAckSchema,
+  ],
+  [
+    'companion-shortcut-proof-recovery-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-shortcut-proof-recovery-request.json',
+    companionShortcutProofRecoveryRequestSchema,
+  ],
   [
     'companion-action-execution-create-request.schema.json',
     'https://operatingline.dev/schema/v1/companion-action-execution-create-request.json',
@@ -772,6 +880,36 @@ const schemas = [
     procedureLeafReplayBindingSchema,
   ],
   [
+    'procedure-shortcut-proof-binding.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-binding.json',
+    procedureShortcutProofBindingSchema,
+  ],
+  [
+    'procedure-shortcut-proof-proposal-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-proposal-request.json',
+    procedureShortcutProofProposalRequestSchema,
+  ],
+  [
+    'procedure-shortcut-proof-proposal-record.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-proposal-record.json',
+    procedureShortcutProofProposalRecordSchema,
+  ],
+  [
+    'procedure-shortcut-proof-proposal-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-proposal-result.json',
+    procedureShortcutProofProposalResultSchema,
+  ],
+  [
+    'procedure-shortcut-proof-attestation.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-attestation.json',
+    procedureShortcutProofAttestationSchema,
+  ],
+  [
+    'procedure-shortcut-proof-failure-checkpoint.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-shortcut-proof-failure-checkpoint.json',
+    procedureShortcutProofFailureCheckpointSchema,
+  ],
+  [
     'procedure-leaf-replay-proposal-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-leaf-replay-proposal-result.json',
     procedureLeafReplayProposalResultSchema,
@@ -1197,7 +1335,8 @@ function hardenProcedureTreeEditorSchema(filename: string, schema: Record<string
 for (const [filename, id, schema] of schemas) {
   const draft7TupleSchema =
     filename.startsWith('procedure-tutorial-media-') ||
-    filename.startsWith('procedure-tutorial-authoring-');
+    filename.startsWith('procedure-tutorial-authoring-') ||
+    filename.includes('shortcut-proof');
   const jsonSchema = z.toJSONSchema(schema, {
     target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
   });

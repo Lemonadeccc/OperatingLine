@@ -256,7 +256,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.38.0');
+    expect(catalog.catalogVersion).toBe('1.39.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -320,6 +320,7 @@ describe('interaction catalog protocol', () => {
       '1.36.0',
       '1.37.0',
       '1.38.0',
+      '1.39.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -1335,7 +1336,8 @@ describe('interaction catalog protocol', () => {
       {
         kind: 'selection',
         label: 'Active Target',
-        value: 'Exactly one accepted target Mesh object is active and selected',
+        value:
+          'Exactly the unmodified factory Cube (8 vertices, 12 edges, 6 polygons) is active and selected',
       },
       { kind: 'keymap', label: 'Keymap', value: 'Blender' },
       { kind: 'modal_state', label: 'Modal UI', value: 'None' },
@@ -2040,6 +2042,38 @@ describe('interaction catalog protocol', () => {
       readFileSync(resolve('protocol/schemas/v1/interaction-catalog.schema.json'), 'utf8'),
     ) as { additionalProperties?: boolean };
     expect(schema.additionalProperties).toBe(false);
+  });
+
+  it('authorizes native shortcut proof execution only through the exact catalog declaration', () => {
+    const recipe = blenderInteractionCatalog.recipes.find(
+      (candidate) => candidate.actionName === 'blender.modifier.add_subdivision_surface',
+    );
+    const shortcut = recipe?.procedureMaterialization?.shortcut;
+    if (shortcut?.availability !== 'available') throw new Error('Expected shortcut');
+    expect(shortcut.projection).toBe('candidate_only');
+    expect(shortcut.proofExecution?.operationIds).toEqual(shortcut.operations.map(({ id }) => id));
+    expect(shortcut.proofExecution).toMatchObject({
+      executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+      targetProfile: 'factory_cube_8_12_6',
+      executionBoundary: 'blender_window_event_simulate',
+      authorization: 'accepted_replay_next_step',
+      transport: 'event_simulate',
+      hostVersions: ['4.5.3', '5.1.1'],
+      strongObservationKind: 'subdivision_surface_shortcut_ready',
+      nativeUndoCheckpointRequired: true,
+    });
+
+    const wrongRecipe = structuredClone(blenderInteractionCatalog);
+    const cube = wrongRecipe.recipes.find(
+      (candidate) => candidate.actionName === 'blender.mesh.create_cube',
+    );
+    if (cube?.procedureMaterialization?.shortcut.availability !== 'available') {
+      throw new Error('Expected Cube shortcut');
+    }
+    cube.procedureMaterialization.shortcut.proofExecution = shortcut.proofExecution;
+    expect(() => validateInteractionCatalog(wrongRecipe, blenderActionCatalog)).toThrow(
+      'restricted to the exact Subdivision Surface recipe',
+    );
   });
 
   it('validates ordered shortcut mappings independently from menu mappings', () => {

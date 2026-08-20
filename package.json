@@ -53,6 +53,7 @@
     "test:blender:f9": "node tools/blender/run-icosphere-f9.mjs",
     "test:blender:subdivide": "node tools/blender/run-subdivide-f9.mjs",
     "test:blender:subdivision-surface": "node tools/blender/run-subdivision-surface-f9.mjs",
+    "test:blender:shortcut-history": "node tools/blender/run-shortcut-history.mjs",
     "test:blender:edit-bevel": "node tools/blender/run-edit-bevel-f9.mjs",
     "test:blender:edit-inset": "node tools/blender/run-edit-inset-f9.mjs",
     "test:blender:edit-poke": "node tools/blender/run-edit-poke-f9.mjs",

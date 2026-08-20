@@ -1749,6 +1749,7 @@ describe('procedure authoring materialization', () => {
     if (shortcut?.availability !== 'available') {
       throw new Error('expected available Subdivision Surface shortcut track');
     }
+    expect(shortcut.proofExecution).toBeUndefined();
     expect(shortcut).toMatchObject({
       id: 'blender.modifier.add_subdivision_surface.semantic.shortcut',
       modality: 'shortcut',
@@ -1818,6 +1819,24 @@ describe('procedure authoring materialization', () => {
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);
+  });
+
+  it('materializes native shortcut proof authority only from active IC1.39', () => {
+    const result = materializeProcedureAuthoringCandidate(
+      subdivisionSurfaceCandidate(blenderInteractionCatalog, blenderActionCatalog),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf' || leaf.shortcutTracks[0]?.availability !== 'available') {
+      throw new Error('expected active Subdivision Surface shortcut');
+    }
+    expect(leaf.shortcutTracks[0].proofExecution).toMatchObject({
+      executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+      targetProfile: 'factory_cube_8_12_6',
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+    });
   });
 
   it('materializes the exact Edit Mode Bevel F9 shortcut without projecting managed IDs', () => {

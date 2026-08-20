@@ -141,6 +141,25 @@ class ProcedureMaterializationChannel:
     tool_name: str | None = None
     authorization: str | None = None
     result_binding: str | None = None
+    proof_execution: "ShortcutProofExecutionDefinition | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutProofExecutionDefinition:
+    """One catalog-authorized native shortcut proof executor declaration."""
+
+    executor_id: str
+    target_profile: str
+    execution_boundary: str
+    os_hid_input: bool
+    managed_action_executed: bool
+    managed_receipt_created: bool
+    authorization: str
+    transport: str
+    host_versions: tuple[str, str]
+    operation_ids: tuple[str, str, str, str]
+    strong_observation_kind: str
+    native_undo_checkpoint_required: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -1327,6 +1346,7 @@ def _parse_shortcut_materialization(
             "operations",
             "omittedActionArguments",
         },
+        optional={"proofExecution"},
         label=label,
     )
     if raw["source"] != "catalog.ordered_shortcut_operations":
@@ -1337,6 +1357,67 @@ def _parse_shortcut_materialization(
         raise ValueError(f"{label} has unsupported parameterBinding")
     if raw["projection"] != "candidate_only":
         raise ValueError(f"{label} projection must be candidate_only")
+    proof_execution = None
+    if "proofExecution" in raw:
+        if recipe_id != "blender.modifier.add_subdivision_surface.semantic":
+            raise ValueError(
+                f"{label} proofExecution is restricted to Subdivision Surface"
+            )
+        proof = _expect_object(raw["proofExecution"], f"{label} proofExecution")
+        _expect_exact_keys(
+            proof,
+            required={
+                "executorId", "targetProfile", "executionBoundary", "osHidInput",
+                "managedActionExecuted", "managedReceiptCreated", "authorization",
+                "transport", "hostVersions", "operationIds",
+                "strongObservationKind", "nativeUndoCheckpointRequired",
+            },
+            label=f"{label} proofExecution",
+        )
+        expected_scalar = {
+            "executorId": "blender.subdivision_surface_f9.event_simulate.v1",
+            "targetProfile": "factory_cube_8_12_6",
+            "executionBoundary": "blender_window_event_simulate",
+            "osHidInput": False,
+            "managedActionExecuted": False,
+            "managedReceiptCreated": False,
+            "authorization": "accepted_replay_next_step",
+            "transport": "event_simulate",
+            "strongObservationKind": "subdivision_surface_shortcut_ready",
+            "nativeUndoCheckpointRequired": True,
+        }
+        for key, expected_value in expected_scalar.items():
+            if type(proof[key]) is not type(expected_value) or proof[key] != expected_value:
+                raise ValueError(f"{label} proofExecution has unsupported {key}")
+        host_versions = tuple(proof["hostVersions"]) if isinstance(proof["hostVersions"], list) else ()
+        operation_ids = tuple(proof["operationIds"]) if isinstance(proof["operationIds"], list) else ()
+        expected_operation_ids = (
+            "shortcut.add_subdivision_surface_level_one",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_viewport_level",
+            "shortcut.close_adjust_last_operation",
+        )
+        if host_versions != ("4.5.3", "5.1.1"):
+            raise ValueError(f"{label} proofExecution has unsupported hostVersions")
+        if operation_ids != expected_operation_ids:
+            raise ValueError(f"{label} proofExecution must bind exact operationIds")
+        proof_execution = ShortcutProofExecutionDefinition(
+            executor_id=expected_scalar["executorId"],
+            target_profile=expected_scalar["targetProfile"],
+            execution_boundary=expected_scalar["executionBoundary"],
+            os_hid_input=False,
+            managed_action_executed=False,
+            managed_receipt_created=False,
+            authorization=expected_scalar["authorization"],
+            transport=expected_scalar["transport"],
+            host_versions=("4.5.3", "5.1.1"),
+            operation_ids=expected_operation_ids,
+            strong_observation_kind=expected_scalar["strongObservationKind"],
+            native_undo_checkpoint_required=True,
+        )
+    operations = _parse_shortcut_operations(raw["operations"], recipe_id, guidance)
+    if proof_execution is not None and tuple(operation.id for operation in operations) != proof_execution.operation_ids:
+        raise ValueError(f"{label} proofExecution operationIds do not match operations")
     return ProcedureMaterializationChannel(
         availability="available",
         source="catalog.ordered_shortcut_operations",
@@ -1344,12 +1425,11 @@ def _parse_shortcut_materialization(
         parameter_binding="ordered_parameter_operations",
         projection="candidate_only",
         preconditions=_parse_shortcut_preconditions(raw["preconditions"], recipe_id),
-        shortcut_operations=_parse_shortcut_operations(
-            raw["operations"], recipe_id, guidance
-        ),
+        shortcut_operations=operations,
         omitted_action_arguments=_parse_omitted_action_arguments(
             raw["omittedActionArguments"], recipe_id
         ),
+        proof_execution=proof_execution,
     )
 
 
@@ -1976,6 +2056,7 @@ __all__ = (
     "SemanticParameterPathSegmentDefinition",
     "SemanticParameterProjectionDefinition",
     "SemanticProcedureMaterializationDefinition",
+    "ShortcutProofExecutionDefinition",
     "ShortcutKeyInputOperationDefinition",
     "ShortcutOpenedSurfaceDefinition",
     "ShortcutOperationDefinition",

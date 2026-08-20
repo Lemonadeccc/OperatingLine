@@ -24,16 +24,26 @@ import {
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
   companionActionPollDeliverySchema,
+  companionShortcutProofPollDeliverySchema,
+  companionShortcutProofStatusSchema,
+  computeCompanionShortcutProofResultContentSha256,
+  computeCompanionShortcutProofTerminalMarkerContentSha256,
+  computeProcedureShortcutProofAttestationContentSha256,
+  computeProcedureShortcutProofNativeObservationContentSha256,
+  computeProcedureShortcutProofOperationReceiptContentSha256,
+  computeProcedureShortcutProofStrongObservationContentSha256,
   guideProtocolVersion,
   procedureLeafReplayCurrentStateRequestResultSchema,
   procedureLeafReplayCurrentStateStatusResultSchema,
   procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalResultSchema,
+  procedureShortcutProofProposalResultSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
   type ProcedureAuthoringPromptPacket,
+  type CompanionShortcutProofDelivery,
 } from '@operatingline/protocol';
 
 import { buildProcedureLeafReplayAttestation } from '../../../services/orchestrator/src/procedure-replay.js';
@@ -526,7 +536,7 @@ function subdivisionSurfaceAuthoringCandidateFixture(
     },
   };
   leaf['anchors'] = [
-    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    { kind: 'object', objectName: 'Cube' },
     {
       kind: 'owned_control',
       surfaceId: 'modifier.stack',
@@ -539,6 +549,236 @@ function subdivisionSurfaceAuthoringCandidateFixture(
     parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
   };
   return tree;
+}
+
+function shortcutProofOperationReceipts(delivery: CompanionShortcutProofDelivery) {
+  const viewportLevel = delivery.binding.acceptedAction.arguments.viewportLevel;
+  const digit =
+    viewportLevel === 1
+      ? ({ type: 'ONE', unicode: '1' } as const)
+      : viewportLevel === 2
+        ? ({ type: 'TWO', unicode: '2' } as const)
+        : ({ type: 'THREE', unicode: '3' } as const);
+  const viewportPoint = { x: 400, y: 300, role: 'viewport_center' as const };
+  const levelPoint = { x: 610, y: 250, role: 'level_control' as const };
+  const context = {
+    windowId: 'window.main',
+    areaType: 'VIEW_3D' as const,
+    regionType: 'WINDOW' as const,
+    mode: 'OBJECT' as const,
+  };
+  const event = (
+    type: string,
+    value: string,
+    ctrl = false,
+    point: typeof viewportPoint | typeof levelPoint = viewportPoint,
+    unicode?: '1' | '2' | '3',
+  ) => ({
+    type,
+    value,
+    ctrl,
+    shift: false,
+    point,
+    ...(unicode === undefined ? {} : { unicode }),
+  });
+  const occurredAt = (offset: number) => new Date(Date.now() + offset).toISOString();
+  const rawReceipts = [
+    {
+      receiptId: randomUUID(),
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: delivery.bindingContentSha256,
+      operationId: delivery.operationIds[0],
+      order: 1,
+      outcome: 'succeeded' as const,
+      occurredAt: occurredAt(10),
+      kind: 'key_input' as const,
+      context,
+      eventEvidence: [event('ONE', 'PRESS', true), event('ONE', 'RELEASE', true)] as const,
+      operatorStackBeforeSha256: '1'.repeat(64),
+      operatorStackAfterSha256: '2'.repeat(64),
+    },
+    {
+      receiptId: randomUUID(),
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: delivery.bindingContentSha256,
+      operationId: delivery.operationIds[1],
+      order: 2,
+      outcome: 'succeeded' as const,
+      occurredAt: occurredAt(20),
+      kind: 'key_input' as const,
+      context,
+      eventEvidence: [event('F9', 'PRESS'), event('F9', 'RELEASE')] as const,
+      operatorStackBeforeSha256: '2'.repeat(64),
+      operatorStackAfterSha256: '3'.repeat(64),
+      sourceOperationId: delivery.operationIds[0],
+      sourceOperatorId: 'object.subdivision_set' as const,
+    },
+    {
+      receiptId: randomUUID(),
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: delivery.bindingContentSha256,
+      operationId: delivery.operationIds[2],
+      order: 3,
+      outcome: 'succeeded' as const,
+      occurredAt: occurredAt(30),
+      kind: 'operator_property_update' as const,
+      surfaceOperationId: delivery.operationIds[1],
+      surfaceOperatorId: 'object.subdivision_set' as const,
+      controlId: 'object.subdivision_set.level' as const,
+      oldValue: 1 as const,
+      newValue: viewportLevel,
+      eventEvidence: [
+        event('MOUSEMOVE', 'NOTHING', false, levelPoint),
+        event('LEFTMOUSE', 'PRESS', false, levelPoint),
+        event('LEFTMOUSE', 'RELEASE', false, levelPoint),
+        event('LEFTMOUSE', 'PRESS', false, levelPoint),
+        event('LEFTMOUSE', 'RELEASE', false, levelPoint),
+        event('A', 'PRESS', true),
+        event(digit.type, 'PRESS', false, viewportPoint, digit.unicode),
+        event('RET', 'PRESS'),
+        event('RET', 'RELEASE'),
+      ] as const,
+    },
+    {
+      receiptId: randomUUID(),
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: delivery.bindingContentSha256,
+      operationId: delivery.operationIds[3],
+      order: 4,
+      outcome: 'succeeded' as const,
+      occurredAt: occurredAt(40),
+      kind: 'key_input' as const,
+      context,
+      eventEvidence: [event('RET', 'PRESS'), event('RET', 'RELEASE')] as const,
+      operatorStackBeforeSha256: '3'.repeat(64),
+      operatorStackAfterSha256: '4'.repeat(64),
+      surfaceOperationId: delivery.operationIds[1],
+    },
+  ] as const;
+  let previousReceiptContentSha256: string | null = null;
+  return rawReceipts.map((raw) => {
+    const content = { ...raw, previousReceiptContentSha256 };
+    const receipt = {
+      ...content,
+      contentSha256: computeProcedureShortcutProofOperationReceiptContentSha256(content),
+    };
+    previousReceiptContentSha256 = receipt.contentSha256;
+    return receipt;
+  });
+}
+
+function successfulShortcutProofResult(
+  delivery: CompanionShortcutProofDelivery,
+  operationReceipts = shortcutProofOperationReceipts(delivery),
+) {
+  const targetId = delivery.binding.acceptedAction.arguments.targetId;
+  const viewportLevel = delivery.binding.acceptedAction.arguments.viewportLevel;
+  const baselineSceneFingerprintSha256 = 'd'.repeat(64);
+  const finalSceneFingerprintSha256 = 'e'.repeat(64);
+  const strongObservationContent = {
+    kind: 'subdivision_surface_shortcut_ready' as const,
+    satisfied: true as const,
+    observationId: randomUUID(),
+    observedAt: new Date(Date.now() + 50).toISOString(),
+    targetId,
+    modifierType: 'SUBSURF' as const,
+    modifierCount: 1 as const,
+    viewportLevel,
+    subdivisionType: 'CATMULL_CLARK' as const,
+    renderLevels: 2 as const,
+    quality: 3 as const,
+    modifierStackMatches: true as const,
+    evaluatedTopologyWithinBounds: true as const,
+    sceneFingerprintSha256: finalSceneFingerprintSha256,
+  };
+  const strongObservation = {
+    ...strongObservationContent,
+    contentSha256:
+      computeProcedureShortcutProofStrongObservationContentSha256(strongObservationContent),
+  };
+  const checkpointId = randomUUID();
+  const undoLockId = randomUUID();
+  const attestationContent = {
+    formatVersion: '1.0.0' as const,
+    attestationId: randomUUID(),
+    deliveryId: delivery.deliveryId,
+    binding: delivery.binding,
+    bindingContentSha256: delivery.bindingContentSha256,
+    managedActionResult: 'not_executed' as const,
+    managedIdentityVerified: false as const,
+    executor: {
+      executorId: delivery.executorId,
+      executionBoundary: delivery.executionBoundary,
+      transport: delivery.transport,
+      osHidInput: false as const,
+    },
+    operationReceipts,
+    strongObservation,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0' as const,
+      evidenceClass: 'companion_reported_shortcut_proof_native_undo_checkpoint' as const,
+      checkpointId,
+      proofId: delivery.proofId,
+      replayId: delivery.replayId,
+      previousCheckpointId: null,
+      operation: 'shortcut_proof' as const,
+      undoLockId,
+      targetId,
+      marker: { key: '_operating_line_shortcut_proof_history_v1' as const, matched: true as const },
+      journal: {
+        entryPresent: true as const,
+        baselineSnapshotPresent: true as const,
+        finalSnapshotPresent: true as const,
+        undoRedoRoundTripVerified: true as const,
+        mutationLeaseHeld: true as const,
+      },
+      baselineState: {
+        targetId,
+        modifierCount: 0 as const,
+        activeObjectMode: 'OBJECT' as const,
+        selectedObjectCount: 1 as const,
+      },
+      finalState: {
+        targetId,
+        modifierType: 'SUBSURF' as const,
+        modifierCount: 1 as const,
+        viewportLevel,
+      },
+      baselineSceneFingerprintSha256,
+      finalSceneFingerprintSha256,
+      receiptChainRootSha256: operationReceipts[0]!.contentSha256,
+      receiptChainHeadSha256: operationReceipts.at(-1)!.contentSha256,
+      strongObservationContentSha256: strongObservation.contentSha256,
+      committedAt: new Date(Date.now() + 60).toISOString(),
+    },
+    attestedAt: new Date(Date.now() + 70).toISOString(),
+  };
+  const attestation = {
+    ...attestationContent,
+    integrity: {
+      algorithm: 'sha256' as const,
+      canonicalization: 'operatingline-json-value-v1' as const,
+      contentSha256: computeProcedureShortcutProofAttestationContentSha256(attestationContent),
+    },
+  };
+  return {
+    ...delivery,
+    status: 'succeeded' as const,
+    managedActionResult: 'not_executed' as const,
+    managedIdentityVerified: false as const,
+    requiresUndoToUnlock: true as const,
+    terminalEvidence: { kind: 'succeeded_locked' as const, attestation },
+    error: null,
+    occurredAt: new Date(Date.now() + 80).toISOString(),
+  };
 }
 
 function mirrorAuthoringCandidateFixture(
@@ -7199,6 +7439,722 @@ describe('procedure compilation runtime', () => {
       }
     },
   );
+
+  it('runs the accepted native shortcut proof through receipt progress, Undo, and Redo', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-shortcut-proof-'));
+    const databasePath = join(directory, 'state.db');
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: '在默认 Cube 上通过原生快捷键添加三级细分曲面。',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'zh-CN',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const replayRequest = {
+        formatVersion: '1.0.0',
+        replayId: randomUUID(),
+        targetInstanceId,
+        leafId: 'snowman.head.eyes.left',
+        replayMode: 'native_shortcut_proof',
+        packet,
+        tree: subdivisionSurfaceAuthoringCandidateFixture(packet),
+      } as const;
+      const proposedMcp = await callMcpTool(
+        runtime,
+        9_100,
+        'operatingline.procedure.shortcut-proof.propose',
+        replayRequest,
+      );
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+      const proposed = procedureShortcutProofProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed).toMatchObject({
+        status: 'accepted',
+        record: {
+          replayId: replayRequest.replayId,
+          leafId: replayRequest.leafId,
+          claims: {
+            approval: 'pending',
+            hostExecutionStarted: false,
+            managedActionResult: 'pending',
+            managedIdentityVerified: false,
+          },
+          proofExecution: {
+            targetProfile: 'factory_cube_8_12_6',
+            executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+          },
+        },
+      });
+      const proposal = proposed.record.proposal;
+
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(sessionResponse.status).toBe(200);
+      const session = (await sessionResponse.json()) as { leaseId: string };
+      const leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+      );
+      expect(decisionResponse.status).toBe(200);
+      await waitUntilAfter(decision.occurredAt);
+
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const executionId = randomUUID();
+      const startOccurredAt = new Date().toISOString();
+      const startReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 1,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: new Date(Date.parse(startOccurredAt) - 1).toISOString(),
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: startOccurredAt,
+      } as const;
+      const startStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startStateResponse.status).toBe(200);
+
+      const staleExecution = await callMcpTool(
+        runtime,
+        9_101,
+        'operatingline.blender.shortcut-proof.execute',
+        {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId: replayRequest.replayId,
+          expectedState: { reportId: randomUUID(), sequence: startReport.sequence },
+        },
+      );
+      expect(staleExecution.result?.isError).toBe(true);
+      expect(staleExecution.result?.content?.[0]?.text).toContain(
+        'shortcut_proof_execution_state_changed',
+      );
+
+      const executionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: replayRequest.replayId,
+        expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+      } as const;
+      const queuedMcp = await callMcpTool(
+        runtime,
+        9_102,
+        'operatingline.blender.shortcut-proof.execute',
+        executionRequest,
+      );
+      expect(queuedMcp.result?.isError, queuedMcp.result?.content?.[0]?.text).not.toBe(true);
+      expect(
+        companionShortcutProofStatusSchema.parse(queuedMcp.result?.structuredContent),
+      ).toMatchObject({
+        requestId: executionRequest.requestId,
+        replayId: replayRequest.replayId,
+        status: 'queued',
+        targetProfile: 'factory_cube_8_12_6',
+        binding: {
+          acceptedDecision: { decisionId: decision.decisionId },
+          startState: executionRequest.expectedState,
+        },
+      });
+
+      let pollUrl = new URL('/api/v1/companion/shortcut-proof', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', targetInstanceId);
+      const missingLeasePoll = await fetch(pollUrl, { headers });
+      expect(missingLeasePoll.status).toBe(409);
+      await expect(missingLeasePoll.json()).resolves.toMatchObject({
+        error: 'companion_lease_required',
+      });
+      const deliveryResponse = await fetch(pollUrl, { headers: leaseHeaders });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionShortcutProofPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('Expected one shortcut proof delivery');
+      expect(delivery).toMatchObject({
+        requestId: executionRequest.requestId,
+        operationIds: proposed.record.proofExecution.operationIds,
+        binding: {
+          proposalRecordContentSha256: proposed.record.integrity.contentSha256,
+          acceptedAction: {
+            name: 'blender.modifier.add_subdivision_surface',
+            arguments: { viewportLevel: 3 },
+          },
+        },
+      });
+
+      const operationReceipts = shortcutProofOperationReceipts(delivery);
+      for (const [index, receipt] of operationReceipts.entries()) {
+        const progress = {
+          ...delivery,
+          status: 'in_progress',
+          completedOperationIds: delivery.operationIds.slice(0, index + 1),
+          receiptChainHeadSha256: receipt.contentSha256,
+          occurredAt: new Date(Date.now() + index + 1).toISOString(),
+        };
+        const progressResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/shortcut-proof-progress`,
+          { method: 'POST', headers: leaseHeaders, body: JSON.stringify(progress) },
+        );
+        expect(progressResponse.status).toBe(200);
+        await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+      }
+
+      const succeeded = successfulShortcutProofResult(delivery, operationReceipts);
+      expect(succeeded.terminalEvidence.attestation.operationReceipts).toHaveLength(4);
+      await new Promise<void>((resolvePromise) =>
+        setTimeout(resolvePromise, Math.max(0, Date.parse(succeeded.occurredAt) - Date.now() + 1)),
+      );
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      pollUrl = new URL('/api/v1/companion/shortcut-proof', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', targetInstanceId);
+
+      const terminalSessionResponseB = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(terminalSessionResponseB.status).toBe(200);
+      const terminalSessionB = (await terminalSessionResponseB.json()) as { leaseId: string };
+      const terminalLeaseHeadersB = {
+        ...headers,
+        'x-operatingline-companion-lease': terminalSessionB.leaseId,
+      };
+      const terminalChallengeResponseB = await fetch(pollUrl, {
+        headers: terminalLeaseHeadersB,
+      });
+      expect(terminalChallengeResponseB.status).toBe(200);
+      const terminalChallengeB = companionShortcutProofPollDeliverySchema.parse(
+        await terminalChallengeResponseB.json(),
+      ).request;
+      if (terminalChallengeB === null || terminalChallengeB.kind !== 'native_terminal_reconcile') {
+        throw new Error('Expected terminal reconciliation challenge for replacement session B');
+      }
+      const repeatedTerminalChallengeResponseB = await fetch(pollUrl, {
+        headers: terminalLeaseHeadersB,
+      });
+      expect(
+        companionShortcutProofPollDeliverySchema.parse(
+          await repeatedTerminalChallengeResponseB.json(),
+        ).request,
+      ).toEqual(terminalChallengeB);
+
+      const terminalSessionResponseC = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(terminalSessionResponseC.status).toBe(200);
+      const terminalSessionC = (await terminalSessionResponseC.json()) as { leaseId: string };
+      const terminalLeaseHeadersC = {
+        ...headers,
+        'x-operatingline-companion-lease': terminalSessionC.leaseId,
+      };
+      const terminalChallengeResponseC = await fetch(pollUrl, {
+        headers: terminalLeaseHeadersC,
+      });
+      expect(terminalChallengeResponseC.status).toBe(200);
+      const terminalChallengeC = companionShortcutProofPollDeliverySchema.parse(
+        await terminalChallengeResponseC.json(),
+      ).request;
+      if (terminalChallengeC === null || terminalChallengeC.kind !== 'native_terminal_reconcile') {
+        throw new Error('Expected terminal reconciliation challenge for replacement session C');
+      }
+      expect(terminalChallengeC.recoveryId).not.toBe(terminalChallengeB.recoveryId);
+
+      const terminalAckOccurredAt = new Date(
+        Math.max(Date.now(), Date.parse(terminalChallengeC.recoveryRequestedAt) + 1),
+      ).toISOString();
+      const terminalAckC = {
+        kind: 'native_terminal_reconcile' as const,
+        recoveryId: terminalChallengeC.recoveryId,
+        result: succeeded,
+        expectedMarkerContentSha256:
+          computeCompanionShortcutProofTerminalMarkerContentSha256(succeeded),
+        currentSceneFingerprintSha256:
+          succeeded.terminalEvidence.attestation.nativeUndoCheckpoint.finalSceneFingerprintSha256,
+        occurredAt: terminalAckOccurredAt,
+      };
+      const staleTerminalAckBResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: terminalLeaseHeadersB,
+          body: JSON.stringify({
+            ...terminalAckC,
+            recoveryId: terminalChallengeB.recoveryId,
+          }),
+        },
+      );
+      expect(staleTerminalAckBResponse.status).toBe(409);
+      await expect(staleTerminalAckBResponse.json()).resolves.toMatchObject({
+        error: 'lease_not_current',
+      });
+      const staleTerminalIdResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: terminalLeaseHeadersC,
+          body: JSON.stringify({
+            ...terminalAckC,
+            recoveryId: terminalChallengeB.recoveryId,
+          }),
+        },
+      );
+      expect(staleTerminalIdResponse.status).toBe(409);
+      await expect(staleTerminalIdResponse.json()).resolves.toMatchObject({
+        error: 'shortcut_proof_terminal_reconciliation_identity_mismatch',
+      });
+      const terminalAckResponseC = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: terminalLeaseHeadersC,
+          body: JSON.stringify(terminalAckC),
+        },
+      );
+      expect(terminalAckResponseC.status).toBe(200);
+      await expect(terminalAckResponseC.json()).resolves.toEqual({ result: 'accepted' });
+      const duplicateTerminalAckResponseC = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: terminalLeaseHeadersC,
+          body: JSON.stringify(terminalAckC),
+        },
+      );
+      expect(duplicateTerminalAckResponseC.status).toBe(200);
+      await expect(duplicateTerminalAckResponseC.json()).resolves.toEqual({
+        result: 'duplicate',
+      });
+
+      const lockedMcp = await callMcpTool(
+        runtime,
+        9_103,
+        'operatingline.blender.shortcut-proof.status',
+        { requestId: executionRequest.requestId },
+      );
+      expect(
+        companionShortcutProofStatusSchema.parse(lockedMcp.result?.structuredContent),
+      ).toMatchObject({
+        status: 'succeeded',
+        result: {
+          requiresUndoToUnlock: true,
+          terminalEvidence: { kind: 'succeeded_locked' },
+        },
+      });
+
+      const checkpoint = succeeded.terminalEvidence.attestation.nativeUndoCheckpoint;
+      await waitUntilAfter(succeeded.occurredAt);
+      const replacementSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+        },
+      );
+      expect(replacementSessionResponse.status).toBe(200);
+      const replacementSession = (await replacementSessionResponse.json()) as {
+        leaseId: string;
+      };
+      expect(replacementSession.leaseId).not.toBe(session.leaseId);
+      const replacementLeaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': replacementSession.leaseId,
+      };
+      const recoveryResponse = await fetch(pollUrl, { headers: replacementLeaseHeaders });
+      expect(recoveryResponse.status, await recoveryResponse.clone().text()).toBe(200);
+      const recoveryDelivery = companionShortcutProofPollDeliverySchema.parse(
+        await recoveryResponse.json(),
+      ).request;
+      if (recoveryDelivery === null || !('kind' in recoveryDelivery)) {
+        throw new Error('Expected a native shortcut history recovery delivery');
+      }
+      expect(recoveryDelivery).toMatchObject({
+        kind: 'native_history_rebind',
+        requestId: delivery.requestId,
+        deliveryId: delivery.deliveryId,
+        history: {
+          checkpointId: checkpoint.checkpointId,
+          undoLockId: checkpoint.undoLockId,
+          checkpointKind: 'success',
+          baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          lockedSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+        },
+      });
+      const recoveryAck = {
+        kind: 'native_history_rebind' as const,
+        formatVersion: recoveryDelivery.formatVersion,
+        requestId: recoveryDelivery.requestId,
+        replayId: recoveryDelivery.replayId,
+        proofId: recoveryDelivery.proofId,
+        deliveryId: recoveryDelivery.deliveryId,
+        target: recoveryDelivery.target,
+        bindingContentSha256: recoveryDelivery.bindingContentSha256,
+        recoveryId: recoveryDelivery.recoveryId,
+        history: recoveryDelivery.history,
+        status: recoveryDelivery.expectedStatus,
+        expectedMarkerContentSha256: recoveryDelivery.expectedMarkerContentSha256,
+        currentSceneFingerprintSha256: recoveryDelivery.history.lockedSceneFingerprintSha256,
+        mutationLocked: true as const,
+        occurredAt: new Date(
+          Math.max(Date.now(), Date.parse(recoveryDelivery.recoveryRequestedAt) + 1),
+        ).toISOString(),
+      };
+      const missingLeaseRecovery = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        { method: 'POST', headers, body: JSON.stringify(recoveryAck) },
+      );
+      expect(missingLeaseRecovery.status).toBe(409);
+      const recoveryAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: replacementLeaseHeaders,
+          body: JSON.stringify(recoveryAck),
+        },
+      );
+      expect(recoveryAckResponse.status).toBe(200);
+      await expect(recoveryAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const restoredAt = new Date(
+        Math.max(Date.now(), Date.parse(recoveryAck.occurredAt) + 1),
+      ).toISOString();
+      const nativeUndoObservationContent = {
+        satisfied: true as const,
+        restorationObservationId: randomUUID(),
+        sceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+      };
+      const restored = {
+        ...delivery,
+        status: 'restored' as const,
+        managedActionResult: 'not_executed' as const,
+        managedIdentityVerified: false as const,
+        requiresUndoToUnlock: false as const,
+        terminalEvidence: {
+          kind: 'restored' as const,
+          sourceCheckpointId: checkpoint.checkpointId,
+          undoLockId: checkpoint.undoLockId,
+          baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          lockedSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+          currentSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          nativeUndoObservation: {
+            ...nativeUndoObservationContent,
+            contentSha256: computeProcedureShortcutProofNativeObservationContentSha256(
+              nativeUndoObservationContent,
+            ),
+          },
+          restoredAt,
+        },
+        error: null,
+        occurredAt: restoredAt,
+      };
+      const restoredResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-result`,
+        { method: 'POST', headers: replacementLeaseHeaders, body: JSON.stringify(restored) },
+      );
+      expect(restoredResponse.status).toBe(200);
+      expect(
+        companionShortcutProofStatusSchema.parse(
+          (
+            await callMcpTool(runtime, 9_104, 'operatingline.blender.shortcut-proof.status', {
+              requestId: executionRequest.requestId,
+            })
+          ).result?.structuredContent,
+        ),
+      ).toMatchObject({
+        status: 'restored',
+        result: { requiresUndoToUnlock: false, terminalEvidence: { kind: 'restored' } },
+      });
+
+      await waitUntilAfter(restoredAt);
+      const restoredSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(restoredSessionResponse.status).toBe(200);
+      const restoredSession = (await restoredSessionResponse.json()) as { leaseId: string };
+      const restoredLeaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': restoredSession.leaseId,
+      };
+      const restoredRecoveryResponse = await fetch(pollUrl, { headers: restoredLeaseHeaders });
+      expect(restoredRecoveryResponse.status).toBe(200);
+      const restoredRecovery = companionShortcutProofPollDeliverySchema.parse(
+        await restoredRecoveryResponse.json(),
+      ).request;
+      if (restoredRecovery === null || !('kind' in restoredRecovery)) {
+        throw new Error('Expected retained restored history recovery before further delivery');
+      }
+      expect(restoredRecovery).toMatchObject({
+        kind: 'native_history_rebind',
+        expectedStatus: 'restored',
+        expectedResultContentSha256: computeCompanionShortcutProofResultContentSha256(restored),
+      });
+      const restoredRecoveryAck = {
+        kind: 'native_history_rebind' as const,
+        formatVersion: restoredRecovery.formatVersion,
+        requestId: restoredRecovery.requestId,
+        replayId: restoredRecovery.replayId,
+        proofId: restoredRecovery.proofId,
+        deliveryId: restoredRecovery.deliveryId,
+        target: restoredRecovery.target,
+        bindingContentSha256: restoredRecovery.bindingContentSha256,
+        recoveryId: restoredRecovery.recoveryId,
+        history: restoredRecovery.history,
+        status: restoredRecovery.expectedStatus,
+        expectedMarkerContentSha256: restoredRecovery.expectedMarkerContentSha256,
+        currentSceneFingerprintSha256: restoredRecovery.history.baselineSceneFingerprintSha256,
+        mutationLocked: false as const,
+        occurredAt: new Date(
+          Math.max(Date.now(), Date.parse(restoredRecovery.recoveryRequestedAt) + 1),
+        ).toISOString(),
+      };
+      const restoredRecoveryAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: restoredLeaseHeaders,
+          body: JSON.stringify(restoredRecoveryAck),
+        },
+      );
+      expect(restoredRecoveryAckResponse.status).toBe(200);
+
+      const reappliedAt = new Date(
+        Math.max(Date.now(), Date.parse(restoredRecoveryAck.occurredAt) + 1),
+      ).toISOString();
+      const nativeRedoObservationContent = {
+        satisfied: true as const,
+        redoObservationId: randomUUID(),
+        sceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+      };
+      const reapplied = {
+        ...delivery,
+        status: 'reapplied_locked' as const,
+        managedActionResult: 'not_executed' as const,
+        managedIdentityVerified: false as const,
+        requiresUndoToUnlock: true as const,
+        terminalEvidence: {
+          kind: 'reapplied_locked' as const,
+          sourceCheckpointId: checkpoint.checkpointId,
+          undoLockId: checkpoint.undoLockId,
+          baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          lockedSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+          currentSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+          nativeRedoObservation: {
+            ...nativeRedoObservationContent,
+            contentSha256: computeProcedureShortcutProofNativeObservationContentSha256(
+              nativeRedoObservationContent,
+            ),
+          },
+          reappliedAt,
+        },
+        error: null,
+        occurredAt: reappliedAt,
+      };
+      const reappliedResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-result`,
+        { method: 'POST', headers: restoredLeaseHeaders, body: JSON.stringify(reapplied) },
+      );
+      expect(reappliedResponse.status).toBe(200);
+      expect(
+        companionShortcutProofStatusSchema.parse(
+          (
+            await callMcpTool(runtime, 9_105, 'operatingline.blender.shortcut-proof.status', {
+              requestId: executionRequest.requestId,
+            })
+          ).result?.structuredContent,
+        ),
+      ).toMatchObject({
+        status: 'reapplied_locked',
+        result: {
+          requiresUndoToUnlock: true,
+          terminalEvidence: { kind: 'reapplied_locked' },
+        },
+      });
+
+      await waitUntilAfter(reappliedAt);
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      const transitionSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+      });
+      expect(transitionSessionResponse.status).toBe(200);
+      const transitionSession = (await transitionSessionResponse.json()) as { leaseId: string };
+      const transitionLeaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': transitionSession.leaseId,
+      };
+      const transitionPollUrl = new URL('/api/v1/companion/shortcut-proof', runtime.baseUrl);
+      transitionPollUrl.searchParams.set('adapterId', 'blender');
+      transitionPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const transitionRecoveryResponse = await fetch(transitionPollUrl, {
+        headers: transitionLeaseHeaders,
+      });
+      const transitionRecovery = companionShortcutProofPollDeliverySchema.parse(
+        await transitionRecoveryResponse.json(),
+      ).request;
+      if (transitionRecovery === null || !('kind' in transitionRecovery)) {
+        throw new Error('Expected a native history transition recovery delivery');
+      }
+      expect(transitionRecovery).toMatchObject({
+        kind: 'native_history_rebind',
+        expectedStatus: 'reapplied_locked',
+        expectedResultContentSha256: computeCompanionShortcutProofResultContentSha256(reapplied),
+      });
+      const transitionOccurredAt = new Date(
+        Math.max(Date.now(), Date.parse(transitionRecovery.recoveryRequestedAt) + 1),
+      ).toISOString();
+      const transitionUndoObservationContent = {
+        satisfied: true as const,
+        restorationObservationId: randomUUID(),
+        sceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+      };
+      const transitionRestored = {
+        ...delivery,
+        status: 'restored' as const,
+        managedActionResult: 'not_executed' as const,
+        managedIdentityVerified: false as const,
+        requiresUndoToUnlock: false as const,
+        terminalEvidence: {
+          kind: 'restored' as const,
+          sourceCheckpointId: checkpoint.checkpointId,
+          undoLockId: checkpoint.undoLockId,
+          baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          lockedSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+          currentSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+          nativeUndoObservation: {
+            ...transitionUndoObservationContent,
+            contentSha256: computeProcedureShortcutProofNativeObservationContentSha256(
+              transitionUndoObservationContent,
+            ),
+          },
+          restoredAt: transitionOccurredAt,
+        },
+        error: null,
+        occurredAt: transitionOccurredAt,
+      };
+      const transitionAck = {
+        kind: 'native_history_transition_reconcile' as const,
+        recoveryId: transitionRecovery.recoveryId,
+        results: [transitionRestored],
+        expectedResultContentSha256: transitionRecovery.expectedResultContentSha256,
+        expectedMarkerContentSha256: transitionRecovery.expectedMarkerContentSha256,
+        currentSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+        occurredAt: new Date(Date.parse(transitionOccurredAt) + 1).toISOString(),
+      };
+      const transitionAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: transitionLeaseHeaders,
+          body: JSON.stringify(transitionAck),
+        },
+      );
+      expect(transitionAckResponse.status).toBe(200);
+      await expect(transitionAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const duplicateTransitionAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/shortcut-proof-recovery`,
+        {
+          method: 'POST',
+          headers: transitionLeaseHeaders,
+          body: JSON.stringify(transitionAck),
+        },
+      );
+      await expect(duplicateTransitionAckResponse.json()).resolves.toEqual({
+        result: 'duplicate',
+      });
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it('compiles through MCP and HTTP without publishing, proposing, or executing', async () => {
     const runtime = await startRuntime({

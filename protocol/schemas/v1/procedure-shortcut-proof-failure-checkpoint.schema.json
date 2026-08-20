@@ -1,0 +1,211 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "evidenceClass": {
+      "type": "string",
+      "const": "companion_reported_shortcut_proof_failure_checkpoint"
+    },
+    "checkpointId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "previousCheckpointId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operation": {
+      "type": "string",
+      "const": "shortcut_proof_failure"
+    },
+    "undoLockId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "proofId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "replayId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "targetId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "marker": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "const": "_operating_line_shortcut_proof_history_v1"
+        },
+        "matched": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "key",
+        "matched"
+      ],
+      "additionalProperties": false
+    },
+    "journal": {
+      "type": "object",
+      "properties": {
+        "entryPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "baselineSnapshotPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "currentSnapshotPresent": {
+          "type": "boolean",
+          "const": true
+        },
+        "mutationLeaseHeld": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "entryPresent",
+        "baselineSnapshotPresent",
+        "currentSnapshotPresent",
+        "mutationLeaseHeld"
+      ],
+      "additionalProperties": false
+    },
+    "baselineState": {
+      "type": "object",
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sceneFingerprintSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "modifierCount": {
+          "type": "number",
+          "const": 0
+        }
+      },
+      "required": [
+        "targetId",
+        "sceneFingerprintSha256",
+        "modifierCount"
+      ],
+      "additionalProperties": false
+    },
+    "currentState": {
+      "type": "object",
+      "properties": {
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sceneFingerprintSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "modifierCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "targetId",
+        "sceneFingerprintSha256",
+        "modifierCount"
+      ],
+      "additionalProperties": false
+    },
+    "receiptPrefixRootSha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "receiptPrefixHeadSha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lastCompletedOperationId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "shortcut.add_subdivision_surface_level_one",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_viewport_level",
+            "shortcut.close_adjust_last_operation"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "committedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    }
+  },
+  "required": [
+    "formatVersion",
+    "evidenceClass",
+    "checkpointId",
+    "previousCheckpointId",
+    "operation",
+    "undoLockId",
+    "proofId",
+    "replayId",
+    "targetId",
+    "marker",
+    "journal",
+    "baselineState",
+    "currentState",
+    "receiptPrefixRootSha256",
+    "receiptPrefixHeadSha256",
+    "lastCompletedOperationId",
+    "committedAt"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-shortcut-proof-failure-checkpoint.json"
+}

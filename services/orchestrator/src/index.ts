@@ -25,6 +25,17 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionShortcutProofCreateRequestSchema,
+  companionShortcutProofPollDeliverySchema,
+  companionShortcutProofPollRequestSchema,
+  companionShortcutProofProgressAckSchema,
+  companionShortcutProofProgressSchema,
+  companionShortcutProofRecoveryAckResponseSchema,
+  companionShortcutProofRecoveryRequestSchema,
+  companionShortcutProofResultAckSchema,
+  companionShortcutProofResultSchema,
+  companionShortcutProofStatusRequestSchema,
+  companionShortcutProofStatusSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunStatusRequestSchema,
   companionHeartbeatRequestSchema,
@@ -118,6 +129,9 @@ import {
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalRequestSchema,
   procedureLeafReplayProposalResultSchema,
+  procedureShortcutProofProposalRecordSchema,
+  procedureShortcutProofProposalRequestSchema,
+  procedureShortcutProofProposalResultSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
   procedureTreeEditorBranchCreateRequestSchema,
@@ -147,6 +161,8 @@ import {
   type CompanionActionExecutionCreateRequest,
   type CompanionActionExecutionResult,
   type CompanionActionExecutionStatus,
+  type CompanionShortcutProofCreateRequest,
+  type CompanionShortcutProofStatus,
   type CompanionStateReport,
   type GuidePlan,
   type GuideGoalRequest,
@@ -155,6 +171,7 @@ import {
   type PlanningIntent,
   type PlanningQualityReport,
   type ProcedureLeafReplayBinding,
+  type ProcedureShortcutProofProposalRecord,
   type ProcedureTutorialAuthoringBinding,
   type RuntimeStatus,
 } from '@operatingline/protocol';
@@ -165,6 +182,10 @@ import {
   BlenderActionExecutionError,
   createBlenderActionExecutionCoordinator,
 } from './blender-action-execution.js';
+import {
+  BlenderShortcutProofExecutionError,
+  createBlenderShortcutProofExecutionCoordinator,
+} from './blender-shortcut-proof-execution.js';
 import {
   CompanionDialogueRunRequestError,
   createCompanionDialogueRunCoordinator,
@@ -243,6 +264,13 @@ import {
   sameProcedureLeafReplayValue,
   validateStrongProcedureLeafReplayObservation,
 } from './procedure-replay.js';
+import {
+  buildProcedureShortcutProofBinding,
+  buildProcedureShortcutProofProposalRecord,
+  prepareProcedureShortcutProofProposal,
+  ProcedureShortcutProofError,
+  sameProcedureShortcutProofValue,
+} from './procedure-shortcut-proof.js';
 import {
   buildProcedureAuthoringPromptPacket,
   procedureAuthoringTutorialInputFromPacket,
@@ -1434,6 +1462,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    type VerifiedExternalResourceConsumer = {
+      readonly consumerStepId: string;
+      readonly resourceId: string;
+      readonly resourceType: string;
+    };
+
+    type InternalPlanningQualityOptions = {
+      readonly verifiedExternalResourceConsumers?: readonly VerifiedExternalResourceConsumer[];
+      readonly shortcutProofAuthority?: {
+        readonly replayId: string;
+        readonly leafId: string;
+        readonly targetProfile: 'factory_cube_8_12_6';
+      };
+    };
+
     const getPlanningQuality = (
       request: ReturnType<typeof planningQualityEvaluationRequestSchema.parse>,
       selectedCatalog?: ActionCatalog,
@@ -1443,6 +1486,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         revisionRequestId?: string;
         generationRequestId?: string;
       },
+      evaluationOptions: InternalPlanningQualityOptions = {},
     ): PlanningQualityReport => {
       const catalog =
         selectedCatalog ??
@@ -1452,7 +1496,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             ? {}
             : { catalogVersion: request.catalogVersion }),
         });
-      const report = evaluatePlanningQuality(request, catalog);
+      const report = evaluatePlanningQuality(request, catalog, evaluationOptions);
       database.appendEvent({
         id: randomUUID(),
         eventType: 'planning.quality.evaluated',
@@ -1466,6 +1510,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             : { capabilityCoverage: request.capabilityCoverage }),
           plan: request.plan,
           report,
+          ...(evaluationOptions.verifiedExternalResourceConsumers === undefined
+            ? {}
+            : {
+                verifiedExternalResourceConsumers: [
+                  ...evaluationOptions.verifiedExternalResourceConsumers,
+                ].sort(
+                  (left, right) =>
+                    left.consumerStepId.localeCompare(right.consumerStepId) ||
+                    left.resourceType.localeCompare(right.resourceType) ||
+                    left.resourceId.localeCompare(right.resourceId),
+                ),
+              }),
+          ...(evaluationOptions.shortcutProofAuthority === undefined
+            ? {}
+            : { shortcutProofAuthority: evaluationOptions.shortcutProofAuthority }),
           ...provenance,
         },
       });
@@ -1741,28 +1800,34 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ),
       appendEvent: (event) => database.appendEvent(event),
     });
-    const createProposal = (input: {
-      targetAdapterId: string;
-      targetInstanceId?: string;
-      catalogVersion?: string;
-      plan: GuidePlan;
-      goalRequestId?: string;
-      goalGenerationRequestId?: string;
-      replan?: {
-        requestId: string;
-        generationRequestId?: string;
-        basePlan: GuidePlan;
-        revisionThread: NonNullable<
-          ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
-        >;
-        revisionOperation?: ReturnType<
-          typeof guideRevisionRequestSchema.parse
-        >['revisionOperation'];
-        mergeBaseRequestId?: string;
-      };
-      planning?: PlanningIntent;
-      persistProposal?: (proposal: GuideProposal) => void;
-    }): { proposal: GuideProposal; planningQuality: PlanningQualityReport } => {
+    const createProposalCore = (
+      input: {
+        targetAdapterId: string;
+        targetInstanceId?: string;
+        catalogVersion?: string;
+        plan: GuidePlan;
+        goalRequestId?: string;
+        goalGenerationRequestId?: string;
+        replan?: {
+          requestId: string;
+          generationRequestId?: string;
+          basePlan: GuidePlan;
+          revisionThread: NonNullable<
+            ReturnType<typeof guideRevisionRequestSchema.parse>['revisionThread']
+          >;
+          revisionOperation?: ReturnType<
+            typeof guideRevisionRequestSchema.parse
+          >['revisionOperation'];
+          mergeBaseRequestId?: string;
+        };
+        planning?: PlanningIntent;
+        persistProposal?: (proposal: GuideProposal) => void;
+      },
+      evaluationOptions: InternalPlanningQualityOptions = {},
+    ): {
+      proposal: GuideProposal;
+      planningQuality: PlanningQualityReport;
+    } => {
       validateProposalTarget(input.plan, input.targetAdapterId);
       const catalog = actionCatalogRegistry.get({
         targetAdapterId: input.targetAdapterId,
@@ -1801,6 +1866,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                     : { generationRequestId: input.replan.generationRequestId }),
                   targetInstanceId: input.targetInstanceId,
                 },
+        evaluationOptions,
       );
       if (!planningQuality.valid) {
         const errors = planningQuality.findings
@@ -1866,6 +1932,32 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       return { proposal, planningQuality };
     };
 
+    const createProposal = (input: Parameters<typeof createProposalCore>[0]) =>
+      createProposalCore(input);
+
+    const createShortcutProofProposal = (
+      input: Parameters<typeof createProposalCore>[0],
+      authority: {
+        readonly replayId: string;
+        readonly leafId: string;
+        readonly targetId: 'tutorial.cube';
+      },
+    ) =>
+      createProposalCore(input, {
+        verifiedExternalResourceConsumers: [
+          {
+            consumerStepId: authority.leafId,
+            resourceId: authority.targetId,
+            resourceType: 'OBJECT',
+          },
+        ],
+        shortcutProofAuthority: {
+          replayId: authority.replayId,
+          leafId: authority.leafId,
+          targetProfile: 'factory_cube_8_12_6',
+        },
+      });
+
     const proposalResult = (proposal: GuideProposal, planningQuality: PlanningQualityReport) => ({
       proposed: true,
       proposalId: proposal.proposalId,
@@ -1888,7 +1980,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     ) => {
       const existingPayload = database.getProcedureLeafReplay(request.replayId);
       if (existingPayload !== null) {
-        const existing = procedureLeafReplayBindingSchema.parse(existingPayload);
+        const parsedExisting = procedureLeafReplayBindingSchema.safeParse(existingPayload);
+        if (!parsedExisting.success) {
+          throw new ProcedureLeafReplayError(
+            `Replay id ${request.replayId} is already bound to a different replay mode`,
+            409,
+          );
+        }
+        const existing = parsedExisting.data;
         if (!sameProcedureLeafReplayValue(existing.request, request)) {
           throw new ProcedureLeafReplayError(
             `Replay id ${request.replayId} is already bound to different input`,
@@ -1961,6 +2060,102 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    const proposeProcedureShortcutProof = (
+      request: ReturnType<typeof procedureShortcutProofProposalRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplay(request.replayId);
+      if (existingPayload !== null) {
+        const parsedExisting =
+          procedureShortcutProofProposalRecordSchema.safeParse(existingPayload);
+        if (!parsedExisting.success) {
+          throw new ProcedureShortcutProofError(
+            `Replay id ${request.replayId} is already bound to a different replay mode`,
+            409,
+          );
+        }
+        const existing = parsedExisting.data;
+        if (!sameProcedureShortcutProofValue(existing.request, request)) {
+          throw new ProcedureShortcutProofError(
+            `Replay id ${request.replayId} is already bound to different input`,
+            409,
+          );
+        }
+        return procedureShortcutProofProposalResultSchema.parse({
+          status: 'duplicate',
+          record: existing,
+        });
+      }
+
+      const materialization = materializeProcedureAuthoring({
+        packet: request.packet,
+        tree: request.tree,
+      });
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: materialization.catalogBinding.adapterId,
+        catalogVersion: materialization.catalogBinding.actionCatalogVersion,
+      });
+      const prepared = prepareProcedureShortcutProofProposal(
+        request,
+        materialization,
+        actionCatalog,
+      );
+      const planContentSha256 = computePlanContentSha256(materialization.compilation.plan);
+      let record: ProcedureShortcutProofProposalRecord | undefined;
+      let persistenceResult: 'accepted' | 'duplicate' | undefined;
+      createShortcutProofProposal(
+        {
+          targetAdapterId: actionCatalog.adapterId,
+          targetInstanceId: request.targetInstanceId,
+          catalogVersion: actionCatalog.catalogVersion,
+          plan: materialization.compilation.plan,
+          planning: prepared.planning,
+          persistProposal: (proposal) => {
+            const candidateRecord = buildProcedureShortcutProofProposalRecord({
+              recordId: randomUUID(),
+              request,
+              materialization,
+              proposal,
+              planContentSha256,
+              shortcutTrackContentSha256: prepared.shortcutTrackContentSha256,
+              createdAt: proposal.proposedAt,
+            });
+            const result = database.recordProcedureLeafReplayProposal(proposal, {
+              replayId: candidateRecord.replayId,
+              proposalId: proposal.proposalId,
+              treeId: candidateRecord.materialization.tree.id,
+              treeRevision: candidateRecord.materialization.tree.revision,
+              leafId: candidateRecord.leafId,
+              adapterId: candidateRecord.materialization.tree.adapterId,
+              instanceId: candidateRecord.request.targetInstanceId,
+              bindingContentSha256: candidateRecord.integrity.contentSha256,
+              payload: candidateRecord,
+              createdAt: candidateRecord.createdAt,
+            });
+            if (result === 'conflict') {
+              throw new ProcedureShortcutProofError(
+                'Shortcut proof proposal conflicts with an existing proposal or replay binding',
+                409,
+              );
+            }
+            record = candidateRecord;
+            persistenceResult = result;
+          },
+        },
+        {
+          replayId: request.replayId,
+          leafId: request.leafId,
+          targetId: prepared.targetId,
+        },
+      );
+      if (record === undefined || persistenceResult === undefined) {
+        throw new Error('Shortcut proof proposal persistence did not return a record');
+      }
+      return procedureShortcutProofProposalResultSchema.parse({
+        status: persistenceResult,
+        record,
+      });
+    };
+
     const loadProcedureLeafReplayEvidence = (replayId: string) => {
       const bindingPayload = database.getProcedureLeafReplay(replayId);
       if (bindingPayload === null) {
@@ -2004,6 +2199,58 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         );
       }
       return { binding, decision, proposalReceipt, decisionReceipt };
+    };
+
+    const loadProcedureShortcutProofEvidence = (replayId: string) => {
+      const recordPayload = database.getProcedureLeafReplay(replayId);
+      if (recordPayload === null) {
+        throw new ProcedureShortcutProofError(`Unknown shortcut proof replay: ${replayId}`, 404);
+      }
+      const parsedRecord = procedureShortcutProofProposalRecordSchema.safeParse(recordPayload);
+      if (!parsedRecord.success) {
+        throw new ProcedureShortcutProofError(
+          'Stored replay is not a native shortcut proof proposal record',
+          409,
+        );
+      }
+      const record = parsedRecord.data;
+      const proposalPayload = database.getGuideProposal(record.proposal.proposalId);
+      if (
+        proposalPayload === null ||
+        !sameProcedureShortcutProofValue(proposalPayload, record.proposal)
+      ) {
+        throw new ProcedureShortcutProofError(
+          'Stored shortcut proof proposal is missing or differs from its immutable record',
+          409,
+        );
+      }
+      const decisionPayload = database.getGuideProposalDecision(
+        record.proposal.proposalId,
+        record.proposal.targetAdapterId,
+        record.request.targetInstanceId,
+      );
+      if (decisionPayload === null) {
+        throw new ProcedureShortcutProofError(
+          'Shortcut proof proposal has no persisted decision for the target instance',
+          409,
+        );
+      }
+      const decision = guideProposalDecisionSchema.parse(decisionPayload);
+      const proposalReceipt = database.getManagedReplayReceipt(
+        'replay_proposal',
+        record.proposal.proposalId,
+      );
+      const decisionReceipt = database.getManagedReplayReceipt(
+        'guide_proposal_decision',
+        decision.decisionId,
+      );
+      if (proposalReceipt === null || decisionReceipt === null) {
+        throw new ProcedureShortcutProofError(
+          'Shortcut proof evidence lacks its proposal or decision receipt',
+          409,
+        );
+      }
+      return { record, decision, proposalReceipt, decisionReceipt };
     };
 
     const finalizeProcedureLeafReplay = (
@@ -2194,6 +2441,17 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     };
 
     const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({ database });
+    const shortcutProofExecutionCoordinator = createBlenderShortcutProofExecutionCoordinator({
+      database,
+    });
+
+    const shortcutProofExecutionRejected = (
+      message: string,
+      statusCode: number = 409,
+      code = 'shortcut_proof_not_authorized',
+    ): never => {
+      throw new BlenderShortcutProofExecutionError(code, statusCode, message);
+    };
 
     const actionExecutionRejected = (
       message: string,
@@ -2250,6 +2508,175 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         );
       }
       return { action, leaf, operation };
+    };
+
+    const authorizeBlenderShortcutProofExecution = (
+      request: CompanionShortcutProofCreateRequest,
+    ): {
+      execution: CompanionShortcutProofStatus;
+      sessionFingerprintSha256: string;
+    } => {
+      const { record, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureShortcutProofEvidence(request.replayId);
+      if (decision.decision !== 'accepted') {
+        return shortcutProofExecutionRejected(
+          'The shortcut proof proposal was not accepted by the target user',
+        );
+      }
+      const proposal = record.proposal;
+      if (
+        proposal.targetAdapterId !== 'blender' ||
+        proposal.targetInstanceId !== record.request.targetInstanceId ||
+        decision.adapterId !== 'blender' ||
+        decision.instanceId !== record.request.targetInstanceId ||
+        decision.proposalId !== proposal.proposalId
+      ) {
+        return shortcutProofExecutionRejected(
+          'Shortcut proof proposal, decision, and target identities differ',
+        );
+      }
+      if (
+        proposalReceipt.subjectType !== 'replay_proposal' ||
+        proposalReceipt.subjectId !== proposal.proposalId ||
+        proposalReceipt.authentication !== 'orchestrator_internal' ||
+        proposalReceipt.adapterId !== 'blender' ||
+        proposalReceipt.instanceId !== record.request.targetInstanceId ||
+        proposalReceipt.sessionFingerprintSha256 !== null ||
+        decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+        decisionReceipt.subjectId !== decision.decisionId ||
+        decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+        decisionReceipt.adapterId !== 'blender' ||
+        decisionReceipt.instanceId !== record.request.targetInstanceId ||
+        decisionReceipt.sessionFingerprintSha256 === null
+      ) {
+        return shortcutProofExecutionRejected(
+          'The accepted shortcut proof lacks a negotiated Companion session receipt',
+        );
+      }
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const executableSteps = proposal.plan.steps.filter((step) => step.action !== null);
+      const step = executableSteps[0];
+      const leaf = record.materialization.tree.nodes.find(
+        (node) => node.kind === 'leaf' && node.id === record.leafId,
+      );
+      if (
+        planContentSha256 !== record.planContentSha256 ||
+        executableSteps.length !== 1 ||
+        step?.id !== record.leafId ||
+        step.action?.adapterId !== 'blender' ||
+        step.action.name !== record.actionName ||
+        leaf?.kind !== 'leaf' ||
+        leaf.action === null ||
+        !sameProcedureShortcutProofValue(step.action, leaf.action)
+      ) {
+        return shortcutProofExecutionRejected(
+          'Accepted shortcut proof plan does not contain its exact single Subdivision Surface leaf',
+        );
+      }
+
+      const latest = listCompanionStates().find(
+        (report) =>
+          report.adapterId === 'blender' && report.instanceId === record.request.targetInstanceId,
+      );
+      if (latest === undefined) {
+        return shortcutProofExecutionRejected(
+          'The accepted target Companion is not currently present',
+          409,
+          'shortcut_proof_companion_unavailable',
+        );
+      }
+      if (
+        latest.reportId !== request.expectedState.reportId ||
+        latest.sequence !== request.expectedState.sequence
+      ) {
+        return shortcutProofExecutionRejected(
+          'The expected Companion state is stale; refresh companions and retry with a new requestId',
+          409,
+          'shortcut_proof_execution_state_changed',
+        );
+      }
+      if (
+        latest.plan?.id !== proposal.plan.id ||
+        latest.plan.revision !== proposal.plan.revision ||
+        latest.planContentSha256 !== planContentSha256 ||
+        latest.executionId === null ||
+        latest.phase !== 'running' ||
+        latest.transition !== 'walkthrough_started' ||
+        latest.activeStepId !== null ||
+        latest.completedStepIds.length !== 0 ||
+        latest.nativeUndoCheckpoint?.operation !== 'start' ||
+        (latest.observationGate !== undefined && latest.observationGate !== null) ||
+        latest.error !== null
+      ) {
+        return shortcutProofExecutionRejected(
+          'The target Companion is not at the started, untouched accepted shortcut proof cursor',
+          409,
+          'shortcut_proof_state_not_ready',
+        );
+      }
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        latest.reportId,
+      );
+      if (
+        reportReceipt === null ||
+        reportReceipt.subjectType !== 'companion_state_report' ||
+        reportReceipt.subjectId !== latest.reportId ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== 'blender' ||
+        reportReceipt.instanceId !== record.request.targetInstanceId ||
+        reportReceipt.sessionFingerprintSha256 !== decisionReceipt.sessionFingerprintSha256 ||
+        proposalReceipt.sequence >= decisionReceipt.sequence ||
+        decisionReceipt.sequence >= reportReceipt.sequence ||
+        Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
+        Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt) ||
+        Date.parse(decision.occurredAt) > Date.parse(latest.occurredAt)
+      ) {
+        return shortcutProofExecutionRejected(
+          'The expected Companion state is not an ordered receipt after shortcut proof acceptance',
+          409,
+          'shortcut_proof_evidence_order_invalid',
+        );
+      }
+      const requestedAt = new Date().toISOString();
+      const binding = buildProcedureShortcutProofBinding({
+        bindingId: randomUUID(),
+        proofId: randomUUID(),
+        requestId: request.requestId,
+        record,
+        decision,
+        currentState: latest,
+        createdAt: requestedAt,
+      });
+      return {
+        execution: companionShortcutProofStatusSchema.parse({
+          formatVersion: request.formatVersion,
+          requestId: request.requestId,
+          replayId: request.replayId,
+          proofId: binding.proofId,
+          target: binding.target,
+          targetProfile: binding.targetProfile,
+          bindingContentSha256: binding.integrity.contentSha256,
+          binding,
+          proposalId: binding.proposalId,
+          plan: binding.plan,
+          executionId: binding.executionId,
+          leafId: binding.leafId,
+          interactionCatalogVersion: binding.materialization.interactionCatalogVersion,
+          interactionCatalogContentSha256: binding.materialization.interactionCatalogContentSha256,
+          shortcutTrackContentSha256: binding.materialization.shortcutTrackContentSha256,
+          executorId: binding.executorId,
+          executionBoundary: binding.executionBoundary,
+          authorization: binding.authorization,
+          transport: binding.transport,
+          operationIds: binding.operationIds,
+          expectedState: request.expectedState,
+          requestedAt,
+          status: 'queued',
+          updatedAt: requestedAt,
+        }),
+        sessionFingerprintSha256: decisionReceipt.sessionFingerprintSha256,
+      };
     };
 
     const authorizeBlenderActionExecution = (
@@ -2710,6 +3137,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               existing ??
               (() => {
                 const authorization = authorizeBlenderActionExecution(parsedRequest.data);
+                if (
+                  shortcutProofExecutionCoordinator.ownsTarget(
+                    authorization.execution.target.adapterId,
+                    authorization.execution.target.instanceId,
+                  )
+                ) {
+                  return actionExecutionRejected(
+                    'A native shortcut proof still owns the target instance',
+                    409,
+                    'action_execution_shortcut_proof_locked',
+                  );
+                }
                 return actionExecutionCoordinator.queue(
                   authorization.execution,
                   authorization.sessionFingerprintSha256,
@@ -2776,6 +3215,126 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                   text: JSON.stringify({
                     error: 'action_execution_not_found',
                     message: 'The action execution request was not found',
+                  }),
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+            structuredContent: execution,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.shortcut-proof.execute',
+        {
+          description:
+            'Queue the exact accepted factory-Cube Subdivision Surface proof Ctrl+1, F9, viewport-level control, Enter through Blender window event simulation. Authority is derived only from an immutable native_shortcut_proof ProposalRecord, accepted in-host decision, active untouched next leaf, authenticated Companion receipt, and InteractionCatalog 1.39 proof track. It accepts no keys, coordinates, operators, Python, arbitrary actions, or parameters and does not create a managed ActionReceipt.',
+          inputSchema: companionShortcutProofCreateRequestSchema,
+          outputSchema: companionShortcutProofStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = companionShortcutProofCreateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_shortcut_proof_request',
+                    message: 'Shortcut proof execution request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const existing = shortcutProofExecutionCoordinator.findForCreate(parsedRequest.data);
+            const execution =
+              existing ??
+              (() => {
+                const authorization = authorizeBlenderShortcutProofExecution(parsedRequest.data);
+                if (
+                  actionExecutionCoordinator.ownsTarget(
+                    authorization.execution.target.adapterId,
+                    authorization.execution.target.instanceId,
+                  )
+                ) {
+                  return shortcutProofExecutionRejected(
+                    'A managed Blender action still owns the target instance',
+                    409,
+                    'shortcut_proof_action_execution_locked',
+                  );
+                }
+                return shortcutProofExecutionCoordinator.queue(
+                  authorization.execution,
+                  authorization.sessionFingerprintSha256,
+                );
+              })();
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+              structuredContent: execution,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error:
+                      error instanceof BlenderShortcutProofExecutionError
+                        ? error.code
+                        : 'shortcut_proof_execution_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Shortcut proof could not be safely authorized',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.shortcut-proof.status',
+        {
+          description:
+            'Return the durable native shortcut proof status, including receipt progress, success or failure evidence, retained Undo lock, verified restoration, Redo relock, or recovery_required after an indeterminate restart.',
+          inputSchema: companionShortcutProofStatusRequestSchema,
+          outputSchema: companionShortcutProofStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = companionShortcutProofStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_shortcut_proof_status_request',
+                    message: 'Shortcut proof status request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          const execution = shortcutProofExecutionCoordinator.get(parsedRequest.data.requestId);
+          if (execution === null) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'shortcut_proof_not_found',
+                    message: 'The shortcut proof request was not found',
                   }),
                 },
               ],
@@ -3656,6 +4215,54 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                     error: 'procedure_leaf_replay_proposal_failed',
                     message:
                       error instanceof Error ? error.message : 'Procedure leaf replay failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.shortcut-proof.propose',
+        {
+          description:
+            'Revalidate and materialize exactly one Subdivision Surface leaf with the InteractionCatalog 1.39 factory-Cube native shortcut proof track, create a pending human-reviewable instance-bound GuideProposal, and atomically store the full ProposalRecord. This does not accept, start, or execute the proposal and creates no managed ActionReceipt.',
+          inputSchema: deferMcpInputValidation(procedureShortcutProofProposalRequestSchema),
+          outputSchema: procedureShortcutProofProposalResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureShortcutProofProposalRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_shortcut_proof_proposal_request',
+                    message: 'Shortcut proof proposal violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = proposeProcedureShortcutProof(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_shortcut_proof_proposal_failed',
+                    message:
+                      error instanceof Error ? error.message : 'Shortcut proof proposal failed',
                   }),
                 },
               ],
@@ -5427,6 +6034,24 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
     });
+    runtimeApp.post('/api/v1/procedure/shortcut-proof/propose', async (request, reply) => {
+      const parsedRequest = procedureShortcutProofProposalRequestSchema.safeParse(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_shortcut_proof_proposal_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      try {
+        return proposeProcedureShortcutProof(parsedRequest.data);
+      } catch (error) {
+        const statusCode = error instanceof ProcedureShortcutProofError ? error.statusCode : 422;
+        return reply.code(statusCode).send({
+          error: 'procedure_shortcut_proof_proposal_failed',
+          message: error instanceof Error ? error.message : 'Shortcut proof proposal failed',
+        });
+      }
+    });
     runtimeApp.post('/api/v1/procedure/replay/finalize', async (request, reply) => {
       const parsedRequest = procedureLeafReplayFinalizeRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -6229,6 +6854,216 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
         }
         if (error instanceof BlenderActionExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/shortcut-proof', async (request, reply) => {
+      const parsedRequest = companionShortcutProofPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_shortcut_proof_poll_request',
+          message: 'Shortcut proof poll violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Shortcut proof delivery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'shortcut_proof_protocol_unsupported',
+            message: 'Shortcut proof delivery requires Guide protocol 1.5 native Undo evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const historyRecovery = shortcutProofExecutionCoordinator.pollHistoryRecovery(
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+          sessionFingerprintSha256,
+        );
+        const delivery =
+          historyRecovery === null
+            ? shortcutProofExecutionCoordinator.poll(
+                parsedRequest.data.adapterId,
+                parsedRequest.data.instanceId,
+                sessionFingerprintSha256,
+              )
+            : null;
+        const recovery =
+          historyRecovery === null && delivery === null
+            ? shortcutProofExecutionCoordinator.pollTerminalReconciliation(
+                parsedRequest.data.adapterId,
+                parsedRequest.data.instanceId,
+                sessionFingerprintSha256,
+              )
+            : null;
+        return companionShortcutProofPollDeliverySchema.parse({
+          request: historyRecovery ?? delivery ?? recovery,
+        });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderShortcutProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/shortcut-proof-progress', async (request, reply) => {
+      const parsedProgress = companionShortcutProofProgressSchema.safeParse(request.body);
+      if (!parsedProgress.success) {
+        return reply.code(400).send({
+          error: 'invalid_shortcut_proof_progress',
+          message: 'Shortcut proof progress violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Shortcut proof progress requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          parsedProgress.data.target.adapterId,
+          parsedProgress.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'shortcut_proof_protocol_unsupported',
+            message: 'Shortcut proof progress requires Guide protocol 1.5 evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const result = shortcutProofExecutionCoordinator.progress(
+          parsedProgress.data,
+          sessionFingerprintSha256,
+        );
+        return companionShortcutProofProgressAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderShortcutProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/shortcut-proof-result', async (request, reply) => {
+      const parsedResult = companionShortcutProofResultSchema.safeParse(request.body);
+      if (!parsedResult.success) {
+        return reply.code(400).send({
+          error: 'invalid_shortcut_proof_result',
+          message: 'Shortcut proof result violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Shortcut proof results require a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          parsedResult.data.target.adapterId,
+          parsedResult.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'shortcut_proof_protocol_unsupported',
+            message: 'Shortcut proof results require Guide protocol 1.5 evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        const result = shortcutProofExecutionCoordinator.complete(
+          parsedResult.data,
+          sessionFingerprintSha256,
+        );
+        return companionShortcutProofResultAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderShortcutProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/shortcut-proof-recovery', async (request, reply) => {
+      const parsedAck = companionShortcutProofRecoveryRequestSchema.safeParse(request.body);
+      if (!parsedAck.success) {
+        return reply.code(400).send({
+          error: 'invalid_shortcut_proof_recovery_ack',
+          message: 'Shortcut proof recovery acknowledgement violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Shortcut proof recovery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const recoveryTarget =
+          parsedAck.data.kind === 'native_terminal_reconcile'
+            ? parsedAck.data.result.target
+            : parsedAck.data.kind === 'native_history_transition_reconcile'
+              ? parsedAck.data.results[0]!.target
+              : parsedAck.data.target;
+        const session = companionLeaseManager.authorize(
+          leaseHeader,
+          recoveryTarget.adapterId,
+          recoveryTarget.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'shortcut_proof_protocol_unsupported',
+            message: 'Shortcut proof recovery requires Guide protocol 1.5 native Undo evidence',
+          });
+        }
+        const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
+        let result: 'accepted' | 'duplicate';
+        if (parsedAck.data.kind === 'native_terminal_reconcile') {
+          result = shortcutProofExecutionCoordinator.reconcileTerminal(
+            parsedAck.data,
+            sessionFingerprintSha256,
+          );
+        } else if (parsedAck.data.kind === 'native_history_transition_reconcile') {
+          result = shortcutProofExecutionCoordinator.reconcileHistoryTransitions(
+            parsedAck.data,
+            sessionFingerprintSha256,
+          );
+        } else {
+          result = shortcutProofExecutionCoordinator.recoverHistory(
+            parsedAck.data,
+            sessionFingerprintSha256,
+          );
+        }
+        return companionShortcutProofRecoveryAckResponseSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderShortcutProofExecutionError) {
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
         }
         throw error;

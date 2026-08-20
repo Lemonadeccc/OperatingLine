@@ -1,0 +1,2240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "formatVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "attestationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "deliveryId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "bindingId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "proposalRecordContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "proofId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "adapterId",
+            "instanceId"
+          ],
+          "additionalProperties": false
+        },
+        "proposalId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "plan": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "revision",
+            "contentSha256"
+          ],
+          "additionalProperties": false
+        },
+        "executionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "leafId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "recipeId": {
+          "type": "string",
+          "const": "blender.modifier.add_subdivision_surface.semantic"
+        },
+        "actionName": {
+          "type": "string",
+          "const": "blender.modifier.add_subdivision_surface"
+        },
+        "acceptedAction": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "name": {
+              "type": "string",
+              "const": "blender.modifier.add_subdivision_surface"
+            },
+            "arguments": {
+              "type": "object",
+              "properties": {
+                "targetId": {
+                  "type": "string",
+                  "const": "tutorial.cube"
+                },
+                "modifierId": {
+                  "type": "string",
+                  "const": "tutorial.cube.subdivision_surface"
+                },
+                "modifierName": {
+                  "type": "string",
+                  "const": "OperatingLine.Cube.SubdivisionSurface"
+                },
+                "viewportLevel": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                }
+              },
+              "required": [
+                "targetId",
+                "modifierId",
+                "modifierName",
+                "viewportLevel"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "adapterId",
+            "name",
+            "arguments"
+          ],
+          "additionalProperties": false
+        },
+        "targetProfile": {
+          "type": "string",
+          "const": "factory_cube_8_12_6"
+        },
+        "acceptedDecision": {
+          "type": "object",
+          "properties": {
+            "decisionId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "proposalId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "decision": {
+              "type": "string",
+              "const": "accepted"
+            },
+            "decidedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "decisionId",
+            "proposalId",
+            "instanceId",
+            "adapterId",
+            "decision",
+            "decidedAt"
+          ],
+          "additionalProperties": false
+        },
+        "proofScope": {
+          "type": "object",
+          "properties": {
+            "managedActionResult": {
+              "type": "string",
+              "const": "not_executed"
+            },
+            "managedIdentityVerified": {
+              "type": "boolean",
+              "const": false
+            },
+            "managedReceiptCreated": {
+              "type": "boolean",
+              "const": false
+            },
+            "omittedAcceptedArguments": {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string",
+                  "const": "modifierId"
+                },
+                {
+                  "type": "string",
+                  "const": "modifierName"
+                }
+              ],
+              "additionalItems": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "required": [
+            "managedActionResult",
+            "managedIdentityVerified",
+            "managedReceiptCreated",
+            "omittedAcceptedArguments"
+          ],
+          "additionalProperties": false
+        },
+        "materialization": {
+          "type": "object",
+          "properties": {
+            "actionCatalogVersion": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+            },
+            "interactionCatalogVersion": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+            },
+            "interactionCatalogContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "shortcutTrackContentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "actionCatalogVersion",
+            "interactionCatalogVersion",
+            "interactionCatalogContentSha256",
+            "shortcutTrackContentSha256"
+          ],
+          "additionalProperties": false
+        },
+        "executorId": {
+          "type": "string",
+          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+        },
+        "executionBoundary": {
+          "type": "string",
+          "const": "blender_window_event_simulate"
+        },
+        "authorization": {
+          "type": "string",
+          "const": "accepted_replay_next_step"
+        },
+        "transport": {
+          "type": "string",
+          "const": "event_simulate"
+        },
+        "operationIds": {
+          "type": "array",
+          "items": [
+            {
+              "type": "string",
+              "const": "shortcut.add_subdivision_surface_level_one"
+            },
+            {
+              "type": "string",
+              "const": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "type": "string",
+              "const": "shortcut.set_viewport_level"
+            },
+            {
+              "type": "string",
+              "const": "shortcut.close_adjust_last_operation"
+            }
+          ],
+          "additionalItems": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "startState": {
+          "type": "object",
+          "properties": {
+            "reportId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "sequence": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "reportId",
+            "sequence"
+          ],
+          "additionalProperties": false
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "integrity": {
+          "type": "object",
+          "properties": {
+            "algorithm": {
+              "type": "string",
+              "const": "sha256"
+            },
+            "canonicalization": {
+              "type": "string",
+              "const": "operatingline-json-value-v1"
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "algorithm",
+            "canonicalization",
+            "contentSha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "formatVersion",
+        "bindingId",
+        "proposalRecordContentSha256",
+        "proofId",
+        "requestId",
+        "replayId",
+        "target",
+        "proposalId",
+        "plan",
+        "executionId",
+        "leafId",
+        "recipeId",
+        "actionName",
+        "acceptedAction",
+        "targetProfile",
+        "acceptedDecision",
+        "proofScope",
+        "materialization",
+        "executorId",
+        "executionBoundary",
+        "authorization",
+        "transport",
+        "operationIds",
+        "startState",
+        "createdAt",
+        "integrity"
+      ],
+      "additionalProperties": false
+    },
+    "bindingContentSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "managedActionResult": {
+      "type": "string",
+      "const": "not_executed"
+    },
+    "managedIdentityVerified": {
+      "type": "boolean",
+      "const": false
+    },
+    "executor": {
+      "type": "object",
+      "properties": {
+        "executorId": {
+          "type": "string",
+          "const": "blender.subdivision_surface_f9.event_simulate.v1"
+        },
+        "executionBoundary": {
+          "type": "string",
+          "const": "blender_window_event_simulate"
+        },
+        "transport": {
+          "type": "string",
+          "const": "event_simulate"
+        },
+        "osHidInput": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "executorId",
+        "executionBoundary",
+        "transport",
+        "osHidInput"
+      ],
+      "additionalProperties": false
+    },
+    "operationReceipts": {
+      "minItems": 4,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "proofId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "deliveryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "bindingContentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "order": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "previousReceiptContentSha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "const": "succeeded"
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operationId": {
+                "type": "string",
+                "const": "shortcut.add_subdivision_surface_level_one"
+              },
+              "kind": {
+                "type": "string",
+                "const": "key_input"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "windowId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "areaType": {
+                    "type": "string",
+                    "const": "VIEW_3D"
+                  },
+                  "regionType": {
+                    "type": "string",
+                    "const": "WINDOW"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "const": "OBJECT"
+                  }
+                },
+                "required": [
+                  "windowId",
+                  "areaType",
+                  "regionType",
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "eventEvidence": {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "ONE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "ONE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "operatorStackBeforeSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operatorStackAfterSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "receiptId",
+              "proofId",
+              "requestId",
+              "deliveryId",
+              "bindingContentSha256",
+              "order",
+              "previousReceiptContentSha256",
+              "outcome",
+              "occurredAt",
+              "contentSha256",
+              "operationId",
+              "kind",
+              "context",
+              "eventEvidence",
+              "operatorStackBeforeSha256",
+              "operatorStackAfterSha256"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "proofId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "deliveryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "bindingContentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "order": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "previousReceiptContentSha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "const": "succeeded"
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operationId": {
+                "type": "string",
+                "const": "shortcut.open_adjust_last_operation"
+              },
+              "kind": {
+                "type": "string",
+                "const": "key_input"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "windowId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "areaType": {
+                    "type": "string",
+                    "const": "VIEW_3D"
+                  },
+                  "regionType": {
+                    "type": "string",
+                    "const": "WINDOW"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "const": "OBJECT"
+                  }
+                },
+                "required": [
+                  "windowId",
+                  "areaType",
+                  "regionType",
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "eventEvidence": {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "F9"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "F9"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "operatorStackBeforeSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operatorStackAfterSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "sourceOperationId": {
+                "type": "string",
+                "const": "shortcut.add_subdivision_surface_level_one"
+              },
+              "sourceOperatorId": {
+                "type": "string",
+                "const": "object.subdivision_set"
+              }
+            },
+            "required": [
+              "receiptId",
+              "proofId",
+              "requestId",
+              "deliveryId",
+              "bindingContentSha256",
+              "order",
+              "previousReceiptContentSha256",
+              "outcome",
+              "occurredAt",
+              "contentSha256",
+              "operationId",
+              "kind",
+              "context",
+              "eventEvidence",
+              "operatorStackBeforeSha256",
+              "operatorStackAfterSha256",
+              "sourceOperationId",
+              "sourceOperatorId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "proofId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "deliveryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "bindingContentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "order": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "previousReceiptContentSha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "const": "succeeded"
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operationId": {
+                "type": "string",
+                "const": "shortcut.set_viewport_level"
+              },
+              "kind": {
+                "type": "string",
+                "const": "operator_property_update"
+              },
+              "surfaceOperationId": {
+                "type": "string",
+                "const": "shortcut.open_adjust_last_operation"
+              },
+              "surfaceOperatorId": {
+                "type": "string",
+                "const": "object.subdivision_set"
+              },
+              "controlId": {
+                "type": "string",
+                "const": "object.subdivision_set.level"
+              },
+              "oldValue": {
+                "type": "number",
+                "const": 1
+              },
+              "newValue": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3
+              },
+              "eventEvidence": {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "MOUSEMOVE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "NOTHING"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "level_control"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "LEFTMOUSE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "level_control"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "LEFTMOUSE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "level_control"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "LEFTMOUSE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "level_control"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "LEFTMOUSE"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "level_control"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "A"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "ONE"
+                          },
+                          "value": {
+                            "type": "string",
+                            "const": "PRESS"
+                          },
+                          "ctrl": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "shift": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "point": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "y": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "role": {
+                                "type": "string",
+                                "const": "viewport_center"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y",
+                              "role"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "unicode": {
+                            "type": "string",
+                            "const": "1"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value",
+                          "ctrl",
+                          "shift",
+                          "point",
+                          "unicode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "TWO"
+                          },
+                          "value": {
+                            "type": "string",
+                            "const": "PRESS"
+                          },
+                          "ctrl": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "shift": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "point": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "y": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "role": {
+                                "type": "string",
+                                "const": "viewport_center"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y",
+                              "role"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "unicode": {
+                            "type": "string",
+                            "const": "2"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value",
+                          "ctrl",
+                          "shift",
+                          "point",
+                          "unicode"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "THREE"
+                          },
+                          "value": {
+                            "type": "string",
+                            "const": "PRESS"
+                          },
+                          "ctrl": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "shift": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "point": {
+                            "type": "object",
+                            "properties": {
+                              "x": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "y": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "role": {
+                                "type": "string",
+                                "const": "viewport_center"
+                              }
+                            },
+                            "required": [
+                              "x",
+                              "y",
+                              "role"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "unicode": {
+                            "type": "string",
+                            "const": "3"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "value",
+                          "ctrl",
+                          "shift",
+                          "point",
+                          "unicode"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "RET"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "RET"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 9,
+                "maxItems": 9
+              }
+            },
+            "required": [
+              "receiptId",
+              "proofId",
+              "requestId",
+              "deliveryId",
+              "bindingContentSha256",
+              "order",
+              "previousReceiptContentSha256",
+              "outcome",
+              "occurredAt",
+              "contentSha256",
+              "operationId",
+              "kind",
+              "surfaceOperationId",
+              "surfaceOperatorId",
+              "controlId",
+              "oldValue",
+              "newValue",
+              "eventEvidence"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "receiptId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "proofId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "requestId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "deliveryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "bindingContentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "order": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "previousReceiptContentSha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "const": "succeeded"
+              },
+              "occurredAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "contentSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operationId": {
+                "type": "string",
+                "const": "shortcut.close_adjust_last_operation"
+              },
+              "kind": {
+                "type": "string",
+                "const": "key_input"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "windowId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "areaType": {
+                    "type": "string",
+                    "const": "VIEW_3D"
+                  },
+                  "regionType": {
+                    "type": "string",
+                    "const": "WINDOW"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "const": "OBJECT"
+                  }
+                },
+                "required": [
+                  "windowId",
+                  "areaType",
+                  "regionType",
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "eventEvidence": {
+                "type": "array",
+                "items": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "RET"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "PRESS"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "RET"
+                      },
+                      "value": {
+                        "type": "string",
+                        "const": "RELEASE"
+                      },
+                      "ctrl": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "shift": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "point": {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "y": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "role": {
+                            "type": "string",
+                            "const": "viewport_center"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "role"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value",
+                      "ctrl",
+                      "shift",
+                      "point"
+                    ],
+                    "additionalProperties": false
+                  }
+                ],
+                "additionalItems": false,
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "operatorStackBeforeSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "operatorStackAfterSha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "surfaceOperationId": {
+                "type": "string",
+                "const": "shortcut.open_adjust_last_operation"
+              }
+            },
+            "required": [
+              "receiptId",
+              "proofId",
+              "requestId",
+              "deliveryId",
+              "bindingContentSha256",
+              "order",
+              "previousReceiptContentSha256",
+              "outcome",
+              "occurredAt",
+              "contentSha256",
+              "operationId",
+              "kind",
+              "context",
+              "eventEvidence",
+              "operatorStackBeforeSha256",
+              "operatorStackAfterSha256",
+              "surfaceOperationId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "strongObservation": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "subdivision_surface_shortcut_ready"
+        },
+        "satisfied": {
+          "type": "boolean",
+          "const": true
+        },
+        "observationId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modifierType": {
+          "type": "string",
+          "const": "SUBSURF"
+        },
+        "modifierCount": {
+          "type": "number",
+          "const": 1
+        },
+        "viewportLevel": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "subdivisionType": {
+          "type": "string",
+          "const": "CATMULL_CLARK"
+        },
+        "renderLevels": {
+          "type": "number",
+          "const": 2
+        },
+        "quality": {
+          "type": "number",
+          "const": 3
+        },
+        "modifierStackMatches": {
+          "type": "boolean",
+          "const": true
+        },
+        "evaluatedTopologyWithinBounds": {
+          "type": "boolean",
+          "const": true
+        },
+        "sceneFingerprintSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "kind",
+        "satisfied",
+        "observationId",
+        "observedAt",
+        "contentSha256",
+        "targetId",
+        "modifierType",
+        "modifierCount",
+        "viewportLevel",
+        "subdivisionType",
+        "renderLevels",
+        "quality",
+        "modifierStackMatches",
+        "evaluatedTopologyWithinBounds",
+        "sceneFingerprintSha256"
+      ],
+      "additionalProperties": false
+    },
+    "nativeUndoCheckpoint": {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.0.0"
+        },
+        "evidenceClass": {
+          "type": "string",
+          "const": "companion_reported_shortcut_proof_native_undo_checkpoint"
+        },
+        "checkpointId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "proofId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "replayId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "previousCheckpointId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "const": "shortcut_proof"
+        },
+        "undoLockId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "targetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "marker": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "_operating_line_shortcut_proof_history_v1"
+            },
+            "matched": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "key",
+            "matched"
+          ],
+          "additionalProperties": false
+        },
+        "journal": {
+          "type": "object",
+          "properties": {
+            "entryPresent": {
+              "type": "boolean",
+              "const": true
+            },
+            "baselineSnapshotPresent": {
+              "type": "boolean",
+              "const": true
+            },
+            "finalSnapshotPresent": {
+              "type": "boolean",
+              "const": true
+            },
+            "undoRedoRoundTripVerified": {
+              "type": "boolean",
+              "const": true
+            },
+            "mutationLeaseHeld": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "entryPresent",
+            "baselineSnapshotPresent",
+            "finalSnapshotPresent",
+            "undoRedoRoundTripVerified",
+            "mutationLeaseHeld"
+          ],
+          "additionalProperties": false
+        },
+        "baselineState": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "modifierCount": {
+              "type": "number",
+              "const": 0
+            },
+            "activeObjectMode": {
+              "type": "string",
+              "const": "OBJECT"
+            },
+            "selectedObjectCount": {
+              "type": "number",
+              "const": 1
+            }
+          },
+          "required": [
+            "targetId",
+            "modifierCount",
+            "activeObjectMode",
+            "selectedObjectCount"
+          ],
+          "additionalProperties": false
+        },
+        "finalState": {
+          "type": "object",
+          "properties": {
+            "targetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "modifierType": {
+              "type": "string",
+              "const": "SUBSURF"
+            },
+            "modifierCount": {
+              "type": "number",
+              "const": 1
+            },
+            "viewportLevel": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            }
+          },
+          "required": [
+            "targetId",
+            "modifierType",
+            "modifierCount",
+            "viewportLevel"
+          ],
+          "additionalProperties": false
+        },
+        "baselineSceneFingerprintSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "finalSceneFingerprintSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "receiptChainRootSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "receiptChainHeadSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "strongObservationContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "committedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        }
+      },
+      "required": [
+        "formatVersion",
+        "evidenceClass",
+        "checkpointId",
+        "proofId",
+        "replayId",
+        "previousCheckpointId",
+        "operation",
+        "undoLockId",
+        "targetId",
+        "marker",
+        "journal",
+        "baselineState",
+        "finalState",
+        "baselineSceneFingerprintSha256",
+        "finalSceneFingerprintSha256",
+        "receiptChainRootSha256",
+        "receiptChainHeadSha256",
+        "strongObservationContentSha256",
+        "committedAt"
+      ],
+      "additionalProperties": false
+    },
+    "attestedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "integrity": {
+      "type": "object",
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "canonicalization": {
+          "type": "string",
+          "const": "operatingline-json-value-v1"
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "algorithm",
+        "canonicalization",
+        "contentSha256"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "formatVersion",
+    "attestationId",
+    "deliveryId",
+    "binding",
+    "bindingContentSha256",
+    "managedActionResult",
+    "managedIdentityVerified",
+    "executor",
+    "operationReceipts",
+    "strongObservation",
+    "nativeUndoCheckpoint",
+    "attestedAt",
+    "integrity"
+  ],
+  "additionalProperties": false,
+  "$id": "https://operatingline.dev/schema/v1/procedure-shortcut-proof-attestation.json"
+}

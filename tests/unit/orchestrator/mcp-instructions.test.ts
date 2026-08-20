@@ -62,6 +62,37 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain(
       'recovery_required means delivery became indeterminate',
     );
+    expect(operatingLineMcpInstructions).toContain(
+      'recovery_required never replays input automatically',
+    );
+    expect(operatingLineMcpInstructions).toContain('native_terminal_reconcile');
+    expect(operatingLineMcpInstructions).toContain(
+      'bound to the polling replacement lease and rotates its recovery id',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'native_history_rebind as the strict suffix after the server current result',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'revalidates local authority before every timer turn',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'new Blender OS process never inherit the old instanceId or target lease',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.procedure.shortcut-proof.propose',
+    );
+    expect(operatingLineMcpInstructions).toContain('operatingline.blender.shortcut-proof.execute');
+    expect(operatingLineMcpInstructions).toContain('operatingline.blender.shortcut-proof.status');
+    expect(operatingLineMcpInstructions).toContain(
+      'callers cannot submit raw events, keys, coordinates, operators, RNA, Python',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'managedActionResult as not_executed and managedIdentityVerified as false',
+    );
+    expect(operatingLineMcpInstructions).toContain('native Redo reports reapplied_locked');
+    expect(operatingLineMcpInstructions).toContain(
+      'a failure checkpoint never becomes success evidence',
+    );
     expect(operatingLineMcpInstructions).not.toContain('the MCP track remains unavailable');
   });
 });

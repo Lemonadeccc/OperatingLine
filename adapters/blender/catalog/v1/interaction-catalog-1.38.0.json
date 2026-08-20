@@ -1,0 +1,3950 @@
+{
+  "protocolVersion": "1.1.0",
+  "catalogVersion": "1.38.0",
+  "adapterId": "blender",
+  "actionCatalogVersion": "1.22.0",
+  "adapterVersionRange": ">=0.1.0 <0.2.0",
+  "hostVersionRange": ">=4.5.0 <4.6.0 || >=5.1.0 <5.2.0",
+  "title": "OperatingLine Blender interaction catalog",
+  "description": "Version-tested host interaction recipes and explicit semantic fallbacks for every Blender ActionCatalog 1.22.0 action.",
+  "recipes": [
+    {
+      "id": "blender.mesh.create_uv_sphere.native",
+      "actionName": "blender.mesh.create_uv_sphere",
+      "title": "Add one UV sphere from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.uv_sphere",
+            "order": 4,
+            "label": "UV Sphere",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_uv_sphere_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.uv_sphere",
+          "operatorId": "mesh.primitive_uv_sphere_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "semantic": {
+          "source": "catalog.semantic_parameter_projections",
+          "projections": [
+            {
+              "id": "projection.semantic.transform.location",
+              "semanticAction": "set_object_transform",
+              "path": [{ "kind": "field", "name": "location" }],
+              "actionArgument": "location",
+              "transform": "identity"
+            },
+            {
+              "id": "projection.semantic.transform.scale",
+              "semanticAction": "set_object_transform",
+              "path": [{ "kind": "field", "name": "scale" }],
+              "actionArgument": "radius",
+              "transform": "uniform_vector3"
+            },
+            {
+              "id": "projection.semantic.rename.name",
+              "semanticAction": "rename_object",
+              "path": [{ "kind": "field", "name": "name" }],
+              "actionArgument": "objectName",
+              "transform": "identity"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no semantic UI representation."
+            }
+          ]
+        },
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "radius",
+              "source": {
+                "kind": "literal",
+                "value": 1
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.uv_sphere",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.scale",
+                "label": "Scale",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.scale"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Scale"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "radius",
+                      "transform": "uniform_vector3"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "scene_state",
+              "label": "3D Cursor",
+              "value": "[0,0,0]"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Transform Orientation",
+              "value": "GLOBAL"
+            }
+          ],
+          "operations": [
+            {
+              "id": "shortcut.add_uv_sphere",
+              "label": "Add UV Sphere",
+              "keyMode": "chord",
+              "keys": ["SHIFT", "A"],
+              "selectionPath": ["Mesh", "UV Sphere"],
+              "parameters": [
+                {
+                  "name": "radius",
+                  "source": {
+                    "kind": "literal",
+                    "value": 1
+                  }
+                },
+                {
+                  "name": "location",
+                  "source": {
+                    "kind": "literal",
+                    "value": [0, 0, 0]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_x",
+              "label": "Move X",
+              "keyMode": "sequence",
+              "keys": ["G", "X"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_x"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_y",
+              "label": "Move Y",
+              "keyMode": "sequence",
+              "keys": ["G", "Y"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_y"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_z",
+              "label": "Move Z",
+              "keyMode": "sequence",
+              "keys": ["G", "Z"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_z"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.scale",
+              "label": "Scale",
+              "keyMode": "sequence",
+              "keys": ["S"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "radius",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.rename",
+              "label": "Rename Object",
+              "keyMode": "sequence",
+              "keys": ["F2"],
+              "parameters": [
+                {
+                  "name": "text",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "objectName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender shortcut input."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_icosphere.native",
+      "actionName": "blender.mesh.create_icosphere",
+      "title": "Add one Icosphere from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.icosphere",
+            "order": 4,
+            "label": "Ico Sphere",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_ico_sphere_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.icosphere",
+          "operatorId": "mesh.primitive_ico_sphere_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html#icosphere"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "subdivisions",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "subdivisions",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "radius",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radius",
+                "transform": "identity"
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.icosphere",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "scene_state",
+              "label": "3D Cursor",
+              "value": "World origin"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Transform Orientation",
+              "value": "GLOBAL"
+            }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.add_icosphere",
+              "label": "Add Icosphere",
+              "keyMode": "chord",
+              "keys": ["SHIFT", "A"],
+              "selectionPath": ["Mesh", "Ico Sphere"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.add_icosphere",
+                "expectedOperatorId": "mesh.primitive_ico_sphere_add"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_subdivisions",
+              "label": "Set Subdivisions",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.primitive_ico_sphere_add.subdivisions"
+              },
+              "path": ["Adjust Last Operation", "Subdivisions"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "subdivisions",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_radius",
+              "label": "Set Radius",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.primitive_ico_sphere_add.radius"
+              },
+              "path": ["Adjust Last Operation", "Radius"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "radius",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.move_x",
+              "label": "Move X",
+              "keyMode": "sequence",
+              "keys": ["G", "X", "VALUE", "ENTER"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_x"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.move_y",
+              "label": "Move Y",
+              "keyMode": "sequence",
+              "keys": ["G", "Y", "VALUE", "ENTER"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_y"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.move_z",
+              "label": "Move Z",
+              "keyMode": "sequence",
+              "keys": ["G", "Z", "VALUE", "ENTER"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_z"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.rename",
+              "label": "Rename",
+              "keyMode": "sequence",
+              "keys": ["F2", "VALUE", "ENTER"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "objectName",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender shortcut input."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_plane.native",
+      "actionName": "blender.mesh.create_plane",
+      "title": "Add one plane from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.plane",
+            "order": 4,
+            "label": "Plane",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_plane_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.plane",
+          "operatorId": "mesh.primitive_plane_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "size",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "size",
+                "transform": "identity"
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.plane",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "scene_state",
+              "label": "3D Cursor",
+              "value": "[0,0,0]"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Transform Orientation",
+              "value": "GLOBAL"
+            }
+          ],
+          "operations": [
+            {
+              "id": "shortcut.add_plane",
+              "label": "Add Plane",
+              "keyMode": "chord",
+              "keys": ["SHIFT", "A"],
+              "selectionPath": ["Mesh", "Plane"],
+              "parameters": [
+                {
+                  "name": "size",
+                  "source": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                {
+                  "name": "location",
+                  "source": {
+                    "kind": "literal",
+                    "value": [0, 0, 0]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_x",
+              "label": "Move X",
+              "keyMode": "sequence",
+              "keys": ["G", "X"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_x"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_y",
+              "label": "Move Y",
+              "keyMode": "sequence",
+              "keys": ["G", "Y"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_y"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_z",
+              "label": "Move Z",
+              "keyMode": "sequence",
+              "keys": ["G", "Z"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_z"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.scale",
+              "label": "Scale",
+              "keyMode": "sequence",
+              "keys": ["S"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "size",
+                    "transform": "divide_by_two"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.rename",
+              "label": "Rename Object",
+              "keyMode": "sequence",
+              "keys": ["F2"],
+              "parameters": [
+                {
+                  "name": "text",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "objectName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender shortcut input."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_cube.native",
+      "actionName": "blender.mesh.create_cube",
+      "title": "Add one cube from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.cube",
+            "order": 4,
+            "label": "Cube",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_cube_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.cube",
+          "operatorId": "mesh.primitive_cube_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "size",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "size",
+                "transform": "identity"
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.cube",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "scene_state",
+              "label": "3D Cursor",
+              "value": "[0,0,0]"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Transform Orientation",
+              "value": "GLOBAL"
+            }
+          ],
+          "operations": [
+            {
+              "id": "shortcut.add_cube",
+              "label": "Add Cube",
+              "keyMode": "chord",
+              "keys": ["SHIFT", "A"],
+              "selectionPath": ["Mesh", "Cube"],
+              "parameters": [
+                {
+                  "name": "size",
+                  "source": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                {
+                  "name": "location",
+                  "source": {
+                    "kind": "literal",
+                    "value": [0, 0, 0]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_x",
+              "label": "Move X",
+              "keyMode": "sequence",
+              "keys": ["G", "X"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_x"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_y",
+              "label": "Move Y",
+              "keyMode": "sequence",
+              "keys": ["G", "Y"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_y"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.move_z",
+              "label": "Move Z",
+              "keyMode": "sequence",
+              "keys": ["G", "Z"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "location",
+                    "transform": "vector3_z"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.scale",
+              "label": "Scale",
+              "keyMode": "sequence",
+              "keys": ["S"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "size",
+                    "transform": "divide_by_two"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "shortcut.rename",
+              "label": "Rename Object",
+              "keyMode": "sequence",
+              "keys": ["F2"],
+              "parameters": [
+                {
+                  "name": "text",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "objectName",
+                    "transform": "identity"
+                  }
+                },
+                {
+                  "name": "confirm",
+                  "source": {
+                    "kind": "literal",
+                    "value": "ENTER"
+                  }
+                }
+              ]
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender shortcut input."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_cone.native",
+      "actionName": "blender.mesh.create_cone",
+      "title": "Add one cone from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.cone",
+            "order": 4,
+            "label": "Cone",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_cone_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.cone",
+          "operatorId": "mesh.primitive_cone_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "vertices",
+              "source": {
+                "kind": "literal",
+                "value": 32
+              }
+            },
+            {
+              "name": "radius1",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radiusStart",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "radius2",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radiusEnd",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "depth",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "distance"
+              }
+            },
+            {
+              "name": "end_fill_type",
+              "source": {
+                "kind": "literal",
+                "value": "NGON"
+              }
+            },
+            {
+              "name": "calc_uvs",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "enter_editmode",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "align",
+              "source": {
+                "kind": "literal",
+                "value": "WORLD"
+              }
+            },
+            {
+              "name": "location",
+              "source": {
+                "kind": "literal",
+                "value": [0, 0, 0]
+              }
+            },
+            {
+              "name": "rotation",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "rotation_euler_xyz_align_z"
+              }
+            },
+            {
+              "name": "scale",
+              "source": {
+                "kind": "literal",
+                "value": [1, 1, 1]
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.cone",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "derived_action_arguments",
+                      "derivation": "segment_frame",
+                      "startArgumentName": "start",
+                      "endArgumentName": "end",
+                      "output": "midpoint"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No verified shortcut procedure is available."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_cylinder.native",
+      "actionName": "blender.mesh.create_cylinder",
+      "title": "Add one cylinder from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.cylinder",
+            "order": 4,
+            "label": "Cylinder",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_cylinder_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.cylinder",
+          "operatorId": "mesh.primitive_cylinder_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "vertices",
+              "source": {
+                "kind": "literal",
+                "value": 32
+              }
+            },
+            {
+              "name": "radius",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "radius",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "depth",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "distance"
+              }
+            },
+            {
+              "name": "end_fill_type",
+              "source": {
+                "kind": "literal",
+                "value": "NGON"
+              }
+            },
+            {
+              "name": "calc_uvs",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "enter_editmode",
+              "source": {
+                "kind": "literal",
+                "value": false
+              }
+            },
+            {
+              "name": "align",
+              "source": {
+                "kind": "literal",
+                "value": "WORLD"
+              }
+            },
+            {
+              "name": "location",
+              "source": {
+                "kind": "literal",
+                "value": [0, 0, 0]
+              }
+            },
+            {
+              "name": "rotation",
+              "source": {
+                "kind": "derived_action_arguments",
+                "derivation": "segment_frame",
+                "startArgumentName": "start",
+                "endArgumentName": "end",
+                "output": "rotation_euler_xyz_align_z"
+              }
+            },
+            {
+              "name": "scale",
+              "source": {
+                "kind": "literal",
+                "value": [1, 1, 1]
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.cylinder",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "derived_action_arguments",
+                      "derivation": "segment_frame",
+                      "startArgumentName": "start",
+                      "endArgumentName": "end",
+                      "output": "midpoint"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No verified shortcut procedure is available."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_torus.native",
+      "actionName": "blender.mesh.create_torus",
+      "title": "Add one torus from the 3D Viewport",
+      "guidance": {
+        "kind": "native_path",
+        "surfaceId": "VIEW_3D",
+        "preconditions": [
+          {
+            "kind": "workspace",
+            "label": "Layout workspace",
+            "value": "Layout"
+          },
+          {
+            "kind": "editor",
+            "label": "3D Viewport",
+            "value": "VIEW_3D"
+          },
+          {
+            "kind": "mode",
+            "label": "Object Mode",
+            "value": "OBJECT"
+          }
+        ],
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "operator.torus",
+            "order": 4,
+            "label": "Torus",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "mesh.primitive_torus_add"
+            }
+          }
+        ],
+        "execution": {
+          "stepId": "operator.torus",
+          "operatorId": "mesh.primitive_torus_add",
+          "binding": "accepted_plan_action"
+        },
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html#torus"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "available",
+          "source": "guidance.native_path",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "operatorParameters": [
+            {
+              "name": "major_segments",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "majorSegments",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "minor_segments",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "minorSegments",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "mode",
+              "source": {
+                "kind": "literal",
+                "value": "MAJOR_MINOR"
+              }
+            },
+            {
+              "name": "major_radius",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "majorRadius",
+                "transform": "identity"
+              }
+            },
+            {
+              "name": "minor_radius",
+              "source": {
+                "kind": "action_argument",
+                "argumentName": "minorRadius",
+                "transform": "identity"
+              }
+            }
+          ],
+          "controlOperations": {
+            "insertAfterStepId": "operator.torus",
+            "operations": [
+              {
+                "id": "control.location",
+                "label": "Location",
+                "target": {
+                  "kind": "control",
+                  "hostId": "VIEW3D_PT_item.transform.location"
+                },
+                "path": ["Sidebar", "Item", "Transform", "Location"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "location",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "control.object_name",
+                "label": "Object Name",
+                "target": {
+                  "kind": "control",
+                  "hostId": "OUTLINER.object.name"
+                },
+                "path": ["Outliner", "Object Name"],
+                "parameters": [
+                  {
+                    "name": "value",
+                    "source": {
+                      "kind": "action_argument",
+                      "argumentName": "objectName",
+                      "transform": "identity"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "omittedActionArguments": [
+            {
+              "argumentName": "resourceId",
+              "reason": "The logical resource identifier has no user-facing Blender control."
+            }
+          ]
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "No verified shortcut procedure is available."
+        },
+        "mcp": {
+          "availability": "available",
+          "source": "catalog.action_level_mcp",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "accepted_action_arguments",
+          "serverName": "operating-line",
+          "toolName": "operatingline.blender.action.execute",
+          "authorization": "accepted_replay_next_step",
+          "resultBinding": "companion_state_report"
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.create_primitive_batch.semantic",
+      "actionName": "blender.mesh.create_primitive_batch",
+      "title": "Create a bounded primitive assembly",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add",
+            "order": 2,
+            "label": "Add",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_add"
+            }
+          },
+          {
+            "id": "menu.mesh",
+            "order": 3,
+            "label": "Mesh",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "VIEW3D_MT_mesh_add"
+            }
+          },
+          {
+            "id": "semantic.repeat_primitives",
+            "order": 4,
+            "label": "Planned parts",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.primitive_batch"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates multiple planned primitives atomically, so no single Blender menu item can represent the action honestly. Split meaningful parts into separate leaves for native teaching guidance.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/primitives.html"
+      }
+    },
+    {
+      "id": "blender.mesh.edit_subdivide.semantic",
+      "actionName": "blender.mesh.edit_subdivide",
+      "title": "Subdivide an owned mesh through a bounded Edit Mode operation",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "operator.subdivide",
+            "order": 4,
+            "label": "Subdivide",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.subdivide" }
+          }
+        ],
+        "reason": "The accepted action subdivides every edge into a new owned mesh datablock and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/edge/subdivide.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent executable menu track."
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            {
+              "kind": "workspace",
+              "label": "Workspace",
+              "value": "Layout"
+            },
+            {
+              "kind": "editor",
+              "label": "Editor",
+              "value": "VIEW_3D"
+            },
+            {
+              "kind": "mode",
+              "label": "Mode",
+              "value": "OBJECT"
+            },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly one accepted target Mesh object is active and selected"
+            },
+            {
+              "kind": "keymap",
+              "label": "Keymap",
+              "value": "Blender"
+            },
+            {
+              "kind": "modal_state",
+              "label": "Modal UI",
+              "value": "None"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Mesh Elements",
+              "value": "All target mesh elements are visible"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Mesh Data Users",
+              "value": "1"
+            },
+            {
+              "kind": "scene_state",
+              "label": "UI Language",
+              "value": "English"
+            }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.enter_edit_mode",
+              "label": "Enter Edit Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_all_mesh_elements",
+              "label": "Select All Mesh Elements",
+              "keyMode": "sequence",
+              "keys": ["A"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.search_subdivide",
+              "label": "Search Subdivide",
+              "keyMode": "sequence",
+              "keys": ["F3"],
+              "selectionPath": ["Subdivide"],
+              "parameters": [
+                {
+                  "name": "query",
+                  "source": {
+                    "kind": "literal",
+                    "value": "subdivide"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.execute_subdivide",
+              "label": "Execute Subdivide",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.execute_subdivide",
+                "expectedOperatorId": "mesh.subdivide"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_number_of_cuts",
+              "label": "Set Number of Cuts",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.subdivide.number_cuts"
+              },
+              "path": ["Adjust Last Operation", "Number of Cuts"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "cuts",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_smoothness",
+              "label": "Set Smoothness",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": {
+                "kind": "control",
+                "hostId": "mesh.subdivide.smoothness"
+              },
+              "path": ["Adjust Last Operation", "Smoothness"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "smooth",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.return_to_object_mode",
+              "label": "Return to Object Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The active target is supplied by the required selection precondition; the logical target ID is not typed into Blender."
+            },
+            {
+              "argumentName": "resultMeshId",
+              "reason": "The native Edit Mode operator mutates the current mesh in place and does not create the managed replacement mesh identity."
+            },
+            {
+              "argumentName": "resultMeshName",
+              "reason": "The native Edit Mode operator does not copy or rename a replacement mesh datablock."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.edit_triangulate.semantic",
+      "actionName": "blender.mesh.edit_triangulate",
+      "title": "Triangulate an owned mesh through a bounded Edit Mode operation",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "operator.triangulate_faces",
+            "order": 4,
+            "label": "Triangulate Faces",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.quads_convert_to_tris" }
+          }
+        ],
+        "reason": "The accepted action triangulates the complete bounded mesh into a new owned datablock with fixed FIXED/EAR_CLIP methods and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/triangulate_faces.html"
+      }
+    },
+    {
+      "id": "blender.mesh.edit_extrude_region.semantic",
+      "actionName": "blender.mesh.edit_extrude_region",
+      "title": "Extrude an explicit owned mesh face region through a bounded Edit Mode operation",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "semantic.select_face_region",
+            "order": 4,
+            "label": "Face Region",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.explicit_face_region"
+            }
+          },
+          {
+            "id": "operator.extrude_region_move",
+            "order": 5,
+            "label": "Extrude Region",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.extrude_region_move" }
+          }
+        ],
+        "reason": "The accepted action resolves stable source polygon indices, validates one connected bounded region, extrudes it by an exact local-space vector into a new owned mesh datablock, and swaps the target link transactionally; Blender's context-sensitive operator alone cannot express that ownership, selection, observation, and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/tools/extrude_region.html"
+      }
+    },
+    {
+      "id": "blender.mesh.edit_bevel_edges.semantic",
+      "actionName": "blender.mesh.edit_bevel_edges",
+      "title": "Bevel every edge of one owned closed manifold mesh",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "menu.edge",
+            "order": 4,
+            "label": "Edge",
+            "intent": "navigate",
+            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_edges" }
+          },
+          {
+            "id": "operator.bevel_edges",
+            "order": 5,
+            "label": "Bevel Edges",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.bevel" }
+          },
+          {
+            "id": "semantic.managed_bevel_edges_contract",
+            "order": 6,
+            "label": "Managed Bevel Edges Contract",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.managed_bevel_edges"
+            }
+          }
+        ],
+        "reason": "The accepted action validates a complete closed manifold surface, bevels every edge into a new owned mesh datablock, bounds the result topology, swaps the target link transactionally, observes the exact bevel result, and retains compensation state; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/edge/bevel.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track."
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly one accepted target Mesh object is active and selected"
+            },
+            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
+            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
+            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
+            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "scene_state",
+              "label": "Closed Manifold",
+              "value": "Every target mesh edge belongs to exactly two faces"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Topology Bounds",
+              "value": "Source and projected result topology are within 8192 vertices, 16384 edges, and 8192 polygons"
+            }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.enter_edit_mode",
+              "label": "Enter Edit Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_edge_mode",
+              "label": "Select Edge Mode",
+              "keyMode": "sequence",
+              "keys": ["2"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_all_edges",
+              "label": "Select All Edges",
+              "keyMode": "sequence",
+              "keys": ["A"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.bevel_edges",
+              "label": "Bevel Edges",
+              "keyMode": "chord",
+              "keys": ["CTRL", "B"],
+              "parameters": [
+                { "name": "offset_type", "source": { "kind": "literal", "value": "OFFSET" } },
+                { "name": "offset", "source": { "kind": "literal", "value": 0 } },
+                {
+                  "name": "profile_type",
+                  "source": { "kind": "literal", "value": "SUPERELLIPSE" }
+                },
+                { "name": "segments", "source": { "kind": "literal", "value": 1 } },
+                { "name": "profile", "source": { "kind": "literal", "value": 0.5 } },
+                { "name": "affect", "source": { "kind": "literal", "value": "EDGES" } },
+                {
+                  "name": "clamp_overlap",
+                  "source": { "kind": "literal", "value": false }
+                },
+                { "name": "loop_slide", "source": { "kind": "literal", "value": true } },
+                { "name": "mark_seam", "source": { "kind": "literal", "value": false } },
+                { "name": "mark_sharp", "source": { "kind": "literal", "value": false } },
+                { "name": "material", "source": { "kind": "literal", "value": -1 } },
+                {
+                  "name": "harden_normals",
+                  "source": { "kind": "literal", "value": false }
+                },
+                {
+                  "name": "face_strength_mode",
+                  "source": { "kind": "literal", "value": "NONE" }
+                },
+                { "name": "miter_outer", "source": { "kind": "literal", "value": "SHARP" } },
+                { "name": "miter_inner", "source": { "kind": "literal", "value": "SHARP" } },
+                { "name": "spread", "source": { "kind": "literal", "value": 0.1 } },
+                { "name": "vmesh_method", "source": { "kind": "literal", "value": "ADJ" } },
+                {
+                  "name": "release_confirm",
+                  "source": { "kind": "literal", "value": false }
+                },
+                { "name": "confirm", "source": { "kind": "literal", "value": "ENTER" } }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.bevel_edges",
+                "expectedOperatorId": "mesh.bevel"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_bevel_width",
+              "label": "Set Bevel Width",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.bevel.offset" },
+              "path": ["Adjust Last Operation", "Width"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "width",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_bevel_segments",
+              "label": "Set Bevel Segments",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.bevel.segments" },
+              "path": ["Adjust Last Operation", "Segments"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "segments",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_bevel_profile",
+              "label": "Set Bevel Profile",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.bevel.profile" },
+              "path": ["Adjust Last Operation", "Profile Shape"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "profile",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.return_to_object_mode",
+              "label": "Return to Object Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The active target is supplied by the required selection precondition; the logical target ID is not typed into Blender."
+            },
+            {
+              "argumentName": "resultMeshId",
+              "reason": "The native Edit Mode operator mutates the current mesh in place and does not create the managed replacement mesh identity."
+            },
+            {
+              "argumentName": "resultMeshName",
+              "reason": "The native Edit Mode operator does not copy or rename a replacement mesh datablock."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.edit_inset_faces.semantic",
+      "actionName": "blender.mesh.edit_inset_faces",
+      "title": "Inset every face of one owned closed manifold mesh individually",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "menu.face",
+            "order": 4,
+            "label": "Face",
+            "intent": "navigate",
+            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_faces" }
+          },
+          {
+            "id": "operator.inset_faces",
+            "order": 5,
+            "label": "Inset Faces",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.inset" }
+          },
+          {
+            "id": "semantic.managed_inset_faces_contract",
+            "order": 6,
+            "label": "Managed Individual Inset Faces Contract",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.managed_inset_faces"
+            }
+          }
+        ],
+        "reason": "The accepted action validates a complete closed, nondegenerate manifold surface, insets every face individually into a new owned mesh datablock, verifies the exact V+2E / 5E / F+2E topology contract and bounds, swaps the target link transactionally, observes the exact inset result, and retains compensation state; Blender's context-sensitive operator alone cannot express that ownership and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/inset_faces.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track."
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly one accepted target Mesh object is active and selected"
+            },
+            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
+            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
+            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
+            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "scene_state",
+              "label": "Closed Nondegenerate Manifold",
+              "value": "Every target edge belongs to exactly two faces and every face has nonzero area"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Topology Bounds",
+              "value": "Source and exact V+2E / 5E / F+2E result topology are within 8192 vertices, 16384 edges, and 8192 polygons"
+            }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.enter_edit_mode",
+              "label": "Enter Edit Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_face_mode",
+              "label": "Select Face Mode",
+              "keyMode": "sequence",
+              "keys": ["3"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_all_faces",
+              "label": "Select All Faces",
+              "keyMode": "sequence",
+              "keys": ["A"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.inset_faces",
+              "label": "Inset Faces",
+              "keyMode": "sequence",
+              "keys": ["I"],
+              "parameters": [
+                { "name": "use_boundary", "source": { "kind": "literal", "value": true } },
+                { "name": "use_even_offset", "source": { "kind": "literal", "value": true } },
+                {
+                  "name": "use_relative_offset",
+                  "source": { "kind": "literal", "value": false }
+                },
+                { "name": "use_edge_rail", "source": { "kind": "literal", "value": false } },
+                { "name": "thickness", "source": { "kind": "literal", "value": 0 } },
+                { "name": "depth", "source": { "kind": "literal", "value": 0 } },
+                { "name": "use_outset", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "use_select_inset",
+                  "source": { "kind": "literal", "value": false }
+                },
+                {
+                  "name": "use_individual",
+                  "source": { "kind": "literal", "value": false }
+                },
+                {
+                  "name": "use_interpolate",
+                  "source": { "kind": "literal", "value": true }
+                },
+                {
+                  "name": "release_confirm",
+                  "source": { "kind": "literal", "value": false }
+                },
+                { "name": "confirm", "source": { "kind": "literal", "value": "ENTER" } }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.inset_faces",
+                "expectedOperatorId": "mesh.inset"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_inset_thickness",
+              "label": "Set Inset Thickness",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.inset.thickness" },
+              "path": ["Adjust Last Operation", "Thickness"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "thickness",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_inset_depth",
+              "label": "Set Inset Depth",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.inset.depth" },
+              "path": ["Adjust Last Operation", "Depth"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "depth",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_inset_individual",
+              "label": "Enable Individual Faces",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.inset.use_individual" },
+              "path": ["Adjust Last Operation", "Individual"],
+              "parameters": [{ "name": "value", "source": { "kind": "literal", "value": true } }]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.return_to_object_mode",
+              "label": "Return to Object Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The active target is supplied by the required selection precondition; the logical target ID is not typed into Blender."
+            },
+            {
+              "argumentName": "resultMeshId",
+              "reason": "The native Edit Mode operator mutates the current mesh in place and does not create the managed replacement mesh identity."
+            },
+            {
+              "argumentName": "resultMeshName",
+              "reason": "The native Edit Mode operator does not copy or rename a replacement mesh datablock."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.mesh.edit_poke_faces.semantic",
+      "actionName": "blender.mesh.edit_poke_faces",
+      "title": "Poke every face of one owned closed manifold mesh",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "mode.edit_mesh",
+            "order": 3,
+            "label": "Edit Mode",
+            "intent": "navigate",
+            "target": { "kind": "mode", "hostId": "EDIT_MESH" }
+          },
+          {
+            "id": "menu.face",
+            "order": 4,
+            "label": "Face",
+            "intent": "navigate",
+            "target": { "kind": "menu", "hostId": "VIEW3D_MT_edit_mesh_faces" }
+          },
+          {
+            "id": "operator.poke_faces",
+            "order": 5,
+            "label": "Poke Faces",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "mesh.poke" }
+          },
+          {
+            "id": "semantic.managed_poke_faces_contract",
+            "order": 6,
+            "label": "Managed Poke Contract",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.managed_poke_faces" }
+          }
+        ],
+        "reason": "The accepted action validates a complete closed, nondegenerate manifold surface, pokes every face into triangles in a new owned mesh datablock, verifies the exact V+F / E+L / L topology contract and bounds, swaps the target link transactionally, observes the exact result, and retains compensation state. Blender's UI MEDIAN_WEIGHTED center_mode is the literal UI spelling equivalent to the managed BMesh MEAN_WEIGHTED contract, but the context-sensitive operator alone cannot express the managed ownership and rollback contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/editing/face/poke_faces.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The managed action copies and tags a replacement mesh before swapping the object link, so Blender's in-place Edit Mode menu path is not an equivalent identity or transaction track."
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly one accepted target Mesh object is active and selected"
+            },
+            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
+            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
+            { "kind": "scene_state", "label": "Modifiers", "value": "None" },
+            { "kind": "scene_state", "label": "Shape Keys", "value": "None" },
+            {
+              "kind": "scene_state",
+              "label": "Closed Nondegenerate Manifold",
+              "value": "Every target edge belongs to exactly two faces, every target vertex forms one manifold face fan, and every face has nonzero area"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Topology Bounds",
+              "value": "Source and exact V+F / E+L / L result topology are within 8192 vertices, 16384 edges, and 8192 polygons"
+            },
+            { "kind": "scene_state", "label": "UI Language", "value": "English" }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.enter_edit_mode",
+              "label": "Enter Edit Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_face_mode",
+              "label": "Select Face Mode",
+              "keyMode": "sequence",
+              "keys": ["3"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.select_all_faces",
+              "label": "Select All Faces",
+              "keyMode": "sequence",
+              "keys": ["A"],
+              "parameters": []
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_operator_search",
+              "label": "Open Operator Search",
+              "keyMode": "sequence",
+              "keys": ["F3"],
+              "selectionPath": ["Poke Faces"],
+              "parameters": [
+                { "name": "query", "source": { "kind": "literal", "value": "poke faces" } }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.execute_poke_faces",
+              "label": "Execute Poke Faces",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [
+                { "name": "offset", "source": { "kind": "literal", "value": 0 } },
+                { "name": "use_relative_offset", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "center_mode",
+                  "source": { "kind": "literal", "value": "MEDIAN_WEIGHTED" }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.execute_poke_faces",
+                "expectedOperatorId": "mesh.poke"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_poke_offset",
+              "label": "Set Poke Offset",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "mesh.poke.offset" },
+              "path": ["Adjust Last Operation", "Offset"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "offset",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.return_to_object_mode",
+              "label": "Return to Object Mode",
+              "keyMode": "sequence",
+              "keys": ["TAB"],
+              "parameters": []
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The active target is supplied by the required selection precondition; the logical target ID is not typed into Blender."
+            },
+            {
+              "argumentName": "resultMeshId",
+              "reason": "The native Edit Mode operator mutates the current mesh in place and does not create the managed replacement mesh identity."
+            },
+            {
+              "argumentName": "resultMeshName",
+              "reason": "The native Edit Mode operator does not copy or rename a replacement mesh datablock."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.modifier.add_bevel.semantic",
+      "actionName": "blender.modifier.add_bevel",
+      "title": "Add a bounded Bevel modifier",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "panel.modifier_properties",
+            "order": 2,
+            "label": "Modifiers",
+            "intent": "navigate",
+            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+          },
+          {
+            "id": "control.add_modifier",
+            "order": 3,
+            "label": "Add Modifier",
+            "intent": "execute",
+            "target": { "kind": "control", "hostId": "object.modifier_add" }
+          },
+          {
+            "id": "semantic.bevel_parameters",
+            "order": 4,
+            "label": "Bevel Settings",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.bevel_modifier" }
+          }
+        ],
+        "reason": "The action must bind exact width, segment, angle, ownership, and compensation state; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/bevel.html"
+      }
+    },
+    {
+      "id": "blender.modifier.add_solidify.semantic",
+      "actionName": "blender.modifier.add_solidify",
+      "title": "Add a bounded Solidify modifier",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "panel.modifier_properties",
+            "order": 2,
+            "label": "Modifiers",
+            "intent": "navigate",
+            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+          },
+          {
+            "id": "control.add_modifier",
+            "order": 3,
+            "label": "Add Modifier",
+            "intent": "execute",
+            "target": { "kind": "control", "hostId": "object.modifier_add" }
+          },
+          {
+            "id": "semantic.solidify_parameters",
+            "order": 4,
+            "label": "Solidify Settings",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.solidify_modifier" }
+          }
+        ],
+        "reason": "The action must bind exact thickness, offset, ownership, bounded topology, and compensation state while fixing mode to EXTRUDE, even offset and rim on, and rim-only off; the public UI API does not expose a stable rectangle or single operator for the whole transaction.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/solidify.html"
+      }
+    },
+    {
+      "id": "blender.modifier.add_subdivision_surface.semantic",
+      "actionName": "blender.modifier.add_subdivision_surface",
+      "title": "Add a bounded Subdivision Surface modifier",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "operator.subdivision_set",
+            "order": 3,
+            "label": "Set Subdivision Level",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "object.subdivision_set" }
+          },
+          {
+            "id": "semantic.subdivision_surface_contract",
+            "order": 4,
+            "label": "Subdivision Surface Contract",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.subdivision_surface_modifier"
+            }
+          }
+        ],
+        "reason": "The native operator identifies the relevant UI action but does not express the accepted action's owned modifier identity, receipt-tracked stack requirement, duplicate-SUBSURF rejection, viewportLevel binding, fixed CATMULL_CLARK, render level 2 and quality 3 settings, bounded projected topology, observation, or compensation contract.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/subdivision_surface.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The native modifier UI does not encode the managed modifier identity and name, receipt-tracked stack contract, bounded projected topology, observation, or compensating rollback state."
+        },
+        "shortcut": {
+          "availability": "available",
+          "source": "catalog.ordered_shortcut_operations",
+          "semanticBinding": "all_leaf_operations",
+          "parameterBinding": "ordered_parameter_operations",
+          "projection": "candidate_only",
+          "preconditions": [
+            { "kind": "workspace", "label": "Workspace", "value": "Layout" },
+            { "kind": "editor", "label": "Editor", "value": "VIEW_3D" },
+            { "kind": "mode", "label": "Mode", "value": "OBJECT" },
+            {
+              "kind": "selection",
+              "label": "Active Target",
+              "value": "Exactly one accepted target Mesh object is active and selected"
+            },
+            { "kind": "keymap", "label": "Keymap", "value": "Blender" },
+            { "kind": "modal_state", "label": "Modal UI", "value": "None" },
+            {
+              "kind": "scene_state",
+              "label": "Modifier Type",
+              "value": "No existing SUBSURF modifier"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Modifier Stack",
+              "value": "Existing modifier stack matches accepted tracked state"
+            },
+            {
+              "kind": "scene_state",
+              "label": "Topology Bounds",
+              "value": "Evaluated and projected topology are within managed bounds"
+            }
+          ],
+          "operations": [
+            {
+              "kind": "key_input",
+              "id": "shortcut.add_subdivision_surface_level_one",
+              "label": "Add Subdivision Surface Level One",
+              "keyMode": "chord",
+              "keys": ["CTRL", "1"],
+              "parameters": [
+                { "name": "level", "source": { "kind": "literal", "value": 1 } },
+                { "name": "relative", "source": { "kind": "literal", "value": false } },
+                {
+                  "name": "ensure_modifier",
+                  "source": { "kind": "literal", "value": true }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.open_adjust_last_operation",
+              "label": "Open Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["F9"],
+              "parameters": [],
+              "opensSurface": {
+                "kind": "adjust_last_operation",
+                "hostId": "screen.redo_last",
+                "sourceOperationId": "shortcut.add_subdivision_surface_level_one",
+                "expectedOperatorId": "object.subdivision_set"
+              }
+            },
+            {
+              "kind": "operator_property_update",
+              "id": "shortcut.set_viewport_level",
+              "label": "Set Viewport Level",
+              "surfaceOperationId": "shortcut.open_adjust_last_operation",
+              "target": { "kind": "control", "hostId": "object.subdivision_set.level" },
+              "path": ["Adjust Last Operation", "Level"],
+              "parameters": [
+                {
+                  "name": "value",
+                  "source": {
+                    "kind": "action_argument",
+                    "argumentName": "viewportLevel",
+                    "transform": "identity"
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "key_input",
+              "id": "shortcut.close_adjust_last_operation",
+              "label": "Confirm Adjust Last Operation",
+              "keyMode": "sequence",
+              "keys": ["ENTER"],
+              "parameters": [],
+              "closesSurfaceOperationId": "shortcut.open_adjust_last_operation"
+            }
+          ],
+          "omittedActionArguments": [
+            {
+              "argumentName": "targetId",
+              "reason": "The active target is supplied by the required selection precondition; the logical target ID is not typed into Blender."
+            },
+            {
+              "argumentName": "modifierId",
+              "reason": "The native shortcut does not assign the managed logical modifier identity."
+            },
+            {
+              "argumentName": "modifierName",
+              "reason": "The native shortcut creates Blender's default modifier name rather than the accepted managed name."
+            }
+          ]
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.modifier.add_mirror.semantic",
+      "actionName": "blender.modifier.add_mirror",
+      "title": "Add a bounded Mirror modifier",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Layout" }
+          },
+          {
+            "id": "semantic.select_owned_mesh",
+            "order": 2,
+            "label": "Owned Mesh",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.owned_mesh" }
+          },
+          {
+            "id": "panel.modifier_properties",
+            "order": 3,
+            "label": "Modifiers",
+            "intent": "navigate",
+            "target": { "kind": "panel", "hostId": "PROPERTIES_MODIFIER" }
+          },
+          {
+            "id": "control.add_modifier",
+            "order": 4,
+            "label": "Add Modifier",
+            "intent": "execute",
+            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add" }
+          },
+          {
+            "id": "category.generate",
+            "order": 5,
+            "label": "Generate",
+            "intent": "navigate",
+            "target": { "kind": "menu", "hostId": "OBJECT_MT_modifier_add_generate" }
+          },
+          {
+            "id": "modifier.mirror",
+            "order": 6,
+            "label": "Mirror",
+            "intent": "execute",
+            "target": { "kind": "operator", "hostId": "object.modifier_add" }
+          },
+          {
+            "id": "semantic.mirror_contract",
+            "order": 7,
+            "label": "Managed Mirror Contract",
+            "intent": "configure",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.mirror_modifier" }
+          }
+        ],
+        "reason": "The native operator must be invoked with type=MIRROR, but the accepted action also binds the owned target and modifier identities, exact axis, complete fixed Mirror properties, bounded source, evaluated input, projected and actual evaluated topology, observation, and compensating rollback contract atomically.",
+        "manualReference": "https://docs.blender.org/manual/en/4.5/modeling/modifiers/generate/mirror.html"
+      },
+      "procedureMaterialization": {
+        "menu": {
+          "availability": "unavailable",
+          "reason": "The native menu path does not encode the managed modifier identity and name, exact fixed properties, bounded topology checks, observation, or compensating rollback contract."
+        },
+        "shortcut": {
+          "availability": "unavailable",
+          "reason": "Shift+A is only a Properties Modifier-context alias for opening Add Modifier and cannot express the axis parameters or managed contract; no F3 or F9 projection is declared."
+        },
+        "mcp": {
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
+        }
+      }
+    },
+    {
+      "id": "blender.geometry_nodes.create_transform.semantic",
+      "actionName": "blender.geometry_nodes.create_transform",
+      "title": "Create an inspectable Transform Geometry node group",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.geometry_nodes",
+            "order": 1,
+            "label": "Geometry Nodes",
+            "intent": "navigate",
+            "target": { "kind": "workspace", "hostId": "Geometry Nodes" }
+          },
+          {
+            "id": "semantic.new_geometry_modifier",
+            "order": 2,
+            "label": "New Modifier",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.geometry_nodes_modifier"
+            }
+          },
+          {
+            "id": "node.transform_geometry",
+            "order": 3,
+            "label": "Transform Geometry",
+            "intent": "configure",
+            "target": { "kind": "node", "hostId": "GeometryNodeTransform" }
+          },
+          {
+            "id": "semantic.verify_node_links",
+            "order": 4,
+            "label": "Verify Links",
+            "intent": "verify",
+            "target": { "kind": "semantic", "hostId": "operatingline.blender.transform_node_links" }
+          }
+        ],
+        "reason": "The accepted action creates the node group interface, graph, values, modifier binding, and rollback receipt atomically; no single native control represents the complete graph.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/geometry_nodes/introduction.html"
+      }
+    },
+    {
+      "id": "blender.material.create_and_assign.semantic",
+      "actionName": "blender.material.create_and_assign",
+      "title": "Create and assign one Principled material",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.shading",
+            "order": 1,
+            "label": "Shading",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Shading"
+            }
+          },
+          {
+            "id": "panel.material_properties",
+            "order": 2,
+            "label": "Material",
+            "intent": "navigate",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MATERIAL"
+            }
+          },
+          {
+            "id": "control.new_material",
+            "order": 3,
+            "label": "New",
+            "intent": "configure",
+            "target": {
+              "kind": "control",
+              "hostId": "material.new"
+            }
+          },
+          {
+            "id": "semantic.principled_surface",
+            "order": 4,
+            "label": "Surface",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "ShaderNodeBsdfPrincipled"
+            }
+          }
+        ],
+        "reason": "The canonical action creates and assigns the exact material through Blender data APIs; stable native rectangles for the Properties controls are not exposed by the supported public UI API.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      }
+    },
+    {
+      "id": "blender.material.create_palette_and_assign.semantic",
+      "actionName": "blender.material.create_palette_and_assign",
+      "title": "Create and assign a Principled material palette",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.shading",
+            "order": 1,
+            "label": "Shading",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Shading"
+            }
+          },
+          {
+            "id": "panel.material_properties",
+            "order": 2,
+            "label": "Material",
+            "intent": "navigate",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_MATERIAL"
+            }
+          },
+          {
+            "id": "semantic.palette_entries",
+            "order": 3,
+            "label": "Palette",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.material_palette"
+            }
+          },
+          {
+            "id": "semantic.assign_targets",
+            "order": 4,
+            "label": "Assign",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.material_assignments"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates several materials and assignments atomically; Blender does not expose one native control that represents the whole palette operation.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/materials/introduction.html"
+      }
+    },
+    {
+      "id": "blender.rig.create_armature.semantic",
+      "actionName": "blender.rig.create_armature",
+      "title": "Create and bind a rigid armature",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "menu.add_armature",
+            "order": 2,
+            "label": "Armature",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "object.armature_add"
+            }
+          },
+          {
+            "id": "mode.edit_bones",
+            "order": 3,
+            "label": "Edit Bones",
+            "intent": "configure",
+            "target": {
+              "kind": "mode",
+              "hostId": "EDIT_ARMATURE"
+            }
+          },
+          {
+            "id": "semantic.rigid_parent",
+            "order": 4,
+            "label": "Parent Parts",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.rigid_bindings"
+            }
+          }
+        ],
+        "reason": "The accepted action creates several bones and rigid object bindings as one compensated transaction, not as one allowlisted native menu command.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/animation/armatures/introduction.html"
+      }
+    },
+    {
+      "id": "blender.rig.bind_skin_weights.semantic",
+      "actionName": "blender.rig.bind_skin_weights",
+      "title": "Bind explicit skin weights",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "panel.object_data",
+            "order": 2,
+            "label": "Vertex Groups",
+            "intent": "configure",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_DATA"
+            }
+          },
+          {
+            "id": "mode.weight_paint",
+            "order": 3,
+            "label": "Weight Paint",
+            "intent": "configure",
+            "target": {
+              "kind": "mode",
+              "hostId": "PAINT_WEIGHT"
+            }
+          },
+          {
+            "id": "semantic.normalized_weights",
+            "order": 4,
+            "label": "Normalized Weights",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.explicit_skin_weights"
+            }
+          },
+          {
+            "id": "semantic.armature_modifier",
+            "order": 5,
+            "label": "Armature Modifier",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.armature_modifier"
+            }
+          }
+        ],
+        "reason": "The accepted action validates and assigns a complete bounded per-vertex weight table plus an Armature modifier atomically; Blender has no single native control representing that transaction.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/modeling/meshes/properties/vertex_groups/vertex_groups.html"
+      }
+    },
+    {
+      "id": "blender.animation.create_pose_keyframes.semantic",
+      "actionName": "blender.animation.create_pose_keyframes",
+      "title": "Create pose transform keyframes",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.animation",
+            "order": 1,
+            "label": "Animation",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Animation"
+            }
+          },
+          {
+            "id": "editor.action",
+            "order": 2,
+            "label": "Dope Sheet",
+            "intent": "navigate",
+            "target": {
+              "kind": "editor",
+              "hostId": "DOPESHEET_EDITOR.ACTION"
+            }
+          },
+          {
+            "id": "mode.pose",
+            "order": 3,
+            "label": "Pose Bones",
+            "intent": "configure",
+            "target": {
+              "kind": "mode",
+              "hostId": "POSE"
+            }
+          },
+          {
+            "id": "operator.insert_keyframe",
+            "order": 4,
+            "label": "Keyframes",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "anim.keyframe_insert"
+            }
+          }
+        ],
+        "reason": "The accepted action writes a bounded set of exact frames, pose transforms, interpolation, and extrapolation atomically; the native keyframe command alone cannot represent that complete parameterized transaction.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/animation/keyframes/introduction.html"
+      }
+    },
+    {
+      "id": "blender.render_scene.create.semantic",
+      "actionName": "blender.render_scene.create",
+      "title": "Create an isolated render scene and world",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "control.scene_selector",
+            "order": 2,
+            "label": "Scene",
+            "intent": "navigate",
+            "target": {
+              "kind": "control",
+              "hostId": "window.scene"
+            }
+          },
+          {
+            "id": "semantic.new_scene",
+            "order": 3,
+            "label": "New Scene",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.render_scene"
+            }
+          },
+          {
+            "id": "panel.world",
+            "order": 4,
+            "label": "World",
+            "intent": "configure",
+            "target": {
+              "kind": "panel",
+              "hostId": "PROPERTIES_WORLD"
+            }
+          }
+        ],
+        "reason": "The action creates an owned scene, world, and collection linkage together; Blender has no single allowlisted native control for the complete operation.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/scene_layout/scene/introduction.html"
+      }
+    },
+    {
+      "id": "blender.render_rig.create.semantic",
+      "actionName": "blender.render_rig.create",
+      "title": "Create Area lights and a camera",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.layout",
+            "order": 1,
+            "label": "Layout",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Layout"
+            }
+          },
+          {
+            "id": "semantic.area_lights",
+            "order": 2,
+            "label": "Area Lights",
+            "intent": "execute",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.area_lights"
+            }
+          },
+          {
+            "id": "operator.camera_add",
+            "order": 3,
+            "label": "Camera",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "object.camera_add"
+            }
+          },
+          {
+            "id": "semantic.aim_assign",
+            "order": 4,
+            "label": "Aim & Assign",
+            "intent": "configure",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.render_rig"
+            }
+          }
+        ],
+        "reason": "One accepted leaf creates and configures multiple lights plus a camera; no single native menu item represents the complete action or rollback receipt.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/lights/light_object.html"
+      }
+    },
+    {
+      "id": "blender.render.execute_preview.semantic",
+      "actionName": "blender.render.execute_preview",
+      "title": "Render a managed PNG preview",
+      "guidance": {
+        "kind": "semantic_path",
+        "steps": [
+          {
+            "id": "workspace.rendering",
+            "order": 1,
+            "label": "Rendering",
+            "intent": "navigate",
+            "target": {
+              "kind": "workspace",
+              "hostId": "Rendering"
+            }
+          },
+          {
+            "id": "menu.render",
+            "order": 2,
+            "label": "Render",
+            "intent": "navigate",
+            "target": {
+              "kind": "menu",
+              "hostId": "TOPBAR_MT_render"
+            }
+          },
+          {
+            "id": "operator.render",
+            "order": 3,
+            "label": "Render Image",
+            "intent": "execute",
+            "target": {
+              "kind": "operator",
+              "hostId": "render.render"
+            }
+          },
+          {
+            "id": "semantic.managed_png",
+            "order": 4,
+            "label": "Managed PNG",
+            "intent": "verify",
+            "target": {
+              "kind": "semantic",
+              "hostId": "operatingline.blender.preview_artifact"
+            }
+          }
+        ],
+        "reason": "The accepted action also applies bounded render settings and writes to an adapter-managed PNG destination, so the ordinary Render Image item is only a semantic reference.",
+        "manualReference": "https://docs.blender.org/manual/en/latest/render/output/index.html"
+      }
+    }
+  ]
+}

@@ -364,6 +364,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.action_catalog.get' },
             { name: 'operatingline.blender.action.execute' },
             { name: 'operatingline.blender.action.status' },
+            { name: 'operatingline.blender.shortcut-proof.execute' },
+            { name: 'operatingline.blender.shortcut-proof.status' },
             { name: 'operatingline.procedure.tutorial.media.capabilities' },
             { name: 'operatingline.procedure.tutorial.media.jobs.create' },
             { name: 'operatingline.procedure.tutorial.media.jobs.status' },
@@ -384,6 +386,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.authoring.materialize' },
             { name: 'operatingline.procedure.replay.propose' },
+            { name: 'operatingline.procedure.shortcut-proof.propose' },
             { name: 'operatingline.procedure.replay.finalize' },
             { name: 'operatingline.procedure.replay.failure-recovery.finalize' },
             { name: 'operatingline.procedure.replay.current-state.request' },
@@ -530,6 +533,41 @@ describe('OperatingLine runtime', () => {
       ).toMatchObject({
         type: 'object',
         required: ['packet', 'tree'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.shortcut-proof.execute',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.shortcut-proof.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.shortcut-proof.propose',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: [
+          'formatVersion',
+          'replayId',
+          'targetInstanceId',
+          'leafId',
+          'replayMode',
+          'packet',
+          'tree',
+        ],
         additionalProperties: false,
       });
       expect(

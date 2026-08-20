@@ -727,6 +727,9 @@ function materializeLeaf(
             title: `${recipe!.title} shortcut projection`,
             preconditions: structuredClone(shortcutDeclaration.preconditions),
             modality: 'shortcut' as const,
+            ...(shortcutDeclaration.proofExecution === undefined
+              ? {}
+              : { proofExecution: structuredClone(shortcutDeclaration.proofExecution) }),
             operations: shortcutDeclaration.operations.map((operation, index) => {
               const common = {
                 id: operation.id,

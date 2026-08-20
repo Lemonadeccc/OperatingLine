@@ -1,6 +1,7 @@
 """OperatingLine Blender extension entry point."""
 
 import bpy
+import uuid
 
 from .application import DemoSession
 from .application.companion import CompanionController
@@ -17,7 +18,9 @@ from .infrastructure import (
     discard_native_history,
     forget_managed_collection,
     register_native_history,
+    register_shortcut_history,
     unregister_native_history,
+    unregister_shortcut_history,
 )
 from .infrastructure.observations import evaluate_observations
 from .presentation import CLASSES
@@ -30,6 +33,27 @@ from .presentation.native_menu_guidance import interaction_guidance_snapshot
 
 _session: DemoSession | None = None
 _companion: CompanionController | None = None
+_COMPANION_INSTANCE_ID_SLOT = "operating_line_companion_instance_id"
+
+
+def _runtime_namespace() -> dict:
+    namespace = getattr(bpy.app, "driver_namespace", None)
+    if not isinstance(namespace, dict):
+        raise RuntimeError("Blender process runtime namespace is unavailable")
+    return namespace
+
+
+def _companion_instance_id(*, rotate: bool = False) -> str:
+    namespace = _runtime_namespace()
+    candidate = None if rotate else namespace.get(_COMPANION_INSTANCE_ID_SLOT)
+    try:
+        parsed = uuid.UUID(str(candidate))
+        if str(parsed) != candidate:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        candidate = str(uuid.uuid4())
+        namespace[_COMPANION_INSTANCE_ID_SLOT] = candidate
+    return candidate
 
 
 def get_session() -> DemoSession:
@@ -61,7 +85,7 @@ def replace_session(replacement: DemoSession) -> None:
 def get_companion() -> CompanionController:
     global _companion
     if _companion is None:
-        _companion = CompanionController()
+        _companion = CompanionController(_companion_instance_id())
     return _companion
 
 
@@ -123,14 +147,16 @@ def _native_history_restored(restore: NativeHistoryRestore) -> None:
 
 
 def _native_history_file_loaded() -> None:
+    global _companion
+    rotated_instance_id = _companion_instance_id(rotate=True)
     disable_native_menu_guidance()
     disable_overlay()
     reset_native_menu_guidance()
     if _companion is not None:
-        try:
-            _companion.report("plan_loaded")
-        except (OSError, RuntimeError, ValueError) as error:
-            _companion.error = f"File-load reporting failed: {error}"
+        previous = _companion
+        previous.unregister_timer(document_replaced=True)
+        _companion = CompanionController(rotated_instance_id)
+        _companion.register_timer()
 
 
 def register() -> None:
@@ -239,6 +265,7 @@ def register() -> None:
         _native_history_restored,
         _native_history_file_loaded,
     )
+    register_shortcut_history()
     get_companion().register_timer()
 
 
@@ -246,6 +273,7 @@ def unregister() -> None:
     global _companion, _session
     if _companion is not None:
         _companion.unregister_timer()
+    unregister_shortcut_history()
     unregister_native_history()
     disable_native_menu_guidance()
     disable_overlay()

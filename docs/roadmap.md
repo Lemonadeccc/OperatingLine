@@ -24,9 +24,10 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.38.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.37.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.39.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.38.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
-      其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
+      其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate shortcut，但 menu 仍 unavailable；只有 Subdivision Surface 的精确
+      accepted-replay/F9 轨迹另带独立 `proofExecution`，不会把其它 candidate 轨迹升级为可执行。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
       [ADR 0024](adr/0024-versioned-interaction-catalog.md) 与
       [ADR 0025](adr/0025-granular-primitive-teaching-steps.md)、
@@ -601,6 +602,16 @@
           `cylinder_ready` 及 Start→Next 原生 Undo 直连证明成功。旧 binding 不继承权限，Cylinder shortcut 仍
           unavailable，menu 的 canonical Euler teaching projection 不冒充 managed quaternion 执行。见
           [ADR 0093](adr/0093-cylinder-action-level-mcp.md)。
+    - [x] 首个原生 shortcut proof executor：冻结 InteractionCatalog `1.38.0`，由 `1.39.0` 只为已接受的
+          factory Cube Subdivision Surface replay 声明 `Ctrl+1 → F9 → Level → Enter`。Blender 4.5.3/5.1.1
+          的 `Window.event_simulate` 执行器生成四段哈希收据、强 Observation、完整 factory Cube 指纹与原生
+          Undo/Redo checkpoint；成功保持 mutation lock。单一完成事件避免终态半链，持久 terminal outbox 与
+          Undo/Redo transition outbox 在 ACK 不确定或 Runtime 重启后只重交原始结果或服务端当前 result 后的严格
+          后缀、不重放宿主输入；terminal challenge 绑定并随最新 replacement lease 轮换，driver 在每个 timer turn
+          重验 authority，disconnect/unregister 与文件加载会先停止旧 callback。同一文档的进程内 identity 支持
+          Controller 重建，文件加载、复制 `.blend` 与 OS 进程重启不会继承旧 target。该证明明确排除 OS HID、menu 点击、
+          managed Action/MCP identity 及其它对象或快捷键。见
+          [ADR 0094](adr/0094-native-subdivision-shortcut-proof.md)。
     - [ ] 真实逐控件 menu/shortcut executor，以及七种已证明 primitive 之外的复合与编辑叶节点覆盖；根据失败
           分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整

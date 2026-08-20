@@ -74,7 +74,14 @@ Subdivide 保留 managed copy/swap `semantic_path`，并增加 candidate-only �
 `Ctrl+1` 以 literal `level=1`、`relative=false`、`ensure_modifier=true` 创建默认 modifier，`F9` 打开
 `object.subdivision_set` 的 Adjust Last Operation，Level 绑定 accepted `viewportLevel`，再以 `ENTER`
 结束 surface。`targetId`、`modifierId`、`modifierName` 显式省略；目标版本的 `F3` 搜索路径实测不可用，
-因此未收录。Edit Mode Bevel 保留 managed replacement Mesh `semantic_path`，并增加 candidate-only
+因此未收录。InteractionCatalog `1.39.0` 只为这条已接受 replay 的精确 factory Cube 轨迹增加独立
+`proofExecution`：公开输入不能提供事件或参数，Blender `Window.event_simulate` 执行器生成四段收据、
+强 Observation、完整场景指纹与原生 Undo/Redo checkpoint；它仍不把默认 UI Modifier 冒充 managed
+identity。terminal 与 Undo/Redo result 在 transport 前进入持久 outbox；Runtime 只原子接受其当前 result 后的
+严格后缀。terminal reconciliation challenge 绑定当前 replacement lease；更新的 lease 会轮换 recovery ID，旧
+lease/旧 challenge 均失效。driver 在每个 timer turn 重验 authority，disconnect/unregister 会先取消 timer 与输入；
+`load_post` 只 abandon 旧 driver，不读取新 Scene。同一文档的 Companion identity 存在进程 namespace，文件加载、
+复制 `.blend` 或新 OS 进程不会继承旧 target。Edit Mode Bevel 保留 managed replacement Mesh `semantic_path`，并增加 candidate-only
 十步 shortcut：`TAB → 2 → A → Ctrl+B → F9 → Width → Segments → Profile → ENTER → TAB`。
 `Ctrl+B` 固定完整来源 operator 默认值并以内嵌 `ENTER` 确认；三个 F9 控件按序绑定 accepted
 `width`、`segments`、`profile`。`targetId`、`resultMeshId`、`resultMeshName` 显式省略；menu/MCP
@@ -154,7 +161,9 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 三个身体球；Cube、鼻子和手臂会分别切换到各自 recipe。批量几何、Edit/Modifier/Geometry Nodes、
 材质、骨骼、显式蒙皮权重、动画和渲染等二十条
 `semantic_path` 在卡片中显示灰色有序参考与 `UI target unavailable`，不绘制猜测坐标或替换无关
-菜单项；Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 仅额外提供 candidate shortcut，其菜单仍 unavailable。未来只有新的版本专用 recipe
+菜单项；Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 提供 candidate shortcut，
+其菜单仍 unavailable；其中只有 Subdivision Surface 的 `1.39.0` 精确轨迹另有受审批的 proof executor。
+未来只有新的版本专用 recipe
 通过真实宿主测试后，才能升级为 `native_path`。见
 [ADR 0024](../adr/0024-versioned-interaction-catalog.md) 与
 [ADR 0026](../adr/0026-native-cube-action-slice.md) 与
@@ -162,9 +171,11 @@ Blender 4.5/5.1 版本适配器只把目录中的 `Add → Mesh → Plane/Cube/U
 [ADR 0028](../adr/0028-native-torus-action-slice.md) 与
 [ADR 0029](../adr/0029-bounded-edit-modifier-geometry-nodes.md) 与
 [ADR 0037](../adr/0037-bounded-solidify-modifier.md) 与
-[ADR 0038](../adr/0038-bounded-edit-triangulate.md)。
+[ADR 0038](../adr/0038-bounded-edit-triangulate.md) 与
+[ADR 0094](../adr/0094-native-subdivision-shortcut-proof.md)。
 
-当前 Procedure replay 切片不驱动上述菜单，也不模拟快捷键。Orchestrator 重新验证并物化单一 UV Sphere、
+通用 Procedure replay 切片不驱动上述菜单或 candidate shortcut；ADR 0094 的 Subdivision Surface
+`native_shortcut_proof` 是独立、显式审批且仅限 factory Cube 的例外。Orchestrator 重新验证并物化单一 UV Sphere、
 Icosphere、Cube、Plane、Torus、Cone 或 Cylinder leaf 后，只向目标实例投递普通待审 GuideProposal；用户 Accept 后仍由 Blender
 的既有受管 Session action 执行。ActionCatalog `1.18.0` 为 UV Sphere 增加 `uv_sphere_ready`，`1.19.0`
 为 Icosphere 增加 `icosphere_ready`，`1.20.0` 为 Cube/Plane 增加 `cube_ready`/`plane_ready`，`1.21.0`

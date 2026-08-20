@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { canonicalizeProtocolJsonValue } from './canonical-json-value.js';
 
 import { guideStepIdSchema } from './guide.js';
+import { shortcutProofExecutionSchema } from './interaction-catalog.js';
 import {
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
@@ -100,6 +101,7 @@ const procedureAuthoringAvailableShortcutTrackSchema = z.strictObject({
   preconditions: z.array(procedurePreconditionSchema),
   modality: z.literal('shortcut'),
   operations: z.array(procedureAuthoringMaterializedShortcutOperationSchema).min(1),
+  proofExecution: shortcutProofExecutionSchema.optional(),
 });
 
 const procedureAuthoringAvailableExtendedShortcutTrackSchema = z.strictObject({
@@ -109,6 +111,7 @@ const procedureAuthoringAvailableExtendedShortcutTrackSchema = z.strictObject({
   preconditions: z.array(procedurePreconditionSchema),
   modality: z.literal('shortcut'),
   operations: z.array(extendedShortcutProcedureOperationSchema).min(1),
+  proofExecution: shortcutProofExecutionSchema.optional(),
 });
 
 const procedureAuthoringMaterializedShortcutTrackSchema = z.union([

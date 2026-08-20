@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.38.0")
+        self.assertEqual(catalog.catalog_version, "1.39.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -413,6 +413,18 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
         )
         assert subdivision_shortcut.preconditions is not None
+        proof_execution = subdivision_shortcut.proof_execution
+        self.assertIsNotNone(proof_execution)
+        assert proof_execution is not None
+        self.assertEqual(
+            proof_execution.executor_id,
+            "blender.subdivision_surface_f9.event_simulate.v1",
+        )
+        self.assertEqual(proof_execution.target_profile, "factory_cube_8_12_6")
+        self.assertEqual(proof_execution.host_versions, ("4.5.3", "5.1.1"))
+        self.assertFalse(proof_execution.os_hid_input)
+        self.assertFalse(proof_execution.managed_action_executed)
+        self.assertFalse(proof_execution.managed_receipt_created)
         self.assertEqual(
             tuple(
                 (item.kind, item.label, item.value)
@@ -425,7 +437,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 (
                     "selection",
                     "Active Target",
-                    "Exactly one accepted target Mesh object is active and selected",
+                    "Exactly the unmodified factory Cube (8 vertices, 12 edges, 6 polygons) is active and selected",
                 ),
                 ("keymap", "Keymap", "Blender"),
                 ("modal_state", "Modal UI", "None"),
@@ -446,6 +458,7 @@ class InteractionCatalogTests(unittest.TestCase):
                 ),
             ),
         )
+
         assert subdivision_shortcut.shortcut_operations is not None
         subdivision_operations = subdivision_shortcut.shortcut_operations
         self.assertEqual(
@@ -1619,6 +1632,46 @@ class InteractionCatalogTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_rejects_invalid_or_foreign_shortcut_proof_execution(self) -> None:
+        def proof(raw: dict) -> dict:
+            recipe = next(
+                item
+                for item in raw["recipes"]
+                if item["actionName"]
+                == "blender.modifier.add_subdivision_surface"
+            )
+            return recipe["procedureMaterialization"]["shortcut"]["proofExecution"]
+
+        wrong_boolean = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        proof(wrong_boolean)["osHidInput"] = 0
+        with self.assertRaisesRegex(ValueError, "unsupported osHidInput"):
+            self._load_raw(wrong_boolean)
+
+        wrong_operations = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        proof(wrong_operations)["operationIds"] = list(
+            reversed(proof(wrong_operations)["operationIds"])
+        )
+        with self.assertRaisesRegex(ValueError, "exact operationIds"):
+            self._load_raw(wrong_operations)
+
+        foreign = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        declaration = proof(foreign)
+        source = next(
+            item
+            for item in foreign["recipes"]
+            if item["actionName"]
+            == "blender.modifier.add_subdivision_surface"
+        )
+        del source["procedureMaterialization"]["shortcut"]["proofExecution"]
+        target = next(
+            item
+            for item in foreign["recipes"]
+            if item["actionName"] == "blender.mesh.create_cube"
+        )
+        target["procedureMaterialization"]["shortcut"]["proofExecution"] = declaration
+        with self.assertRaisesRegex(ValueError, "restricted to Subdivision Surface"):
+            self._load_raw(foreign)
 
     def test_exposes_candidate_only_bevel_edges_shortcut_with_exact_modal_source(self) -> None:
         recipe = next(

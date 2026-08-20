@@ -475,7 +475,10 @@ Subdivision Surface Modifier 声明 candidate-only 四步 shortcut：`Ctrl+1` �
 `relative=false`、`ensure_modifier=true` 创建默认 modifier，`F9` 打开 `object.subdivision_set` 的 Adjust
 Last Operation，Level 绑定 accepted `viewportLevel`，再以 `ENTER` 结束 surface。`targetId`、
 `modifierId`、`modifierName` 显式省略；menu/MCP unavailable。目标 Blender 版本中的 `F3` 搜索路径
-实测不可用，因此没有进入目录。
+实测不可用，因此没有进入目录。InteractionCatalog `1.39.0` 在不改变该教学投影边界的前提下，只为
+已接受单叶 replay 的精确 factory Cube 轨迹附加独立 `proofExecution`；Runtime 派生全部事件、参数和
+旧 delivery identity，Companion 报告四段收据、强 Observation、完整 factory Cube 指纹与原生 Undo/Redo
+checkpoint。该路径不执行 managed Action，也不授权其它 candidate shortcut。
 Edit Mode Bevel 保留 managed replacement Mesh `semantic_path`，并声明 candidate-only 十步 shortcut：
 `TAB` 进入 Edit Mode、`2` 切换 Edge Select、`A` 选择全部边、`Ctrl+B` 以内嵌 `ENTER` 确认完整来源
 默认值、`F9` 打开 `mesh.bevel` 的 Adjust Last Operation，随后按序把 accepted `width`、`segments`、
@@ -546,7 +549,8 @@ unavailable。该 managed Action 入口不把 menu/shortcut grounding 升级为�
 replay finalize 复用同一 validator 并固化认证 receipt，二者都不证明报告之后的当前宿主状态。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
-`validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。radius→scale 与相对移动是教学投影，
+`validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。Subdivision Surface `1.39.0` 的执行权
+只存在于另行审批并绑定精确旧树、目录与 lease 的 proof 协议中。radius→scale 与相对移动是教学投影，
 不是宿主状态等价证明。Cube/Plane 的 `size`、Torus 的四项 identity 投影与 Cone/Cylinder 的
 segment-frame 派生同样只证明参数来源；Icosphere 的创建与 F9 参数链已在 Blender 4.5.3/5.1.1
 完成真实前台事件回放，验证 Subdivisions 3、Radius 2.5、162 顶点和顶点半径；后续移动/重命名及 managed
@@ -555,8 +559,12 @@ action 等价仍没有完整 UI operation replay。Subdivide 的九步真实前�
 数量保持不变；该证据证明原生 in-place mutation 与 managed copy/swap 不同，不证明二者等价。
 Subdivision Surface 的四步真实前台事件回放在两个版本分别验证 level 1/2/3，得到
 `26/48/24`、`98/192/96`、`386/768/384` vertices/edges/polygons；render level 始终为 2，源 Mesh
-pointer 与 datablock 数量不变。该 UI 默认 modifier 仍不等价于 managed identity、receipt、Observation
-与补偿事务。Edit Mode Bevel 的十步真实前台事件回放在两个版本均验证 `width=0.2`、`segments=3`、
+pointer 与 datablock 数量不变。`1.39.0` proof executor 另把相同真实事件链绑定到独立 receipt、Observation、
+scene fingerprint、原生 Undo/Redo、ACK 前终态 outbox 与严格转换后缀恢复；marker 中旧 result 的
+`instanceId` 只作证明，当前路由 identity 仅来自进程 namespace。terminal challenge 绑定当前 replacement lease，
+新 lease 接管会轮换 recovery ID；driver 每个 timer turn 重验 authority，disconnect/unregister 在 transport teardown
+前停止输入，`load_post` abandon 旧 callback 而不接触新 Scene。因此文件加载或新进程不会认领旧 target。该 UI 默认 modifier 仍不等价于 managed
+identity 或 MCP receipt。Edit Mode Bevel 的十步真实前台事件回放在两个版本均验证 `width=0.2`、`segments=3`、
 `profile=0.6`，得到 96 vertices、192 edges、98 polygons，且 Mesh data pointer 与 datablock 数量不变。
 Harness 只证明已经发送 popup 关闭事件；原生 in-place mutation 仍不等价于 managed replacement Mesh、
 receipt、Observation、补偿或原生 Undo。Individual Inset Faces 的十步真实前台事件回放在两个版本均验证
@@ -603,7 +611,8 @@ grounding attestation。完整决策见
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
-[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md) 与
+[ADR 0094](../adr/0094-native-subdivision-shortcut-proof.md)。
 
 首个可执行桥接使用独立的 `ProcedureLeafReplay 1.0.0` 合同。调用方把原始 authoring packet、候选树、
 目标实例和单一 leaf 提交给 MCP/HTTP `procedure.replay.propose`；Orchestrator 重新运行 packet-bound
@@ -655,7 +664,8 @@ ENTER`；`1.24.0` 声明 Edit Mode Bevel 的 `Ctrl+B → F9 → Width → Segmen
 `1.25.0` 声明 Individual Inset Faces 的 `I → F9 → Thickness → Depth → Individual true → ENTER` 参数链；
 `1.26.0` 声明 Poke Faces 的 `F3(query="poke faces") → ENTER → F9 → Offset → ENTER` 参数链。
 真实 Blender 4.5.3/5.1.1 前台回放已证明这些 UI 轨迹的事件和参数链，但结果仍是
-candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Individual Inset Faces 与 Poke Faces action 另有完整 Observation、
+candidate/structural-only；只有 Subdivision Surface `1.39.0` 的独立 accepted-replay proof 合同可执行其
+固定四步轨迹。Managed Subdivision Surface、Edit Mode Bevel、Individual Inset Faces 与 Poke Faces action 另有完整 Observation、
 补偿与原生 Undo 证据；这些执行层能力不使 UI candidate 与 managed action 等价。见
 [ADR 0057](../adr/0057-shortcut-operator-property-surfaces.md) 与
 [ADR 0058](../adr/0058-icosphere-f9-shortcut-materialization.md) 与
@@ -664,7 +674,8 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0061](../adr/0061-bounded-edit-mode-bevel-edges.md) 与
 [ADR 0062](../adr/0062-bounded-individual-inset-faces.md) 与
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
-[ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
+[ADR 0064](../adr/0064-bounded-mirror-modifier.md) 与
+[ADR 0094](../adr/0094-native-subdivision-shortcut-proof.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实 Blender 轨迹回放、semantic retrieval 到 authoring/refinement 的 RAG 组合、
 自动教学视频获取/转录/画面识别和训练治理仍在后续范围。已有树的本地可视化 revision 编辑器只管理
 ProcedureTree 内容与 lineage，不补齐这些 interaction grounding 或训练治理能力；见

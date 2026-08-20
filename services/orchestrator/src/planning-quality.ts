@@ -105,6 +105,16 @@ export function evaluatePlanningQuality(
   catalogInput: ActionCatalog,
   options: {
     readonly allowedCoverageStepIds?: ReadonlySet<string>;
+    readonly verifiedExternalResourceConsumers?: readonly {
+      readonly consumerStepId: string;
+      readonly resourceId: string;
+      readonly resourceType: string;
+    }[];
+    readonly shortcutProofAuthority?: {
+      readonly replayId: string;
+      readonly leafId: string;
+      readonly targetProfile: 'factory_cube_8_12_6';
+    };
   } = {},
 ): PlanningQualityReport {
   const request = planningQualityEvaluationRequestSchema.parse(input);
@@ -121,6 +131,41 @@ export function evaluatePlanningQuality(
   }
 
   const findings: PlanningQualityFinding[] = [];
+  const verifiedExternalResourceConsumerKeys = new Set<string>();
+  const verifiedExternalResourceConsumers = options.verifiedExternalResourceConsumers ?? [];
+  const shortcutProofAuthority = options.shortcutProofAuthority;
+  if (verifiedExternalResourceConsumers.length > 0 && shortcutProofAuthority !== undefined) {
+    const shortcutStep = request.plan.steps.find(
+      (step) => step.id === shortcutProofAuthority.leafId,
+    );
+    const action = shortcutStep?.action;
+    const exactShortcutBoundary =
+      shortcutProofAuthority.targetProfile === 'factory_cube_8_12_6' &&
+      request.targetAdapterId === 'blender' &&
+      action?.adapterId === 'blender' &&
+      action.name === 'blender.modifier.add_subdivision_surface' &&
+      action.arguments['targetId'] === 'tutorial.cube' &&
+      action.arguments['modifierId'] === 'tutorial.cube.subdivision_surface' &&
+      action.arguments['modifierName'] === 'OperatingLine.Cube.SubdivisionSurface' &&
+      shortcutStep?.anchors.filter((anchor) => anchor.kind === 'object').length === 1 &&
+      shortcutStep.anchors.some(
+        (anchor) => anchor.kind === 'object' && anchor.objectName === 'Cube',
+      );
+    const exactTuple =
+      verifiedExternalResourceConsumers.length === 1
+        ? verifiedExternalResourceConsumers[0]
+        : undefined;
+    if (
+      exactShortcutBoundary &&
+      exactTuple?.consumerStepId === shortcutProofAuthority.leafId &&
+      exactTuple.resourceId === 'tutorial.cube' &&
+      exactTuple.resourceType === 'OBJECT'
+    ) {
+      verifiedExternalResourceConsumerKeys.add(
+        `${exactTuple.consumerStepId}\u0000${exactTuple.resourceType}\u0000${exactTuple.resourceId}`,
+      );
+    }
+  }
   const findingKeys = new Set<string>();
   const addFinding = (finding: PlanningQualityFinding): void => {
     const key = JSON.stringify(finding);
@@ -422,20 +467,44 @@ export function evaluatePlanningQuality(
     const ancestors = dependencyAncestors(request.plan);
     for (const step of executableSteps) {
       const entry = catalogEntries.get(step.action.name);
-      const consumedResourceIds = new Set<string>();
+      const consumedResources = new Map<
+        string,
+        { readonly resourceId: string; readonly resourceType: string }
+      >();
       for (const effect of entry?.resourceEffects ?? []) {
         if (effect.access !== 'read' && effect.access !== 'mutate') {
           continue;
         }
         for (const value of valuesAtArgumentPath(step.action.arguments, effect.argumentPath)) {
           if (typeof value === 'string' && value.length > 0) {
-            consumedResourceIds.add(value);
+            consumedResources.set(`${effect.resourceType}\u0000${value}`, {
+              resourceId: value,
+              resourceType: effect.resourceType,
+            });
           }
         }
       }
-      for (const resourceId of [...consumedResourceIds].sort()) {
+      for (const { resourceId, resourceType } of [...consumedResources.values()].sort(
+        (left, right) =>
+          left.resourceId.localeCompare(right.resourceId) ||
+          left.resourceType.localeCompare(right.resourceType),
+      )) {
         const creatorStepIds = creators.get(resourceId);
         if (creatorStepIds === undefined || creatorStepIds.size === 0) {
+          if (
+            verifiedExternalResourceConsumerKeys.has(
+              `${step.id}\u0000${resourceType}\u0000${resourceId}`,
+            )
+          ) {
+            addFinding({
+              code: 'resource.verified_external_input',
+              severity: 'warning',
+              message: `Step ${step.id} consumes verified external ${resourceType} resource ${resourceId}`,
+              stepIds: [step.id],
+              phaseIds: [],
+            });
+            continue;
+          }
           addFinding({
             code: 'resource.missing_creator',
             severity: 'error',

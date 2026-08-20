@@ -27,6 +27,7 @@ from .session import DemoSession, ObservationGateState
 from .goal_request import GoalRequestState, build_goal_request
 from .provider_handoff import DialogueRunState, InitialPlanRunState, ReplanRunState
 from .parameter_form import ParameterField, action_parameter_fields
+from .interaction_catalog import BUNDLED_INTERACTION_CATALOG, RESOURCE_PATH
 from .revision_review import (
     RevisionLineage,
     lineage_from_proposal,
@@ -47,8 +48,15 @@ class ProposalQueueFullError(ValueError):
 
 
 class CompanionController:
-    def __init__(self) -> None:
-        self.instance_id = str(uuid.uuid4())
+    def __init__(self, instance_id: str | None = None) -> None:
+        candidate = str(uuid.uuid4()) if instance_id is None else instance_id
+        try:
+            parsed_instance_id = uuid.UUID(candidate)
+        except (AttributeError, TypeError, ValueError) as error:
+            raise ValueError("Companion instance id must be a UUID") from error
+        if str(parsed_instance_id) != candidate:
+            raise ValueError("Companion instance id must be a canonical UUID")
+        self.instance_id = candidate
         self.status = "Offline"
         self.error = ""
         self._transport: CompanionTransport | None = None
@@ -94,13 +102,24 @@ class CompanionController:
         self._delivered_proposal_plan_content_sha256: str | None = None
         self._pending_proposal_decisions: dict[str, dict[str, Any]] = {}
         self._last_accepted_proposal_id: str | None = None
+        self._last_accepted_proposal_decision: dict[str, Any] | None = None
         self._artifact_attestation_execution_id: str | None = None
         self._artifact_attestation: dict[str, Any] | None = None
+        self._shortcut_proof_driver: Any | None = None
+        self._shortcut_proof_delivery: dict[str, Any] | None = None
+        self._shortcut_proof_checkpoint: dict[str, Any] | None = None
+        self._seen_shortcut_proof_request_ids: set[str] = set()
 
     @property
     def connected(self) -> bool:
         connected, _protocol_version = self._transport_connection_state()
         return connected
+
+    @property
+    def shortcut_mutation_blocked(self) -> bool:
+        from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
+
+        return self._shortcut_proof_driver is not None or shortcut_history_mutation_locked()
 
     def _transport_connection_state(self) -> tuple[bool, str]:
         transport = self._transport
@@ -141,12 +160,21 @@ class CompanionController:
         return self._timer_callback
 
     def register_timer(self) -> None:
+        from ..infrastructure.shortcut_history import register_shortcut_history
+
+        register_shortcut_history(
+            restored_result_builder=self._shortcut_history_restored,
+            reapplied_result_builder=self._shortcut_history_reapplied,
+            transition_result_callback=self._submit_shortcut_transition_result,
+        )
         if self._timer_registered:
             return
         bpy.app.timers.register(self._timer_callback, first_interval=0.1, persistent=True)
         self._timer_registered = True
 
-    def unregister_timer(self) -> None:
+    def unregister_timer(self, *, document_replaced: bool = False) -> None:
+        if document_replaced:
+            self._abandon_active_shortcut_proof()
         self.disconnect(
             flush_timeout=0.0,
             wait_timeout=0.1,
@@ -217,6 +245,9 @@ class CompanionController:
         preserve_initial_plan_handoff: bool = True,
         preserve_dialogue_handoff: bool = True,
     ) -> None:
+        self._cancel_active_shortcut_proof(
+            "Companion disconnected while shortcut proof was executing"
+        )
         transport = self._transport
         self._transport = None
         if transport is not None:
@@ -229,6 +260,7 @@ class CompanionController:
         self.pending_plan = None
         self.pending_plan_content_sha256 = None
         self._last_accepted_proposal_id = None
+        self._last_accepted_proposal_decision = None
         if not preserve_proposal_review:
             self.proposed_plan = None
             self.proposal_session = None
@@ -260,6 +292,84 @@ class CompanionController:
             and self.goal_request.phase == "proposal_received"
         ):
             self.goal_request.clear()
+
+    def _cancel_active_shortcut_proof(self, reason: str) -> None:
+        """Stop an active native-input driver before transport/history teardown."""
+
+        from ..infrastructure.shortcut_history import (
+            lock_shortcut_history_indeterminate,
+        )
+
+        driver = self._shortcut_proof_driver
+        if driver is None:
+            return
+        cancel = getattr(driver, "cancel", None)
+        try:
+            if callable(cancel):
+                cancel(reason)
+            else:
+                self._hard_stop_shortcut_driver(driver)
+                lock_shortcut_history_indeterminate(
+                    "Active shortcut driver had no cancellation capability"
+                )
+                self.error = (
+                    "Shortcut proof driver cannot be cancelled; native Undo may be required"
+                )
+                self.status = "Shortcut proof failed closed; native Undo required"
+        except Exception as error:
+            self._hard_stop_shortcut_driver(driver)
+            if getattr(driver, "mutation_started", True) is not False:
+                lock_shortcut_history_indeterminate(
+                    f"Active shortcut driver cancellation failed: {error}"
+                )
+            self.error = f"Shortcut proof cancellation failed closed: {error}"
+            self.status = "Shortcut proof failed closed; native Undo required"
+        finally:
+            if self._shortcut_proof_driver is driver:
+                self._shortcut_proof_driver = None
+
+    def _abandon_active_shortcut_proof(self) -> None:
+        """Hard-stop old-document input without inspecting the newly loaded Scene."""
+
+        driver = self._shortcut_proof_driver
+        if driver is None:
+            return
+        abandon = getattr(driver, "abandon", None)
+        stop_error: str | None = None
+        try:
+            if callable(abandon):
+                abandon()
+            else:
+                self._hard_stop_shortcut_driver(driver)
+        except Exception as error:
+            self._hard_stop_shortcut_driver(driver)
+            stop_error = f"Shortcut proof document replacement stop failed: {error}"
+        finally:
+            if self._shortcut_proof_driver is driver:
+                self._shortcut_proof_driver = None
+        self.error = stop_error or (
+            "Shortcut proof document was replaced; Runtime recovery is required"
+        )
+        self.status = "Shortcut proof recovery required"
+
+    @staticmethod
+    def _hard_stop_shortcut_driver(driver: Any) -> None:
+        """Best-effort no-Scene stop for a malformed legacy driver instance."""
+
+        callback = getattr(driver, "_timer_callback", None)
+        timers = bpy.app.timers
+        if callable(callback):
+            try:
+                is_registered = getattr(timers, "is_registered", None)
+                if not callable(is_registered) or is_registered(callback):
+                    timers.unregister(callback)
+            except (ReferenceError, RuntimeError, ValueError):
+                pass
+        steps = getattr(driver, "_steps", None)
+        if isinstance(steps, list):
+            steps.clear()
+        if hasattr(driver, "_terminal"):
+            driver._terminal = True
 
     def _queue_proposal_decision(
         self, proposal_id: str, decision: str
@@ -490,6 +600,11 @@ class CompanionController:
 
     def switch_revision_branch(self, thread_id: str) -> None:
         from .. import get_session, replace_session
+
+        if self.shortcut_mutation_blocked:
+            raise ValueError(
+                "Native Undo must restore the shortcut proof before switching revision branches"
+            )
 
         branch = self._revision_branch(thread_id)
         if branch["status"] != "accepted" or branch["plan"] is None:
@@ -1069,11 +1184,16 @@ class CompanionController:
     ) -> bool:
         """Validate fully before replacing the active session."""
         from .. import get_session, replace_session
+        if self.shortcut_mutation_blocked:
+            raise ValueError(
+                "Native Undo must restore the shortcut proof before replacing the walkthrough"
+            )
 
         replacement = self._validated_session(plan, plan_content_sha256)
         # Only an explicit accept_proposal() call may authorize remote action
         # execution for a plan. Any other installation path revokes that proof.
         self._last_accepted_proposal_id = None
+        self._last_accepted_proposal_decision = None
         plan_content_sha256 = replacement.plan_content_sha256
         plan_id = replacement.plan_id
         revision = replacement.revision
@@ -1760,6 +1880,14 @@ class CompanionController:
         transport = self._transport
         decision = self._queue_proposal_decision(proposal_id, "accepted")
         self._last_accepted_proposal_id = proposal_id
+        self._last_accepted_proposal_decision = {
+            "decisionId": decision["decisionId"],
+            "proposalId": decision["proposalId"],
+            "instanceId": decision["instanceId"],
+            "adapterId": decision["adapterId"],
+            "decision": decision["decision"],
+            "decidedAt": decision["occurredAt"],
+        }
         self.proposed_plan = None
         self.proposal_session = None
         self._active_revision_lineage = accepted_lineage
@@ -1956,6 +2084,608 @@ class CompanionController:
         self.error = message
         self.status = "Action execution rejected"
 
+    @staticmethod
+    def _shortcut_canonical_sha256(value: dict[str, Any]) -> str:
+        return CompanionTransport._canonical_sha256(value)
+
+    @staticmethod
+    def _shortcut_now() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _shortcut_result_identity(delivery: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: deepcopy(delivery[key])
+            for key in (
+                "formatVersion", "requestId", "replayId", "proofId", "deliveryId",
+                "target", "targetProfile", "proposalId", "plan", "executionId",
+                "leafId", "interactionCatalogVersion",
+                "interactionCatalogContentSha256", "shortcutTrackContentSha256",
+                "bindingContentSha256", "binding", "executorId",
+                "executionBoundary", "authorization", "transport", "operationIds",
+                "expectedState", "requestedAt", "dispatchedAt",
+            )
+        }
+
+    def _validate_shortcut_proof_authority(
+        self, delivery: dict[str, Any], *, require_idle_driver: bool
+    ) -> tuple[DemoSession, dict[str, Any]]:
+        """Re-check immutable accepted authority immediately before native input."""
+        from .. import get_session
+        from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
+
+        if require_idle_driver and self._shortcut_proof_driver is not None:
+            raise ValueError("Another shortcut proof is already executing")
+        if shortcut_history_mutation_locked():
+            raise ValueError("A shortcut proof mutation remains locked pending native Undo")
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Shortcut proof requires the live Companion lease")
+        session = get_session()
+        binding = delivery["binding"]
+        if delivery["target"] != {"adapterId": "blender", "instanceId": self.instance_id}:
+            raise ValueError("Shortcut proof targets a different Companion")
+        if delivery["targetProfile"] != "factory_cube_8_12_6":
+            raise ValueError("Shortcut proof target profile is unsupported")
+        if self._last_accepted_proposal_id != delivery["proposalId"]:
+            raise ValueError("Shortcut proof proposal was not accepted locally")
+        if self._last_accepted_proposal_decision != binding["acceptedDecision"]:
+            raise ValueError("Shortcut proof does not bind the exact local acceptance decision")
+        if self.proposed_plan is not None or self._proposal_candidates or self.pending_plan is not None:
+            raise ValueError("A plan or proposal is still pending review")
+        if session.observation_blocked:
+            raise ValueError("The current Observation success gate is blocked")
+        if not session.started or session.execution_id is None:
+            raise ValueError("The accepted walkthrough is not running")
+        expected_plan = {
+            "id": session.plan_id,
+            "revision": session.revision,
+            "contentSha256": session.plan_content_sha256,
+        }
+        if delivery["plan"] != expected_plan or binding["plan"] != expected_plan:
+            raise ValueError("Shortcut proof plan does not match the active accepted session")
+        if delivery["executionId"] != session.execution_id:
+            raise ValueError("Shortcut proof execution id does not match the active session")
+        last_report = self.last_report
+        if not isinstance(last_report, dict) or delivery["expectedState"] != {
+            "reportId": last_report.get("reportId"),
+            "sequence": last_report.get("sequence"),
+        }:
+            raise ValueError("Shortcut proof expected state is stale")
+        if last_report.get("protocolVersion") != "1.5.0":
+            raise ValueError("Shortcut proof requires native Undo protocol 1.5")
+        expected_sequence = delivery["expectedState"]["sequence"]
+        if expected_sequence > getattr(transport, "last_delivered_sequence", self.last_delivered_sequence):
+            raise ValueError("Shortcut proof expected state was not delivered")
+        next_index = session.active_index + 1
+        if next_index < 0 or next_index >= len(session.steps):
+            raise ValueError("The accepted walkthrough has no next leaf")
+        candidate = session.steps[next_index]
+        source_step = self._source_step(session, candidate.id)
+        if source_step is None or candidate.id != delivery["leafId"] or binding["leafId"] != candidate.id:
+            raise ValueError("Shortcut proof leaf is not the exact accepted next leaf")
+        if source_step.get("action") != binding["acceptedAction"]:
+            raise ValueError("Shortcut proof action does not match the accepted next leaf")
+        if binding["proposalId"] != delivery["proposalId"] or binding["executionId"] != delivery["executionId"]:
+            raise ValueError("Shortcut proof binding identity is inconsistent")
+        if binding["startState"] != delivery["expectedState"]:
+            raise ValueError("Shortcut proof binding start state is inconsistent")
+        raw_catalog = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        catalog_sha256 = self._shortcut_canonical_sha256(raw_catalog)
+        materialization = binding["materialization"]
+        if (
+            delivery["interactionCatalogVersion"] != BUNDLED_INTERACTION_CATALOG.catalog_version
+            or materialization["interactionCatalogVersion"] != BUNDLED_INTERACTION_CATALOG.catalog_version
+            or delivery["interactionCatalogContentSha256"] != catalog_sha256
+            or materialization["interactionCatalogContentSha256"] != catalog_sha256
+        ):
+            raise ValueError("Shortcut proof does not bind the bundled InteractionCatalog")
+        recipe = BUNDLED_INTERACTION_CATALOG.recipe_for(binding["actionName"])
+        proof = (
+            None
+            if recipe is None or recipe.procedure_materialization is None
+            else recipe.procedure_materialization.shortcut.proof_execution
+        )
+        if (
+            proof is None
+            or proof.executor_id != delivery["executorId"]
+            or proof.target_profile != delivery["targetProfile"]
+            or proof.execution_boundary != delivery["executionBoundary"]
+            or proof.authorization != delivery["authorization"]
+            or proof.transport != delivery["transport"]
+            or list(proof.operation_ids) != delivery["operationIds"]
+            or proof.os_hid_input is not False
+            or proof.managed_action_executed is not False
+            or proof.managed_receipt_created is not False
+        ):
+            raise ValueError("Shortcut proof executor is not authorized by the bundled catalog")
+        return session, source_step
+
+    def _shortcut_progress_payloads(
+        self, delivery: dict[str, Any], receipts: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        identity = self._shortcut_result_identity(delivery)
+        return [
+            {
+                **deepcopy(identity),
+                "status": "in_progress",
+                "completedOperationIds": deepcopy(delivery["operationIds"][:index]),
+                "receiptChainHeadSha256": receipt["contentSha256"],
+                "occurredAt": receipt["occurredAt"],
+            }
+            for index, receipt in enumerate(receipts, start=1)
+        ]
+
+    def _shortcut_result_payload(
+        self,
+        delivery: dict[str, Any],
+        *,
+        status: str,
+        requires_undo: bool,
+        terminal_evidence: dict[str, Any],
+        error: str | None,
+        occurred_at: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            **self._shortcut_result_identity(delivery),
+            "status": status,
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "requiresUndoToUnlock": requires_undo,
+            "terminalEvidence": terminal_evidence,
+            "error": error,
+            "occurredAt": occurred_at or self._shortcut_now(),
+        }
+
+    def _shortcut_strong_observation(
+        self, delivery: dict[str, Any], evidence: dict[str, Any]
+    ) -> dict[str, Any]:
+        observation = evidence["observation"]
+        flags = observation["modifierFlags"]
+        strong = {
+            "kind": "subdivision_surface_shortcut_ready",
+            "satisfied": True,
+            "observationId": str(uuid.uuid4()),
+            "observedAt": observation["observedAt"],
+            "targetId": delivery["binding"]["acceptedAction"]["arguments"]["targetId"],
+            "modifierType": "SUBSURF",
+            "modifierCount": observation["modifierCount"],
+            "viewportLevel": observation["viewportLevel"],
+            "subdivisionType": flags["subdivision_type"],
+            "renderLevels": observation["renderLevel"],
+            "quality": flags["quality"],
+            "modifierStackMatches": observation["subsurfModifierCount"] == 1,
+            "evaluatedTopologyWithinBounds": True,
+            "sceneFingerprintSha256": observation["sceneFingerprintSha256"],
+        }
+        strong["contentSha256"] = self._shortcut_canonical_sha256(strong)
+        return strong
+
+    def _shortcut_success_attestation(
+        self,
+        delivery: dict[str, Any],
+        evidence: dict[str, Any],
+        checkpoint: dict[str, Any],
+        strong: dict[str, Any],
+    ) -> dict[str, Any]:
+        attestation = {
+            "formatVersion": "1.0.0",
+            "attestationId": str(uuid.uuid4()),
+            "deliveryId": delivery["deliveryId"],
+            "binding": deepcopy(delivery["binding"]),
+            "bindingContentSha256": delivery["bindingContentSha256"],
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "executor": {
+                "executorId": delivery["executorId"],
+                "executionBoundary": delivery["executionBoundary"],
+                "transport": delivery["transport"],
+                "osHidInput": False,
+            },
+            "operationReceipts": deepcopy(evidence["operationReceipts"]),
+            "strongObservation": strong,
+            "nativeUndoCheckpoint": deepcopy(checkpoint),
+            "attestedAt": self._shortcut_now(),
+        }
+        attestation["integrity"] = {
+            "algorithm": "sha256",
+            "canonicalization": "operatingline-json-value-v1",
+            "contentSha256": self._shortcut_canonical_sha256(attestation),
+        }
+        return attestation
+
+    def _handle_shortcut_proof_complete(
+        self, delivery: dict[str, Any], evidence: dict[str, Any]
+    ) -> None:
+        from ..infrastructure.shortcut_history import arm_shortcut_history
+
+        transport = self._transport
+        receipts = list(evidence["operationReceipts"])
+        if transport is not None:
+            for progress in self._shortcut_progress_payloads(delivery, receipts):
+                transport.submit_shortcut_proof_progress(progress)
+        checkpoint_armed = False
+        try:
+            target_id = delivery["binding"]["acceptedAction"]["arguments"]["targetId"]
+            strong = self._shortcut_strong_observation(delivery, evidence)
+            terminal_result: dict[str, Any] | None = None
+
+            def build_terminal_result(checkpoint_value: dict[str, Any]) -> dict[str, Any]:
+                nonlocal terminal_result
+                attestation = self._shortcut_success_attestation(
+                    delivery, evidence, checkpoint_value, strong
+                )
+                terminal_result = self._shortcut_result_payload(
+                    delivery,
+                    status="succeeded",
+                    requires_undo=True,
+                    terminal_evidence={"kind": "succeeded_locked", "attestation": attestation},
+                    error=None,
+                )
+                return terminal_result
+
+            checkpoint = arm_shortcut_history(
+                bpy.context.scene,
+                evidence,
+                proof_id=delivery["proofId"],
+                replay_id=delivery["replayId"],
+                target_id=target_id,
+                strong_observation_content_sha256=strong["contentSha256"],
+                terminal_result_builder=build_terminal_result,
+            )
+            checkpoint_armed = True
+            if terminal_result is None:
+                raise RuntimeError("Shortcut proof terminal result was not persisted")
+            if transport is not None:
+                transport.submit_shortcut_proof_result(terminal_result)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            if checkpoint_armed:
+                self._shortcut_proof_checkpoint = deepcopy(checkpoint)
+                self._shortcut_proof_delivery = deepcopy(delivery)
+                self._shortcut_proof_driver = None
+                self.error = f"Shortcut proof result delivery failed while locked: {error}"
+                self.status = "Shortcut proof succeeded locally; native Undo required"
+                return
+            failed_evidence = deepcopy(evidence)
+            failed_evidence.update(
+                {
+                    "ok": False,
+                    "failureStatus": "failed_checkpointed",
+                    "failedStep": "arm successful shortcut checkpoint",
+                    "error": f"{type(error).__name__}: {error}",
+                    "requiresUndoRecovery": True,
+                    "currentSceneSnapshot": deepcopy(evidence["finalSceneSnapshot"]),
+                    "currentSceneFingerprintSha256": evidence[
+                        "finalSceneFingerprintSha256"
+                    ],
+                    "operationReceiptPrefixVerified": True,
+                    "operationReceiptChainComplete": True,
+                    "operationReceiptChainVerified": True,
+                    "nativeHistory": {
+                        "status": "failed_checkpointed",
+                        "availability": "failed_checkpointed",
+                        "reason": "Success checkpoint arming failed after the complete mutation proof.",
+                    },
+                }
+            )
+            failed_evidence.pop("requiresUndoToUnlock", None)
+            self._handle_shortcut_proof_failure(delivery, failed_evidence)
+            return
+        self._shortcut_proof_checkpoint = deepcopy(checkpoint)
+        self._shortcut_proof_delivery = deepcopy(delivery)
+        self._shortcut_proof_driver = None
+        self.error = ""
+        self.status = (
+            "Shortcut proof succeeded; native Undo required to unlock"
+            if transport is not None
+            else "Shortcut proof succeeded offline; native Undo required to unlock"
+        )
+
+    def _handle_shortcut_proof_failure(
+        self, delivery: dict[str, Any], evidence: dict[str, Any]
+    ) -> None:
+        transport = self._transport
+        self._shortcut_proof_driver = None
+        error = str(evidence.get("error") or "Shortcut proof failed")
+        receipts = list(evidence.get("operationReceipts") or [])
+        terminal_result: dict[str, Any] | None = None
+        if transport is not None:
+            for progress in self._shortcut_progress_payloads(delivery, receipts):
+                transport.submit_shortcut_proof_progress(progress)
+        failure_status = evidence.get("failureStatus")
+        if failure_status == "preflight_rejected":
+            status = "rejected"
+            terminal = {"kind": "rejected_before_mutation", "mutationStarted": False}
+            requires_undo = False
+        elif failure_status == "failed_restored":
+            fingerprint = evidence.get("currentSceneFingerprintSha256")
+            observation = {
+                "satisfied": True,
+                "restorationObservationId": str(uuid.uuid4()),
+                "sceneFingerprintSha256": fingerprint,
+            }
+            observation["contentSha256"] = self._shortcut_canonical_sha256(observation)
+            status = "failed_restored"
+            terminal = {
+                "kind": "failed_restored",
+                "receiptPrefix": deepcopy(receipts),
+                "lastCompletedOperationId": evidence.get("lastCompletedOperation"),
+                "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                "currentSceneFingerprintSha256": fingerprint,
+                "nativeUndoObservation": observation,
+                "mutationStarted": True,
+            }
+            requires_undo = False
+        else:
+            from ..infrastructure.shortcut_history import arm_failed_shortcut_history
+
+            try:
+                target_id = delivery["binding"]["acceptedAction"]["arguments"]["targetId"]
+                def build_failure_terminal_result(
+                    checkpoint_value: dict[str, Any],
+                ) -> dict[str, Any]:
+                    nonlocal terminal_result
+                    terminal_result = self._shortcut_result_payload(
+                        delivery,
+                        status="failed_checkpointed",
+                        requires_undo=True,
+                        terminal_evidence={
+                            "kind": "failed_checkpointed",
+                            "checkpoint": deepcopy(checkpoint_value),
+                            "receiptPrefix": deepcopy(receipts),
+                            "lastCompletedOperationId": evidence.get("lastCompletedOperation"),
+                            "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                            "currentSceneFingerprintSha256": evidence["currentSceneFingerprintSha256"],
+                            "mutationStarted": True,
+                        },
+                        error=error,
+                    )
+                    return terminal_result
+
+                checkpoint = arm_failed_shortcut_history(
+                    bpy.context.scene,
+                    evidence,
+                    proof_id=delivery["proofId"],
+                    replay_id=delivery["replayId"],
+                    target_id=target_id,
+                    terminal_result_builder=build_failure_terminal_result,
+                )
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError) as checkpoint_error:
+                from ..infrastructure.shortcut_history import (
+                    lock_shortcut_history_indeterminate,
+                )
+
+                lock_shortcut_history_indeterminate(
+                    f"Failure checkpoint could not arm: {checkpoint_error}"
+                )
+                self._shortcut_proof_delivery = deepcopy(delivery)
+                self.error = f"{error}; failure checkpoint could not arm: {checkpoint_error}"
+                self.status = "Shortcut proof failed closed; native Undo required"
+                return
+            status = "failed_checkpointed"
+            assert terminal_result is not None
+            terminal = terminal_result["terminalEvidence"]
+            requires_undo = True
+            self._shortcut_proof_checkpoint = deepcopy(checkpoint)
+            self._shortcut_proof_delivery = deepcopy(delivery)
+        if transport is not None:
+            result = (
+                terminal_result
+                if status == "failed_checkpointed"
+                else self._shortcut_result_payload(
+                    delivery,
+                    status=status,
+                    requires_undo=requires_undo,
+                    terminal_evidence=terminal,
+                    error=error,
+                )
+            )
+            assert result is not None
+            transport.submit_shortcut_proof_result(result)
+        self.error = error
+        self.status = {
+            "rejected": "Shortcut proof rejected",
+            "failed_restored": "Shortcut proof failed and restored",
+            "failed_checkpointed": (
+                "Shortcut proof failed with mutation; native Undo required"
+            ),
+        }[status]
+
+    def _handle_shortcut_proof_execute_request(self, delivery: Any) -> None:
+        from ..infrastructure.shortcut_proof import SubdivisionSurfaceF9ShortcutProof
+
+        transport = self._transport
+        if transport is None or not isinstance(delivery, dict):
+            return
+        request_id = delivery.get("requestId")
+        if request_id in self._seen_shortcut_proof_request_ids:
+            self.error = "Shortcut proof request was already consumed; execution will not be replayed"
+            self.status = "Shortcut proof recovery required"
+            return
+        if isinstance(request_id, str):
+            if len(self._seen_shortcut_proof_request_ids) >= 256:
+                self._seen_shortcut_proof_request_ids.pop()
+            self._seen_shortcut_proof_request_ids.add(request_id)
+        try:
+            self._validate_shortcut_proof_authority(delivery, require_idle_driver=True)
+            target_level = delivery["binding"]["acceptedAction"]["arguments"]["viewportLevel"]
+            driver = SubdivisionSurfaceF9ShortcutProof(
+                target_level,
+                proof_id=delivery["proofId"],
+                request_id=delivery["requestId"],
+                delivery_id=delivery["deliveryId"],
+                binding_content_sha256=delivery["bindingContentSha256"],
+            )
+            self._shortcut_proof_driver = driver
+            self._shortcut_proof_delivery = deepcopy(delivery)
+
+            def preflight_hook() -> bool:
+                self._validate_shortcut_proof_authority(delivery, require_idle_driver=False)
+                return self._shortcut_proof_driver is driver and self._shortcut_proof_delivery == delivery
+
+            driver.start(
+                preflight_hook=preflight_hook,
+                on_complete=lambda evidence: self._handle_shortcut_proof_complete(delivery, evidence),
+                on_failure=lambda evidence: self._handle_shortcut_proof_failure(delivery, evidence),
+            )
+            self.status = "Shortcut proof executing"
+            self.error = ""
+        except (IndexError, KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._shortcut_proof_driver = None
+            self._handle_shortcut_proof_failure(delivery, {
+                "failureStatus": "preflight_rejected",
+                "error": str(error),
+                "mutationStarted": False,
+                "operationReceipts": [],
+            })
+
+    def _handle_shortcut_proof_recovery_request(self, delivery: Any) -> None:
+        from ..infrastructure.shortcut_history import (
+            reconcile_shortcut_transition_outbox,
+            rebind_shortcut_history,
+            shortcut_history_has_transition_outbox,
+            shortcut_history_transition_checkpoint,
+        )
+
+        transport = self._transport
+        if transport is None or not isinstance(delivery, dict):
+            return
+        try:
+            ack = (
+                reconcile_shortcut_transition_outbox(bpy.context.scene, delivery)
+                if shortcut_history_has_transition_outbox()
+                else rebind_shortcut_history(bpy.context.scene, delivery)
+            )
+            history = delivery["history"]
+            base_delivery = {
+                key: deepcopy(value)
+                for key, value in delivery.items()
+                if key not in {
+                    "kind", "recoveryId", "history",
+                    "expectedMarkerContentSha256", "expectedResultContentSha256",
+                    "expectedStatus",
+                    "recoveryRequestedAt",
+                }
+            }
+            self._shortcut_proof_delivery = base_delivery
+            checkpoint = shortcut_history_transition_checkpoint()
+            if checkpoint is None:
+                raise RuntimeError("Shortcut proof rebound checkpoint is unavailable")
+            self._shortcut_proof_checkpoint = deepcopy(checkpoint)
+            transport.submit_shortcut_proof_recovery_ack(ack)
+            self.error = ""
+            self.status = "Shortcut proof native history reconciliation queued"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self.error = f"Shortcut proof native history recovery failed: {error}"
+            self.status = "Shortcut proof recovery required"
+
+    def _handle_shortcut_terminal_reconcile_request(self, delivery: Any) -> None:
+        from ..infrastructure.shortcut_history import (
+            reconcile_shortcut_terminal_outbox,
+            shortcut_history_current_attestation,
+        )
+
+        transport = self._transport
+        if transport is None or not isinstance(delivery, dict):
+            return
+        try:
+            ack = reconcile_shortcut_terminal_outbox(bpy.context.scene, delivery)
+            base_delivery = {
+                key: deepcopy(value)
+                for key, value in delivery.items()
+                if key not in {
+                    "kind", "recoveryId", "acknowledgedProgressReceiptChainHeads",
+                    "recoveryRequestedAt",
+                }
+            }
+            checkpoint = shortcut_history_current_attestation()
+            if checkpoint is None:
+                raise RuntimeError("Shortcut terminal reconciliation checkpoint is unavailable")
+            self._shortcut_proof_delivery = base_delivery
+            self._shortcut_proof_checkpoint = deepcopy(checkpoint)
+            transport.submit_shortcut_proof_recovery_ack(ack)
+            self.error = ""
+            self.status = "Shortcut proof terminal result reconciled; native Undo required"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self.error = f"Shortcut proof terminal reconciliation failed: {error}"
+            self.status = "Shortcut proof recovery required"
+
+    def _shortcut_history_restored(self, transition: Any) -> dict[str, Any]:
+        delivery = self._shortcut_proof_delivery
+        checkpoint = self._shortcut_proof_checkpoint
+        if delivery is None or checkpoint is None:
+            raise RuntimeError("Shortcut proof transition identity is unavailable")
+        observation = {
+            "satisfied": True,
+            "restorationObservationId": str(uuid.uuid4()),
+            "sceneFingerprintSha256": transition.scene_fingerprint_sha256,
+        }
+        observation["contentSha256"] = self._shortcut_canonical_sha256(observation)
+        terminal = {
+            "kind": "restored",
+            "sourceCheckpointId": checkpoint["checkpointId"],
+            "undoLockId": checkpoint["undoLockId"],
+            "baselineSceneFingerprintSha256": checkpoint.get(
+                "baselineSceneFingerprintSha256",
+                checkpoint.get("baselineState", {}).get("sceneFingerprintSha256"),
+            ),
+            "lockedSceneFingerprintSha256": checkpoint.get(
+                "finalSceneFingerprintSha256",
+                checkpoint.get("currentState", {}).get("sceneFingerprintSha256"),
+            ),
+            "currentSceneFingerprintSha256": transition.scene_fingerprint_sha256,
+            "nativeUndoObservation": observation,
+            "restoredAt": transition.occurred_at,
+        }
+        return self._shortcut_result_payload(
+            delivery, status="restored", requires_undo=False,
+            terminal_evidence=terminal, error=None, occurred_at=transition.occurred_at,
+        )
+
+    def _shortcut_history_reapplied(self, transition: Any) -> dict[str, Any]:
+        delivery = self._shortcut_proof_delivery
+        checkpoint = self._shortcut_proof_checkpoint
+        if delivery is None or checkpoint is None:
+            raise RuntimeError("Shortcut proof transition identity is unavailable")
+        observation = {
+            "satisfied": True,
+            "redoObservationId": str(uuid.uuid4()),
+            "sceneFingerprintSha256": transition.scene_fingerprint_sha256,
+        }
+        observation["contentSha256"] = self._shortcut_canonical_sha256(observation)
+        terminal = {
+            "kind": "reapplied_locked",
+            "sourceCheckpointId": checkpoint["checkpointId"],
+            "undoLockId": checkpoint["undoLockId"],
+            "baselineSceneFingerprintSha256": checkpoint.get(
+                "baselineSceneFingerprintSha256",
+                checkpoint.get("baselineState", {}).get("sceneFingerprintSha256"),
+            ),
+            "lockedSceneFingerprintSha256": checkpoint.get(
+                "finalSceneFingerprintSha256",
+                checkpoint.get("currentState", {}).get("sceneFingerprintSha256"),
+            ),
+            "currentSceneFingerprintSha256": transition.scene_fingerprint_sha256,
+            "nativeRedoObservation": observation,
+            "reappliedAt": transition.occurred_at,
+        }
+        return self._shortcut_result_payload(
+            delivery, status="reapplied_locked", requires_undo=True,
+            terminal_evidence=terminal, error=None, occurred_at=transition.occurred_at,
+        )
+
+    def _submit_shortcut_transition_result(self, result: dict[str, object]) -> None:
+        transport = self._transport
+        if transport is None:
+            return
+        transport.submit_shortcut_proof_result(dict(result))
+        self.status = (
+            "Shortcut proof restored by native Undo"
+            if result.get("status") == "restored"
+            else "Shortcut proof reapplied; native Undo required to unlock"
+        )
+        self.error = ""
+
     def _handle_action_execute_request(self, delivery: Any) -> None:
         """Validate and invoke exactly the accepted session's canonical next step."""
         from .. import get_session
@@ -1989,6 +2719,10 @@ class CompanionController:
                 raise ValueError("A plan or proposal is still pending review")
             if session.observation_blocked:
                 raise ValueError("The current Observation success gate is blocked")
+            if self.shortcut_mutation_blocked:
+                raise ValueError(
+                    "Native Undo must restore the shortcut proof before managed action execution"
+                )
             if not session.started or session.execution_id is None:
                 raise ValueError("The accepted walkthrough is not running")
             if plan != {"id": session.plan_id, "revision": session.revision}:
@@ -2121,6 +2855,42 @@ class CompanionController:
                     break
                 if message.get("kind") == "action_execute_request":
                     self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") == "shortcut_proof_execute_request":
+                    self._handle_shortcut_proof_execute_request(message.get("request"))
+                elif message.get("kind") == "shortcut_proof_recovery_request":
+                    self._handle_shortcut_proof_recovery_request(message.get("request"))
+                elif message.get("kind") == "shortcut_proof_terminal_reconcile_request":
+                    self._handle_shortcut_terminal_reconcile_request(message.get("request"))
+                elif message.get("kind") in {
+                    "shortcut_proof_progress_rejected",
+                    "shortcut_proof_result_rejected",
+                    "shortcut_proof_recovery_rejected",
+                }:
+                    self.error = str(message.get("message") or "Runtime rejected shortcut proof evidence")
+                    self.status = "Shortcut proof reporting failed closed"
+                elif message.get("kind") == "shortcut_proof_result_acknowledged":
+                    from ..infrastructure.shortcut_history import (
+                        acknowledge_shortcut_transition_results,
+                    )
+
+                    result_sha256 = message.get("resultContentSha256")
+                    if isinstance(result_sha256, str):
+                        acknowledge_shortcut_transition_results([result_sha256])
+                    if not self.error:
+                        self.status = "Shortcut proof evidence acknowledged"
+                elif message.get("kind") == "shortcut_proof_recovery_acknowledged":
+                    from ..infrastructure.shortcut_history import (
+                        acknowledge_shortcut_transition_recovery,
+                    )
+
+                    recovery_id = message.get("recoveryId")
+                    if isinstance(recovery_id, str):
+                        acknowledge_shortcut_transition_recovery(recovery_id)
+                    if not self.error:
+                        self.status = (
+                            "Shortcut proof history recovery acknowledged; "
+                            "native Undo required"
+                        )
                 elif message.get("kind") == "plan":
                     plan = message.get("plan")
                     try:

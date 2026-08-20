@@ -37,6 +37,12 @@ def _companion():
 
 
 def _prepare_history(operator, context, session, operation: str) -> bool:
+    if _companion().shortcut_mutation_blocked:
+        message = (
+            "Native Undo must restore the shortcut proof before changing the walkthrough or scene"
+        )
+        operator.report({"ERROR"}, message)
+        return False
     try:
         prepare_native_history(session, context.scene, operation)
     except (OSError, RuntimeError, ValueError) as error:

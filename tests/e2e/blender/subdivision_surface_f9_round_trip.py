@@ -1,64 +1,64 @@
-"""Foreground UI proof for setting Subdivision Surface viewport levels through F9."""
+"""Foreground proof for the production Subdivision Surface shortcut driver."""
 
 from __future__ import annotations
 
+import copy
+import importlib.util
 import json
 import os
-import traceback
 from pathlib import Path
-from typing import Callable
+import sys
 
 import bpy
 
 
+sys.dont_write_bytecode = True
 RESULT_PATH = Path(os.environ["OPERATINGLINE_SUBDIVISION_SURFACE_F9_RESULT"])
 TARGET_LEVEL = int(os.environ["OPERATINGLINE_SUBDIVISION_SURFACE_VIEWPORT_LEVEL"])
-assert TARGET_LEVEL in {1, 2, 3}
-
-EXPECTED_TOPOLOGY = {
-    1: {"vertices": 26, "edges": 48, "polygons": 24},
-    2: {"vertices": 98, "edges": 192, "polygons": 96},
-    3: {"vertices": 386, "edges": 768, "polygons": 384},
+FIXTURE_IDENTITY = {
+    "proof_id": "00000000-0000-4000-8000-000000000021",
+    "request_id": "00000000-0000-4000-8000-000000000022",
+    "delivery_id": "00000000-0000-4000-8000-000000000023",
+    "binding_content_sha256": "b" * 64,
 }
-EXPECTED_MODIFIER_FLAGS = {
-    "subdivision_type": "CATMULL_CLARK",
-    "quality": 3,
-    "show_viewport": True,
-    "show_render": True,
-    "show_in_editmode": True,
-    "show_on_cage": False,
-    "show_only_control_edges": True,
-    "use_limit_surface": True,
-    "use_creases": True,
-    "use_custom_normals": False,
-    "boundary_smooth": "ALL",
-    "uv_smooth": "PRESERVE_BOUNDARIES",
-}
-
-window = bpy.context.window
-assert window is not None
-area = next(candidate for candidate in window.screen.areas if candidate.type == "VIEW_3D")
-region = next(candidate for candidate in area.regions if candidate.type == "WINDOW")
-space = area.spaces.active
-center_x = area.x + area.width // 2
-center_y = area.y + area.height // 2
-ui_scale = bpy.context.preferences.system.ui_scale
-level_point = (
-    center_x + round(210 * ui_scale),
-    center_y - round(50 * ui_scale),
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DRIVER_PATH = (
+    REPO_ROOT
+    / "adapters"
+    / "blender"
+    / "extension"
+    / "operating_line"
+    / "infrastructure"
+    / "shortcut_proof.py"
 )
+spec = importlib.util.spec_from_file_location(
+    "operating_line_subdivision_surface_shortcut_proof_e2e",
+    DRIVER_PATH,
+)
+assert spec is not None and spec.loader is not None
+shortcut_proof = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = shortcut_proof
+spec.loader.exec_module(shortcut_proof)
 
-initial_active = bpy.context.view_layer.objects.active
-assert initial_active is not None
-assert initial_active.name == "Cube"
-assert initial_active.type == "MESH"
-mesh_data_pointer_before = initial_active.data.as_pointer()
-mesh_datablock_count_before = len(bpy.data.meshes)
 
-captured_operator_id: str | None = None
-captured_operator_properties: dict[str, object] = {}
-source_operator_properties: dict[str, object] = {}
-source_modifier_levels: dict[str, int] = {}
+def canonical_factory_cube_from_scene_snapshot(
+    snapshot: dict[str, object],
+) -> dict[str, object]:
+    mesh = snapshot["mesh"]
+    return {
+        "transform": snapshot["transform"],
+        "geometry": {
+            key: mesh[key]
+            for key in (
+                "vertices",
+                "edgeEndpoints",
+                "quadFaces",
+                "shapeKeys",
+                "hasCustomNormals",
+                "subdivisionAttributes",
+            )
+        },
+    }
 
 
 def write_result(payload: dict[str, object]) -> None:
@@ -69,267 +69,165 @@ def write_result(payload: dict[str, object]) -> None:
     )
 
 
-def simulate(
-    event_type: str,
-    value: str = "PRESS",
-    *,
-    unicode: str = "",
-    x: int | None = None,
-    y: int | None = None,
-    ctrl: bool = False,
-) -> None:
-    event: dict[str, object] = {
-        "type": event_type,
-        "value": value,
-        "x": center_x if x is None else x,
-        "y": center_y if y is None else y,
-        "ctrl": ctrl,
-    }
-    if unicode:
-        event["unicode"] = unicode
-    window.event_simulate(**event)
+def fail(payload: dict[str, object]) -> None:
+    write_result(payload)
+    print("SUBDIVISION_SURFACE_F9 FAIL " + json.dumps(payload, sort_keys=True), flush=True)
+    os._exit(1)
 
 
-def capture_operator() -> None:
-    global captured_operator_id, captured_operator_properties
-
-    candidates = [
-        operator
-        for operator in bpy.context.window_manager.operators
-        if operator.bl_idname == "OBJECT_OT_subdivision_set"
-    ]
-    assert candidates, "OBJECT_OT_subdivision_set was not present in the operator stack"
-    operator = candidates[-1]
-    captured_operator_id = operator.bl_idname
-    captured_operator_properties = {
-        name: getattr(operator.properties, name)
-        for name in ("level", "relative", "ensure_modifier")
-        if hasattr(operator.properties, name)
-    }
-
-
-def capture_source_operation() -> None:
-    global source_operator_properties, source_modifier_levels
-
-    candidates = [
-        operator
-        for operator in bpy.context.window_manager.operators
-        if operator.bl_idname == "OBJECT_OT_subdivision_set"
-    ]
-    assert candidates
-    operator = candidates[-1]
-    source_operator_properties = {
-        name: getattr(operator.properties, name)
-        for name in ("level", "relative", "ensure_modifier")
-        if hasattr(operator.properties, name)
-    }
-    assert source_operator_properties == {
-        "level": 1,
-        "relative": False,
-        "ensure_modifier": True,
-    }
-
-    active = bpy.context.view_layer.objects.active
-    assert active is not None
-    modifiers = [modifier for modifier in active.modifiers if modifier.type == "SUBSURF"]
-    assert len(modifiers) == 1
-    source_modifier_levels = {
-        "levels": modifiers[0].levels,
-        "render_levels": modifiers[0].render_levels,
-    }
-    assert source_modifier_levels == {"levels": 1, "render_levels": 2}
-
-
-def finish() -> None:
-    active = bpy.context.view_layer.objects.active
-    assert captured_operator_id == "OBJECT_OT_subdivision_set"
-    assert captured_operator_properties == {
-        "level": TARGET_LEVEL,
-        "relative": False,
-        "ensure_modifier": True,
-    }
-    assert bpy.context.mode == "OBJECT"
-    assert active is not None
-    assert active.type == "MESH"
-    assert active.name == "Cube"
-
-    modifiers = [modifier for modifier in active.modifiers if modifier.type == "SUBSURF"]
-    assert len(modifiers) == 1
-    modifier = modifiers[0]
-    modifier_flags = {
-        name: getattr(modifier, name) for name in EXPECTED_MODIFIER_FLAGS
-    }
-    assert modifier.levels == TARGET_LEVEL
-    assert modifier.render_levels == 2
-    assert modifier_flags == EXPECTED_MODIFIER_FLAGS
-
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    evaluated_object = active.evaluated_get(depsgraph)
-    evaluated_mesh = evaluated_object.to_mesh()
-    try:
-        evaluated_topology = {
-            "vertices": len(evaluated_mesh.vertices),
-            "edges": len(evaluated_mesh.edges),
-            "polygons": len(evaluated_mesh.polygons),
-        }
-    finally:
-        evaluated_object.to_mesh_clear()
-    assert evaluated_topology == EXPECTED_TOPOLOGY[TARGET_LEVEL]
-
-    mesh_data_pointer_after = active.data.as_pointer()
-    mesh_datablock_count_after = len(bpy.data.meshes)
-    assert mesh_data_pointer_after == mesh_data_pointer_before
-    assert mesh_datablock_count_after == mesh_datablock_count_before
-
-    result = {
+def complete(payload: dict[str, object]) -> None:
+    receipts = payload["operationReceipts"]
+    preflight = payload["preflight"]
+    observation = payload["observation"]
+    native_history = payload["nativeHistory"]
+    baseline_snapshot = payload["baselineSceneSnapshot"]
+    final_snapshot = payload["finalSceneSnapshot"]
+    assert isinstance(receipts, list) and len(receipts) == 4
+    assert shortcut_proof.verify_operation_receipt_chain(receipts)
+    assert payload == {
+        **payload,
         "ok": True,
-        "blenderVersion": bpy.app.version_string,
-        "viewportLevel": TARGET_LEVEL,
-        "renderLevel": modifier.render_levels,
-        "operatorId": captured_operator_id,
-        "sourceOperatorProperties": source_operator_properties,
-        "sourceModifierLevels": source_modifier_levels,
-        "operatorProperties": captured_operator_properties,
-        "subsurfModifierCount": len(modifiers),
-        "modifierName": modifier.name,
-        "modifierFlags": modifier_flags,
-        "meshDataPointerBefore": mesh_data_pointer_before,
-        "meshDataPointerAfter": mesh_data_pointer_after,
-        "meshDatablockCountBefore": mesh_datablock_count_before,
-        "meshDatablockCountAfter": mesh_datablock_count_after,
-        "evaluatedTopology": evaluated_topology,
-        "objectName": active.name,
-        "mode": bpy.context.mode,
-        "levelPoint": level_point,
-        "uiScale": ui_scale,
-        "popupCloseEventSent": True,
+        "executorId": shortcut_proof.EXECUTOR_ID,
+        "evidenceClass": "blender_event_simulation",
+        "osHidInput": False,
+        "managedActionResult": "not_executed",
+        "managedIdentityVerified": False,
+        "operationReceiptChainVerified": True,
     }
-    write_result(result)
-    print("SUBDIVISION_SURFACE_F9 PASS " + json.dumps(result, sort_keys=True), flush=True)
+    assert [receipt["operationId"] for receipt in receipts] == list(
+        shortcut_proof.OPERATION_IDS
+    )
+    assert all(
+        receipt["proofId"] == FIXTURE_IDENTITY["proof_id"]
+        and receipt["requestId"] == FIXTURE_IDENTITY["request_id"]
+        and receipt["deliveryId"] == FIXTURE_IDENTITY["delivery_id"]
+        and receipt["bindingContentSha256"]
+        == FIXTURE_IDENTITY["binding_content_sha256"]
+        for receipt in receipts
+    )
+    assert [len(receipt["eventEvidence"]) for receipt in receipts] == [2, 2, 9, 2]
+    assert preflight == {
+        "satisfied": True,
+        "targetProfile": "factory_cube_8_12_6",
+        "authorizationHookVerified": True,
+        "blenderVersionSupported": True,
+        "splashDisabled": True,
+        "workspace": "Layout",
+        "areaType": "VIEW_3D",
+        "regionType": "WINDOW",
+        "keymap": "Blender",
+        "eventSimulateCapability": "callable",
+        "modalOperatorCount": 0,
+        "objectName": "Cube",
+        "objectPointer": observation["objectPointer"],
+        "meshPointer": observation["meshPointer"],
+        "meshDatablockCount": observation["meshDatablockCount"],
+        "mode": "OBJECT",
+        "selectedObjectCount": 1,
+        "modifierCount": 0,
+        "topology": {"vertices": 8, "edges": 12, "polygons": 6},
+    }
+    assert payload["mutationStarted"] is True
+    assert payload["targetProfile"] == "factory_cube_8_12_6"
+    assert payload["lastCompletedOperation"] == shortcut_proof.OPERATION_IDS[-1]
+    assert payload["requiresUndoToUnlock"] is True
+    assert (
+        shortcut_proof.compute_shortcut_scene_fingerprint_sha256(baseline_snapshot)
+        == payload["baselineSceneFingerprintSha256"]
+        == native_history["undoObservation"]["sceneFingerprintSha256"]
+    )
+    assert (
+        shortcut_proof.compute_shortcut_scene_fingerprint_sha256(final_snapshot)
+        == payload["finalSceneFingerprintSha256"]
+        == observation["sceneFingerprintSha256"]
+        == native_history["redoObservation"]["sceneFingerprintSha256"]
+    )
+    assert "pointer" not in json.dumps(baseline_snapshot).lower()
+    assert "pointer" not in json.dumps(final_snapshot).lower()
+    shortcut_proof.validate_factory_cube_canonical_snapshot(
+        canonical_factory_cube_from_scene_snapshot(baseline_snapshot)
+    )
+    shortcut_proof.validate_factory_cube_canonical_snapshot(
+        canonical_factory_cube_from_scene_snapshot(final_snapshot)
+    )
+    assert baseline_snapshot["transform"] == final_snapshot["transform"]
+    assert {
+        key: baseline_snapshot["mesh"][key]
+        for key in (
+            "vertices",
+            "edgeEndpoints",
+            "quadFaces",
+            "shapeKeys",
+            "hasCustomNormals",
+            "subdivisionAttributes",
+        )
+    } == {
+        key: final_snapshot["mesh"][key]
+        for key in (
+            "vertices",
+            "edgeEndpoints",
+            "quadFaces",
+            "shapeKeys",
+            "hasCustomNormals",
+            "subdivisionAttributes",
+        )
+    }
+    assert baseline_snapshot["modifiers"] == []
+    assert len(final_snapshot["modifiers"]) == 1
+    assert final_snapshot["modifiers"][0]["type"] == "SUBSURF"
+    assert final_snapshot["modifiers"][0]["levels"] == TARGET_LEVEL
+    anchor = payload["contextAnchorEventEvidence"]
+    assert anchor["type"] == "MOUSEMOVE" and anchor["value"] == "NOTHING"
+    assert anchor["ctrl"] is False and anchor["shift"] is False
+    assert anchor["point"]["role"] == "viewport_center"
+    assert all(
+        event["type"] != "ESC"
+        for receipt in receipts
+        for event in receipt["eventEvidence"]
+    )
+    assert [event["type"] for event in receipts[0]["eventEvidence"]] == [
+        "ONE",
+        "ONE",
+    ]
+    assert all(event["ctrl"] is True for event in receipts[0]["eventEvidence"])
+    assert [event["type"] for event in receipts[1]["eventEvidence"]] == ["F9", "F9"]
+    assert [event["type"] for event in receipts[2]["eventEvidence"]] == [
+        "MOUSEMOVE",
+        "LEFTMOUSE",
+        "LEFTMOUSE",
+        "LEFTMOUSE",
+        "LEFTMOUSE",
+        "A",
+        {1: "ONE", 2: "TWO", 3: "THREE"}[TARGET_LEVEL],
+        "RET",
+        "RET",
+    ]
+    assert [event["type"] for event in receipts[3]["eventEvidence"]] == ["RET", "RET"]
+    assert isinstance(observation, dict)
+    assert observation["satisfied"] is True
+    assert observation["viewportLevel"] == TARGET_LEVEL
+    assert observation["objectIdentityUnchanged"] is True
+    assert observation["meshIdentityUnchanged"] is True
+    assert observation["meshDatablockCountUnchanged"] is True
+    assert observation["modeUnchanged"] is True
+    assert isinstance(observation["observedAt"], str) and observation["observedAt"]
+    assert isinstance(native_history, dict)
+    assert native_history["availability"] == "verified"
+    assert native_history["boundary"] == "single_native_undo_redo"
+    assert [event["type"] for event in native_history["eventEvidence"]["undo"]] == [
+        "Z",
+        "Z",
+    ]
+    assert all(event["ctrl"] is True for event in native_history["eventEvidence"]["undo"])
+    assert all(
+        event["ctrl"] is True and event["shift"] is True
+        for event in native_history["eventEvidence"]["redo"]
+    )
+    assert native_history["undoObservation"]["subsurfModifierCount"] == 0
+    assert native_history["redoObservation"]["viewportLevel"] == TARGET_LEVEL
+    write_result(payload)
+    print("SUBDIVISION_SURFACE_F9 PASS " + json.dumps(payload, sort_keys=True), flush=True)
     bpy.ops.wm.quit_blender()
-
-
-Step = tuple[str, float, Callable[[], None]]
-steps: list[Step] = []
-
-
-def add_event(
-    label: str,
-    event_type: str,
-    value: str = "PRESS",
-    *,
-    delay: float = 0.1,
-    unicode: str = "",
-    x: int | None = None,
-    y: int | None = None,
-    ctrl: bool = False,
-) -> None:
-    steps.append(
-        (
-            label,
-            delay,
-            lambda: simulate(
-                event_type,
-                value,
-                unicode=unicode,
-                x=x,
-                y=y,
-                ctrl=ctrl,
-            ),
-        )
-    )
-
-
-def add_press_release(
-    label: str,
-    event_type: str,
-    *,
-    delay: float,
-    x: int | None = None,
-    y: int | None = None,
-    ctrl: bool = False,
-) -> None:
-    add_event(label + ":press", event_type, delay=0.04, x=x, y=y, ctrl=ctrl)
-    add_event(
-        label + ":release",
-        event_type,
-        "RELEASE",
-        delay=delay,
-        x=x,
-        y=y,
-        ctrl=ctrl,
-    )
-
-
-def add_double_click(label: str, point: tuple[int, int]) -> None:
-    add_event(label + ":hover", "MOUSEMOVE", "NOTHING", x=point[0], y=point[1])
-    for click_index in (1, 2):
-        add_event(
-            f"{label}:{click_index}:press",
-            "LEFTMOUSE",
-            delay=0.03,
-            x=point[0],
-            y=point[1],
-        )
-        add_event(
-            f"{label}:{click_index}:release",
-            "LEFTMOUSE",
-            "RELEASE",
-            delay=0.15 if click_index == 2 else 0.04,
-            x=point[0],
-            y=point[1],
-        )
-
-
-event_name_for_level = {1: "ONE", 2: "TWO", 3: "THREE"}
-
-# Each input is dispatched on its own timer turn. Ctrl+1 creates the modifier;
-# F9 then edits the registered operator's viewport level without replacing Mesh.
-add_event("dismiss splash", "ESC", delay=0.15)
-add_event("anchor cursor", "MOUSEMOVE", "NOTHING", delay=0.15)
-add_press_release("set subdivision level one", "ONE", ctrl=True, delay=0.7)
-steps.append(("capture source operation", 0.1, capture_source_operation))
-add_press_release("open redo panel", "F9", delay=0.5)
-add_double_click("edit viewport level", level_point)
-add_event("select viewport level text", "A", ctrl=True, delay=0.08)
-add_event(
-    "type viewport level",
-    event_name_for_level[TARGET_LEVEL],
-    unicode=str(TARGET_LEVEL),
-    delay=0.08,
-)
-add_press_release("confirm viewport level", "RET", delay=0.5)
-add_press_release("close redo panel", "RET", delay=0.5)
-steps.append(("capture subdivision operator", 0.1, capture_operator))
-steps.append(("verify result", 0.1, finish))
-
-
-def advance() -> float | None:
-    if not steps:
-        return None
-    label, delay, action = steps.pop(0)
-    print(f"SUBDIVISION_SURFACE_F9 step={label}", flush=True)
-    try:
-        with bpy.context.temp_override(
-            window=window,
-            area=area,
-            region=region,
-            space_data=space,
-        ):
-            action()
-    except Exception as error:
-        failure = {
-            "ok": False,
-            "blenderVersion": bpy.app.version_string,
-            "viewportLevel": TARGET_LEVEL,
-            "failedStep": label,
-            "error": f"{type(error).__name__}: {error}",
-            "traceback": traceback.format_exc(),
-        }
-        write_result(failure)
-        print("SUBDIVISION_SURFACE_F9 FAIL " + json.dumps(failure, sort_keys=True), flush=True)
-        os._exit(1)
-    return delay
 
 
 print(
@@ -337,12 +235,57 @@ print(
     + json.dumps(
         {
             "blenderVersion": bpy.app.version_string,
+            "executorId": shortcut_proof.EXECUTOR_ID,
             "viewportLevel": TARGET_LEVEL,
-            "levelPoint": level_point,
-            "uiScale": ui_scale,
         },
         sort_keys=True,
     ),
     flush=True,
 )
-bpy.app.timers.register(advance, first_interval=1.0)
+factory_cube_snapshot = shortcut_proof.build_factory_cube_canonical_snapshot(
+    bpy.context.view_layer.objects.active
+)
+shortcut_proof.validate_factory_cube_canonical_snapshot(factory_cube_snapshot)
+tampered_factory_cube_snapshot = copy.deepcopy(factory_cube_snapshot)
+tampered_factory_cube_snapshot["geometry"]["vertices"][0][0] = -0.5
+try:
+    shortcut_proof.validate_factory_cube_canonical_snapshot(
+        tampered_factory_cube_snapshot
+    )
+except RuntimeError as error:
+    assert "canonical factory Cube vertices" in str(error)
+else:
+    raise AssertionError("Factory Cube validation accepted non-canonical geometry")
+factory_mesh = bpy.context.view_layer.objects.active.data
+crease_attribute = factory_mesh.attributes.new(
+    name="crease_edge",
+    type="FLOAT",
+    domain="EDGE",
+)
+crease_attribute.data[0].value = 1.0
+try:
+    shortcut_proof.validate_factory_cube_canonical_snapshot(
+        shortcut_proof.build_factory_cube_canonical_snapshot(
+            bpy.context.view_layer.objects.active
+        )
+    )
+except RuntimeError as error:
+    assert "default factory Cube subdivision attributes" in str(error)
+else:
+    raise AssertionError("Factory Cube validation accepted a non-zero edge crease")
+finally:
+    factory_mesh.attributes.remove(crease_attribute)
+shortcut_proof.validate_factory_cube_canonical_snapshot(
+    shortcut_proof.build_factory_cube_canonical_snapshot(
+        bpy.context.view_layer.objects.active
+    )
+)
+driver = shortcut_proof.SubdivisionSurfaceF9ShortcutProof(
+    TARGET_LEVEL,
+    **FIXTURE_IDENTITY,
+)
+driver.start(
+    preflight_hook=lambda: True,
+    on_complete=complete,
+    on_failure=fail,
+)

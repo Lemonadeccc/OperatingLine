@@ -245,6 +245,41 @@ export const shortcutLedOperationSchema = z.union([
 ]);
 export type ShortcutLedOperation = z.infer<typeof shortcutLedOperationSchema>;
 
+export const shortcutProofExecutionSchema = z.strictObject({
+  executorId: z.literal('blender.subdivision_surface_f9.event_simulate.v1'),
+  targetProfile: z.literal('factory_cube_8_12_6'),
+  executionBoundary: z.literal('blender_window_event_simulate'),
+  osHidInput: z.literal(false),
+  managedActionExecuted: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  authorization: z.literal('accepted_replay_next_step'),
+  transport: z.literal('event_simulate'),
+  hostVersions: z
+    .array(z.enum(['4.5.3', '5.1.1']))
+    .length(2)
+    .refine((versions) => versions[0] === '4.5.3' && versions[1] === '5.1.1'),
+  operationIds: z
+    .array(
+      z.enum([
+        'shortcut.add_subdivision_surface_level_one',
+        'shortcut.open_adjust_last_operation',
+        'shortcut.set_viewport_level',
+        'shortcut.close_adjust_last_operation',
+      ]),
+    )
+    .length(4)
+    .refine(
+      (ids) =>
+        ids[0] === 'shortcut.add_subdivision_surface_level_one' &&
+        ids[1] === 'shortcut.open_adjust_last_operation' &&
+        ids[2] === 'shortcut.set_viewport_level' &&
+        ids[3] === 'shortcut.close_adjust_last_operation',
+    ),
+  strongObservationKind: z.literal('subdivision_surface_shortcut_ready'),
+  nativeUndoCheckpointRequired: z.literal(true),
+});
+export type ShortcutProofExecution = z.infer<typeof shortcutProofExecutionSchema>;
+
 export const availableShortcutProcedureMaterializationSchema = z.strictObject({
   availability: z.literal('available'),
   source: z.literal('catalog.ordered_shortcut_operations'),
@@ -268,6 +303,7 @@ export const availableShortcutProcedureMaterializationSchema = z.strictObject({
   ),
   operations: z.array(shortcutLedOperationSchema).min(1),
   omittedActionArguments: z.array(omittedActionArgumentSchema),
+  proofExecution: shortcutProofExecutionSchema.optional(),
 });
 export type AvailableShortcutProcedureMaterialization = z.infer<
   typeof availableShortcutProcedureMaterializationSchema
@@ -912,6 +948,27 @@ function validateRecipe(recipe: InteractionRecipe): void {
       throw new Error(
         `Interaction recipe ${recipe.id} shortcut surface ${openSurfaceOperationId} is not explicitly closed`,
       );
+    }
+    if (shortcut.proofExecution !== undefined) {
+      if (
+        recipe.id !== 'blender.modifier.add_subdivision_surface.semantic' ||
+        recipe.actionName !== 'blender.modifier.add_subdivision_surface'
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut proof execution is restricted to the exact Subdivision Surface recipe`,
+        );
+      }
+      const actualOperationIds = shortcut.operations.map((operation) => operation.id);
+      if (
+        actualOperationIds.length !== shortcut.proofExecution.operationIds.length ||
+        actualOperationIds.some(
+          (operationId, index) => operationId !== shortcut.proofExecution?.operationIds[index],
+        )
+      ) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} shortcut proof execution must bind every ordered shortcut operation exactly`,
+        );
+      }
     }
   }
 

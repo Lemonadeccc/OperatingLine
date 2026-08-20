@@ -87,6 +87,94 @@ const evaluate = (plan: GuidePlan, requiredPhaseIds: string[] = []) =>
     blenderActionCatalog,
   );
 
+const subdivisionSurfacePlan = (): GuidePlan => {
+  const plan = snowmanPlan();
+  const root = structuredClone(plan.steps.find((step) => step.id === 'snowman')!);
+  const group = structuredClone(plan.steps.find((step) => step.id === 'snowman.model')!);
+  const leaf = structuredClone(plan.steps.find((step) => step.id === 'snowman.model.head')!);
+
+  leaf.dependsOn = [];
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_subdivision_surface',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.subdivision_surface',
+      modifierName: 'OperatingLine.Cube.SubdivisionSurface',
+      viewportLevel: 3,
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.subdivision_surface',
+    },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'modifier_ready',
+      parameters: { modifierId: 'tutorial.cube.subdivision_surface' },
+    },
+  ];
+
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'subdivision-surface-quality',
+    revision: 1,
+    title: 'Add a Subdivision Surface modifier',
+    steps: [root, group, leaf],
+  });
+};
+
+const subdivisionSurfaceCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'subdivision-surface',
+      statement: 'Add a Subdivision Surface modifier to the accepted Cube.',
+      coverage: [
+        {
+          capabilityId: 'geometry.subdivision_surface_modifier',
+          stepIds: ['snowman.model.head'],
+        },
+      ],
+    },
+  ],
+};
+
+const evaluateSubdivisionSurface = (
+  verifiedExternalResourceConsumers?: readonly {
+    readonly consumerStepId: string;
+    readonly resourceId: string;
+    readonly resourceType: string;
+  }[],
+  shortcutProof = false,
+  plan = subdivisionSurfacePlan(),
+) =>
+  evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: subdivisionSurfaceCoverage,
+      plan,
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers,
+      ...(shortcutProof
+        ? {
+            shortcutProofAuthority: {
+              replayId: '11111111-1111-4111-8111-111111111111',
+              leafId: 'snowman.model.head',
+              targetProfile: 'factory_cube_8_12_6' as const,
+            },
+          }
+        : {}),
+    },
+  );
+
 describe('planning quality baseline', () => {
   it('accepts the complete teachable snowman plan deterministically', () => {
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
@@ -172,6 +260,115 @@ describe('planning quality baseline', () => {
     head.observationPolicy = undefined;
     expect(evaluate(missingGuidance).findings.map((finding) => finding.code)).toEqual(
       expect.arrayContaining(['guidance.anchor_missing', 'guidance.observation_missing']),
+    );
+  });
+
+  it('rejects a single Subdivision Surface leaf whose mutate target has no creator', () => {
+    const report = evaluateSubdivisionSurface();
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.missing_creator',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+  });
+
+  it('accepts a single Subdivision Surface leaf with an exact verified external resource tuple', () => {
+    const report = evaluateSubdivisionSurface(
+      [
+        {
+          consumerStepId: 'snowman.model.head',
+          resourceId: 'tutorial.cube',
+          resourceType: 'OBJECT',
+        },
+      ],
+      true,
+    );
+
+    expect(report.valid).toBe(true);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.verified_external_input',
+        severity: 'warning',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it.each([
+    ['consumer step', 'other.step', 'tutorial.cube', 'OBJECT'],
+    ['resource id', 'snowman.model.head', 'other.cube', 'OBJECT'],
+    ['resource type', 'snowman.model.head', 'tutorial.cube', 'MESH'],
+  ])(
+    'rejects a verified external resource tuple with the wrong %s',
+    (_, stepId, resourceId, type) => {
+      const report = evaluateSubdivisionSurface(
+        [
+          {
+            consumerStepId: stepId,
+            resourceId,
+            resourceType: type,
+          },
+        ],
+        true,
+      );
+
+      expect(report.valid).toBe(false);
+      expect(report.findings).toContainEqual(
+        expect.objectContaining({
+          code: 'resource.missing_creator',
+          stepIds: ['snowman.model.head'],
+        }),
+      );
+      expect(report.findings).not.toContainEqual(
+        expect.objectContaining({ code: 'resource.verified_external_input' }),
+      );
+    },
+  );
+
+  it('does not allow an ordinary proposal to supply the external-input tuple', () => {
+    const report = evaluateSubdivisionSurface([
+      {
+        consumerStepId: 'snowman.model.head',
+        resourceId: 'tutorial.cube',
+        resourceType: 'OBJECT',
+      },
+    ]);
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.verified_external_input' }),
+    );
+  });
+
+  it('rejects an arbitrary target even with shortcut proof authority', () => {
+    const plan = subdivisionSurfacePlan();
+    const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+    if (leaf.action === null) throw new Error('expected action');
+    leaf.action.arguments['targetId'] = 'tutorial.other';
+    const report = evaluateSubdivisionSurface(
+      [
+        {
+          consumerStepId: leaf.id,
+          resourceId: 'tutorial.other',
+          resourceType: 'OBJECT',
+        },
+      ],
+      true,
+      plan,
+    );
+
+    expect(report.valid).toBe(false);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
     );
   });
 

@@ -9,11 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import ipaddress
+import hashlib
 import json
 import re
 from http.client import HTTPConnection, HTTPException, HTTPResponse
 from queue import Empty, Queue
 import socket
+import struct
 import threading
 import time
 from typing import Any
@@ -175,6 +177,9 @@ class CompanionTransport:
         self.dialogue_runs: Queue[dict[str, Any]] = Queue()
         self.initial_plan_runs: Queue[dict[str, Any]] = Queue()
         self.action_results: Queue[dict[str, Any]] = Queue()
+        self.shortcut_proof_progress: Queue[dict[str, Any]] = Queue()
+        self.shortcut_proof_results: Queue[dict[str, Any]] = Queue()
+        self.shortcut_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -184,6 +189,8 @@ class CompanionTransport:
         self._session_snapshot: CompanionSessionSnapshot | None = None
         self._seen_replay_current_state_verification_ids: set[str] = set()
         self._seen_action_request_ids: set[str] = set()
+        self._seen_shortcut_proof_request_ids: set[str] = set()
+        self._seen_shortcut_proof_recovery_ids: set[str] = set()
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -269,6 +276,21 @@ class CompanionTransport:
         if not isinstance(result, dict):
             raise ValueError("Action result must be an object")
         self.action_results.put(dict(result))
+
+    def submit_shortcut_proof_progress(self, progress: dict[str, Any]) -> None:
+        """Queue append-only shortcut receipt progress on its independent channel."""
+        validated = self._validate_shortcut_proof_progress(progress)
+        self.shortcut_proof_progress.put(dict(validated))
+
+    def submit_shortcut_proof_result(self, result: dict[str, Any]) -> None:
+        """Queue terminal or native-history shortcut evidence independently."""
+        validated = self._validate_shortcut_proof_result(result)
+        self.shortcut_proof_results.put(dict(validated))
+
+    def submit_shortcut_proof_recovery_ack(self, ack: dict[str, Any]) -> None:
+        """Queue proof that a persisted native-history marker was rebound."""
+        validated = self._validate_shortcut_proof_recovery_ack(ack)
+        self.shortcut_proof_recovery_acks.put(dict(validated))
 
     def accept_plan(
         self,
@@ -418,6 +440,10 @@ class CompanionTransport:
             or path == "/api/v1/companion/state"
             or path == "/api/v1/companion/proposal-decision"
             or path == "/api/v1/companion/action-result"
+            or path.startswith("/api/v1/companion/shortcut-proof?")
+            or path == "/api/v1/companion/shortcut-proof-progress"
+            or path == "/api/v1/companion/shortcut-proof-result"
+            or path == "/api/v1/companion/shortcut-proof-recovery"
         ):
             session = self._session_snapshot
             if session is None:
@@ -754,6 +780,7 @@ class CompanionTransport:
         self._poll_revision_branches()
         if session.negotiated_guide_protocol_version == "1.5.0":
             self._poll_action_request()
+            self._poll_shortcut_proof_request()
 
     @staticmethod
     def _validated_required_uuid(value: Any, label: str) -> str:
@@ -931,6 +958,990 @@ class CompanionTransport:
         self.incoming.put(
             {"kind": "action_execute_request", "request": dict(validated)}
         )
+
+    @staticmethod
+    def _canonical_protocol_bytes(value: Any) -> bytes:
+        def length_delimited(encoded: bytes) -> bytes:
+            return str(len(encoded)).encode("ascii") + b":" + encoded
+
+        if value is None:
+            return b"n"
+        if value is False:
+            return b"f"
+        if value is True:
+            return b"t"
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            number = float(value)
+            if not (number == number and abs(number) != float("inf")):
+                raise ValueError("Canonical protocol numbers must be finite")
+            return b"d" + struct.pack(">d", 0.0 if number == 0 else number).hex().encode("ascii")
+        if isinstance(value, str):
+            encoded = value.encode("utf-8")
+            return b"s" + str(len(encoded)).encode("ascii") + b":" + encoded
+        if isinstance(value, list):
+            items = b"".join(
+                length_delimited(CompanionTransport._canonical_protocol_bytes(item))
+                for item in value
+            )
+            return b"a" + str(len(value)).encode("ascii") + b":" + items
+        if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+            entries = sorted(value.items(), key=lambda item: item[0].encode("utf-8"))
+            parts = [b"o" + str(len(entries)).encode("ascii") + b":"]
+            for key, item in entries:
+                parts.append(length_delimited(CompanionTransport._canonical_protocol_bytes(key)))
+                parts.append(length_delimited(CompanionTransport._canonical_protocol_bytes(item)))
+            return b"".join(parts)
+        raise ValueError("Value is not a canonical protocol JSON value")
+
+    @staticmethod
+    def _canonical_sha256(value: dict[str, Any]) -> str:
+        return hashlib.sha256(CompanionTransport._canonical_protocol_bytes(value)).hexdigest()
+
+    def _validate_shortcut_proof_binding(self, binding: Any) -> dict[str, Any]:
+        if not isinstance(binding, dict):
+            raise ValueError("Shortcut proof binding must be an object")
+        self._validate_exact_keys(
+            binding,
+            {
+                "formatVersion", "bindingId", "proposalRecordContentSha256",
+                "proofId", "requestId", "replayId", "target", "proposalId",
+                "plan", "executionId", "leafId", "recipeId", "actionName",
+                "acceptedAction", "targetProfile", "acceptedDecision", "proofScope",
+                "materialization", "executorId", "executionBoundary", "authorization",
+                "transport", "operationIds", "startState", "createdAt", "integrity",
+            },
+            "Shortcut proof binding",
+        )
+        if binding["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported shortcut proof binding format version")
+        for field in (
+            "bindingId", "proofId", "requestId", "replayId", "proposalId", "executionId"
+        ):
+            self._validated_required_uuid(binding[field], f"Shortcut proof binding {field}")
+        for field in ("proposalRecordContentSha256",):
+            if not isinstance(binding[field], str) or CONTENT_SHA256_PATTERN.fullmatch(binding[field]) is None:
+                raise ValueError(f"Shortcut proof binding {field} is invalid")
+        target = binding["target"]
+        if not isinstance(target, dict):
+            raise ValueError("Shortcut proof binding target must be an object")
+        self._validate_exact_keys(target, {"adapterId", "instanceId"}, "Shortcut proof binding target")
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Shortcut proof binding targets a different Blender instance")
+        self._validated_required_uuid(target["instanceId"], "Shortcut proof binding instance id")
+        plan = binding["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("Shortcut proof binding plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision", "contentSha256"}, "Shortcut proof binding plan")
+        if not isinstance(plan["id"], str) or not plan["id"]:
+            raise ValueError("Shortcut proof binding plan id must not be empty")
+        if isinstance(plan["revision"], bool) or not isinstance(plan["revision"], int) or plan["revision"] <= 0:
+            raise ValueError("Shortcut proof binding plan revision must be positive")
+        if not isinstance(plan["contentSha256"], str) or CONTENT_SHA256_PATTERN.fullmatch(plan["contentSha256"]) is None:
+            raise ValueError("Shortcut proof binding plan hash is invalid")
+        if binding["recipeId"] != "blender.modifier.add_subdivision_surface.semantic" or binding["actionName"] != "blender.modifier.add_subdivision_surface":
+            raise ValueError("Shortcut proof binding is restricted to Subdivision Surface")
+        action = binding["acceptedAction"]
+        if not isinstance(action, dict):
+            raise ValueError("Shortcut proof accepted action must be an object")
+        self._validate_exact_keys(action, {"adapterId", "name", "arguments"}, "Shortcut proof accepted action")
+        arguments = action.get("arguments")
+        if action.get("adapterId") != "blender" or action.get("name") != binding["actionName"] or not isinstance(arguments, dict):
+            raise ValueError("Shortcut proof accepted action is invalid")
+        self._validate_exact_keys(arguments, {"targetId", "modifierId", "modifierName", "viewportLevel"}, "Shortcut proof accepted arguments")
+        if (
+            arguments["targetId"] != "tutorial.cube"
+            or arguments["modifierId"] != "tutorial.cube.subdivision_surface"
+            or arguments["modifierName"] != "OperatingLine.Cube.SubdivisionSurface"
+        ):
+            raise ValueError("Shortcut proof accepted resource identity is invalid")
+        if isinstance(arguments["viewportLevel"], bool) or arguments["viewportLevel"] not in {1, 2, 3}:
+            raise ValueError("Shortcut proof viewport level must be 1, 2, or 3")
+        if binding["targetProfile"] != "factory_cube_8_12_6":
+            raise ValueError("Shortcut proof target profile is unsupported")
+        decision = binding["acceptedDecision"]
+        if not isinstance(decision, dict):
+            raise ValueError("Shortcut proof accepted decision must be an object")
+        self._validate_exact_keys(decision, {"decisionId", "proposalId", "instanceId", "adapterId", "decision", "decidedAt"}, "Shortcut proof accepted decision")
+        for field in ("decisionId", "proposalId", "instanceId"):
+            self._validated_required_uuid(decision[field], f"Shortcut proof decision {field}")
+        if decision["proposalId"] != binding["proposalId"] or decision["instanceId"] != self._instance_id or decision["adapterId"] != "blender" or decision["decision"] != "accepted":
+            raise ValueError("Shortcut proof decision does not bind the accepted proposal")
+        self._validate_expiry(decision["decidedAt"], "Shortcut proof decision time")
+        proof_scope = binding["proofScope"]
+        if proof_scope != {
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "managedReceiptCreated": False,
+            "omittedAcceptedArguments": ["modifierId", "modifierName"],
+        }:
+            raise ValueError("Shortcut proof managed-action scope is invalid")
+        materialization = binding["materialization"]
+        if not isinstance(materialization, dict):
+            raise ValueError("Shortcut proof materialization must be an object")
+        self._validate_exact_keys(materialization, {"actionCatalogVersion", "interactionCatalogVersion", "interactionCatalogContentSha256", "shortcutTrackContentSha256"}, "Shortcut proof materialization")
+        for field in ("interactionCatalogContentSha256", "shortcutTrackContentSha256"):
+            if not isinstance(materialization[field], str) or CONTENT_SHA256_PATTERN.fullmatch(materialization[field]) is None:
+                raise ValueError(f"Shortcut proof materialization {field} is invalid")
+        operations = list(binding["operationIds"]) if isinstance(binding["operationIds"], list) else None
+        expected_operations = [
+            "shortcut.add_subdivision_surface_level_one",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_viewport_level",
+            "shortcut.close_adjust_last_operation",
+        ]
+        if (
+            binding["executorId"] != "blender.subdivision_surface_f9.event_simulate.v1"
+            or binding["executionBoundary"] != "blender_window_event_simulate"
+            or binding["authorization"] != "accepted_replay_next_step"
+            or binding["transport"] != "event_simulate"
+            or operations != expected_operations
+        ):
+            raise ValueError("Shortcut proof executor authority is invalid")
+        start_state = binding["startState"]
+        if not isinstance(start_state, dict):
+            raise ValueError("Shortcut proof start state must be an object")
+        self._validate_exact_keys(start_state, {"reportId", "sequence"}, "Shortcut proof start state")
+        self._validated_required_uuid(start_state["reportId"], "Shortcut proof start report id")
+        if isinstance(start_state["sequence"], bool) or not isinstance(start_state["sequence"], int) or start_state["sequence"] <= 0:
+            raise ValueError("Shortcut proof start sequence must be positive")
+        self._validate_expiry(binding["createdAt"], "Shortcut proof binding creation time")
+        integrity = binding["integrity"]
+        if not isinstance(integrity, dict):
+            raise ValueError("Shortcut proof binding integrity must be an object")
+        self._validate_exact_keys(integrity, {"algorithm", "canonicalization", "contentSha256"}, "Shortcut proof binding integrity")
+        if integrity.get("algorithm") != "sha256" or integrity.get("canonicalization") != "operatingline-json-value-v1":
+            raise ValueError("Shortcut proof binding integrity algorithm is unsupported")
+        content = {key: value for key, value in binding.items() if key != "integrity"}
+        if integrity.get("contentSha256") != self._canonical_sha256(content):
+            raise ValueError("Shortcut proof binding content hash does not match")
+        return binding
+
+    def _validate_shortcut_proof_identity(self, payload: Any, label: str, *, terminal: bool = False) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{label} must be an object")
+        identity_keys = {
+            "formatVersion", "requestId", "replayId", "proofId", "deliveryId",
+            "target", "targetProfile", "proposalId", "plan", "executionId", "leafId",
+            "interactionCatalogVersion", "interactionCatalogContentSha256",
+            "shortcutTrackContentSha256", "bindingContentSha256", "binding", "executorId",
+            "executionBoundary", "authorization", "transport", "operationIds",
+            "expectedState", "requestedAt", "dispatchedAt",
+        }
+        extra = {"status", "managedActionResult", "managedIdentityVerified", "requiresUndoToUnlock", "terminalEvidence", "error", "occurredAt"} if terminal else {"status", "completedOperationIds", "receiptChainHeadSha256", "occurredAt"}
+        self._validate_exact_keys(payload, identity_keys | extra, label)
+        binding = self._validate_shortcut_proof_binding(payload["binding"])
+        if payload["formatVersion"] != "1.0.0":
+            raise ValueError(f"{label} format version is unsupported")
+        for field in ("requestId", "replayId", "proofId", "deliveryId", "proposalId", "executionId"):
+            self._validated_required_uuid(payload[field], f"{label} {field}")
+        target = payload["target"]
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError(f"{label} targets a different Companion")
+        if payload["targetProfile"] != "factory_cube_8_12_6":
+            raise ValueError(f"{label} target profile is unsupported")
+        plan = payload["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError(f"{label} plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision", "contentSha256"}, f"{label} plan")
+        for field in ("interactionCatalogContentSha256", "shortcutTrackContentSha256", "bindingContentSha256"):
+            if not isinstance(payload[field], str) or CONTENT_SHA256_PATTERN.fullmatch(payload[field]) is None:
+                raise ValueError(f"{label} {field} is invalid")
+        expected_state = payload["expectedState"]
+        if not isinstance(expected_state, dict):
+            raise ValueError(f"{label} expected state must be an object")
+        self._validate_exact_keys(expected_state, {"reportId", "sequence"}, f"{label} expected state")
+        self._validated_required_uuid(expected_state["reportId"], f"{label} expected report id")
+        expected_operations = [
+            "shortcut.add_subdivision_surface_level_one",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_viewport_level",
+            "shortcut.close_adjust_last_operation",
+        ]
+        mirror = {
+            "requestId": "requestId", "replayId": "replayId", "proofId": "proofId",
+            "proposalId": "proposalId", "executionId": "executionId", "leafId": "leafId",
+            "targetProfile": "targetProfile", "executorId": "executorId",
+            "executionBoundary": "executionBoundary", "authorization": "authorization",
+            "transport": "transport", "operationIds": "operationIds",
+        }
+        if any(binding[binding_field] != payload[payload_field] for payload_field, binding_field in mirror.items()):
+            raise ValueError(f"{label} does not mirror its immutable binding")
+        materialization = binding["materialization"]
+        if (
+            payload["bindingContentSha256"] != binding["integrity"]["contentSha256"]
+            or payload["target"] != binding["target"]
+            or payload["plan"] != binding["plan"]
+            or payload["expectedState"] != binding["startState"]
+            or payload["interactionCatalogVersion"] != materialization["interactionCatalogVersion"]
+            or payload["interactionCatalogContentSha256"] != materialization["interactionCatalogContentSha256"]
+            or payload["shortcutTrackContentSha256"] != materialization["shortcutTrackContentSha256"]
+            or payload["operationIds"] != expected_operations
+        ):
+            raise ValueError(f"{label} immutable delivery identity is inconsistent")
+        self._validate_expiry(payload["requestedAt"], f"{label} requested time")
+        self._validate_expiry(payload["dispatchedAt"], f"{label} dispatched time")
+        self._validate_expiry(payload["occurredAt"], f"{label} occurrence time")
+        return payload
+
+    def _validate_shortcut_proof_delivery(self, delivery: Any) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Shortcut proof delivery must be an object")
+        synthetic = dict(delivery)
+        synthetic.update({"status": "in_progress", "completedOperationIds": [delivery.get("operationIds", [None])[0]], "receiptChainHeadSha256": "0" * 64, "occurredAt": delivery.get("dispatchedAt")})
+        self._validate_shortcut_proof_identity(synthetic, "Shortcut proof delivery")
+        return delivery
+
+    def _validate_shortcut_proof_history_identity(self, history: Any) -> dict[str, Any]:
+        if not isinstance(history, dict):
+            raise ValueError("Shortcut proof history identity must be an object")
+        self._validate_exact_keys(
+            history,
+            {
+                "checkpointId", "undoLockId", "checkpointKind",
+                "baselineSceneFingerprintSha256", "lockedSceneFingerprintSha256",
+                "terminalResultContentSha256",
+            },
+            "Shortcut proof history identity",
+        )
+        self._validated_required_uuid(history["checkpointId"], "Shortcut proof checkpoint id")
+        self._validated_required_uuid(history["undoLockId"], "Shortcut proof Undo lock id")
+        if history["checkpointKind"] not in {"success", "failure"}:
+            raise ValueError("Shortcut proof checkpoint kind is invalid")
+        for field in (
+            "baselineSceneFingerprintSha256",
+            "lockedSceneFingerprintSha256",
+            "terminalResultContentSha256",
+        ):
+            if not isinstance(history[field], str) or CONTENT_SHA256_PATTERN.fullmatch(history[field]) is None:
+                raise ValueError(f"Shortcut proof history {field} is invalid")
+        return history
+
+    def _validate_shortcut_proof_recovery_delivery(self, delivery: Any) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Shortcut proof recovery delivery must be an object")
+        recovery_keys = {
+            "kind", "recoveryId", "history", "expectedMarkerContentSha256",
+            "expectedResultContentSha256", "expectedStatus", "recoveryRequestedAt",
+        }
+        base = {key: value for key, value in delivery.items() if key not in recovery_keys}
+        self._validate_shortcut_proof_delivery(base)
+        self._validate_exact_keys(
+            delivery,
+            set(base) | recovery_keys,
+            "Shortcut proof recovery delivery",
+        )
+        if delivery["kind"] != "native_history_rebind":
+            raise ValueError("Shortcut proof recovery kind is unsupported")
+        self._validated_required_uuid(delivery["recoveryId"], "Shortcut proof recovery id")
+        self._validate_shortcut_proof_history_identity(delivery["history"])
+        if delivery["expectedStatus"] not in {
+            "succeeded", "failed_checkpointed", "restored", "reapplied_locked"
+        }:
+            raise ValueError("Shortcut proof recovery expected status is invalid")
+        marker_hash = delivery["expectedMarkerContentSha256"]
+        if not isinstance(marker_hash, str) or CONTENT_SHA256_PATTERN.fullmatch(marker_hash) is None:
+            raise ValueError("Shortcut proof recovery marker hash is invalid")
+        result_hash = delivery["expectedResultContentSha256"]
+        if (
+            not isinstance(result_hash, str)
+            or CONTENT_SHA256_PATTERN.fullmatch(result_hash) is None
+        ):
+            raise ValueError("Shortcut proof recovery expected result hash is invalid")
+        self._validate_expiry(delivery["recoveryRequestedAt"], "Shortcut proof recovery request time")
+        recovery_requested_at = datetime.fromisoformat(
+            delivery["recoveryRequestedAt"].replace("Z", "+00:00")
+        )
+        dispatched_at = datetime.fromisoformat(
+            delivery["dispatchedAt"].replace("Z", "+00:00")
+        )
+        if recovery_requested_at < dispatched_at:
+            raise ValueError("Shortcut proof recovery predates the original delivery")
+        return delivery
+
+    def _validate_shortcut_terminal_reconcile_delivery(
+        self, delivery: Any
+    ) -> dict[str, Any]:
+        if not isinstance(delivery, dict):
+            raise ValueError("Shortcut terminal reconciliation delivery must be an object")
+        recovery_keys = {
+            "kind", "recoveryId", "acknowledgedProgressReceiptChainHeads",
+            "recoveryRequestedAt",
+        }
+        base = {key: value for key, value in delivery.items() if key not in recovery_keys}
+        self._validate_shortcut_proof_delivery(base)
+        self._validate_exact_keys(
+            delivery, set(base) | recovery_keys, "Shortcut terminal reconciliation delivery"
+        )
+        if delivery["kind"] != "native_terminal_reconcile":
+            raise ValueError("Shortcut terminal reconciliation kind is unsupported")
+        self._validated_required_uuid(delivery["recoveryId"], "Shortcut terminal recovery id")
+        heads = delivery["acknowledgedProgressReceiptChainHeads"]
+        if (
+            not isinstance(heads, list)
+            or len(heads) > len(self._shortcut_operation_ids())
+            or len(set(heads)) != len(heads)
+            or any(
+                not isinstance(value, str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value) is None
+                for value in heads
+            )
+        ):
+            raise ValueError("Shortcut terminal reconciliation progress heads are invalid")
+        self._validate_expiry(
+            delivery["recoveryRequestedAt"],
+            "Shortcut terminal reconciliation request time",
+        )
+        if datetime.fromisoformat(
+            delivery["recoveryRequestedAt"].replace("Z", "+00:00")
+        ) < datetime.fromisoformat(delivery["dispatchedAt"].replace("Z", "+00:00")):
+            raise ValueError("Shortcut terminal reconciliation predates the original delivery")
+        return delivery
+
+    def _validate_shortcut_proof_recovery_ack(self, ack: Any) -> dict[str, Any]:
+        if not isinstance(ack, dict):
+            raise ValueError("Shortcut proof recovery acknowledgement must be an object")
+        if ack.get("kind") == "native_history_transition_reconcile":
+            self._validate_exact_keys(
+                ack,
+                {
+                    "kind", "recoveryId", "expectedResultContentSha256", "results",
+                    "expectedMarkerContentSha256",
+                    "currentSceneFingerprintSha256", "occurredAt",
+                },
+                "Shortcut transition reconciliation acknowledgement",
+            )
+            self._validated_required_uuid(
+                ack["recoveryId"], "Shortcut transition recovery id"
+            )
+            if (
+                not isinstance(ack["expectedResultContentSha256"], str)
+                or CONTENT_SHA256_PATTERN.fullmatch(
+                    ack["expectedResultContentSha256"]
+                )
+                is None
+            ):
+                raise ValueError(
+                    "Shortcut transition reconciliation expected result hash is invalid"
+                )
+            results = ack["results"]
+            if not isinstance(results, list) or not 1 <= len(results) <= 32:
+                raise ValueError("Shortcut transition reconciliation results are invalid")
+            validated_results = [
+                self._validate_shortcut_proof_result(result) for result in results
+            ]
+            if any(
+                result["status"] not in {"restored", "reapplied_locked"}
+                for result in validated_results
+            ):
+                raise ValueError("Shortcut transition reconciliation status is invalid")
+            for previous, current in zip(
+                validated_results, validated_results[1:]
+            ):
+                if previous["status"] == current["status"]:
+                    raise ValueError(
+                        "Shortcut transition reconciliation results must strictly alternate"
+                    )
+                if datetime.fromisoformat(
+                    current["occurredAt"].replace("Z", "+00:00")
+                ) <= datetime.fromisoformat(
+                    previous["occurredAt"].replace("Z", "+00:00")
+                ):
+                    raise ValueError(
+                        "Shortcut transition reconciliation results must be strictly chronological"
+                    )
+            for field in (
+                "expectedMarkerContentSha256", "currentSceneFingerprintSha256"
+            ):
+                if (
+                    not isinstance(ack[field], str)
+                    or CONTENT_SHA256_PATTERN.fullmatch(ack[field]) is None
+                ):
+                    raise ValueError(
+                        f"Shortcut transition reconciliation {field} is invalid"
+                    )
+            last = validated_results[-1]
+            terminal = last["terminalEvidence"]
+            if ack["currentSceneFingerprintSha256"] != terminal[
+                "currentSceneFingerprintSha256"
+            ]:
+                raise ValueError(
+                    "Shortcut transition reconciliation fingerprint is invalid"
+                )
+            self._validate_expiry(
+                ack["occurredAt"], "Shortcut transition reconciliation time"
+            )
+            if datetime.fromisoformat(
+                ack["occurredAt"].replace("Z", "+00:00")
+            ) < datetime.fromisoformat(last["occurredAt"].replace("Z", "+00:00")):
+                raise ValueError(
+                    "Shortcut transition reconciliation acknowledgement predates its final result"
+                )
+            return ack
+        if ack.get("kind") == "native_terminal_reconcile":
+            self._validate_exact_keys(
+                ack,
+                {
+                    "kind", "recoveryId", "result", "expectedMarkerContentSha256",
+                    "currentSceneFingerprintSha256", "occurredAt",
+                },
+                "Shortcut terminal reconciliation acknowledgement",
+            )
+            self._validated_required_uuid(
+                ack["recoveryId"], "Shortcut terminal recovery id"
+            )
+            result = self._validate_shortcut_proof_result(ack["result"])
+            if result["status"] not in {"succeeded", "failed_checkpointed"}:
+                raise ValueError("Shortcut terminal reconciliation result is not locked")
+            for field in (
+                "expectedMarkerContentSha256", "currentSceneFingerprintSha256"
+            ):
+                if (
+                    not isinstance(ack[field], str)
+                    or CONTENT_SHA256_PATTERN.fullmatch(ack[field]) is None
+                ):
+                    raise ValueError(f"Shortcut terminal reconciliation {field} is invalid")
+            terminal = result["terminalEvidence"]
+            checkpoint = (
+                terminal["attestation"]["nativeUndoCheckpoint"]
+                if result["status"] == "succeeded"
+                else terminal["checkpoint"]
+            )
+            locked_sha256 = (
+                checkpoint["finalSceneFingerprintSha256"]
+                if result["status"] == "succeeded"
+                else checkpoint["currentState"]["sceneFingerprintSha256"]
+            )
+            if ack["currentSceneFingerprintSha256"] != locked_sha256:
+                raise ValueError("Shortcut terminal reconciliation does not prove locked state")
+            self._validate_expiry(ack["occurredAt"], "Shortcut terminal reconciliation time")
+            expected_marker = {
+                "formatVersion": "1.0.0",
+                "executorId": result["executorId"],
+                "checkpointId": checkpoint["checkpointId"],
+                "undoLockId": checkpoint["undoLockId"],
+                "proofId": result["proofId"],
+                "replayId": result["replayId"],
+                "targetId": result["binding"]["acceptedAction"]["arguments"]["targetId"],
+                "targetObjectName": "Cube",
+                "checkpointKind": "success" if result["status"] == "succeeded" else "failure",
+                "baselineSceneFingerprintSha256": (
+                    checkpoint["baselineSceneFingerprintSha256"]
+                    if result["status"] == "succeeded"
+                    else checkpoint["baselineState"]["sceneFingerprintSha256"]
+                ),
+                "finalSceneFingerprintSha256": locked_sha256,
+                "terminalResultContentSha256": self._canonical_sha256(result),
+            }
+            if ack["expectedMarkerContentSha256"] != self._canonical_sha256(expected_marker):
+                raise ValueError("Shortcut terminal reconciliation marker hash is invalid")
+            if datetime.fromisoformat(
+                ack["occurredAt"].replace("Z", "+00:00")
+            ) < datetime.fromisoformat(result["occurredAt"].replace("Z", "+00:00")):
+                raise ValueError("Shortcut terminal reconciliation predates its result")
+            return ack
+        self._validate_exact_keys(
+            ack,
+            {
+                "kind", "formatVersion", "requestId", "replayId", "proofId", "deliveryId",
+                "target", "bindingContentSha256", "recoveryId", "history",
+                "expectedMarkerContentSha256", "currentSceneFingerprintSha256",
+                "mutationLocked", "status", "occurredAt",
+            },
+            "Shortcut proof recovery acknowledgement",
+        )
+        if ack["formatVersion"] != "1.0.0":
+            raise ValueError("Shortcut proof recovery acknowledgement version is unsupported")
+        for field in ("requestId", "replayId", "proofId", "deliveryId", "recoveryId"):
+            self._validated_required_uuid(ack[field], f"Shortcut proof recovery {field}")
+        if ack["target"] != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Shortcut proof recovery acknowledgement targets another Companion")
+        self._validate_shortcut_proof_history_identity(ack["history"])
+        if ack["kind"] != "native_history_rebind" or ack["status"] not in {
+            "succeeded", "failed_checkpointed", "restored", "reapplied_locked"
+        }:
+            raise ValueError("Shortcut proof recovery acknowledgement status is invalid")
+        for field in (
+            "bindingContentSha256", "expectedMarkerContentSha256",
+            "currentSceneFingerprintSha256",
+        ):
+            if not isinstance(ack[field], str) or CONTENT_SHA256_PATTERN.fullmatch(ack[field]) is None:
+                raise ValueError(f"Shortcut proof recovery {field} is invalid")
+        expected_locked = ack["status"] != "restored"
+        expected_fingerprint = (
+            ack["history"]["baselineSceneFingerprintSha256"]
+            if ack["status"] == "restored"
+            else ack["history"]["lockedSceneFingerprintSha256"]
+        )
+        if ack["currentSceneFingerprintSha256"] != expected_fingerprint:
+            raise ValueError("Shortcut proof recovery fingerprint is invalid")
+        if ack["mutationLocked"] is not expected_locked:
+            raise ValueError("Shortcut proof recovery lock state is invalid")
+        self._validate_expiry(ack["occurredAt"], "Shortcut proof recovery acknowledgement time")
+        return ack
+
+    def _validate_shortcut_proof_progress(self, progress: Any) -> dict[str, Any]:
+        validated = self._validate_shortcut_proof_identity(progress, "Shortcut proof progress")
+        completed = validated["completedOperationIds"]
+        if validated["status"] != "in_progress" or not isinstance(completed, list) or not 1 <= len(completed) <= 4 or completed != validated["operationIds"][:len(completed)]:
+            raise ValueError("Shortcut proof progress must be an exact operation prefix")
+        if not isinstance(validated["receiptChainHeadSha256"], str) or CONTENT_SHA256_PATTERN.fullmatch(validated["receiptChainHeadSha256"]) is None:
+            raise ValueError("Shortcut proof progress receipt head is invalid")
+        return validated
+
+    def _validate_shortcut_receipt_chain(
+        self,
+        receipts: Any,
+        *,
+        complete: bool,
+        identity: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(receipts, list) or len(receipts) > 4 or (complete and len(receipts) != 4):
+            raise ValueError("Shortcut proof receipt chain has invalid length")
+        previous = None
+        for index, receipt in enumerate(receipts):
+            if not isinstance(receipt, dict):
+                raise ValueError("Shortcut proof receipt must be an object")
+            common = {
+                "receiptId", "proofId", "requestId", "deliveryId",
+                "bindingContentSha256", "order", "previousReceiptContentSha256",
+                "outcome", "occurredAt", "contentSha256", "operationId", "kind",
+            }
+            operation_id = self._shortcut_operation_ids()[index]
+            extras = (
+                {"context", "eventEvidence", "operatorStackBeforeSha256", "operatorStackAfterSha256"}
+                if index in {0, 1, 3}
+                else {"surfaceOperationId", "surfaceOperatorId", "controlId", "oldValue", "newValue", "eventEvidence"}
+            )
+            if index == 1:
+                extras |= {"sourceOperationId", "sourceOperatorId"}
+            if index == 3:
+                extras |= {"surfaceOperationId"}
+            self._validate_exact_keys(receipt, common | extras, "Shortcut proof operation receipt")
+            if receipt["operationId"] != operation_id or receipt["order"] != index + 1 or receipt["outcome"] != "succeeded":
+                raise ValueError("Shortcut proof receipt order or operation is invalid")
+            if index == 2:
+                if (
+                    receipt["kind"] != "operator_property_update"
+                    or receipt["surfaceOperationId"] != self._shortcut_operation_ids()[1]
+                    or receipt["surfaceOperatorId"] != "object.subdivision_set"
+                    or receipt["controlId"] != "object.subdivision_set.level"
+                    or receipt["oldValue"] != 1
+                    or receipt["newValue"] not in {1, 2, 3}
+                ):
+                    raise ValueError("Shortcut proof property receipt identity is invalid")
+            elif (
+                receipt["kind"] != "key_input"
+                or not isinstance(receipt["context"], dict)
+                or receipt["context"]
+                != {
+                    "windowId": receipt["context"].get("windowId"),
+                    "areaType": "VIEW_3D",
+                    "regionType": "WINDOW",
+                    "mode": "OBJECT",
+                }
+                or not isinstance(receipt["context"].get("windowId"), str)
+                or not receipt["context"]["windowId"]
+                or (index == 1 and (
+                    receipt["sourceOperationId"] != self._shortcut_operation_ids()[0]
+                    or receipt["sourceOperatorId"] != "object.subdivision_set"
+                ))
+                or (index == 3 and receipt["surfaceOperationId"] != self._shortcut_operation_ids()[1])
+            ):
+                raise ValueError("Shortcut proof key receipt identity is invalid")
+            if any(
+                receipt[field] != identity[field]
+                for field in (
+                    "proofId", "requestId", "deliveryId", "bindingContentSha256"
+                )
+            ):
+                raise ValueError("Shortcut proof receipt delivery identity is invalid")
+            self._validated_required_uuid(receipt["receiptId"], "Shortcut proof receipt id")
+            self._validate_expiry(receipt["occurredAt"], "Shortcut proof receipt time")
+            if receipt["previousReceiptContentSha256"] != previous:
+                raise ValueError("Shortcut proof receipt chain link is invalid")
+            content = {key: value for key, value in receipt.items() if key != "contentSha256"}
+            if receipt["contentSha256"] != self._canonical_sha256(content):
+                raise ValueError("Shortcut proof receipt content hash is invalid")
+            events = receipt.get("eventEvidence")
+            if not isinstance(events, list) or len(events) != (2, 2, 9, 2)[index]:
+                raise ValueError("Shortcut proof receipt event evidence must be an array")
+            level_event = (
+                ({1: "ONE", 2: "TWO", 3: "THREE"}[receipt["newValue"]], "PRESS", False, "viewport_center", str(receipt["newValue"]))
+                if index == 2
+                else ("ONE", "PRESS", False, "viewport_center", "1")
+            )
+            expected_events = (
+                (("ONE", "PRESS", True, "viewport_center", None), ("ONE", "RELEASE", True, "viewport_center", None)),
+                (("F9", "PRESS", False, "viewport_center", None), ("F9", "RELEASE", False, "viewport_center", None)),
+                (
+                    ("MOUSEMOVE", "NOTHING", False, "level_control", None),
+                    ("LEFTMOUSE", "PRESS", False, "level_control", None),
+                    ("LEFTMOUSE", "RELEASE", False, "level_control", None),
+                    ("LEFTMOUSE", "PRESS", False, "level_control", None),
+                    ("LEFTMOUSE", "RELEASE", False, "level_control", None),
+                    ("A", "PRESS", True, "viewport_center", None),
+                    level_event,
+                    ("RET", "PRESS", False, "viewport_center", None),
+                    ("RET", "RELEASE", False, "viewport_center", None),
+                ),
+                (("RET", "PRESS", False, "viewport_center", None), ("RET", "RELEASE", False, "viewport_center", None)),
+            )[index]
+            for event, expected_event in zip(events, expected_events):
+                if not isinstance(event, dict):
+                    raise ValueError("Shortcut proof event evidence must be an object")
+                expected_type, expected_value, expected_ctrl, expected_role, expected_unicode = expected_event
+                allowed = {"type", "value", "ctrl", "shift", "point"} | ({"unicode"} if expected_unicode is not None else set())
+                self._validate_exact_keys(event, allowed, "Shortcut proof event evidence")
+                point = event.get("point")
+                if not isinstance(point, dict):
+                    raise ValueError("Shortcut proof event point must be an object")
+                self._validate_exact_keys(point, {"x", "y", "role"}, "Shortcut proof event point")
+                if (
+                    event["type"] != expected_type
+                    or event["value"] != expected_value
+                    or event["ctrl"] is not expected_ctrl
+                    or event["shift"] is not False
+                    or event.get("unicode") != expected_unicode
+                    or point["role"] != expected_role
+                    or isinstance(point["x"], bool)
+                    or not isinstance(point["x"], int)
+                    or isinstance(point["y"], bool)
+                    or not isinstance(point["y"], int)
+                ):
+                    raise ValueError("Shortcut proof event evidence tuple is invalid")
+            previous = receipt["contentSha256"]
+        return receipts
+
+    @staticmethod
+    def _shortcut_operation_ids() -> list[str]:
+        return [
+            "shortcut.add_subdivision_surface_level_one",
+            "shortcut.open_adjust_last_operation",
+            "shortcut.set_viewport_level",
+            "shortcut.close_adjust_last_operation",
+        ]
+
+    def _validate_shortcut_checkpoint(self, checkpoint: Any, *, failure: bool) -> dict[str, Any]:
+        if not isinstance(checkpoint, dict):
+            raise ValueError("Shortcut proof checkpoint must be an object")
+        success_keys = {
+            "formatVersion", "evidenceClass", "checkpointId", "proofId", "replayId",
+            "previousCheckpointId", "operation", "undoLockId", "targetId", "marker",
+            "journal", "baselineState", "finalState", "baselineSceneFingerprintSha256",
+            "finalSceneFingerprintSha256", "receiptChainRootSha256", "receiptChainHeadSha256",
+            "strongObservationContentSha256", "committedAt",
+        }
+        failure_keys = {
+            "formatVersion", "evidenceClass", "checkpointId", "previousCheckpointId",
+            "operation", "undoLockId", "proofId", "replayId", "targetId", "marker",
+            "journal", "baselineState", "currentState", "receiptPrefixRootSha256",
+            "receiptPrefixHeadSha256", "lastCompletedOperationId", "committedAt",
+        }
+        self._validate_exact_keys(checkpoint, failure_keys if failure else success_keys, "Shortcut proof checkpoint")
+        for field in ("checkpointId", "proofId", "replayId", "undoLockId"):
+            self._validated_required_uuid(checkpoint[field], f"Shortcut proof checkpoint {field}")
+        if checkpoint["previousCheckpointId"] is not None:
+            self._validated_required_uuid(checkpoint["previousCheckpointId"], "Shortcut proof previous checkpoint id")
+        self._validate_expiry(checkpoint["committedAt"], "Shortcut proof checkpoint time")
+        marker = checkpoint["marker"]
+        journal = checkpoint["journal"]
+        baseline = checkpoint["baselineState"]
+        if not isinstance(marker, dict) or not isinstance(journal, dict) or not isinstance(baseline, dict):
+            raise ValueError("Shortcut proof checkpoint nested evidence is invalid")
+        self._validate_exact_keys(marker, {"key", "matched"}, "Shortcut proof checkpoint marker")
+        if marker != {"key": "_operating_line_shortcut_proof_history_v1", "matched": True}:
+            raise ValueError("Shortcut proof checkpoint marker is invalid")
+        if failure:
+            current = checkpoint["currentState"]
+            self._validate_exact_keys(journal, {"entryPresent", "baselineSnapshotPresent", "currentSnapshotPresent", "mutationLeaseHeld"}, "Shortcut failure checkpoint journal")
+            self._validate_exact_keys(baseline, {"targetId", "sceneFingerprintSha256", "modifierCount"}, "Shortcut failure baseline state")
+            if not isinstance(current, dict):
+                raise ValueError("Shortcut failure current state is invalid")
+            self._validate_exact_keys(current, {"targetId", "sceneFingerprintSha256", "modifierCount"}, "Shortcut failure current state")
+            if (
+                checkpoint["formatVersion"] != "1.0.0"
+                or checkpoint["evidenceClass"] != "companion_reported_shortcut_proof_failure_checkpoint"
+                or checkpoint["operation"] != "shortcut_proof_failure"
+                or journal != {"entryPresent": True, "baselineSnapshotPresent": True, "currentSnapshotPresent": True, "mutationLeaseHeld": True}
+                or baseline["targetId"] != checkpoint["targetId"]
+                or baseline["modifierCount"] != 0
+                or current["targetId"] != checkpoint["targetId"]
+            ):
+                raise ValueError("Shortcut failure checkpoint nested evidence is inconsistent")
+        else:
+            final = checkpoint["finalState"]
+            self._validate_exact_keys(journal, {"entryPresent", "baselineSnapshotPresent", "finalSnapshotPresent", "undoRedoRoundTripVerified", "mutationLeaseHeld"}, "Shortcut success checkpoint journal")
+            self._validate_exact_keys(baseline, {"targetId", "modifierCount", "activeObjectMode", "selectedObjectCount"}, "Shortcut success baseline state")
+            if not isinstance(final, dict):
+                raise ValueError("Shortcut success final state is invalid")
+            self._validate_exact_keys(final, {"targetId", "modifierType", "modifierCount", "viewportLevel"}, "Shortcut success final state")
+            if (
+                checkpoint["formatVersion"] != "1.0.0"
+                or checkpoint["evidenceClass"] != "companion_reported_shortcut_proof_native_undo_checkpoint"
+                or checkpoint["operation"] != "shortcut_proof"
+                or journal != {"entryPresent": True, "baselineSnapshotPresent": True, "finalSnapshotPresent": True, "undoRedoRoundTripVerified": True, "mutationLeaseHeld": True}
+                or baseline != {"targetId": checkpoint["targetId"], "modifierCount": 0, "activeObjectMode": "OBJECT", "selectedObjectCount": 1}
+                or final.get("targetId") != checkpoint["targetId"]
+                or final.get("modifierType") != "SUBSURF"
+                or final.get("modifierCount") != 1
+                or final.get("viewportLevel") not in {1, 2, 3}
+            ):
+                raise ValueError("Shortcut success checkpoint nested evidence is inconsistent")
+        return checkpoint
+
+    def _validate_shortcut_native_observation(
+        self,
+        observation: Any,
+        *,
+        id_field: str,
+        expected_fingerprint: str,
+        label: str,
+    ) -> dict[str, Any]:
+        if not isinstance(observation, dict):
+            raise ValueError(f"{label} must be an object")
+        self._validate_exact_keys(
+            observation,
+            {"satisfied", id_field, "sceneFingerprintSha256", "contentSha256"},
+            label,
+        )
+        self._validated_required_uuid(observation[id_field], f"{label} id")
+        if (
+            observation["satisfied"] is not True
+            or observation["sceneFingerprintSha256"] != expected_fingerprint
+            or not isinstance(observation["contentSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(observation["contentSha256"]) is None
+        ):
+            raise ValueError(f"{label} does not prove its expected scene fingerprint")
+        content = {
+            key: value for key, value in observation.items() if key != "contentSha256"
+        }
+        if observation["contentSha256"] != self._canonical_sha256(content):
+            raise ValueError(f"{label} content hash is invalid")
+        return observation
+
+    def _validate_shortcut_strong_observation(
+        self,
+        observation: Any,
+        *,
+        binding: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(observation, dict):
+            raise ValueError("Shortcut proof strong observation must be an object")
+        self._validate_exact_keys(
+            observation,
+            {
+                "kind", "satisfied", "observationId", "observedAt", "contentSha256",
+                "targetId", "modifierType", "modifierCount", "viewportLevel",
+                "subdivisionType", "renderLevels", "quality", "modifierStackMatches",
+                "evaluatedTopologyWithinBounds", "sceneFingerprintSha256",
+            },
+            "Shortcut proof strong observation",
+        )
+        self._validated_required_uuid(
+            observation["observationId"], "Shortcut proof observation id"
+        )
+        self._validate_expiry(
+            observation["observedAt"], "Shortcut proof observation time"
+        )
+        accepted = binding["acceptedAction"]["arguments"]
+        if (
+            observation["kind"] != "subdivision_surface_shortcut_ready"
+            or observation["satisfied"] is not True
+            or observation["targetId"] != accepted["targetId"]
+            or observation["modifierType"] != "SUBSURF"
+            or observation["modifierCount"] != 1
+            or observation["viewportLevel"] != accepted["viewportLevel"]
+            or observation["subdivisionType"] != "CATMULL_CLARK"
+            or observation["renderLevels"] != 2
+            or observation["quality"] != 3
+            or observation["modifierStackMatches"] is not True
+            or observation["evaluatedTopologyWithinBounds"] is not True
+            or not isinstance(observation["sceneFingerprintSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(
+                observation["sceneFingerprintSha256"]
+            )
+            is None
+        ):
+            raise ValueError("Shortcut proof strong observation is invalid")
+        content = {
+            key: value for key, value in observation.items() if key != "contentSha256"
+        }
+        if observation["contentSha256"] != self._canonical_sha256(content):
+            raise ValueError("Shortcut proof strong observation content hash is invalid")
+        return observation
+
+    def _validate_shortcut_proof_result(self, result: Any) -> dict[str, Any]:
+        validated = self._validate_shortcut_proof_identity(result, "Shortcut proof result", terminal=True)
+        statuses = {"succeeded", "failed_checkpointed", "failed_restored", "rejected", "restored", "reapplied_locked"}
+        if validated["status"] not in statuses or validated["managedActionResult"] != "not_executed" or validated["managedIdentityVerified"] is not False:
+            raise ValueError("Shortcut proof result status or managed claims are invalid")
+        if not isinstance(validated["terminalEvidence"], dict):
+            raise ValueError("Shortcut proof terminal evidence must be an object")
+        expected_kind = {
+            "succeeded": "succeeded_locked", "failed_checkpointed": "failed_checkpointed",
+            "failed_restored": "failed_restored", "rejected": "rejected_before_mutation",
+            "restored": "restored", "reapplied_locked": "reapplied_locked",
+        }[validated["status"]]
+        if validated["terminalEvidence"].get("kind") != expected_kind:
+            raise ValueError("Shortcut proof result evidence does not match its status")
+        should_lock = validated["status"] in {"succeeded", "failed_checkpointed", "reapplied_locked"}
+        if validated["requiresUndoToUnlock"] is not should_lock:
+            raise ValueError("Shortcut proof result lock state is invalid")
+        if (validated["error"] is None) != (validated["status"] in {"succeeded", "restored", "reapplied_locked"}):
+            raise ValueError("Shortcut proof result error state is invalid")
+        evidence = validated["terminalEvidence"]
+        if expected_kind == "rejected_before_mutation":
+            self._validate_exact_keys(evidence, {"kind", "mutationStarted"}, "Shortcut proof rejection evidence")
+            if evidence["mutationStarted"] is not False:
+                raise ValueError("Shortcut proof rejection cannot claim mutation")
+        elif expected_kind == "failed_restored":
+            self._validate_exact_keys(evidence, {"kind", "receiptPrefix", "lastCompletedOperationId", "baselineSceneFingerprintSha256", "currentSceneFingerprintSha256", "nativeUndoObservation", "mutationStarted"}, "Shortcut proof restored failure evidence")
+            self._validate_shortcut_receipt_chain(
+                evidence["receiptPrefix"], complete=False, identity=validated
+            )
+            if evidence["baselineSceneFingerprintSha256"] != evidence["currentSceneFingerprintSha256"]:
+                raise ValueError("Shortcut proof restored failure did not return to baseline")
+            self._validate_shortcut_native_observation(
+                evidence["nativeUndoObservation"],
+                id_field="restorationObservationId",
+                expected_fingerprint=evidence["currentSceneFingerprintSha256"],
+                label="Shortcut proof failure Undo observation",
+            )
+        elif expected_kind == "failed_checkpointed":
+            self._validate_exact_keys(evidence, {"kind", "checkpoint", "receiptPrefix", "lastCompletedOperationId", "baselineSceneFingerprintSha256", "currentSceneFingerprintSha256", "mutationStarted"}, "Shortcut proof checkpointed failure evidence")
+            self._validate_shortcut_checkpoint(evidence["checkpoint"], failure=True)
+            self._validate_shortcut_receipt_chain(
+                evidence["receiptPrefix"], complete=False, identity=validated
+            )
+        elif expected_kind == "succeeded_locked":
+            self._validate_exact_keys(evidence, {"kind", "attestation"}, "Shortcut proof success evidence")
+            attestation = evidence["attestation"]
+            if not isinstance(attestation, dict):
+                raise ValueError("Shortcut proof attestation must be an object")
+            self._validate_exact_keys(attestation, {"formatVersion", "attestationId", "deliveryId", "binding", "bindingContentSha256", "managedActionResult", "managedIdentityVerified", "executor", "operationReceipts", "strongObservation", "nativeUndoCheckpoint", "attestedAt", "integrity"}, "Shortcut proof attestation")
+            self._validated_required_uuid(attestation["attestationId"], "Shortcut proof attestation id")
+            self._validated_required_uuid(attestation["deliveryId"], "Shortcut proof attestation delivery id")
+            if (
+                attestation["deliveryId"] != validated["deliveryId"]
+                or attestation["binding"] != validated["binding"]
+                or attestation["bindingContentSha256"] != validated["bindingContentSha256"]
+                or attestation["managedActionResult"] != "not_executed"
+                or attestation["managedIdentityVerified"] is not False
+                or attestation["executor"] != {
+                    "executorId": validated["executorId"],
+                    "executionBoundary": validated["executionBoundary"],
+                    "transport": validated["transport"],
+                    "osHidInput": False,
+                }
+            ):
+                raise ValueError("Shortcut proof attestation binding is inconsistent")
+            receipts = self._validate_shortcut_receipt_chain(
+                attestation["operationReceipts"], complete=True, identity=validated
+            )
+            strong = self._validate_shortcut_strong_observation(
+                attestation["strongObservation"], binding=validated["binding"]
+            )
+            checkpoint = self._validate_shortcut_checkpoint(
+                attestation["nativeUndoCheckpoint"], failure=False
+            )
+            accepted = validated["binding"]["acceptedAction"]["arguments"]
+            if (
+                checkpoint["proofId"] != validated["proofId"]
+                or checkpoint["replayId"] != validated["replayId"]
+                or checkpoint["targetId"] != accepted["targetId"]
+                or checkpoint["finalState"]["viewportLevel"] != accepted["viewportLevel"]
+                or checkpoint["receiptChainRootSha256"] != receipts[0]["contentSha256"]
+                or checkpoint["receiptChainHeadSha256"] != receipts[-1]["contentSha256"]
+                or checkpoint["strongObservationContentSha256"] != strong["contentSha256"]
+                or checkpoint["finalSceneFingerprintSha256"]
+                != strong["sceneFingerprintSha256"]
+            ):
+                raise ValueError("Shortcut proof checkpoint evidence is inconsistent")
+            integrity = attestation["integrity"]
+            if not isinstance(integrity, dict):
+                raise ValueError("Shortcut proof attestation integrity must be an object")
+            self._validate_exact_keys(integrity, {"algorithm", "canonicalization", "contentSha256"}, "Shortcut proof attestation integrity")
+            attestation_content = {key: value for key, value in attestation.items() if key != "integrity"}
+            if integrity.get("contentSha256") != self._canonical_sha256(attestation_content):
+                raise ValueError("Shortcut proof attestation content hash is invalid")
+        else:
+            transition_keys = {
+                "kind", "sourceCheckpointId", "undoLockId",
+                "baselineSceneFingerprintSha256", "lockedSceneFingerprintSha256",
+                "currentSceneFingerprintSha256",
+                "nativeUndoObservation" if expected_kind == "restored" else "nativeRedoObservation",
+                "restoredAt" if expected_kind == "restored" else "reappliedAt",
+            }
+            self._validate_exact_keys(evidence, transition_keys, "Shortcut proof native history evidence")
+            expected_fingerprint = (
+                evidence["baselineSceneFingerprintSha256"]
+                if expected_kind == "restored"
+                else evidence["lockedSceneFingerprintSha256"]
+            )
+            if evidence["currentSceneFingerprintSha256"] != expected_fingerprint:
+                raise ValueError("Shortcut proof native history fingerprint is invalid")
+            self._validate_shortcut_native_observation(
+                evidence[
+                    "nativeUndoObservation"
+                    if expected_kind == "restored"
+                    else "nativeRedoObservation"
+                ],
+                id_field=(
+                    "restorationObservationId"
+                    if expected_kind == "restored"
+                    else "redoObservationId"
+                ),
+                expected_fingerprint=expected_fingerprint,
+                label=(
+                    "Shortcut proof Undo observation"
+                    if expected_kind == "restored"
+                    else "Shortcut proof Redo observation"
+                ),
+            )
+        return validated
+
+    def _poll_shortcut_proof_request(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/shortcut-proof?" + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Shortcut proof poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        if isinstance(delivery, dict) and delivery.get("kind") in {
+            "native_history_rebind", "native_terminal_reconcile"
+        }:
+            is_terminal = delivery.get("kind") == "native_terminal_reconcile"
+            validated_recovery = (
+                self._validate_shortcut_terminal_reconcile_delivery(delivery)
+                if is_terminal
+                else self._validate_shortcut_proof_recovery_delivery(delivery)
+            )
+            recovery_id = validated_recovery["recoveryId"]
+            if recovery_id in self._seen_shortcut_proof_recovery_ids:
+                return
+            if len(self._seen_shortcut_proof_recovery_ids) >= 256:
+                self._seen_shortcut_proof_recovery_ids.pop()
+            self._seen_shortcut_proof_recovery_ids.add(recovery_id)
+            self.incoming.put({
+                "kind": (
+                    "shortcut_proof_terminal_reconcile_request"
+                    if is_terminal
+                    else "shortcut_proof_recovery_request"
+                ),
+                "request": dict(validated_recovery),
+            })
+            return
+        validated = self._validate_shortcut_proof_delivery(delivery)
+        request_id = validated["requestId"]
+        if request_id in self._seen_shortcut_proof_request_ids:
+            return
+        if len(self._seen_shortcut_proof_request_ids) >= 256:
+            self._seen_shortcut_proof_request_ids.pop()
+        self._seen_shortcut_proof_request_ids.add(request_id)
+        self.incoming.put({"kind": "shortcut_proof_execute_request", "request": dict(validated)})
 
     def _validated_replay_current_state_request(
         self,
@@ -1217,6 +2228,9 @@ class CompanionTransport:
         session_retry_delay = min(max(0.05, self._poll_interval), 5.0)
         pending_report: dict[str, Any] | None = None
         pending_action_result: dict[str, Any] | None = None
+        pending_shortcut_progress: dict[str, Any] | None = None
+        pending_shortcut_result: dict[str, Any] | None = None
+        pending_shortcut_recovery_ack: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
         pending_goal_request: dict[str, Any] | None = None
@@ -1229,6 +2243,7 @@ class CompanionTransport:
         pending_initial_plan_run: dict[str, Any] | None = None
         active_initial_plan_run_id: str | None = None
         initial_plan_run_signature: str | None = None
+        shortcut_reporting_blocked: set[str] = set()
         refresh_replan_providers = True
         refresh_dialogue_providers = False
         refresh_initial_plan_providers = False
@@ -1241,12 +2256,18 @@ class CompanionTransport:
             not self._stop.is_set()
             or pending_report is not None
             or pending_action_result is not None
+            or pending_shortcut_progress is not None
+            or pending_shortcut_result is not None
+            or pending_shortcut_recovery_ack is not None
             or pending_decision is not None
             or pending_revision_request is not None
             or pending_goal_request is not None
             or pending_dialogue_run is not None
             or not self.outgoing.empty()
             or not self.action_results.empty()
+            or not self.shortcut_proof_progress.empty()
+            or not self.shortcut_proof_results.empty()
+            or not self.shortcut_proof_recovery_acks.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
             or not self.goal_requests.empty()
@@ -1812,6 +2833,141 @@ class CompanionTransport:
                             )
                             pending_action_result = None
                             request_succeeded = True
+                if pending_shortcut_progress is None:
+                    try:
+                        pending_shortcut_progress = self.shortcut_proof_progress.get_nowait()
+                    except Empty:
+                        pass
+                if pending_shortcut_recovery_ack is None:
+                    try:
+                        pending_shortcut_recovery_ack = self.shortcut_proof_recovery_acks.get_nowait()
+                    except Empty:
+                        pass
+                if pending_shortcut_recovery_ack is not None:
+                    request_id = pending_shortcut_recovery_ack.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/shortcut-proof-recovery",
+                            pending_shortcut_recovery_ack,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Shortcut proof recovery ack"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge shortcut proof recovery"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put({
+                            "kind": "shortcut_proof_recovery_rejected",
+                            "requestId": request_id,
+                            "message": (
+                                "Runtime permanently rejected shortcut proof recovery "
+                                f"(HTTP {error.code})"
+                            ),
+                        })
+                        pending_shortcut_recovery_ack = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put({
+                            "kind": "shortcut_proof_recovery_acknowledged",
+                            "requestId": request_id,
+                            "recoveryId": pending_shortcut_recovery_ack.get(
+                                "recoveryId"
+                            ),
+                            "resultContentSha256s": (
+                                [
+                                    self._canonical_sha256(result)
+                                    for result in pending_shortcut_recovery_ack.get(
+                                        "results", []
+                                    )
+                                ]
+                                if pending_shortcut_recovery_ack.get("kind")
+                                == "native_history_transition_reconcile"
+                                else []
+                            ),
+                        })
+                        pending_shortcut_recovery_ack = None
+                        request_succeeded = True
+                if pending_shortcut_progress is not None:
+                    request_id = pending_shortcut_progress.get("requestId")
+                    if request_id in shortcut_reporting_blocked:
+                        pending_shortcut_progress = None
+                        request_succeeded = True
+                        continue
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/shortcut-proof-progress",
+                            pending_shortcut_progress,
+                        )
+                        self._validate_exact_keys(response, {"result"}, "Shortcut proof progress ack")
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge shortcut proof progress")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put({
+                            "kind": "shortcut_proof_progress_rejected",
+                            "requestId": request_id,
+                            "message": f"Runtime permanently rejected shortcut proof progress (HTTP {error.code})",
+                        })
+                        pending_shortcut_progress = None
+                        if isinstance(request_id, str):
+                            shortcut_reporting_blocked.add(request_id)
+                        request_succeeded = True
+                    else:
+                        pending_shortcut_progress = None
+                        request_succeeded = True
+                progress_backlog_pending = (
+                    pending_shortcut_progress is not None
+                    or not self.shortcut_proof_progress.empty()
+                )
+                if pending_shortcut_result is None and not progress_backlog_pending:
+                    try:
+                        pending_shortcut_result = self.shortcut_proof_results.get_nowait()
+                    except Empty:
+                        pass
+                if pending_shortcut_result is not None and not progress_backlog_pending:
+                    request_id = pending_shortcut_result.get("requestId")
+                    if request_id in shortcut_reporting_blocked:
+                        pending_shortcut_result = None
+                        request_succeeded = True
+                        continue
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/shortcut-proof-result",
+                            pending_shortcut_result,
+                        )
+                        self._validate_exact_keys(response, {"result"}, "Shortcut proof result ack")
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge shortcut proof result")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put({
+                            "kind": "shortcut_proof_result_rejected",
+                            "requestId": request_id,
+                            "message": f"Runtime permanently rejected shortcut proof result (HTTP {error.code})",
+                        })
+                        pending_shortcut_result = None
+                        if isinstance(request_id, str):
+                            shortcut_reporting_blocked.add(request_id)
+                        request_succeeded = True
+                    else:
+                        self.incoming.put({
+                            "kind": "shortcut_proof_result_acknowledged",
+                            "requestId": request_id,
+                            "resultContentSha256": self._canonical_sha256(
+                                pending_shortcut_result
+                            ),
+                        })
+                        pending_shortcut_result = None
+                        request_succeeded = True
                 now = time.monotonic()
                 if not self._stop.is_set() and now >= next_poll:
                     self._poll()

@@ -14,6 +14,7 @@ import {
   semanticAnchorSchema,
   type GuidePlan,
 } from './guide.js';
+import { shortcutProofExecutionSchema } from './interaction-catalog.js';
 import {
   procedureParameterProjectionSchema,
   projectProcedureParameter,
@@ -228,6 +229,7 @@ export const shortcutProcedureTrackSchema = z.discriminatedUnion('availability',
     ...availableTrackShape,
     modality: z.literal('shortcut'),
     operations: z.array(shortcutLedProcedureOperationSchema).min(1),
+    proofExecution: shortcutProofExecutionSchema.optional(),
   }),
   z.strictObject({ ...unavailableTrackShape, modality: z.literal('shortcut') }),
 ]);

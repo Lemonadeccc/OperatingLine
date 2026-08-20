@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.38.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.39.0');
     const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
       (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
     );
@@ -1694,6 +1694,60 @@ describe('interaction catalog registry', () => {
     );
     active.catalogVersion = frozen.catalogVersion;
     activeCylinder.procedureMaterialization.mcp = frozenCylinderMcp!;
+    const activeSubdivisionShortcut = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    )?.procedureMaterialization?.shortcut;
+    if (activeSubdivisionShortcut?.availability !== 'available') {
+      throw new Error('Expected Subdivision Surface shortcut');
+    }
+    delete activeSubdivisionShortcut.proofExecution;
+    const frozenSelection = activeSubdivisionShortcut.preconditions.find(
+      (precondition) => precondition.kind === 'selection',
+    );
+    if (frozenSelection === undefined) throw new Error('Expected selection precondition');
+    frozenSelection.value = 'Exactly one accepted target Mesh object is active and selected';
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.38.0 and adds only the Subdivision Surface shortcut proof declaration in 1.39.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.38.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '37517dadb822d18dd9fb9e5d86546f04499531e540d9200507de12e781bc703f',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    const frozenShortcut = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    )?.procedureMaterialization?.shortcut;
+    const activeShortcut = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
+    )?.procedureMaterialization?.shortcut;
+    if (
+      activeShortcut?.availability !== 'available' ||
+      frozenShortcut?.availability !== 'available'
+    ) {
+      throw new Error('Expected Subdivision Surface shortcut');
+    }
+    expect(frozenShortcut.proofExecution).toBeUndefined();
+    expect(activeShortcut).toMatchObject({
+      projection: 'candidate_only',
+      proofExecution: {
+        executorId: 'blender.subdivision_surface_f9.event_simulate.v1',
+        targetProfile: 'factory_cube_8_12_6',
+        managedActionExecuted: false,
+        managedReceiptCreated: false,
+        osHidInput: false,
+      },
+    });
+    active.catalogVersion = frozen.catalogVersion;
+    delete activeShortcut.proofExecution;
+    const activeSelection = activeShortcut.preconditions.find(
+      (precondition) => precondition.kind === 'selection',
+    );
+    if (activeSelection === undefined) throw new Error('Expected selection precondition');
+    activeSelection.value = 'Exactly one accepted target Mesh object is active and selected';
     expect(active).toEqual(frozen);
   });
 

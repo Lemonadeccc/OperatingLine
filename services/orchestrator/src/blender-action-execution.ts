@@ -176,6 +176,16 @@ export function createBlenderActionExecutionCoordinator(
   const get = (requestId: string): CompanionActionExecutionStatus | null =>
     executions.get(requestId)?.execution ?? null;
 
+  const ownsTarget = (adapterId: 'blender', instanceId: string): boolean =>
+    [...executions.values()].some(
+      ({ execution }) =>
+        execution.target.adapterId === adapterId &&
+        execution.target.instanceId === instanceId &&
+        (execution.status === 'queued' ||
+          execution.status === 'dispatched' ||
+          execution.status === 'recovery_required'),
+    );
+
   const findForCreate = (
     input: CompanionActionExecutionCreateRequest,
   ): CompanionActionExecutionStatus | null => {
@@ -351,7 +361,7 @@ export function createBlenderActionExecutionCoordinator(
     return 'accepted';
   };
 
-  return { complete, findForCreate, get, poll, queue };
+  return { complete, findForCreate, get, ownsTarget, poll, queue };
 }
 
 export type BlenderActionExecutionCoordinator = ReturnType<
