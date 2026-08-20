@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.35.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.34.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.36.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.35.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
@@ -585,7 +585,13 @@
           仍 unavailable。见
           [ADR 0089](adr/0089-accepted-uv-sphere-action-level-mcp.md) 与
           [ADR 0090](adr/0090-simple-primitive-action-level-mcp.md)。
-    - [ ] 真实逐控件 menu/shortcut executor、Torus/Cone/Cylinder action-level MCP 独立证据批，以及七种已证明
+    - [x] Torus action-level MCP executor：InteractionCatalog `1.36.0` 冻结 `1.35.0`，只新增 Torus；Runtime
+          从不可变 binding 派生 segments、radii、location 与 objectName，并以可信 receipt、动态拓扑与逐顶点
+          参数化的强 `torus_ready` 及 Start→Next 原生 Undo 直连证明成功；action status 与 replay finalize 共用
+          同一强 validator，后者另行固化追加式 provenance attestation。旧 binding 不继承权限，Torus shortcut
+          仍 unavailable，menu grounding 仍不代表逐控件执行。见
+          [ADR 0091](adr/0091-torus-action-level-mcp.md)。
+    - [ ] 真实逐控件 menu/shortcut executor、Cone/Cylinder action-level MCP 独立证据批，以及七种已证明
           primitive 之外的复合与编辑叶节点覆盖；根据失败分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，

@@ -256,7 +256,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.35.0');
+    expect(catalog.catalogVersion).toBe('1.36.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -317,6 +317,7 @@ describe('interaction catalog protocol', () => {
       '1.33.0',
       '1.34.0',
       '1.35.0',
+      '1.36.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -327,6 +328,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
+      'blender.mesh.create_torus',
     ]);
     for (const recipe of availableMcpRecipes) {
       expect(recipe.procedureMaterialization?.mcp).toEqual({
@@ -1181,8 +1183,14 @@ describe('interaction catalog protocol', () => {
         reason: 'No verified shortcut procedure is available.',
       },
       mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'accepted_action_arguments',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_state_report',
       },
     });
     const subdivide = recipeFor(catalog, 'blender.mesh.edit_subdivide');

@@ -2673,7 +2673,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('materializes the exact Torus ordered menu without inventing shortcut or MCP support', () => {
+  it('materializes the exact Torus ordered menu and action-level MCP operation', () => {
     const input = torusCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -2686,14 +2686,14 @@ describe('procedure authoring materialization', () => {
       throw new Error('expected materialized Torus leaf');
     }
 
-    expect(result.formatVersion).toBe('1.1.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.mesh.create_torus.native',
         menu: 'materialized',
         shortcut: 'unavailable',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     const menuTrack = leaf.menuTracks[0];
@@ -2760,12 +2760,40 @@ describe('procedure authoring materialization', () => {
         reason: 'No verified shortcut procedure is available.',
       }),
     ]);
-    expect(leaf.mcpTracks).toEqual([
-      expect.objectContaining({
-        availability: 'unavailable',
-        modality: 'mcp',
-        reason: 'No approved action-level MCP tool is available.',
-      }),
+    expect(leaf.mcpTracks).toHaveLength(1);
+    const mcpTrack = leaf.mcpTracks[0];
+    if (mcpTrack?.availability !== 'available') {
+      throw new Error('expected available Torus MCP track');
+    }
+    expect(mcpTrack.operations).toEqual([
+      {
+        id: 'blender.mesh.create_torus.native.mcp.execute',
+        order: 1,
+        semanticRefs: leaf.semanticOperations.map((operation) => operation.id),
+        description: 'Execute blender.mesh.create_torus as the accepted replay next step',
+        evidenceRefs: [
+          ...new Set(leaf.semanticOperations.flatMap((operation) => operation.evidenceRefs)),
+        ],
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        arguments: {
+          formatVersion: '1.0.0',
+          requestId: '$runtime.requestId',
+          replayId: '$runtime.replayId',
+          expectedState: '$runtime.expectedState',
+        },
+        argumentSource: 'accepted_leaf_action',
+        actionArguments: {
+          resourceId: 'tutorial.torus.detail',
+          objectName: 'OperatingLine.DetailTorus',
+          majorSegments: 48,
+          minorSegments: 12,
+          majorRadius: 2.25,
+          minorRadius: 0.4,
+          location: [1.5, -2, 0.75],
+        },
+        resultBinding: `${leaf.id}.companion_state_report`,
+      },
     ]);
     expect(input).toEqual(inputSnapshot);
     expect(result.tree).not.toBe(input);

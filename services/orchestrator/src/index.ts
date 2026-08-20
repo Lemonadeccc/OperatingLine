@@ -241,6 +241,7 @@ import {
   prepareProcedureLeafReplay,
   ProcedureLeafReplayError,
   sameProcedureLeafReplayValue,
+  validateStrongProcedureLeafReplayObservation,
 } from './procedure-replay.js';
 import {
   buildProcedureAuthoringPromptPacket,
@@ -2490,19 +2491,21 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           execution.expectedState.reportId,
         );
         const startCheckpoint = authorizedStart?.nativeUndoCheckpoint;
-        const expectedObservations = execution.step.expectedObservations;
-        const observationsMatch =
-          report.observations.length === expectedObservations.length &&
-          expectedObservations.every((expected, index) => {
-            const observation = report.observations[index];
-            return (
-              observation?.kind === expected.kind &&
-              observation.satisfied &&
-              observation.details['supported'] === true &&
-              sameProcedureLeafReplayValue(observation.details['parameters'], expected.parameters)
-            );
-          });
-        if (expectedObservations.length === 0 || !observationsMatch) {
+        let actionReplayBinding: ProcedureLeafReplayBinding;
+        try {
+          ({ binding: actionReplayBinding } = loadProcedureLeafReplayEvidence(execution.replayId));
+        } catch (error) {
+          if (!(error instanceof ProcedureLeafReplayError)) throw error;
+          return actionExecutionRejected(
+            'Succeeded action result cannot be verified against its immutable replay evidence',
+            409,
+            'action_execution_replay_evidence_invalid',
+          );
+        }
+        try {
+          validateStrongProcedureLeafReplayObservation(actionReplayBinding, report);
+        } catch (error) {
+          if (!(error instanceof ProcedureLeafReplayError)) throw error;
           return actionExecutionRejected(
             'Succeeded action result does not match the dispatched Observation success gate',
             409,
@@ -2681,7 +2684,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, or Plane leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, or Torus leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },

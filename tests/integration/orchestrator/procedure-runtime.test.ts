@@ -112,6 +112,51 @@ function replayNativeUndoCheckpoint(input: {
   };
 }
 
+function strongPrimitiveObservationDetails(input: {
+  readonly parameters: Record<string, unknown>;
+  readonly topology: {
+    readonly vertexCount: number;
+    readonly edgeCount: number;
+    readonly faceCount: number;
+  };
+  readonly geometryDetailKeys: readonly string[];
+}) {
+  const resourceId = input.parameters['resourceId'];
+  const objectName = input.parameters['objectName'];
+  if (typeof resourceId !== 'string' || typeof objectName !== 'string') {
+    throw new Error('Expected managed primitive observation identities');
+  }
+  return {
+    parameters: structuredClone(input.parameters),
+    supported: true,
+    resourceId,
+    objectName,
+    meshId: `${resourceId}.mesh`,
+    collectionId: 'snowman.collection',
+    parametersValid: true,
+    objectOwned: true,
+    meshOwned: true,
+    collectionOwned: true,
+    receiptMatches: true,
+    objectDataMatches: true,
+    collectionLinkMatches: true,
+    nameMatches: true,
+    locationMatches: true,
+    rotationMatches: true,
+    scaleMatches: true,
+    transformIsolated: true,
+    modifiersAbsent: true,
+    shapeKeysAbsent: true,
+    materialsAbsent: true,
+    contentIntact: true,
+    topologyMatches: true,
+    finiteCoordinates: true,
+    ...Object.fromEntries(input.geometryDetailKeys.map((key) => [key, true])),
+    ...input.topology,
+    meshContentSha256: 'e'.repeat(64),
+  };
+}
+
 async function waitUntilAfter(isoTimestamp: string): Promise<void> {
   const timestamp = Date.parse(isoTimestamp);
   for (let attempt = 0; attempt < 100 && Date.now() <= timestamp; attempt += 1) {
@@ -4383,7 +4428,11 @@ describe('procedure compilation runtime', () => {
           {
             kind: expectedObservation.kind,
             satisfied: true,
-            details: { parameters: structuredClone(parameters), supported: true },
+            details: strongPrimitiveObservationDetails({
+              parameters,
+              topology: { vertexCount: 482, edgeCount: 992, faceCount: 512 },
+              geometryDetailKeys: ['radiusMatches'],
+            }),
           },
         ],
         nativeUndoCheckpoint: replayNativeUndoCheckpoint({
@@ -4619,158 +4668,182 @@ describe('procedure compilation runtime', () => {
     }
   });
 
-  it('rejects a frozen InteractionCatalog 1.34 Icosphere binding at action execution', async () => {
-    const frozenInteractionCatalog = blenderInteractionCatalogs.find(
-      (catalog) => catalog.catalogVersion === '1.34.0',
-    );
-    if (frozenInteractionCatalog === undefined) {
-      throw new Error('Expected the frozen Blender InteractionCatalog 1.34.0 snapshot');
-    }
-    const runtime = await startRuntime({
-      databasePath: ':memory:',
-      accessToken,
-      actionCatalogs: blenderActionCatalogs,
-      interactionCatalogs: blenderInteractionCatalogs,
-    });
-    try {
-      const targetInstanceId = randomUUID();
-      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          targetAdapterId: 'blender',
-          actionCatalogVersion: frozenInteractionCatalog.actionCatalogVersion,
-          interactionCatalogVersion: frozenInteractionCatalog.catalogVersion,
-          goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
-          treeId: 'snowman.eye.left.procedure',
-          revision: 1,
-          locale: 'zh-CN',
-        }),
-      });
-      expect(promptResponse.status).toBe(200);
-      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
-      const replayRequest = {
-        formatVersion: '1.0.0',
-        replayId: randomUUID(),
-        targetInstanceId,
-        leafId: 'snowman.head.eyes.left',
-        replayMode: 'managed_action',
-        packet,
-        tree: icosphereReplayAuthoringCandidateFixture(packet),
-      } as const;
-      const proposedMcp = await callMcpTool(
-        runtime,
-        8951,
-        'operatingline.procedure.replay.propose',
-        replayRequest,
+  it.each([
+    {
+      catalogVersion: '1.34.0',
+      primitive: 'Icosphere',
+      goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
+      fixture: icosphereReplayAuthoringCandidateFixture,
+    },
+    {
+      catalogVersion: '1.35.0',
+      primitive: 'Torus',
+      goal: '创建一个分段、半径和位置精确的 Torus。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'torus'),
+    },
+  ])(
+    'rejects a frozen InteractionCatalog $catalogVersion $primitive binding at action execution',
+    async ({ catalogVersion, goal, fixture }) => {
+      const frozenInteractionCatalog = blenderInteractionCatalogs.find(
+        (catalog) => catalog.catalogVersion === catalogVersion,
       );
-      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
-      const proposed = procedureLeafReplayProposalResultSchema.parse(
-        proposedMcp.result?.structuredContent,
-      );
-      expect(proposed.binding.materialization).toMatchObject({
-        catalogBinding: { interactionCatalogVersion: '1.34.0' },
-        coverage: [expect.objectContaining({ mcp: 'unavailable' })],
+      if (frozenInteractionCatalog === undefined) {
+        throw new Error(
+          `Expected the frozen Blender InteractionCatalog ${catalogVersion} snapshot`,
+        );
+      }
+      const runtime = await startRuntime({
+        databasePath: ':memory:',
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
       });
+      try {
+        const targetInstanceId = randomUUID();
+        const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            targetAdapterId: 'blender',
+            actionCatalogVersion: frozenInteractionCatalog.actionCatalogVersion,
+            interactionCatalogVersion: frozenInteractionCatalog.catalogVersion,
+            goal,
+            treeId: 'snowman.eye.left.procedure',
+            revision: 1,
+            locale: 'zh-CN',
+          }),
+        });
+        expect(promptResponse.status).toBe(200);
+        const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+        const tree = fixture(packet);
+        const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+          (node) => node['kind'] === 'leaf',
+        );
+        if (leaf === undefined) throw new Error('Expected one frozen replay leaf');
+        const replayRequest = {
+          formatVersion: '1.0.0',
+          replayId: randomUUID(),
+          targetInstanceId,
+          leafId: String(leaf['id']),
+          replayMode: 'managed_action',
+          packet,
+          tree,
+        } as const;
+        const proposedMcp = await callMcpTool(
+          runtime,
+          8951,
+          'operatingline.procedure.replay.propose',
+          replayRequest,
+        );
+        expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+        const proposed = procedureLeafReplayProposalResultSchema.parse(
+          proposedMcp.result?.structuredContent,
+        );
+        expect(proposed.binding.materialization).toMatchObject({
+          catalogBinding: { interactionCatalogVersion: catalogVersion },
+          coverage: [expect.objectContaining({ mcp: 'unavailable' })],
+        });
 
-      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
-      });
-      expect(sessionResponse.status).toBe(200);
-      const session = (await sessionResponse.json()) as { leaseId: string };
-      const leaseHeaders = {
-        ...headers,
-        'x-operatingline-companion-lease': session.leaseId,
-      };
-      const proposal = proposed.binding.proposal;
-      const decisionResponse = await fetch(
-        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
-        {
+        const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(blenderCompanionHello(targetInstanceId)),
+        });
+        expect(sessionResponse.status).toBe(200);
+        const session = (await sessionResponse.json()) as { leaseId: string };
+        const leaseHeaders = {
+          ...headers,
+          'x-operatingline-companion-lease': session.leaseId,
+        };
+        const proposal = proposed.binding.proposal;
+        const decisionResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+          {
+            method: 'POST',
+            headers: leaseHeaders,
+            body: JSON.stringify({
+              protocolVersion: guideProtocolVersion,
+              decisionId: randomUUID(),
+              proposalId: proposal.proposalId,
+              adapterId: 'blender',
+              instanceId: targetInstanceId,
+              decision: 'accepted',
+              occurredAt: new Date().toISOString(),
+            }),
+          },
+        );
+        expect(decisionResponse.status).toBe(200);
+
+        const executionId = randomUUID();
+        const planContentSha256 = computePlanContentSha256(proposal.plan);
+        const startedAt = new Date().toISOString();
+        const startReport = {
+          protocolVersion: guideProtocolVersion,
+          reportId: randomUUID(),
+          sequence: 1,
+          adapterId: 'blender',
+          instanceId: targetInstanceId,
+          companionVersion: '0.1.0',
+          hostVersion: '4.5.3 LTS',
+          plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+          planContentSha256,
+          executionId,
+          phase: 'running',
+          activeStepId: null,
+          completedStepIds: [],
+          transition: 'walkthrough_started',
+          stepId: null,
+          observations: [],
+          observationGate: null,
+          artifactAttestation: null,
+          nativeUndoCheckpoint: {
+            formatVersion: '1.0.0',
+            evidenceClass: 'companion_reported_native_undo_checkpoint',
+            checkpointId: randomUUID(),
+            previousCheckpointId: null,
+            operation: 'start',
+            committedAt: startedAt,
+            marker: { key: '_operating_line_native_history_v1', matched: true },
+            journal: {
+              entryPresent: true,
+              snapshotMatchesSession: true,
+              artifactsBackedUp: true,
+            },
+            session: {
+              plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+              planContentSha256,
+              executionId,
+              activeStepId: null,
+              completedStepIds: [],
+              receiptStepIds: [],
+            },
+          },
+          error: null,
+          occurredAt: startedAt,
+        } as const;
+        const startResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
           method: 'POST',
           headers: leaseHeaders,
-          body: JSON.stringify({
-            protocolVersion: guideProtocolVersion,
-            decisionId: randomUUID(),
-            proposalId: proposal.proposalId,
-            adapterId: 'blender',
-            instanceId: targetInstanceId,
-            decision: 'accepted',
-            occurredAt: new Date().toISOString(),
-          }),
-        },
-      );
-      expect(decisionResponse.status).toBe(200);
+          body: JSON.stringify(startReport),
+        });
+        expect(startResponse.status).toBe(200);
 
-      const executionId = randomUUID();
-      const planContentSha256 = computePlanContentSha256(proposal.plan);
-      const startedAt = new Date().toISOString();
-      const startReport = {
-        protocolVersion: guideProtocolVersion,
-        reportId: randomUUID(),
-        sequence: 1,
-        adapterId: 'blender',
-        instanceId: targetInstanceId,
-        companionVersion: '0.1.0',
-        hostVersion: '4.5.3 LTS',
-        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
-        planContentSha256,
-        executionId,
-        phase: 'running',
-        activeStepId: null,
-        completedStepIds: [],
-        transition: 'walkthrough_started',
-        stepId: null,
-        observations: [],
-        observationGate: null,
-        artifactAttestation: null,
-        nativeUndoCheckpoint: {
+        const execution = await callMcpTool(runtime, 8952, 'operatingline.blender.action.execute', {
           formatVersion: '1.0.0',
-          evidenceClass: 'companion_reported_native_undo_checkpoint',
-          checkpointId: randomUUID(),
-          previousCheckpointId: null,
-          operation: 'start',
-          committedAt: startedAt,
-          marker: { key: '_operating_line_native_history_v1', matched: true },
-          journal: {
-            entryPresent: true,
-            snapshotMatchesSession: true,
-            artifactsBackedUp: true,
-          },
-          session: {
-            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
-            planContentSha256,
-            executionId,
-            activeStepId: null,
-            completedStepIds: [],
-            receiptStepIds: [],
-          },
-        },
-        error: null,
-        occurredAt: startedAt,
-      } as const;
-      const startResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
-        method: 'POST',
-        headers: leaseHeaders,
-        body: JSON.stringify(startReport),
-      });
-      expect(startResponse.status).toBe(200);
-
-      const execution = await callMcpTool(runtime, 8952, 'operatingline.blender.action.execute', {
-        formatVersion: '1.0.0',
-        requestId: randomUUID(),
-        replayId: replayRequest.replayId,
-        expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
-      });
-      expect(execution.result?.isError).toBe(true);
-      expect(execution.result?.content?.[0]?.text).toContain(
-        'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
-      );
-    } finally {
-      await runtime.stop();
-    }
-  });
+          requestId: randomUUID(),
+          replayId: replayRequest.replayId,
+          expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+        });
+        expect(execution.result?.isError).toBe(true);
+        expect(execution.result?.content?.[0]?.text).toContain(
+          'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
+        );
+      } finally {
+        await runtime.stop();
+      }
+    },
+  );
 
   // This table proves the orchestration result gate for each newly authorized primitive.
   // The later topology-attestation cases prove their stronger geometry claims.
@@ -4780,6 +4853,8 @@ describe('procedure compilation runtime', () => {
       actionName: 'blender.mesh.create_icosphere',
       goal: '创建一个三级细分、半径 1.75 的 Icosphere。',
       fixture: icosphereReplayAuthoringCandidateFixture,
+      topology: { vertexCount: 162, edgeCount: 480, faceCount: 320 },
+      geometryDetailKeys: ['radiusMatches'],
     },
     {
       primitive: 'cube',
@@ -4787,6 +4862,8 @@ describe('procedure compilation runtime', () => {
       goal: '创建一个边长 2.5、位置精确的 Cube。',
       fixture: (packet: ProcedureAuthoringPromptPacket) =>
         primitiveReplayAuthoringCandidateFixture(packet, 'cube'),
+      topology: { vertexCount: 8, edgeCount: 12, faceCount: 6 },
+      geometryDetailKeys: ['sizeMatches'],
     },
     {
       primitive: 'plane',
@@ -4794,10 +4871,21 @@ describe('procedure compilation runtime', () => {
       goal: '创建一个边长 12.5、位置精确的 Plane。',
       fixture: (packet: ProcedureAuthoringPromptPacket) =>
         primitiveReplayAuthoringCandidateFixture(packet, 'plane'),
+      topology: { vertexCount: 4, edgeCount: 4, faceCount: 1 },
+      geometryDetailKeys: ['sizeMatches'],
+    },
+    {
+      primitive: 'torus',
+      actionName: 'blender.mesh.create_torus',
+      goal: '创建一个分段、半径和位置精确的 Torus。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'torus'),
+      topology: { vertexCount: 576, edgeCount: 1152, faceCount: 576 },
+      geometryDetailKeys: ['geometryMatches'],
     },
   ])(
     'gates the accepted $primitive orchestration result on its exact action-level MCP and Start checkpoint',
-    async ({ primitive, actionName, goal, fixture }) => {
+    async ({ primitive, actionName, goal, fixture, topology, geometryDetailKeys }) => {
       const runtime = await startRuntime({
         databasePath: ':memory:',
         accessToken,
@@ -4996,46 +5084,45 @@ describe('procedure compilation runtime', () => {
         });
 
         await waitUntilAfter(delivery!.dispatchedAt);
-        const succeededAt = new Date().toISOString();
-        const successReport = {
-          ...startReport,
-          reportId: randomUUID(),
-          sequence: startReport.sequence + 1,
-          phase: 'completed' as const,
-          activeStepId: replayRequest.leafId,
-          completedStepIds: [replayRequest.leafId],
-          transition: 'step_succeeded' as const,
-          stepId: replayRequest.leafId,
-          observations: [
-            {
-              kind: expectedObservation.kind,
-              satisfied: true,
-              details: {
-                parameters: structuredClone(expectedObservation.parameters),
-                supported: true,
-              },
-            },
-          ],
-          nativeUndoCheckpoint: replayNativeUndoCheckpoint({
-            planId: proposal.plan.id,
-            planRevision: proposal.plan.revision,
-            planContentSha256,
-            executionId,
-            stepId: replayRequest.leafId,
-            occurredAt: succeededAt,
-            operation: 'next',
-            previousCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
-          }),
-          occurredAt: succeededAt,
-        };
-        const successStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
-          method: 'POST',
-          headers: leaseHeaders,
-          body: JSON.stringify(successReport),
+        const fullObservationDetails = strongPrimitiveObservationDetails({
+          parameters: expectedObservation.parameters,
+          topology,
+          geometryDetailKeys,
         });
-        expect(successStateResponse.status).toBe(200);
-
-        const result = {
+        const reportFor = (sequence: number, details: Record<string, unknown>) => {
+          const occurredAt = new Date().toISOString();
+          return {
+            ...startReport,
+            reportId: randomUUID(),
+            sequence,
+            phase: 'completed' as const,
+            activeStepId: replayRequest.leafId,
+            completedStepIds: [replayRequest.leafId],
+            transition: 'step_succeeded' as const,
+            stepId: replayRequest.leafId,
+            observations: [{ kind: expectedObservation.kind, satisfied: true, details }],
+            nativeUndoCheckpoint: replayNativeUndoCheckpoint({
+              planId: proposal.plan.id,
+              planRevision: proposal.plan.revision,
+              planContentSha256,
+              executionId,
+              stepId: replayRequest.leafId,
+              occurredAt,
+              operation: 'next',
+              previousCheckpointId: startReport.nativeUndoCheckpoint.checkpointId,
+            }),
+            occurredAt,
+          };
+        };
+        const postState = async (report: ReturnType<typeof reportFor>) => {
+          const response = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+            method: 'POST',
+            headers: leaseHeaders,
+            body: JSON.stringify(report),
+          });
+          expect(response.status).toBe(200);
+        };
+        const resultFor = (report: ReturnType<typeof reportFor>) => ({
           formatVersion: '1.0.0',
           requestId: delivery!.requestId,
           replayId: delivery!.replayId,
@@ -5047,16 +5134,65 @@ describe('procedure compilation runtime', () => {
           executionId: delivery!.executionId,
           expectedState: delivery!.expectedState,
           stepId: delivery!.step.id,
-          status: 'succeeded',
-          report: { reportId: successReport.reportId, sequence: successReport.sequence },
+          status: 'succeeded' as const,
+          report: { reportId: report.reportId, sequence: report.sequence },
           error: null,
-          occurredAt: new Date().toISOString(),
-        } as const;
-        const resultResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/action-result`, {
-          method: 'POST',
-          headers: leaseHeaders,
-          body: JSON.stringify(result),
+          occurredAt: report.occurredAt,
         });
+        const postResult = (report: ReturnType<typeof reportFor>) =>
+          fetch(`${runtime.baseUrl}/api/v1/companion/action-result`, {
+            method: 'POST',
+            headers: leaseHeaders,
+            body: JSON.stringify(resultFor(report)),
+          });
+
+        let successSequence = startReport.sequence + 1;
+        if (primitive === 'torus') {
+          const missingGeometryDetails: Record<string, unknown> =
+            structuredClone(fullObservationDetails);
+          delete missingGeometryDetails['geometryMatches'];
+          const missingGeometryReport = reportFor(successSequence++, missingGeometryDetails);
+          await postState(missingGeometryReport);
+          const missingGeometryResult = await postResult(missingGeometryReport);
+          expect(missingGeometryResult.status).toBe(409);
+          await expect(missingGeometryResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8971, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+
+          const wrongTopologyReport = reportFor(successSequence++, {
+            ...fullObservationDetails,
+            vertexCount: topology.vertexCount + 1,
+          });
+          await postState(wrongTopologyReport);
+          const wrongTopologyResult = await postResult(wrongTopologyReport);
+          expect(wrongTopologyResult.status).toBe(409);
+          await expect(wrongTopologyResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8972, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+        }
+
+        const successReport = reportFor(successSequence, fullObservationDetails);
+        await postState(successReport);
+        const result = resultFor(successReport);
+        const resultResponse = await postResult(successReport);
         expect(resultResponse.status).toBe(200);
         await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
 
@@ -6747,7 +6883,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 576, edgeCount: 1152, faceCount: 576 },
       geometryDetailKeys: ['geometryMatches'] as const,
       shortcutCoverage: 'unavailable' as const,
-      mcpCoverage: 'unavailable' as const,
+      mcpCoverage: 'materialized' as const,
     },
     {
       primitive: 'cone' as const,

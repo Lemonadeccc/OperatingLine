@@ -478,7 +478,7 @@ export function buildProcedureLeafReplayBinding(input: {
   });
 }
 
-function strongReplayObservation(
+export function validateStrongProcedureLeafReplayObservation(
   binding: ProcedureLeafReplayBinding,
   report: CompanionStateReport,
 ) {
@@ -686,7 +686,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     );
   }
 
-  const attestedObservation = strongReplayObservation(binding, report);
+  const attestedObservation = validateStrongProcedureLeafReplayObservation(binding, report);
   if (
     Date.parse(report.occurredAt) > Date.parse(input.attestedAt) ||
     Date.parse(reportReceipt.receivedAt) > Date.parse(input.attestedAt)
@@ -967,7 +967,8 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
     );
   }
 
-  let recoveredObservation: ReturnType<typeof strongReplayObservation> | null = null;
+  let recoveredObservation: ReturnType<typeof validateStrongProcedureLeafReplayObservation> | null =
+    null;
   if (recoveryReport !== null) {
     if (
       recoveryReport.protocolVersion !== proposal.protocolVersion ||
@@ -1003,7 +1004,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
         409,
       );
     }
-    recoveredObservation = strongReplayObservation(binding, recoveryReport);
+    recoveredObservation = validateStrongProcedureLeafReplayObservation(binding, recoveryReport);
   }
   const finalReport = recoveryReport ?? failureReport;
   const finalReceipt = recoveryReportReceipt ?? failureReportReceipt;
