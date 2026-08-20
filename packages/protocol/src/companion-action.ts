@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 import { guideStepIdSchema, guideStepSchema } from './guide.js';
+import {
+  managedPrimitiveActionNames,
+  managedPrimitiveActionNameSchema,
+} from './managed-primitive-action.js';
 
 export const companionActionExecutionFormatVersion = '1.0.0' as const;
 export const companionActionExecutionFormatVersionSchema = z.literal(
@@ -37,20 +41,20 @@ const deliveryIdentityShape = {
   expectedState: expectedStateSchema,
 } as const;
 
-const uvSphereStepSchema = guideStepSchema.superRefine((step, context) => {
+const managedPrimitiveStepSchema = guideStepSchema.superRefine((step, context) => {
   if (
     step.action?.adapterId !== 'blender' ||
-    step.action.name !== 'blender.mesh.create_uv_sphere'
+    !managedPrimitiveActionNameSchema.safeParse(step.action.name).success
   ) {
     context.addIssue({
       code: 'custom',
       path: ['action'],
-      message: 'Action execution delivery is restricted to blender.mesh.create_uv_sphere',
+      message: 'Action execution delivery is restricted to managed Blender primitive actions',
     });
   }
 });
 
-const uvSphereStepJsonSchemaCondition = {
+const managedPrimitiveStepJsonSchemaCondition = {
   properties: {
     step: {
       properties: {
@@ -58,7 +62,7 @@ const uvSphereStepJsonSchemaCondition = {
           type: 'object',
           properties: {
             adapterId: { const: 'blender' },
-            name: { const: 'blender.mesh.create_uv_sphere' },
+            name: { enum: [...managedPrimitiveActionNames] },
           },
           required: ['adapterId', 'name'],
         },
@@ -90,12 +94,12 @@ export const companionActionExecutionDeliverySchema = z
   .strictObject({
     ...deliveryIdentityShape,
     deliveryId: z.uuid(),
-    step: uvSphereStepSchema,
+    step: managedPrimitiveStepSchema,
     requestedAt: timestampSchema,
     dispatchedAt: timestampSchema,
   })
   .meta({
-    allOf: [uvSphereStepJsonSchemaCondition],
+    allOf: [managedPrimitiveStepJsonSchemaCondition],
   });
 export type CompanionActionExecutionDelivery = z.infer<
   typeof companionActionExecutionDeliverySchema
@@ -170,7 +174,7 @@ export const companionActionExecutionStatusSchema = z
   .strictObject({
     ...deliveryIdentityShape,
     deliveryId: z.uuid().optional(),
-    step: uvSphereStepSchema,
+    step: managedPrimitiveStepSchema,
     requestedAt: timestampSchema,
     dispatchedAt: timestampSchema.optional(),
     status: actionExecutionStatusValueSchema,
@@ -243,7 +247,7 @@ export const companionActionExecutionStatusSchema = z
   })
   .meta({
     allOf: [
-      uvSphereStepJsonSchemaCondition,
+      managedPrimitiveStepJsonSchemaCondition,
       {
         if: { properties: { status: { const: 'queued' } }, required: ['status'] },
         then: {

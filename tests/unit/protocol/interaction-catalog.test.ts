@@ -10,6 +10,7 @@ import {
 } from '@operatingline/blender-action-catalog';
 import {
   interactionCatalogSchema,
+  managedPrimitiveActionNames,
   validateInteractionCatalog,
   type InteractionCatalog,
 } from '@operatingline/protocol';
@@ -220,6 +221,38 @@ function installConeSegmentFrame(catalog: InteractionCatalog) {
 }
 
 describe('interaction catalog protocol', () => {
+  it('permits action-level MCP only for the seven managed Blender primitive actions', () => {
+    const availableRecipe = recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere');
+
+    for (const actionName of managedPrimitiveActionNames) {
+      const catalog = structuredClone(blenderInteractionCatalog);
+      catalog.recipes = [structuredClone(availableRecipe)];
+      catalog.recipes[0]!.id = `${actionName}.native`;
+      catalog.recipes[0]!.actionName = actionName;
+      expect(() => validateInteractionCatalog(catalog)).not.toThrow();
+    }
+
+    for (const actionName of [
+      'blender.mesh.create_primitive_batch',
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.create_monkey',
+    ]) {
+      const catalog = structuredClone(blenderInteractionCatalog);
+      catalog.recipes = [structuredClone(availableRecipe)];
+      catalog.recipes[0]!.actionName = actionName;
+      expect(() => validateInteractionCatalog(catalog)).toThrow(
+        'action-level MCP is restricted to exact managed Blender primitive native recipes',
+      );
+    }
+
+    const wrongRecipe = structuredClone(blenderInteractionCatalog);
+    wrongRecipe.recipes = [structuredClone(availableRecipe)];
+    wrongRecipe.recipes[0]!.id = 'blender.mesh.create_uv_sphere.semantic';
+    expect(() => validateInteractionCatalog(wrongRecipe)).toThrow(
+      'action-level MCP is restricted to exact managed Blender primitive native recipes',
+    );
+  });
+
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 

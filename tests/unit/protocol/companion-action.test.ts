@@ -10,6 +10,7 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  managedPrimitiveActionNames,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -31,7 +32,7 @@ const requestedAt = '2026-08-20T10:00:00.000+08:00';
 const dispatchedAt = '2026-08-20T10:00:01.000+08:00';
 const occurredAt = '2026-08-20T10:00:02.000+08:00';
 
-function step() {
+function step(actionName: string = managedPrimitiveActionNames[0]) {
   return {
     id: 'head.eye.create-sphere',
     parentId: 'head.eye',
@@ -43,7 +44,7 @@ function step() {
     state: 'ready',
     action: {
       adapterId: 'blender',
-      name: 'blender.mesh.create_uv_sphere',
+      name: actionName,
       arguments: {
         objectName: 'Eye.L',
         location: [-0.4, -0.8, 1.7],
@@ -57,7 +58,7 @@ function step() {
   } as const;
 }
 
-function delivery() {
+function delivery(actionName: string = managedPrimitiveActionNames[0]) {
   return {
     formatVersion: '1.0.0',
     requestId: ids.requestId,
@@ -69,7 +70,7 @@ function delivery() {
     planContentSha256: 'a'.repeat(64),
     executionId: ids.executionId,
     expectedState,
-    step: step(),
+    step: step(actionName),
     requestedAt,
     dispatchedAt,
   } as const;
@@ -99,8 +100,11 @@ function result(status: 'succeeded' | 'failed' | 'rejected' = 'succeeded') {
   } as const;
 }
 
-function publicStatus(status: 'queued' | 'dispatched' | 'recovery_required' = 'queued') {
-  const request = delivery();
+function publicStatus(
+  status: 'queued' | 'dispatched' | 'recovery_required' = 'queued',
+  actionName: string = managedPrimitiveActionNames[0],
+) {
+  const request = delivery(actionName);
   const resolved = {
     formatVersion: request.formatVersion,
     requestId: request.requestId,
@@ -143,21 +147,39 @@ describe('companion action execution protocol', () => {
     }
   });
 
-  it('delivers only the exact approved Blender UV Sphere guide action', () => {
+  it('delivers and reports status for exactly the seven managed Blender primitive actions', () => {
+    for (const actionName of managedPrimitiveActionNames) {
+      const request = delivery(actionName);
+      expect(companionActionExecutionDeliverySchema.parse(request)).toEqual(request);
+      expect(
+        companionActionExecutionStatusSchema.safeParse(publicStatus('queued', actionName)).success,
+      ).toBe(true);
+    }
+
     const request = delivery();
-    expect(companionActionExecutionDeliverySchema.parse(request)).toEqual(request);
+    for (const actionName of [
+      'blender.mesh.create_primitive_batch',
+      'blender.mesh.edit_subdivide',
+      'blender.mesh.create_monkey',
+    ]) {
+      expect(
+        companionActionExecutionDeliverySchema.safeParse({
+          ...request,
+          step: { ...request.step, action: { ...request.step.action, name: actionName } },
+        }).success,
+      ).toBe(false);
+      expect(
+        companionActionExecutionStatusSchema.safeParse({
+          ...publicStatus(),
+          step: { ...request.step, action: { ...request.step.action, name: actionName } },
+        }).success,
+      ).toBe(false);
+    }
 
     for (const invalid of [
       {
         ...request,
         step: { ...request.step, action: { ...request.step.action, adapterId: 'maya' } },
-      },
-      {
-        ...request,
-        step: {
-          ...request.step,
-          action: { ...request.step.action, name: 'blender.mesh.create_cube' },
-        },
       },
       { ...request, step: { ...request.step, action: null } },
       { ...request, target: { ...request.target, adapterId: 'maya' } },

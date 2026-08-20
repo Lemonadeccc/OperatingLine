@@ -104,6 +104,7 @@ import {
   procedureRefinementRunStatusSchema,
   procedureRefinementSemanticContextBindingSchema,
   procedureRefinementSemanticContextReceiptRequestSchema,
+  procedureLeafReplayActionNameSchema,
   procedureLeafReplayAttestationSchema,
   procedureLeafReplayBindingSchema,
   procedureLeafReplayCurrentStateRequestSchema,
@@ -2201,7 +2202,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       throw new BlenderActionExecutionError(code, statusCode, message);
     };
 
-    const requireUvSphereMcpTrack = (binding: ProcedureLeafReplayBinding) => {
+    const requireManagedPrimitiveMcpTrack = (binding: ProcedureLeafReplayBinding) => {
       const leaf = binding.materialization.tree.nodes.find(
         (node) => node.kind === 'leaf' && node.id === binding.leafId,
       );
@@ -2209,13 +2210,15 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         return actionExecutionRejected('Replay binding has no executable leaf');
       }
       const action = leaf.action;
+      const parsedActionName = procedureLeafReplayActionNameSchema.safeParse(action.name);
       if (
-        binding.actionName !== 'blender.mesh.create_uv_sphere' ||
+        !parsedActionName.success ||
+        parsedActionName.data !== binding.actionName ||
         action.adapterId !== 'blender' ||
-        action.name !== 'blender.mesh.create_uv_sphere'
+        action.name !== binding.actionName
       ) {
         return actionExecutionRejected(
-          'This action-level executor is restricted to blender.mesh.create_uv_sphere',
+          'This action-level executor is restricted to the managed Blender primitive set',
           422,
           'action_execution_unsupported_action',
         );
@@ -2242,7 +2245,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         operation.resultBinding !== `${leaf.id}.companion_state_report`
       ) {
         return actionExecutionRejected(
-          'Replay binding lacks the exact catalog-grounded UV Sphere MCP call',
+          'Replay binding lacks the exact catalog-grounded managed primitive MCP call',
         );
       }
       return { action, leaf, operation };
@@ -2259,7 +2262,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (decision.decision !== 'accepted') {
         return actionExecutionRejected('The replay proposal was not accepted by the target user');
       }
-      const { action } = requireUvSphereMcpTrack(binding);
+      const { action } = requireManagedPrimitiveMcpTrack(binding);
       const proposal = binding.proposal;
       if (
         proposal.targetAdapterId !== 'blender' ||
@@ -2298,11 +2301,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         executableSteps.length !== 1 ||
         step?.id !== binding.leafId ||
         step.action?.adapterId !== 'blender' ||
-        step.action.name !== 'blender.mesh.create_uv_sphere' ||
+        step.action.name !== binding.actionName ||
+        step.action.name !== action.name ||
         !sameProcedureLeafReplayValue(step.action.arguments, action.arguments)
       ) {
         return actionExecutionRejected(
-          'Accepted replay plan does not contain the exact single UV Sphere leaf action',
+          'Accepted replay plan does not contain the exact single managed primitive leaf action',
         );
       }
 

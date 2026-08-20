@@ -6060,6 +6060,22 @@ describe('procedure compilation runtime', () => {
       );
       expect(decisionResponse.status).toBe(200);
 
+      const unavailableActionExecution = await callMcpTool(
+        runtime,
+        9021,
+        'operatingline.blender.action.execute',
+        {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId: replayRequest.replayId,
+          expectedState: { reportId: randomUUID(), sequence: 1 },
+        },
+      );
+      expect(unavailableActionExecution.result?.isError).toBe(true);
+      expect(unavailableActionExecution.result?.content?.[0]?.text).toContain(
+        'lacks the exact catalog-grounded managed primitive MCP call',
+      );
+
       const step = proposal.plan.steps.find((candidate) => candidate.id === replayRequest.leafId);
       const observationParameters = step?.expectedObservations[0]?.parameters;
       const resourceId = observationParameters?.['resourceId'];

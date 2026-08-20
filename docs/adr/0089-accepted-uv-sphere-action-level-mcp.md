@@ -33,8 +33,9 @@ InteractionCatalog `1.34.0` 只为 `blender.mesh.create_uv_sphere` 的封闭 rec
   `recovery_required`。
 
 Runtime 从持久化 replay binding、accepted decision、相同实例的 lease receipt 和当前 Companion state
-推导完整 action。只有单一 UV Sphere executable step、已经接受并 Start、尚未执行任何 step、没有 Observation
-阻塞且存在 `start` native Undo checkpoint 时才能入队。公开请求不能提供 action、参数、Plan/step ID 或 Python。
+推导完整 action。只有单一、由精确 InteractionCatalog 版本声明 available MCP 的受管 primitive executable step、
+已经接受并 Start、尚未执行任何 step、没有 Observation 阻塞且存在 `start` native Undo checkpoint 时才能入队。
+在 `1.34.0` 中该条件仍只有 UV Sphere 满足。公开请求不能提供 action、参数、Plan/step ID 或 Python。
 
 Companion 端点要求 Bearer 鉴权、当前实例的协商 lease 和 Guide protocol `1.5.0`。Blender 再以本地保存的
 accepted proposal、Plan hash、execution ID、最后 report、exact next step 和完整 action arguments 做第二次
@@ -59,12 +60,14 @@ delivery 绑定到新 lease；dispatch 后的 session identity 不再改变。
   MCP grounding claim 不能脱离 action execution status 当作执行证明。
 - menu 与 shortcut 数组仍是目录 grounding 或候选教学轨迹，不因 managed Action 成功而升级为真实逐控件/按键
   执行样本。
-- Icosphere、其他 primitive、Edit Mode、Modifier、Geometry Nodes、蒙皮、权重、骨骼、动画和渲染 action-level
-  MCP 均未由本决策开放。
+- `1.34.0` 未开放 Icosphere、其他 primitive、Edit Mode、Modifier、Geometry Nodes、蒙皮、权重、骨骼、动画和
+  渲染 action-level MCP。协议与 Companion 的代码级白名单可以识别七种受管 primitive，但没有 available
+  Catalog 轨迹的历史或当前 binding 始终不可执行。
 
 ## 验证
 
-- 协议与生成 JSON Schema 拒绝任意 action/Python、非 UV Sphere delivery、身份不一致及非法终态证据；
+- 公开 execute 协议拒绝任意 action/Python 输入；delivery JSON Schema 只接受七种受管 primitive，Runtime 另以
+  精确版本 Catalog 轨迹拒绝 `1.34.0` 中所有非 UV Sphere binding，并拒绝身份不一致及非法终态证据；
 - coordinator 测试覆盖幂等、目标互斥、lease 重连、冲突结果和重启后的 `recovery_required`；
 - Runtime 集成测试覆盖接受/Start/CAS、缺失报告、dispatch 前证据、Observation 参数错配、旧报告、lease 缺失、
   成功与重复结果；

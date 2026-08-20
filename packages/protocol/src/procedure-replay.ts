@@ -13,6 +13,10 @@ import {
 } from './companion.js';
 import { guideStepIdSchema } from './guide.js';
 import {
+  managedPrimitiveActionNameSchema,
+  type ManagedPrimitiveActionName,
+} from './managed-primitive-action.js';
+import {
   procedureAuthoringMaterializationRequestSchema,
   procedureAuthoringMaterializationResultSchema,
 } from './procedure-materialization.js';
@@ -23,16 +27,8 @@ export const procedureLeafReplayFormatVersionSchema = z.literal(procedureLeafRep
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
-export const procedureLeafReplayActionNameSchema = z.enum([
-  'blender.mesh.create_uv_sphere',
-  'blender.mesh.create_icosphere',
-  'blender.mesh.create_cube',
-  'blender.mesh.create_plane',
-  'blender.mesh.create_torus',
-  'blender.mesh.create_cone',
-  'blender.mesh.create_cylinder',
-]);
-export type ProcedureLeafReplayActionName = z.infer<typeof procedureLeafReplayActionNameSchema>;
+export const procedureLeafReplayActionNameSchema = managedPrimitiveActionNameSchema;
+export type ProcedureLeafReplayActionName = ManagedPrimitiveActionName;
 
 const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_uv_sphere': 'uv_sphere_ready',

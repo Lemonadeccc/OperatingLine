@@ -328,6 +328,35 @@ class GoalRequestTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 transport._poll_action_request()
 
+    def test_action_step_accepts_only_the_seven_approved_primitives(self) -> None:
+        instance_id = str(uuid.uuid4())
+        step = self._action_delivery(instance_id)["step"]
+
+        for action_name in (
+            "blender.mesh.create_uv_sphere",
+            "blender.mesh.create_icosphere",
+            "blender.mesh.create_cube",
+            "blender.mesh.create_plane",
+            "blender.mesh.create_torus",
+            "blender.mesh.create_cone",
+            "blender.mesh.create_cylinder",
+        ):
+            with self.subTest(action_name=action_name):
+                candidate = deepcopy(step)
+                candidate["action"]["name"] = action_name
+                CompanionTransport._validate_action_step(candidate)
+
+        for action_name in (
+            "blender.mesh.create_primitive_batch",
+            "blender.mesh.edit_subdivide",
+            "blender.mesh.create_monkey",
+        ):
+            with self.subTest(action_name=action_name):
+                candidate = deepcopy(step)
+                candidate["action"]["name"] = action_name
+                with self.assertRaisesRegex(ValueError, "approved primitives"):
+                    CompanionTransport._validate_action_step(candidate)
+
     def test_action_result_waits_for_state_delivery_and_flushes_on_shutdown(self) -> None:
         instance_id = str(uuid.uuid4())
         transport = CompanionTransport(

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
+import { managedPrimitiveActionNameSchema } from './managed-primitive-action.js';
 import {
   procedureParameterPathSegmentSchema,
   procedureParameterTransformSchema,
@@ -915,9 +916,13 @@ function validateRecipe(recipe: InteractionRecipe): void {
   }
 
   const mcp = recipe.procedureMaterialization?.mcp;
-  if (mcp?.availability === 'available' && recipe.actionName !== 'blender.mesh.create_uv_sphere') {
+  if (
+    mcp?.availability === 'available' &&
+    (!managedPrimitiveActionNameSchema.safeParse(recipe.actionName).success ||
+      recipe.id !== `${recipe.actionName}.native`)
+  ) {
     throw new Error(
-      `Interaction recipe ${recipe.id} action-level MCP is restricted to blender.mesh.create_uv_sphere`,
+      `Interaction recipe ${recipe.id} action-level MCP is restricted to exact managed Blender primitive native recipes`,
     );
   }
 

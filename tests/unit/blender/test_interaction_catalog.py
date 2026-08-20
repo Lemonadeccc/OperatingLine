@@ -66,6 +66,7 @@ FROZEN_ACTION_CATALOG_116_PATH = (
     / "action-catalog-1.16.0.json"
 )
 load_interaction_catalog = catalog_module.load_interaction_catalog
+parse_mcp_materialization = catalog_module._parse_mcp_materialization
 
 
 class InteractionCatalogTests(unittest.TestCase):
@@ -3583,6 +3584,66 @@ class InteractionCatalogTests(unittest.TestCase):
         ] = {"python": "import bpy"}
         with self.assertRaisesRegex(ValueError, "unknown field arguments"):
             self._load_raw(extra)
+
+    def test_action_level_mcp_allowlist_is_exactly_seven_native_primitives(
+        self,
+    ) -> None:
+        raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        available_mcp = deepcopy(
+            next(
+                recipe
+                for recipe in raw["recipes"]
+                if recipe["actionName"] == "blender.mesh.create_uv_sphere"
+            )["procedureMaterialization"]["mcp"]
+        )
+        approved_actions = (
+            "blender.mesh.create_uv_sphere",
+            "blender.mesh.create_icosphere",
+            "blender.mesh.create_cube",
+            "blender.mesh.create_plane",
+            "blender.mesh.create_torus",
+            "blender.mesh.create_cone",
+            "blender.mesh.create_cylinder",
+        )
+
+        for action_name in approved_actions:
+            with self.subTest(action_name=action_name):
+                forged = deepcopy(raw)
+                recipe = next(
+                    item
+                    for item in forged["recipes"]
+                    if item["actionName"] == action_name
+                )
+                recipe["procedureMaterialization"]["mcp"] = deepcopy(
+                    available_mcp
+                )
+                self._load_raw(forged)
+
+        for recipe_id in (
+            "blender.mesh.create_primitive_batch.semantic",
+            "blender.mesh.edit_subdivide.semantic",
+            "blender.mesh.create_monkey.native",
+        ):
+            with self.subTest(recipe_id=recipe_id):
+                with self.assertRaisesRegex(
+                    ValueError, "approved primitive recipes"
+                ):
+                    parse_mcp_materialization(available_mcp, recipe_id)
+
+        mismatched = deepcopy(raw)
+        uv_sphere = next(
+            item
+            for item in mismatched["recipes"]
+            if item["actionName"] == "blender.mesh.create_uv_sphere"
+        )
+        cube = next(
+            item
+            for item in mismatched["recipes"]
+            if item["actionName"] == "blender.mesh.create_cube"
+        )
+        uv_sphere["id"], cube["id"] = cube["id"], uv_sphere["id"]
+        with self.assertRaisesRegex(ValueError, "must bind its exact"):
+            self._load_raw(mismatched)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,11 @@ import re
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..domain import (
+    is_action_level_mcp_primitive,
+    is_action_level_mcp_primitive_recipe,
+)
+
 
 RESOURCE_PATH = (
     Path(__file__).parents[1] / "resources" / "interaction-catalog.json"
@@ -1384,9 +1389,9 @@ def _parse_mcp_materialization(
     for key, expected_value in expected.items():
         if raw[key] != expected_value:
             raise ValueError(f"{label} has unsupported {key}")
-    if recipe_id != "blender.mesh.create_uv_sphere.native":
+    if not is_action_level_mcp_primitive_recipe(recipe_id):
         raise ValueError(
-            f"{label} action-level MCP is restricted to blender.mesh.create_uv_sphere"
+            f"{label} action-level MCP is restricted to approved primitive recipes"
         )
     return ProcedureMaterializationChannel(
         availability="available",
@@ -1763,11 +1768,14 @@ def _validate_ordered_parameter_operations(
         return
     if (
         materialization.mcp.availability == "available"
-        and recipe.action_name != "blender.mesh.create_uv_sphere"
+        and (
+            not is_action_level_mcp_primitive(recipe.action_name)
+            or recipe.id != f"{recipe.action_name}.native"
+        )
     ):
         raise ValueError(
-            f"Interaction recipe {recipe.id} action-level MCP is restricted to "
-            "blender.mesh.create_uv_sphere"
+            f"Interaction recipe {recipe.id} action-level MCP must bind its exact "
+            "approved primitive native recipe"
         )
     semantic = materialization.semantic
     if semantic is not None:

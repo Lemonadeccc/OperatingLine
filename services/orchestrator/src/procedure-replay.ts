@@ -320,7 +320,6 @@ export function prepareProcedureLeafReplay(
     throw new ProcedureLeafReplayError(`Managed leaf replay does not support ${leaf.action.name}`);
   }
   const actionName = parsedActionName.data;
-  const requiresMaterializedMcp = actionName === 'blender.mesh.create_uv_sphere';
   const actionContract = replayActionContracts[actionName];
 
   const executablePlanSteps = materialization.compilation.plan.steps.filter(
@@ -362,12 +361,18 @@ export function prepareProcedureLeafReplay(
   const leafCoverage = coverage[0];
   const shortcutCoverageValid =
     leafCoverage?.shortcut === 'materialized' || leafCoverage?.shortcut === 'unavailable';
+  const expectedMcpTrackAvailability =
+    leafCoverage?.mcp === 'materialized'
+      ? 'available'
+      : leafCoverage?.mcp === 'unavailable'
+        ? 'unavailable'
+        : null;
   if (
     coverage.length !== 1 ||
     leafCoverage?.leafId !== leaf.id ||
     leafCoverage.menu !== 'materialized' ||
     !shortcutCoverageValid ||
-    leafCoverage.mcp !== (requiresMaterializedMcp ? 'materialized' : 'unavailable') ||
+    expectedMcpTrackAvailability === null ||
     leafCoverage.recipeId === null
   ) {
     throw new ProcedureLeafReplayError(
@@ -381,7 +386,7 @@ export function prepareProcedureLeafReplay(
     leaf.shortcutTracks[0]?.availability !==
       (leafCoverage.shortcut === 'materialized' ? 'available' : 'unavailable') ||
     leaf.mcpTracks.length !== 1 ||
-    leaf.mcpTracks[0]?.availability !== (requiresMaterializedMcp ? 'available' : 'unavailable')
+    leaf.mcpTracks[0]?.availability !== expectedMcpTrackAvailability
   ) {
     throw new ProcedureLeafReplayError(
       'Replay materialization tracks do not match the bounded catalog-grounding contract',

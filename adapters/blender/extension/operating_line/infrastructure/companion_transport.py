@@ -25,6 +25,7 @@ from ..domain import (
     BLENDER_ACTION_CATALOG_VERSION,
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    is_action_level_mcp_primitive,
 )
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
@@ -810,10 +811,10 @@ class CompanionTransport:
         CompanionTransport._validate_exact_keys(
             action, {"adapterId", "name", "arguments"}, "Action execution binding"
         )
-        if action["adapterId"] != "blender" or action["name"] != (
-            "blender.mesh.create_uv_sphere"
+        if action["adapterId"] != "blender" or not is_action_level_mcp_primitive(
+            action["name"]
         ):
-            raise ValueError("Action execution is restricted to UV Sphere")
+            raise ValueError("Action execution is restricted to approved primitives")
         if not isinstance(action["arguments"], dict):
             raise ValueError("Action execution arguments must be an object")
         rollback = step["rollback"]

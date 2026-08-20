@@ -17,6 +17,7 @@ from ..domain import (
     CATALOG_VERSION_PATTERN,
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
+    is_action_level_mcp_primitive,
     load_task_tree_data,
 )
 from ..infrastructure.blender_actions import action_registry
@@ -2022,12 +2023,15 @@ class CompanionController:
             if source_step is None or source_step != delivered_step:
                 raise ValueError("Action execution step does not match the exact next step")
             action = delivered_step.get("action")
-            if not isinstance(action, dict) or action != {
-                "adapterId": "blender",
-                "name": "blender.mesh.create_uv_sphere",
-                "arguments": action.get("arguments"),
-            }:
-                raise ValueError("Action execution is restricted to UV Sphere")
+            if (
+                not isinstance(action, dict)
+                or set(action) != {"adapterId", "name", "arguments"}
+                or action.get("adapterId") != "blender"
+                or not is_action_level_mcp_primitive(action.get("name"))
+            ):
+                raise ValueError(
+                    "Action execution is restricted to approved primitives"
+                )
             if not isinstance(action["arguments"], dict):
                 raise ValueError("Action execution arguments must be an object")
         except (IndexError, KeyError, TypeError, ValueError) as error:
@@ -2074,7 +2078,7 @@ class CompanionController:
             error_message = (
                 execution_error
                 or report.get("error")
-                or "Canonical Next did not produce verified UV Sphere success evidence"
+                or "Canonical Next did not produce verified primitive success evidence"
             )
         result = self._action_result_payload(
             delivery,
