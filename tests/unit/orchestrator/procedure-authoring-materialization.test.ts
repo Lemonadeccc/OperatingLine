@@ -13,6 +13,7 @@ import {
 import {
   canonicalizeProtocolJsonValue,
   procedureAuthoringCandidateTreeSchema,
+  validateProcedureTree,
   type ActionCatalog,
   type InteractionCatalog,
   type ProcedureAuthoringCandidateTree,
@@ -21,6 +22,8 @@ import {
 import {
   deriveSegmentFrameParameter,
   materializeProcedureAuthoringCandidate,
+  projectProcedureTreeCatalogParameters,
+  validateProcedureTreeParameterProjectionCatalog,
 } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
 
 function candidate(
@@ -900,6 +903,280 @@ describe('procedure authoring materialization', () => {
       reason: 'No approved action-level MCP tool is available.',
       modality: 'mcp',
     });
+    expect(leaf.parameterProjection).toMatchObject({
+      formatVersion: '1.0.0',
+      provenance: {
+        kind: 'interaction_catalog_materialization',
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        recipeId: 'blender.mesh.create_uv_sphere.native',
+      },
+      arguments: [
+        {
+          actionArgument: 'location',
+          disposition: 'projected',
+          bindingIds: [
+            'binding.menu.control.location.value',
+            'binding.semantic.projection.semantic.transform.location',
+            'binding.shortcut.shortcut.move_x.value',
+            'binding.shortcut.shortcut.move_y.value',
+            'binding.shortcut.shortcut.move_z.value',
+          ],
+        },
+        {
+          actionArgument: 'objectName',
+          disposition: 'projected',
+          bindingIds: [
+            'binding.menu.control.object_name.value',
+            'binding.semantic.projection.semantic.rename.name',
+            'binding.shortcut.shortcut.rename.text',
+          ],
+        },
+        {
+          actionArgument: 'radius',
+          disposition: 'projected',
+          bindingIds: [
+            'binding.menu.control.scale.value',
+            'binding.semantic.projection.semantic.transform.scale',
+            'binding.shortcut.shortcut.scale.value',
+          ],
+        },
+        {
+          actionArgument: 'resourceId',
+          disposition: 'omitted',
+          bindingIds: [],
+          reason: 'The logical resource identifier has no semantic UI representation.',
+        },
+      ],
+    });
+    expect(
+      leaf.parameterProjection?.bindings.map((binding) => ({
+        id: binding.id,
+        actionArgument: binding.actionArgument,
+        transform: binding.transform,
+        modality: binding.target.modality,
+        trackId: 'trackId' in binding.target ? binding.target.trackId : undefined,
+        operationId: binding.target.operationId,
+        path: binding.target.path,
+      })),
+    ).toEqual([
+      {
+        id: 'binding.semantic.projection.semantic.transform.location',
+        actionArgument: 'location',
+        transform: 'identity',
+        modality: 'semantic',
+        trackId: undefined,
+        operationId: 'semantic.transform',
+        path: [{ kind: 'field', name: 'location' }],
+      },
+      {
+        id: 'binding.semantic.projection.semantic.transform.scale',
+        actionArgument: 'radius',
+        transform: 'uniform_vector3',
+        modality: 'semantic',
+        trackId: undefined,
+        operationId: 'semantic.transform',
+        path: [{ kind: 'field', name: 'scale' }],
+      },
+      {
+        id: 'binding.semantic.projection.semantic.rename.name',
+        actionArgument: 'objectName',
+        transform: 'identity',
+        modality: 'semantic',
+        trackId: undefined,
+        operationId: 'semantic.rename',
+        path: [{ kind: 'field', name: 'name' }],
+      },
+      {
+        id: 'binding.menu.control.location.value',
+        actionArgument: 'location',
+        transform: 'identity',
+        modality: 'menu',
+        trackId: 'blender.mesh.create_uv_sphere.native',
+        operationId: 'control.location',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.menu.control.scale.value',
+        actionArgument: 'radius',
+        transform: 'uniform_vector3',
+        modality: 'menu',
+        trackId: 'blender.mesh.create_uv_sphere.native',
+        operationId: 'control.scale',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.menu.control.object_name.value',
+        actionArgument: 'objectName',
+        transform: 'identity',
+        modality: 'menu',
+        trackId: 'blender.mesh.create_uv_sphere.native',
+        operationId: 'control.object_name',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.shortcut.shortcut.move_x.value',
+        actionArgument: 'location',
+        transform: 'vector3_x',
+        modality: 'shortcut',
+        trackId: 'blender.mesh.create_uv_sphere.native.shortcut',
+        operationId: 'shortcut.move_x',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.shortcut.shortcut.move_y.value',
+        actionArgument: 'location',
+        transform: 'vector3_y',
+        modality: 'shortcut',
+        trackId: 'blender.mesh.create_uv_sphere.native.shortcut',
+        operationId: 'shortcut.move_y',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.shortcut.shortcut.move_z.value',
+        actionArgument: 'location',
+        transform: 'vector3_z',
+        modality: 'shortcut',
+        trackId: 'blender.mesh.create_uv_sphere.native.shortcut',
+        operationId: 'shortcut.move_z',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.shortcut.shortcut.scale.value',
+        actionArgument: 'radius',
+        transform: 'identity',
+        modality: 'shortcut',
+        trackId: 'blender.mesh.create_uv_sphere.native.shortcut',
+        operationId: 'shortcut.scale',
+        path: [{ kind: 'field', name: 'value' }],
+      },
+      {
+        id: 'binding.shortcut.shortcut.rename.text',
+        actionArgument: 'objectName',
+        transform: 'identity',
+        modality: 'shortcut',
+        trackId: 'blender.mesh.create_uv_sphere.native.shortcut',
+        operationId: 'shortcut.rename',
+        path: [{ kind: 'field', name: 'text' }],
+      },
+    ]);
+  });
+
+  it('projects edited UV Sphere Action arguments through exact catalog bindings', () => {
+    const materialized = materializeProcedureAuthoringCandidate(
+      candidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    ).tree;
+    const stale = structuredClone(materialized);
+    const staleLeaf = stale.nodes.find((node) => node.kind === 'leaf');
+    if (staleLeaf?.kind !== 'leaf' || staleLeaf.action === null) {
+      throw new Error('expected projected UV Sphere leaf');
+    }
+    staleLeaf.action.arguments['location'] = [4, 5, 6];
+    staleLeaf.action.arguments['radius'] = 0.5;
+    staleLeaf.action.arguments['objectName'] = 'OperatingLine.ProjectedEye';
+
+    expect(() => validateProcedureTree(stale)).toThrow(
+      'does not match its action argument projection',
+    );
+    expect(() =>
+      validateProcedureTreeParameterProjectionCatalog(stale, blenderInteractionCatalog),
+    ).not.toThrow();
+
+    const projected = projectProcedureTreeCatalogParameters(stale, blenderInteractionCatalog);
+    const leaf = projected.nodes.find((node) => node.kind === 'leaf');
+    if (leaf?.kind !== 'leaf') throw new Error('expected projected UV Sphere leaf');
+    expect(leaf.semanticOperations.map((operation) => operation.parameters)).toEqual([
+      { radius: 1 },
+      { location: [4, 5, 6], scale: [0.5, 0.5, 0.5] },
+      { name: 'OperatingLine.ProjectedEye' },
+    ]);
+    const menu = leaf.menuTracks[0];
+    const shortcut = leaf.shortcutTracks[0];
+    if (menu?.availability !== 'available' || shortcut?.availability !== 'available') {
+      throw new Error('expected available projected tracks');
+    }
+    expect(menu.operations.slice(4).map((operation) => operation.parameters)).toEqual([
+      { value: [4, 5, 6] },
+      { value: [0.5, 0.5, 0.5] },
+      { value: 'OperatingLine.ProjectedEye' },
+    ]);
+    expect(shortcut.operations.map((operation) => operation.parameters)).toEqual([
+      { radius: 1, location: [0, 0, 0] },
+      { value: 4, confirm: 'ENTER' },
+      { value: 5, confirm: 'ENTER' },
+      { value: 6, confirm: 'ENTER' },
+      { value: 0.5, confirm: 'ENTER' },
+      { text: 'OperatingLine.ProjectedEye', confirm: 'ENTER' },
+    ]);
+    expect(() => validateProcedureTree(projected)).not.toThrow();
+    expect(staleLeaf.semanticOperations[1]!.parameters).toEqual({
+      location: [0.32, -0.86, 2.14],
+      scale: [0.12, 0.12, 0.12],
+    });
+  });
+
+  it('rejects projection provenance, version, and installed recipe tampering', () => {
+    const materialized = materializeProcedureAuthoringCandidate(
+      candidate(),
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    ).tree;
+
+    const forgedReceipt = structuredClone(materialized);
+    const forgedLeaf = forgedReceipt.nodes.find((node) => node.kind === 'leaf');
+    if (forgedLeaf?.kind !== 'leaf' || forgedLeaf.parameterProjection === undefined) {
+      throw new Error('expected projected UV Sphere leaf');
+    }
+    forgedLeaf.parameterProjection.provenance.recipeId = 'blender.mesh.create_cube.native';
+    expect(() =>
+      validateProcedureTreeParameterProjectionCatalog(forgedReceipt, blenderInteractionCatalog),
+    ).toThrow('does not match its InteractionCatalog recipe');
+
+    const bindingTamperCases: readonly [
+      string,
+      (binding: NonNullable<typeof forgedLeaf.parameterProjection>['bindings'][number]) => void,
+    ][] = [
+      ['binding ID', (binding) => (binding.id = 'binding.forged')],
+      ['operation ID', (binding) => (binding.target.operationId = 'semantic.forged')],
+      [
+        'target path',
+        (binding) => {
+          binding.target.path = [{ kind: 'field', name: 'forged' }];
+        },
+      ],
+    ];
+    for (const [label, mutate] of bindingTamperCases) {
+      const tampered = structuredClone(materialized);
+      const tamperedLeaf = tampered.nodes.find((node) => node.kind === 'leaf');
+      if (tamperedLeaf?.kind !== 'leaf' || tamperedLeaf.parameterProjection === undefined) {
+        throw new Error('expected projected UV Sphere leaf');
+      }
+      mutate(tamperedLeaf.parameterProjection.bindings[0]!);
+      expect(
+        () => validateProcedureTreeParameterProjectionCatalog(tampered, blenderInteractionCatalog),
+        label,
+      ).toThrow('does not match its InteractionCatalog recipe');
+    }
+
+    const wrongVersion = structuredClone(materialized);
+    wrongVersion.interactionCatalogVersion = '999.0.0';
+    expect(() =>
+      validateProcedureTreeParameterProjectionCatalog(wrongVersion, blenderInteractionCatalog),
+    ).toThrow('InteractionCatalog binding mismatch');
+
+    const tamperedCatalog = structuredClone(blenderInteractionCatalog);
+    const recipe = tamperedCatalog.recipes.find(
+      (candidateRecipe) => candidateRecipe.id === 'blender.mesh.create_uv_sphere.native',
+    );
+    const projection = recipe?.procedureMaterialization?.semantic?.projections.find(
+      (candidateProjection) => candidateProjection.id === 'projection.semantic.transform.scale',
+    );
+    if (projection === undefined) throw new Error('expected UV Sphere semantic projection');
+    projection.transform = 'divide_by_two';
+    expect(() =>
+      validateProcedureTreeParameterProjectionCatalog(materialized, tamperedCatalog),
+    ).toThrow('does not match its InteractionCatalog recipe');
   });
 
   it('materializes the exact Icosphere ordered menu and F9 shortcut without inventing MCP support', () => {

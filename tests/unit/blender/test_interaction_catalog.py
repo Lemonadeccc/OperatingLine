@@ -75,6 +75,17 @@ class InteractionCatalogTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             return load_interaction_catalog(path, ACTION_CATALOG_PATH)
 
+    def _load_raw_with_action_catalog(
+        self, raw: dict, action_catalog: dict
+    ) -> object:
+        with TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            interaction_path = directory_path / "interaction-catalog.json"
+            action_path = directory_path / "action-catalog.json"
+            interaction_path.write_text(json.dumps(raw), encoding="utf-8")
+            action_path.write_text(json.dumps(action_catalog), encoding="utf-8")
+            return load_interaction_catalog(interaction_path, action_path)
+
     def _ordered_parameter_catalog(self) -> dict:
         raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
         recipe = raw["recipes"][0]
@@ -144,6 +155,14 @@ class InteractionCatalogTests(unittest.TestCase):
 
     def _ordered_shortcut_catalog(self) -> dict:
         return json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+
+    def _semantic_materialization(self, raw: dict) -> dict:
+        recipe = next(
+            item
+            for item in raw["recipes"]
+            if item["actionName"] == "blender.mesh.create_uv_sphere"
+        )
+        return recipe["procedureMaterialization"]["semantic"]
 
     def _operator_property_shortcut_catalog(self) -> dict:
         raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
@@ -299,7 +318,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.32.0")
+        self.assertEqual(catalog.catalog_version, "1.33.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -551,6 +570,57 @@ class InteractionCatalogTests(unittest.TestCase):
         )
         self.assertIsNotNone(sphere.procedure_materialization)
         assert sphere.procedure_materialization is not None
+        semantic = sphere.procedure_materialization.semantic
+        self.assertIsNotNone(semantic)
+        assert semantic is not None
+        self.assertEqual(
+            semantic.source, "catalog.semantic_parameter_projections"
+        )
+        self.assertEqual(
+            tuple(
+                (
+                    projection.id,
+                    projection.semantic_action,
+                    tuple(
+                        (segment.kind, segment.name, segment.index)
+                        for segment in projection.path
+                    ),
+                    projection.action_argument,
+                    projection.transform,
+                )
+                for projection in semantic.projections
+            ),
+            (
+                (
+                    "projection.semantic.transform.location",
+                    "set_object_transform",
+                    (("field", "location", None),),
+                    "location",
+                    "identity",
+                ),
+                (
+                    "projection.semantic.transform.scale",
+                    "set_object_transform",
+                    (("field", "scale", None),),
+                    "radius",
+                    "uniform_vector3",
+                ),
+                (
+                    "projection.semantic.rename.name",
+                    "rename_object",
+                    (("field", "name", None),),
+                    "objectName",
+                    "identity",
+                ),
+            ),
+        )
+        self.assertEqual(
+            tuple(
+                omission.argument_name
+                for omission in semantic.omitted_action_arguments
+            ),
+            ("resourceId",),
+        )
         self.assertEqual(
             sphere.procedure_materialization.menu.availability,
             "available",
@@ -3201,6 +3271,201 @@ class InteractionCatalogTests(unittest.TestCase):
         del operations(unclosed)[4:]
         with self.assertRaisesRegex(ValueError, "leaves an opened surface unclosed"):
             self._load_raw(unclosed)
+
+    def test_rejects_malformed_semantic_parameter_projections(self) -> None:
+        def duplicate_projection_id(semantic: dict) -> None:
+            semantic["projections"].append(deepcopy(semantic["projections"][0]))
+
+        def duplicate_projection_target(semantic: dict) -> None:
+            duplicate = deepcopy(semantic["projections"][0])
+            duplicate["id"] = "projection.semantic.duplicate_target"
+            semantic["projections"].append(duplicate)
+
+        cases: list[tuple[str, Callable[[dict], None], str]] = [
+            (
+                "unknown semantic field",
+                lambda semantic: semantic.__setitem__("unknown", True),
+                "contains unknown field unknown",
+            ),
+            (
+                "unsupported source",
+                lambda semantic: semantic.__setitem__("source", "guidance.native_path"),
+                "semantic materialization has unsupported source",
+            ),
+            (
+                "empty projections",
+                lambda semantic: semantic.__setitem__("projections", []),
+                "projections must be a non-empty array",
+            ),
+            (
+                "unknown projection field",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "unknown", True
+                ),
+                "projection contains unknown field unknown",
+            ),
+            (
+                "unsafe path field",
+                lambda semantic: semantic["projections"][0]["path"][0].__setitem__(
+                    "name", "__proto__"
+                ),
+                "contains unsafe field __proto__",
+            ),
+            (
+                "boolean path index",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "path", [{"kind": "index", "index": True}]
+                ),
+                "index must be an integer from 0 to 1000000",
+            ),
+            (
+                "oversized path index",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "path", [{"kind": "index", "index": 1_000_001}]
+                ),
+                "index must be an integer from 0 to 1000000",
+            ),
+            (
+                "unsupported transform",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "transform", "multiply_by_two"
+                ),
+                "contains unsupported transform multiply_by_two",
+            ),
+            (
+                "duplicate projection id",
+                duplicate_projection_id,
+                "contains duplicate projection id",
+            ),
+            (
+                "duplicate semantic target",
+                duplicate_projection_target,
+                "contains duplicate semantic target",
+            ),
+            (
+                "existing path prefixes new path",
+                lambda semantic: semantic["projections"][1].__setitem__(
+                    "path",
+                    [
+                        {"kind": "field", "name": "location"},
+                        {"kind": "field", "name": "x"},
+                    ],
+                ),
+                "contains overlapping semantic target paths",
+            ),
+            (
+                "new path prefixes existing path",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "path",
+                    [
+                        {"kind": "field", "name": "scale"},
+                        {"kind": "field", "name": "x"},
+                    ],
+                ),
+                "contains overlapping semantic target paths",
+            ),
+            (
+                "unknown mapped action argument",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "actionArgument", "unknown"
+                ),
+                "semantic ordered parameter action coverage mismatch;.*unknown: unknown",
+            ),
+            (
+                "unmapped action argument",
+                lambda semantic: semantic["projections"].pop(),
+                "semantic ordered parameter action coverage mismatch; missing: objectName",
+            ),
+            (
+                "mapped and omitted action argument",
+                lambda semantic: semantic["omittedActionArguments"].append(
+                    {"argumentName": "location", "reason": "Incorrect overlap."}
+                ),
+                "both maps and omits action argument location",
+            ),
+            (
+                "numeric transform from vector argument",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "transform", "uniform_vector3"
+                ),
+                "uniform_vector3 source location must have a numeric action schema",
+            ),
+            (
+                "incomplete vector component mapping",
+                lambda semantic: semantic["projections"][0].__setitem__(
+                    "transform", "vector3_x"
+                ),
+                "must map vector3 components x, y, and z exactly once",
+            ),
+            (
+                "unknown omitted action argument",
+                lambda semantic: semantic["omittedActionArguments"].append(
+                    {"argumentName": "unknown", "reason": "Not in the action."}
+                ),
+                "semantic ordered parameter action coverage mismatch;.*unknown: unknown",
+            ),
+            (
+                "unknown omitted argument field",
+                lambda semantic: semantic["omittedActionArguments"][0].__setitem__(
+                    "unknown", True
+                ),
+                "omittedActionArguments entry contains unknown field unknown",
+            ),
+        ]
+
+        for name, mutate, message in cases:
+            with self.subTest(name=name):
+                raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+                mutate(self._semantic_materialization(raw))
+                with self.assertRaisesRegex(ValueError, message):
+                    self._load_raw(raw)
+
+    def test_rejects_unprojectable_semantic_identity_action_schemas(self) -> None:
+        invalid_schemas = {
+            "object": {"type": "object", "properties": {}},
+            "non-numeric array": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": 3,
+            },
+            "unbounded array": {
+                "type": "array",
+                "items": {"type": "number"},
+            },
+            "empty array": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 0,
+                "maxItems": 4,
+            },
+            "oversized array": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 1,
+                "maxItems": 5,
+            },
+        }
+
+        for name, invalid_schema in invalid_schemas.items():
+            with self.subTest(name=name):
+                raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+                action_catalog = json.loads(
+                    ACTION_CATALOG_PATH.read_text(encoding="utf-8")
+                )
+                action = next(
+                    item
+                    for item in action_catalog["actions"]
+                    if item["name"] == "blender.mesh.create_uv_sphere"
+                )
+                action["argumentsSchema"]["properties"]["location"] = invalid_schema
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "semantic identity source location must have a scalar or "
+                    "bounded one-to-four-item numeric array action schema",
+                ):
+                    self._load_raw_with_action_catalog(raw, action_catalog)
 
     def test_rejects_non_finite_numbers_in_nested_literal_values(self) -> None:
         for value in (float("nan"), float("inf"), float("-inf")):

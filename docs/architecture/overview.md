@@ -32,6 +32,15 @@ Immutable Procedure Library
   ├─ storage cursor is distinct from node/operation order
   └─ validated knowledge only; no proposal or host execution
 
+Local ProcedureTree Editor
+  ├─ loopback browser UI + bearer-authenticated API
+  ├─ stable-ID server diff/preview + global revision CAS
+  ├─ branch heads + unique-LCA per-conflict fail-closed three-way merge
+  ├─ ActionCatalog form + InteractionCatalog-proven Action parameter projection
+  ├─ server mutation policy + automatic candidate validation downgrade
+  ├─ append-only branch-lineage comments outside tree hash
+  └─ no provider, proposal, acceptance, publication, or host execution
+
 ProcedureAuthoringPromptPacket
   ├─ natural-language goal + namespaced source/evidence
   ├─ optional 1.1 rights-declared video + user-supplied transcript evidence
@@ -48,6 +57,7 @@ ProcedureAuthoringMaterialization
   ├─ recipe ID → track ID; recipe step ID → operation ID
   ├─ ordered cumulative menu path + all semantic/evidence references
   ├─ accepted Action arguments only through declared operator/control bindings
+  ├─ optional versioned projection provenance for later safe Action edits
   └─ catalog/tree digests + leaf coverage; candidate state remains unchanged
 
 GuidePlan
@@ -423,7 +433,9 @@ Proposal 或执行宿主。
 当前独立、证据绑定的 live embedding semantic retrieval/RAG context 已接入显式授权的流式 Procedure
 refinement：固定阈值最多触发第二次 Provider 调用，完整树经本地 scope sanitization、locality、compile 和
 人工 review gate 后才可原子保存，重启不会重放不确定的外部调用。它仍未接入媒体分析；媒体分析到完整
-ProcedureTree 的组合、从一句话零基线生成完整树、可视化编辑器和训练导出仍未完成。完整边界见
+ProcedureTree 的组合、从一句话零基线生成完整树和训练导出仍未完成。已有树可以通过本地工作台进行
+stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；见
+[ADR 0088](../adr/0088-local-procedure-tree-revision-editor.md)。生成与媒体组合边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
 [ADR 0070](../adr/0070-explicit-procedure-authoring-provider.md) 与
 [ADR 0075](../adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -443,8 +455,11 @@ ProcedureTree 的组合、从一句话零基线生成完整树、可视化编辑
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.32.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.31.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
+`1.33.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.32.0`，并为 UV Sphere 声明七步 ordered menu 与六步 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
+`1.33.0` 另以 `procedureMaterialization.semantic` 明确声明 location、radius 与 objectName 到语义操作的
+stable path 与转换；物化结果把这些声明连同菜单和快捷键绑定汇总为 `parameterProjection 1.0.0`，供编辑器
+在 Action-only 修改后执行目录证明的确定性投影。没有该声明的历史树保持可读但参数只读。
 Icosphere 另行声明四步 guidance 加 Location、Object Name 的六步 ordered menu，在 operator step 绑定
 `subdivisions`/`radius`，并从 accepted action 绑定 `location`/`objectName`；九步 candidate shortcut 依次为
 `Shift+A → Mesh → Ico Sphere`、`F9` opener、Subdivisions、Radius、`ENTER` closer、`G X/Y/Z` 与
@@ -628,7 +643,9 @@ candidate/structural-only。Managed Subdivision Surface、Edit Mode Bevel、Indi
 [ADR 0063](../adr/0063-bounded-edit-mode-poke-faces.md) 与
 [ADR 0064](../adr/0064-bounded-mirror-modifier.md)。更多 action 的封闭声明、verified
 shortcut/MCP recipe、真实 Blender 轨迹回放、semantic retrieval 到 authoring/refinement 的 RAG 组合、
-自动教学视频获取/转录/画面识别、可视化编辑器和训练治理仍在后续范围。
+自动教学视频获取/转录/画面识别和训练治理仍在后续范围。已有树的本地可视化 revision 编辑器只管理
+ProcedureTree 内容与 lineage，不补齐这些 interaction grounding 或训练治理能力；见
+[ADR 0088](../adr/0088-local-procedure-tree-revision-editor.md)。
 
 Orchestrator 不内置模型，也不通过关键词假装理解目标；目标所需阶段和具体需求均由 provider/调用方
 显式声明。质量报告没有总分，只证明候选 Plan 满足当前目录可表达的结构、资源流和 coverage

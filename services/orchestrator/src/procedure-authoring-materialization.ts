@@ -12,12 +12,15 @@ import {
   procedureAuthoringMaterializationLegacyFormatVersion,
   procedureAuthoringMaterializationOrderedMenuFormatVersion,
   procedureAuthoringMaterializedTreeSchema,
+  procedureParameterProjectionFormatVersion,
+  projectProcedureParameter,
   procedureTreeExtendedShortcutFormatVersion,
   procedureTreeFormatVersion,
   stableProcedureLeafOrder,
   validateActionArguments,
   validateActionCatalog,
   validateInteractionCatalog,
+  writeProcedureParameterPath,
   type ActionCatalog,
   type InteractionCatalog,
   type MenuProcedureOperation,
@@ -26,6 +29,9 @@ import {
   type ProcedureAuthoringExtendedShortcutMaterializedTree,
   type ProcedureAuthoringMaterializationResult,
   type ProcedureLeafNode,
+  type ProcedureParameterBinding,
+  type ProcedureParameterProjection,
+  type ProcedureParameterProjectionTarget,
   type ProcedureTree,
 } from '@operatingline/protocol';
 
@@ -279,9 +285,333 @@ function materializeParameters(
   return parameters;
 }
 
+function directParameterBinding(
+  id: string,
+  modality: 'menu' | 'shortcut',
+  trackId: string,
+  operationId: string,
+  assignment: MaterializationParameterAssignment,
+): ProcedureParameterBinding | null {
+  if (assignment.source.kind === 'literal') return null;
+  if (assignment.source.kind === 'derived_action_arguments') {
+    throw new Error(
+      'Catalog semantic parameter projection does not yet support derived multi-argument interaction parameters',
+    );
+  }
+  return {
+    id,
+    actionArgument: assignment.source.argumentName,
+    transform: assignment.source.transform,
+    target: {
+      modality,
+      trackId,
+      operationId,
+      path: [{ kind: 'field', name: assignment.name }],
+    },
+  };
+}
+
+function materializeParameterProjection(
+  leaf: ProcedureLeafNode,
+  recipe: InteractionCatalog['recipes'][number] | undefined,
+  interactionCatalogVersion: string,
+): ProcedureParameterProjection | undefined {
+  const declaration = recipe?.procedureMaterialization;
+  const semantic = declaration?.semantic;
+  if (
+    leaf.action === null ||
+    recipe === undefined ||
+    declaration === undefined ||
+    semantic === undefined
+  ) {
+    return undefined;
+  }
+
+  const bindings: ProcedureParameterBinding[] = [];
+  for (const projection of semantic.projections) {
+    const operations = leaf.semanticOperations.filter(
+      (operation) => operation.semanticAction === projection.semanticAction,
+    );
+    if (operations.length !== 1) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} semantic projection ${projection.id} requires exactly one ${projection.semanticAction} operation`,
+      );
+    }
+    bindings.push({
+      id: `binding.semantic.${projection.id}`,
+      actionArgument: projection.actionArgument,
+      transform: projection.transform,
+      target: {
+        modality: 'semantic',
+        operationId: operations[0]!.id,
+        path: structuredClone(projection.path),
+      },
+    });
+  }
+
+  const menu = declaration.menu;
+  if (menu.availability === 'available') {
+    if (menu.parameterBinding === 'accepted_action_arguments') {
+      const executionOperationId =
+        recipe.guidance.kind === 'native_path' ? recipe.guidance.execution.stepId : undefined;
+      if (executionOperationId === undefined) {
+        throw new Error(`Interaction recipe ${recipe.id} has no native menu execution operation`);
+      }
+      for (const actionArgument of Object.keys(leaf.action.arguments).sort()) {
+        bindings.push({
+          id: `binding.menu.${executionOperationId}.${actionArgument}`,
+          actionArgument,
+          transform: 'identity',
+          target: {
+            modality: 'menu',
+            trackId: recipe.id,
+            operationId: executionOperationId,
+            path: [{ kind: 'field', name: actionArgument }],
+          },
+        });
+      }
+    } else {
+      const assignments = [
+        {
+          operationId:
+            recipe.guidance.kind === 'native_path' ? recipe.guidance.execution.stepId : '',
+          parameters: menu.operatorParameters,
+        },
+        ...menu.controlOperations.operations.map((operation) => ({
+          operationId: operation.id,
+          parameters: operation.parameters,
+        })),
+      ];
+      for (const operation of assignments) {
+        for (const assignment of operation.parameters) {
+          const binding = directParameterBinding(
+            `binding.menu.${operation.operationId}.${assignment.name}`,
+            'menu',
+            recipe.id,
+            operation.operationId,
+            assignment,
+          );
+          if (binding !== null) bindings.push(binding);
+        }
+      }
+    }
+  }
+
+  const shortcut = declaration.shortcut;
+  if (shortcut.availability === 'available') {
+    const trackId = `${recipe.id}.shortcut`;
+    for (const operation of shortcut.operations) {
+      for (const assignment of operation.parameters) {
+        const binding = directParameterBinding(
+          `binding.shortcut.${operation.id}.${assignment.name}`,
+          'shortcut',
+          trackId,
+          operation.id,
+          assignment,
+        );
+        if (binding !== null) bindings.push(binding);
+      }
+    }
+  }
+
+  const bindingIdsByArgument = new Map<string, string[]>();
+  for (const binding of bindings) {
+    bindingIdsByArgument.set(binding.actionArgument, [
+      ...(bindingIdsByArgument.get(binding.actionArgument) ?? []),
+      binding.id,
+    ]);
+  }
+  const semanticOmissions = new Map(
+    semantic.omittedActionArguments.map((omission) => [omission.argumentName, omission.reason]),
+  );
+  const argumentsCoverage = Object.keys(leaf.action.arguments)
+    .sort()
+    .map((actionArgument) => {
+      const bindingIds = bindingIdsByArgument.get(actionArgument) ?? [];
+      if (bindingIds.length > 0) {
+        return {
+          actionArgument,
+          disposition: 'projected' as const,
+          bindingIds: bindingIds.sort(),
+        };
+      }
+      const reason = semanticOmissions.get(actionArgument);
+      if (reason === undefined) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} does not prove complete parameter projection for ${actionArgument}`,
+        );
+      }
+      return {
+        actionArgument,
+        disposition: 'omitted' as const,
+        bindingIds: [],
+        reason,
+      };
+    });
+
+  return {
+    formatVersion: procedureParameterProjectionFormatVersion,
+    provenance: {
+      kind: 'interaction_catalog_materialization',
+      interactionCatalogVersion,
+      recipeId: recipe.id,
+    },
+    arguments: argumentsCoverage,
+    bindings,
+  };
+}
+
+function catalogRecipeForLeaf(
+  leaf: ProcedureLeafNode,
+  interactionCatalog: InteractionCatalog,
+): InteractionCatalog['recipes'][number] | undefined {
+  if (leaf.action === null) return undefined;
+  const recipe = interactionCatalog.recipes.find(
+    (candidate) => candidate.actionName === leaf.action?.name,
+  );
+  if (recipe === undefined) {
+    throw new Error(
+      `InteractionCatalog ${interactionCatalog.catalogVersion} has no recipe for ${leaf.action.name}`,
+    );
+  }
+  return recipe;
+}
+
+function assertProjectionCatalogIdentity(
+  tree: ProcedureTree,
+  interactionCatalog: InteractionCatalog,
+): void {
+  if (
+    tree.adapterId !== interactionCatalog.adapterId ||
+    tree.actionCatalogVersion !== interactionCatalog.actionCatalogVersion ||
+    tree.interactionCatalogVersion !== interactionCatalog.catalogVersion ||
+    tree.hostVersionRange !== interactionCatalog.hostVersionRange
+  ) {
+    throw new Error('Procedure parameter projection InteractionCatalog binding mismatch');
+  }
+}
+
+function assertLeafProjectionAuthority(
+  leaf: ProcedureLeafNode,
+  interactionCatalog: InteractionCatalog,
+): void {
+  const expected = materializeParameterProjection(
+    leaf,
+    catalogRecipeForLeaf(leaf, interactionCatalog),
+    interactionCatalog.catalogVersion,
+  );
+  if (sha256(expected ?? null) !== sha256(leaf.parameterProjection ?? null)) {
+    throw new Error(
+      `Procedure leaf ${leaf.id} parameter projection does not match its InteractionCatalog recipe`,
+    );
+  }
+}
+
+/** Prove every projection receipt against the exact installed InteractionCatalog recipe. */
+export function validateProcedureTreeParameterProjectionCatalog(
+  tree: ProcedureTree,
+  interactionCatalog: InteractionCatalog,
+): void {
+  assertProjectionCatalogIdentity(tree, interactionCatalog);
+  for (const node of tree.nodes) {
+    if (node.kind === 'leaf') assertLeafProjectionAuthority(node, interactionCatalog);
+  }
+}
+
+function mutableProjectionParameters(
+  leaf: ProcedureLeafNode,
+  target: ProcedureParameterProjectionTarget,
+): Record<string, unknown> {
+  if (target.modality === 'semantic') {
+    const operation = leaf.semanticOperations.find(
+      (candidate) => candidate.id === target.operationId,
+    );
+    if (operation === undefined)
+      throw new Error(`Missing semantic operation ${target.operationId}`);
+    return operation.parameters;
+  }
+  if (target.modality === 'menu') {
+    const track = leaf.menuTracks.find((candidate) => candidate.id === target.trackId);
+    const operation =
+      track?.availability === 'available'
+        ? track.operations.find((candidate) => candidate.id === target.operationId)
+        : undefined;
+    if (operation === undefined) throw new Error(`Missing menu operation ${target.operationId}`);
+    return operation.parameters;
+  }
+  if (target.modality === 'shortcut') {
+    const track = leaf.shortcutTracks.find((candidate) => candidate.id === target.trackId);
+    const operation =
+      track?.availability === 'available'
+        ? track.operations.find((candidate) => candidate.id === target.operationId)
+        : undefined;
+    if (operation === undefined)
+      throw new Error(`Missing shortcut operation ${target.operationId}`);
+    return operation.parameters;
+  }
+  const track = leaf.mcpTracks.find((candidate) => candidate.id === target.trackId);
+  const operation =
+    track?.availability === 'available'
+      ? track.operations.find((candidate) => candidate.id === target.operationId)
+      : undefined;
+  if (operation === undefined) throw new Error(`Missing MCP operation ${target.operationId}`);
+  return operation.arguments;
+}
+
+/** Apply only catalog-proven action-argument projections to an editor candidate clone. */
+export function projectProcedureTreeCatalogParameters(
+  tree: ProcedureTree,
+  interactionCatalog: InteractionCatalog,
+): ProcedureTree {
+  assertProjectionCatalogIdentity(tree, interactionCatalog);
+  const projected = structuredClone(tree);
+  for (const node of projected.nodes) {
+    if (node.kind !== 'leaf') continue;
+    assertLeafProjectionAuthority(node, interactionCatalog);
+    if (node.action === null || node.parameterProjection === undefined) continue;
+    for (const binding of node.parameterProjection.bindings) {
+      writeProcedureParameterPath(
+        mutableProjectionParameters(node, binding.target),
+        binding.target.path,
+        projectProcedureParameter(node.action.arguments[binding.actionArgument], binding.transform),
+      );
+    }
+  }
+  return projected;
+}
+
+function materializeSemanticParameters(
+  leaf: ProcedureLeafNode,
+  recipe: InteractionCatalog['recipes'][number] | undefined,
+): ProcedureLeafNode['semanticOperations'] {
+  const operations = structuredClone(leaf.semanticOperations);
+  const semantic = recipe?.procedureMaterialization?.semantic;
+  if (leaf.action === null || recipe === undefined || semantic === undefined) return operations;
+  for (const projection of semantic.projections) {
+    const matches = operations.filter(
+      (operation) => operation.semanticAction === projection.semanticAction,
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `Interaction recipe ${recipe.id} semantic projection ${projection.id} requires exactly one ${projection.semanticAction} operation`,
+      );
+    }
+    writeProcedureParameterPath(
+      matches[0]!.parameters,
+      projection.path,
+      projectProcedureParameter(
+        leaf.action.arguments[projection.actionArgument],
+        projection.transform,
+      ),
+    );
+  }
+  return operations;
+}
+
 function materializeLeaf(
   leaf: ProcedureLeafNode,
   recipe: InteractionCatalog['recipes'][number] | undefined,
+  interactionCatalogVersion: string,
   normalizeShortcutOperations: boolean,
 ): {
   readonly leaf: ProcedureLeafNode;
@@ -301,7 +631,8 @@ function materializeLeaf(
       : undefined;
   const shortcutDeclaration =
     declaration?.shortcut.availability === 'available' ? declaration.shortcut : undefined;
-  const semanticOperations = [...leaf.semanticOperations].sort(
+  const projectedSemanticOperations = materializeSemanticParameters(leaf, recipe);
+  const semanticOperations = [...projectedSemanticOperations].sort(
     (left, right) => left.order - right.order,
   );
   const semanticRefs = semanticOperations.map((operation) => operation.id);
@@ -478,11 +809,17 @@ function materializeLeaf(
           mcp: 'unavailable',
         };
 
+  const parameterProjection = materializeParameterProjection(
+    { ...leaf, semanticOperations: projectedSemanticOperations },
+    recipe,
+    interactionCatalogVersion,
+  );
+
   return {
     leaf: {
       ...leaf,
       action: structuredClone(leaf.action),
-      semanticOperations: structuredClone(leaf.semanticOperations),
+      semanticOperations: projectedSemanticOperations,
       menuTracks,
       shortcutTracks,
       mcpTracks,
@@ -493,6 +830,7 @@ function materializeLeaf(
         : { observationPolicy: structuredClone(leaf.observationPolicy) }),
       rollback: structuredClone(leaf.rollback),
       validation: structuredClone(leaf.validation),
+      ...(parameterProjection === undefined ? {} : { parameterProjection }),
     },
     coverage,
   };
@@ -582,7 +920,12 @@ export function materializeProcedureAuthoringCandidate(
     const recipe = leaf.action === null ? undefined : recipesByAction.get(leaf.action.name);
     materializedByLeafId.set(
       leaf.id,
-      materializeLeaf(leaf, recipe, usesExtendedShortcutMaterialization),
+      materializeLeaf(
+        leaf,
+        recipe,
+        interactionCatalog.catalogVersion,
+        usesExtendedShortcutMaterialization,
+      ),
     );
   }
 
@@ -597,6 +940,7 @@ export function materializeProcedureAuthoringCandidate(
       node.kind === 'leaf' ? materializedByLeafId.get(node.id)!.leaf : structuredClone(node),
     ),
   });
+  validateProcedureTreeParameterProjectionCatalog(parsedTree, interactionCatalog);
   const tree = usesExtendedShortcutMaterialization
     ? procedureAuthoringExtendedShortcutMaterializedTreeSchema.parse(parsedTree)
     : procedureAuthoringMaterializedTreeSchema.parse(parsedTree);

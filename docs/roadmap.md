@@ -24,7 +24,7 @@
 
 - [x] 版本化 ActionCatalog：让 AI 查询真实允许动作、参数、资源读写、观察和回退能力。
 - [x] 版本化 InteractionCatalog：通用协议定义 action 到有序宿主交互步骤的严格配方；Blender
-      `1.32.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.31.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
+      `1.33.0` 与 ActionCatalog `1.22.0` 一一覆盖 27 个动作，历史 `1.9.0` 至已冻结的 `1.32.0` 保持逐字可回放。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 使用经过
       4.5/5.1 验证的 `native_path`，其他二十个动作使用明确的灰色 `semantic_path` 与 `UI target unavailable`，
       其中 Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface 另有 candidate-only shortcut，但 menu 仍 unavailable。活动叶节点不再依赖 Python
       硬编码或不可信 Plan anchor 选择可点击目标。见
@@ -328,8 +328,13 @@
         质量校准。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
-  - [ ] ProcedureTree 可视化编辑器：支持树节点、参数、替代轨迹和用户评论的局部修改，并保留 revision
-        分支、合并和来源差异。
+  - [x] ProcedureTree 本地可视化 revision 编辑器：Orchestrator 工作台显示树节点与 semantic/menu/shortcut/MCP
+        轨迹，支持节点增删/移动/重排、树/节点文本、目录证明的 Action 参数和锚点评论；Action 修改由
+        `parameterProjection 1.0.0` 确定性同步到 semantic/menu/shortcut，旧树和 omitted 参数只读。所有修改先由服务端生成 stable-ID diff preview，
+        再以全局 immutable revision CAS 提交。分支保留独立 head，merge 使用唯一最低共同祖先和确定性三方
+        合并并逐冲突选择 target/source/base/custom，缺失、篡改或投影不一致的 resolution fail closed；branch、history 和树哈希外的 append-only comment 可跨重启恢复。入口不调用
+        Provider、不创建 Proposal 或执行 Blender。见
+        [ADR 0088](adr/0088-local-procedure-tree-revision-editor.md)。
   - [x] ProcedureTree → GuidePlan 确定性编译器：保留层级、依赖、Action、Anchor、Observation、成功门
         和回退，并通过当前 Blender ActionCatalog 校验；编译本身不提交、接受或执行计划。
   - [x] 执行轨迹确定性物化：按依赖安全的叶子顺序串联一个可用菜单/快捷键/MCP 轨迹；多别名必须
@@ -580,8 +585,9 @@
         locality、compile 和人工 review gate；store/discard 原子提交，重启不重放不确定的 Provider 调用。
         见 [ADR 0086](adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
         [ADR 0087](adr/0087-evidence-bound-procedure-refinement.md)。
-  - [ ] 从一句话零基线生成完整 ProcedureTree，以及可视化树编辑、评论和参数表单；当前 refinement 必须绑定
-        一棵 latest immutable base tree、明确 scope 和已完成 semantic retrieval receipt。
+  - [ ] 从一句话通过 Provider/RAG 零基线生成完整 ProcedureTree；当前 refinement 必须绑定一棵 latest
+        immutable base tree、明确 scope 和已完成 semantic retrieval receipt，本地可视化编辑器也只编辑
+        已存树，不能充当零基线生成器。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

@@ -112,6 +112,17 @@ import {
   procedureLeafReplayProposalResultSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
+  procedureTreeEditorBranchCreateRequestSchema,
+  procedureTreeEditorBranchGetRequestSchema,
+  procedureTreeEditorBranchHistoryRequestSchema,
+  procedureTreeEditorBranchListRequestSchema,
+  procedureTreeEditorCommentCreateRequestSchema,
+  procedureTreeEditorCommentListRequestSchema,
+  procedureTreeEditorCommitRequestSchema,
+  procedureTreeEditorEditPreviewRequestSchema,
+  procedureTreeEditorMergePreviewRequestSchema,
+  procedureTreeEditorParameterFormRequestSchema,
+  procedureTreeEditorWorkspaceRequestSchema,
   procedureTreeGetRequestSchema,
   procedureTreeListRequestSchema,
   procedureTreeListResultSchema,
@@ -173,7 +184,10 @@ import { createGuideRevisionBranchList } from './guide-revision-branches.js';
 import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
-import { materializeProcedureAuthoringCandidate } from './procedure-authoring-materialization.js';
+import {
+  materializeProcedureAuthoringCandidate,
+  validateProcedureTreeParameterProjectionCatalog,
+} from './procedure-authoring-materialization.js';
 import {
   createProcedureAuthoringGenerationCoordinator,
   procedureAuthoringGenerationEvidenceEventTypes,
@@ -186,6 +200,11 @@ import {
   restoreProcedureSemanticRetrievalInvocations,
   type ProcedureSemanticRetrievalCoordinator,
 } from './procedure-semantic-retrieval.js';
+import {
+  createProcedureTreeEditorCoordinator,
+  ProcedureTreeEditorError,
+} from './procedure-tree-editor-coordinator.js';
+import { resolveProcedureTreeEditorUiAsset } from './procedure-tree-editor-ui.js';
 import {
   createProcedureRefinementCoordinator,
   procedureRefinementEvidenceEventTypes,
@@ -379,6 +398,25 @@ class ProcedureTreeValidationError extends Error {
     super(message);
     this.name = 'ProcedureTreeValidationError';
   }
+}
+
+function procedureTreeEditorHttpError(error: unknown): {
+  readonly statusCode: number;
+  readonly body: {
+    readonly error: string;
+    readonly code: ProcedureTreeEditorError['code'];
+    readonly message: string;
+  };
+} | null {
+  if (!(error instanceof ProcedureTreeEditorError)) return null;
+  return {
+    statusCode: error.statusCode,
+    body: {
+      error: `procedure_tree_editor_${error.code}`,
+      code: error.code,
+      message: error.message,
+    },
+  };
 }
 
 export async function startRuntime(options: StartRuntimeOptions): Promise<RunningRuntime> {
@@ -783,6 +821,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           `Procedure tree host range ${tree.hostVersionRange} is not contained by ${catalog.adapterId}@${catalog.catalogVersion} range ${catalog.hostVersionRange}`,
         );
       }
+      if (
+        tree.nodes.some((node) => node.kind === 'leaf' && node.parameterProjection !== undefined)
+      ) {
+        const interactionCatalog = interactionCatalogRegistry.get({
+          targetAdapterId: tree.adapterId,
+          actionCatalogVersion: tree.actionCatalogVersion,
+          interactionCatalogVersion: tree.interactionCatalogVersion,
+        });
+        validateProcedureTreeParameterProjectionCatalog(tree, interactionCatalog);
+      }
       const plan = compileProcedureTreeToGuidePlan(tree);
       validateGuidePlanStructure(plan);
       validateGuidePlanAgainstActionCatalog(plan, catalog);
@@ -1044,6 +1092,27 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         nextAfterSequence: hasMore ? (visible.at(-1)?.sequence ?? null) : null,
       });
     };
+
+    const procedureTreeEditorCoordinator = createProcedureTreeEditorCoordinator({
+      database,
+      loadTree: (treeId, revision) => {
+        const stored = database.getProcedureTree(treeId, revision);
+        return stored === null ? null : publicProcedureTreeRecord(stored);
+      },
+      validateTree: (tree) => validateAndCompileProcedureTree(tree).tree,
+      computeContentSha256: computeProcedureTreeContentSha256,
+      getActionCatalog: (tree) =>
+        actionCatalogRegistry.get({
+          targetAdapterId: tree.adapterId,
+          catalogVersion: tree.actionCatalogVersion,
+        }),
+      getInteractionCatalog: (tree) =>
+        interactionCatalogRegistry.get({
+          targetAdapterId: tree.adapterId,
+          actionCatalogVersion: tree.actionCatalogVersion,
+          interactionCatalogVersion: tree.interactionCatalogVersion,
+        }),
+    });
 
     const sameStringArray = (
       left: readonly string[] | null,
@@ -4249,6 +4318,113 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     });
 
+    const registerProcedureTreeEditorRoute = (
+      path: string,
+      schema: z.ZodType,
+      handler: (input: unknown) => unknown,
+      options: { readonly nullIsNotFound?: boolean } = {},
+    ): void => {
+      runtimeApp.post(path, async (request, reply) => {
+        const parsedRequest = schema.safeParse(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_tree_editor_request',
+            path,
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          const result = handler(parsedRequest.data);
+          if (result === null && options.nullIsNotFound === true) {
+            return reply.code(404).send({
+              error: 'procedure_tree_editor_not_found',
+              message: 'The requested ProcedureTree editor resource was not found',
+            });
+          }
+          return result;
+        } catch (error) {
+          const expected = procedureTreeEditorHttpError(error);
+          if (expected !== null) return reply.code(expected.statusCode).send(expected.body);
+          request.log.error(error, 'ProcedureTree editor request failed');
+          return reply.code(500).send({
+            error: 'procedure_tree_editor_failed',
+            message: 'ProcedureTree editor request failed',
+          });
+        }
+      });
+    };
+
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/branches/create',
+      procedureTreeEditorBranchCreateRequestSchema,
+      (input) => procedureTreeEditorCoordinator.createBranch(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/branches/get',
+      procedureTreeEditorBranchGetRequestSchema,
+      (input) => procedureTreeEditorCoordinator.getBranch(input),
+      { nullIsNotFound: true },
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/branches/list',
+      procedureTreeEditorBranchListRequestSchema,
+      (input) => procedureTreeEditorCoordinator.listBranches(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/workspaces/get',
+      procedureTreeEditorWorkspaceRequestSchema,
+      (input) => procedureTreeEditorCoordinator.workspace(input),
+      { nullIsNotFound: true },
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/history/list',
+      procedureTreeEditorBranchHistoryRequestSchema,
+      (input) => procedureTreeEditorCoordinator.history(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/edits/preview',
+      procedureTreeEditorEditPreviewRequestSchema,
+      (input) => procedureTreeEditorCoordinator.previewEdit(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/merges/preview',
+      procedureTreeEditorMergePreviewRequestSchema,
+      (input) => procedureTreeEditorCoordinator.previewMerge(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/commits/create',
+      procedureTreeEditorCommitRequestSchema,
+      (input) => procedureTreeEditorCoordinator.commit(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/comments/create',
+      procedureTreeEditorCommentCreateRequestSchema,
+      (input) => procedureTreeEditorCoordinator.createComment(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/comments/list',
+      procedureTreeEditorCommentListRequestSchema,
+      (input) => procedureTreeEditorCoordinator.listComments(input),
+    );
+    registerProcedureTreeEditorRoute(
+      '/api/v1/procedure/editor/parameters/form',
+      procedureTreeEditorParameterFormRequestSchema,
+      (input) => procedureTreeEditorCoordinator.parameterForm(input),
+    );
+
+    for (const path of [
+      '/procedure-editor',
+      '/procedure-editor/',
+      '/procedure-editor/app.js',
+      '/procedure-editor/styles.css',
+    ]) {
+      runtimeApp.get(path, async (_request, reply) => {
+        const asset = resolveProcedureTreeEditorUiAsset(path);
+        if (asset === undefined) return reply.code(404).send({ error: 'not_found' });
+        return reply.headers(asset.headers).type(asset.contentType).send(asset.body);
+      });
+    }
+
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
     runtimeApp.post('/api/v1/companion/session', async (request, reply) => {
@@ -5927,6 +6103,21 @@ export {
   procedureSemanticRetrievalEvidenceEventTypes,
   restoreProcedureSemanticRetrievalInvocations,
 } from './procedure-semantic-retrieval.js';
+export {
+  computeProcedureTreeThreeWayMerge,
+  diffProcedureTrees,
+  type ProcedureTreeDiffEntry,
+  type ProcedureTreeMergeConflict,
+  type ProcedureTreeThreeWayMerge,
+} from './procedure-tree-editor.js';
+export { applyProcedureTreeEditorMutationPolicy } from './procedure-tree-editor-mutation-policy.js';
+export {
+  createProcedureTreeEditorCoordinator,
+  ProcedureTreeEditorError,
+  type ProcedureTreeEditorCoordinator,
+  type ProcedureTreeEditorCoordinatorOptions,
+  type ProcedureTreeEditorErrorCode,
+} from './procedure-tree-editor-coordinator.js';
 export {
   createPlannerReplanGenerationCoordinator,
   plannerReplanGenerationEvidenceEventTypes,

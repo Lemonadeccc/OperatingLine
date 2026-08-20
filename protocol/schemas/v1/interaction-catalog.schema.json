@@ -308,6 +308,129 @@
           "procedureMaterialization": {
             "type": "object",
             "properties": {
+              "semantic": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "const": "catalog.semantic_parameter_projections"
+                  },
+                  "projections": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "semanticAction": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "path": {
+                          "minItems": 1,
+                          "maxItems": 32,
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "field"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 180
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "index"
+                                  },
+                                  "index": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "index"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "actionArgument": {
+                          "type": "string",
+                          "pattern": "^(?!(?:__proto__|prototype|constructor)$)[A-Za-z_][A-Za-z0-9_.-]*$"
+                        },
+                        "transform": {
+                          "type": "string",
+                          "enum": [
+                            "identity",
+                            "uniform_vector3",
+                            "divide_by_two",
+                            "vector3_x",
+                            "vector3_y",
+                            "vector3_z"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "semanticAction",
+                        "path",
+                        "actionArgument",
+                        "transform"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "omittedActionArguments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "argumentName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "reason": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "argumentName",
+                        "reason"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "source",
+                  "projections",
+                  "omittedActionArguments"
+                ],
+                "additionalProperties": false
+              },
               "menu": {
                 "anyOf": [
                   {

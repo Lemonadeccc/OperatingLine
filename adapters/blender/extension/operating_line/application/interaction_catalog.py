@@ -64,6 +64,16 @@ SINGLETON_SHORTCUT_PRECONDITION_KINDS = frozenset(
 )
 RESERVED_PARAMETER_NAMES = frozenset({"__proto__", "prototype", "constructor"})
 PARAMETER_ASSIGNMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+SEMANTIC_PARAMETER_TRANSFORMS = frozenset(
+    {
+        "identity",
+        "uniform_vector3",
+        "divide_by_two",
+        "vector3_x",
+        "vector3_y",
+        "vector3_z",
+    }
+)
 
 
 class InteractionPathKind(str, Enum):
@@ -174,6 +184,35 @@ class OmittedActionArgumentDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticParameterPathSegmentDefinition:
+    """One safe field or array-index segment in a semantic parameter path."""
+
+    kind: str
+    name: str | None = None
+    index: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticParameterProjectionDefinition:
+    """One action argument projected into a semantic operation parameter."""
+
+    id: str
+    semantic_action: str
+    path: tuple[SemanticParameterPathSegmentDefinition, ...]
+    action_argument: str
+    transform: str
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticProcedureMaterializationDefinition:
+    """Catalog-owned semantic parameter projection declarations."""
+
+    source: str
+    projections: tuple[SemanticParameterProjectionDefinition, ...]
+    omitted_action_arguments: tuple[OmittedActionArgumentDefinition, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ShortcutPreconditionDefinition:
     """One declared prerequisite for replaying a shortcut candidate."""
 
@@ -239,6 +278,7 @@ class ProcedureMaterializationDefinition:
     menu: ProcedureMaterializationChannel
     shortcut: ProcedureMaterializationChannel
     mcp: ProcedureMaterializationChannel
+    semantic: SemanticProcedureMaterializationDefinition | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -732,6 +772,158 @@ def _parse_omitted_action_arguments(
     return tuple(omitted)
 
 
+def _parse_semantic_parameter_path(
+    value: Any,
+    label: str,
+) -> tuple[SemanticParameterPathSegmentDefinition, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} must be a non-empty array")
+    if len(value) > 32:
+        raise ValueError(f"{label} cannot contain more than 32 segments")
+    segments: list[SemanticParameterPathSegmentDefinition] = []
+    for raw_value in value:
+        raw = _expect_object(raw_value, f"{label} segment")
+        kind = _expect_string(raw.get("kind"), f"{label} segment kind")
+        if kind == "field":
+            _expect_exact_keys(
+                raw,
+                required={"kind", "name"},
+                label=f"{label} field segment",
+            )
+            name = _expect_string(raw["name"], f"{label} field name")
+            if len(name) > 180:
+                raise ValueError(f"{label} field name cannot exceed 180 characters")
+            if name in RESERVED_PARAMETER_NAMES:
+                raise ValueError(f"{label} contains unsafe field {name}")
+            segments.append(
+                SemanticParameterPathSegmentDefinition(kind="field", name=name)
+            )
+        elif kind == "index":
+            _expect_exact_keys(
+                raw,
+                required={"kind", "index"},
+                label=f"{label} index segment",
+            )
+            index = raw["index"]
+            if (
+                isinstance(index, bool)
+                or not isinstance(index, int)
+                or index < 0
+                or index > 1_000_000
+            ):
+                raise ValueError(
+                    f"{label} index must be an integer from 0 to 1000000"
+                )
+            segments.append(
+                SemanticParameterPathSegmentDefinition(kind="index", index=index)
+            )
+        else:
+            raise ValueError(f"{label} contains unknown segment kind {kind}")
+    return tuple(segments)
+
+
+def _parse_semantic_materialization(
+    value: Any,
+    recipe_id: str,
+) -> SemanticProcedureMaterializationDefinition:
+    label = f"Interaction recipe {recipe_id} semantic materialization"
+    raw = _expect_object(value, label)
+    _expect_exact_keys(
+        raw,
+        required={"source", "projections", "omittedActionArguments"},
+        label=label,
+    )
+    source = _expect_string(raw["source"], f"{label} source")
+    if source != "catalog.semantic_parameter_projections":
+        raise ValueError(f"{label} has unsupported source")
+    raw_projections = raw["projections"]
+    if not isinstance(raw_projections, list) or not raw_projections:
+        raise ValueError(f"{label} projections must be a non-empty array")
+    projections: list[SemanticParameterProjectionDefinition] = []
+    projection_ids: set[str] = set()
+    projection_paths_by_action: dict[
+        str, list[tuple[SemanticParameterPathSegmentDefinition, ...]]
+    ] = {}
+    for raw_value in raw_projections:
+        raw_projection = _expect_object(raw_value, f"{label} projection")
+        _expect_exact_keys(
+            raw_projection,
+            required={
+                "id",
+                "semanticAction",
+                "path",
+                "actionArgument",
+                "transform",
+            },
+            label=f"{label} projection",
+        )
+        projection_id = _expect_string(
+            raw_projection["id"], f"{label} projection id"
+        )
+        if STEP_ID_PATTERN.fullmatch(projection_id) is None:
+            raise ValueError(f"{label} has invalid projection id {projection_id}")
+        if projection_id in projection_ids:
+            raise ValueError(f"{label} contains duplicate projection id {projection_id}")
+        semantic_action = _expect_string(
+            raw_projection["semanticAction"],
+            f"{label} projection semanticAction",
+        )
+        if STEP_ID_PATTERN.fullmatch(semantic_action) is None:
+            raise ValueError(
+                f"{label} has invalid semanticAction {semantic_action}"
+            )
+        path = _parse_semantic_parameter_path(
+            raw_projection["path"], f"{label} projection {projection_id} path"
+        )
+        for existing_path in projection_paths_by_action.get(semantic_action, []):
+            if existing_path == path:
+                raise ValueError(
+                    f"{label} contains duplicate semantic target "
+                    f"{semantic_action} with the same path"
+                )
+            shared_length = min(len(existing_path), len(path))
+            if existing_path[:shared_length] == path[:shared_length]:
+                raise ValueError(
+                    f"{label} contains overlapping semantic target paths for "
+                    f"{semantic_action}"
+                )
+        action_argument = _expect_string(
+            raw_projection["actionArgument"],
+            f"{label} projection actionArgument",
+        )
+        if action_argument in RESERVED_PARAMETER_NAMES:
+            raise ValueError(
+                f"{label} contains reserved actionArgument {action_argument}"
+            )
+        if PARAMETER_ASSIGNMENT_NAME_PATTERN.fullmatch(action_argument) is None:
+            raise ValueError(
+                f"{label} contains non-portable actionArgument {action_argument}"
+            )
+        transform = _expect_string(
+            raw_projection["transform"], f"{label} projection transform"
+        )
+        if transform not in SEMANTIC_PARAMETER_TRANSFORMS:
+            raise ValueError(f"{label} contains unsupported transform {transform}")
+        projection_ids.add(projection_id)
+        projection_paths_by_action.setdefault(semantic_action, []).append(path)
+        projections.append(
+            SemanticParameterProjectionDefinition(
+                id=projection_id,
+                semantic_action=semantic_action,
+                path=path,
+                action_argument=action_argument,
+                transform=transform,
+            )
+        )
+    return SemanticProcedureMaterializationDefinition(
+        source=source,
+        projections=tuple(projections),
+        omitted_action_arguments=_parse_omitted_action_arguments(
+            raw["omittedActionArguments"], recipe_id
+        ),
+    )
+
+
 def _parse_shortcut_preconditions(
     value: Any,
     recipe_id: str,
@@ -1162,6 +1354,7 @@ def _parse_procedure_materialization(
     _expect_exact_keys(
         raw,
         required={"menu", "shortcut", "mcp"},
+        optional={"semantic"},
         label=label,
     )
     raw_menu = _expect_object(raw["menu"], f"{label} menu")
@@ -1270,6 +1463,11 @@ def _parse_procedure_materialization(
             raw["shortcut"], recipe_id, guidance
         ),
         mcp=_parse_unavailable_materialization(raw["mcp"], f"{label} mcp"),
+        semantic=(
+            _parse_semantic_materialization(raw["semantic"], recipe_id)
+            if "semantic" in raw
+            else None
+        ),
     )
 
 
@@ -1284,15 +1482,61 @@ def _is_fixed_numeric_vector3_schema(value: Any) -> bool:
     )
 
 
+def _is_semantic_identity_projectable_schema(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    schema_type = value.get("type")
+    if schema_type in {"boolean", "string", "number", "integer"}:
+        return True
+    if schema_type != "array":
+        return False
+    min_items = value.get("minItems")
+    max_items = value.get("maxItems")
+    items = value.get("items")
+    return (
+        isinstance(min_items, int)
+        and not isinstance(min_items, bool)
+        and 1 <= min_items <= 4
+        and isinstance(max_items, int)
+        and not isinstance(max_items, bool)
+        and min_items <= max_items <= 4
+        and isinstance(items, dict)
+        and items.get("type") in {"number", "integer"}
+    )
+
+
+def _validate_semantic_identity_schemas(
+    recipe: InteractionRecipe,
+    action: dict[str, Any],
+    semantic: SemanticProcedureMaterializationDefinition,
+) -> None:
+    argument_schema = _expect_object(
+        action.get("argumentsSchema"),
+        f"Action {recipe.action_name} argumentsSchema",
+    )
+    properties = _expect_object(
+        argument_schema.get("properties"),
+        f"Action {recipe.action_name} argument properties",
+    )
+    for projection in semantic.projections:
+        if projection.transform != "identity":
+            continue
+        property_schema = properties.get(projection.action_argument)
+        if not _is_semantic_identity_projectable_schema(property_schema):
+            raise ValueError(
+                f"Interaction recipe {recipe.id} semantic identity source "
+                f"{projection.action_argument} must have a scalar or bounded "
+                "one-to-four-item numeric array action schema"
+            )
+
+
 def _validate_parameter_assignment_coverage(
     recipe: InteractionRecipe,
     action: dict[str, Any],
     channel_name: str,
-    channel: ProcedureMaterializationChannel,
+    omitted_action_arguments: tuple[OmittedActionArgumentDefinition, ...],
     parameters: list[ParameterAssignmentDefinition],
 ) -> None:
-    assert channel.omitted_action_arguments is not None
-
     argument_schema = _expect_object(
         action.get("argumentsSchema"),
         f"Action {recipe.action_name} argumentsSchema",
@@ -1339,7 +1583,7 @@ def _validate_parameter_assignment_coverage(
         outputs[source.output] = source
 
     omitted_names = {
-        omitted.argument_name for omitted in channel.omitted_action_arguments
+        omitted.argument_name for omitted in omitted_action_arguments
     }
     mapped_names = set(direct_sources) | set(segment_argument_groups)
     overlap = mapped_names & omitted_names
@@ -1461,24 +1705,50 @@ def _validate_ordered_parameter_operations(
     materialization = recipe.procedure_materialization
     if materialization is None:
         return
+    semantic = materialization.semantic
+    if semantic is not None:
+        _validate_parameter_assignment_coverage(
+            recipe,
+            action,
+            "semantic",
+            semantic.omitted_action_arguments,
+            [
+                ParameterAssignmentDefinition(
+                    name=projection.id,
+                    source=ParameterAssignmentSourceDefinition(
+                        kind="action_argument",
+                        argument_name=projection.action_argument,
+                        transform=projection.transform,
+                    ),
+                )
+                for projection in semantic.projections
+            ],
+        )
+        _validate_semantic_identity_schemas(recipe, action, semantic)
     menu = materialization.menu
     if menu.parameter_binding == "ordered_parameter_operations":
         assert menu.operator_parameters is not None
         assert menu.control_operations is not None
+        assert menu.omitted_action_arguments is not None
         parameters = list(menu.operator_parameters)
         for operation in menu.control_operations.operations:
             parameters.extend(operation.parameters)
         _validate_parameter_assignment_coverage(
-            recipe, action, "menu", menu, parameters
+            recipe, action, "menu", menu.omitted_action_arguments, parameters
         )
     shortcut = materialization.shortcut
     if shortcut.parameter_binding == "ordered_parameter_operations":
         assert shortcut.shortcut_operations is not None
+        assert shortcut.omitted_action_arguments is not None
         parameters = []
         for operation in shortcut.shortcut_operations:
             parameters.extend(operation.parameters)
         _validate_parameter_assignment_coverage(
-            recipe, action, "shortcut", shortcut, parameters
+            recipe,
+            action,
+            "shortcut",
+            shortcut.omitted_action_arguments,
+            parameters,
         )
 
 
@@ -1631,6 +1901,9 @@ __all__ = (
     "ProcedureMaterializationChannel",
     "ProcedureMaterializationDefinition",
     "RESOURCE_PATH",
+    "SemanticParameterPathSegmentDefinition",
+    "SemanticParameterProjectionDefinition",
+    "SemanticProcedureMaterializationDefinition",
     "ShortcutKeyInputOperationDefinition",
     "ShortcutOpenedSurfaceDefinition",
     "ShortcutOperationDefinition",

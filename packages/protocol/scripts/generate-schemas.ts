@@ -139,6 +139,30 @@ import {
   procedureRefinementScopeSchema,
   procedureTreeStoreRequestSchema,
   procedureTreeStoreResultSchema,
+  procedureTreeEditorBranchCreateRequestSchema,
+  procedureTreeEditorBranchCreateResultSchema,
+  procedureTreeEditorBranchGetRequestSchema,
+  procedureTreeEditorBranchGetResultSchema,
+  procedureTreeEditorBranchListRequestSchema,
+  procedureTreeEditorBranchListResultSchema,
+  procedureTreeEditorWorkspaceRequestSchema,
+  procedureTreeEditorWorkspaceResultSchema,
+  procedureTreeEditorDiffResultSchema,
+  procedureTreeEditorEditPreviewRequestSchema,
+  procedureTreeEditorEditPreviewResultSchema,
+  procedureTreeEditorMergePreviewRequestSchema,
+  procedureTreeEditorMergePreviewResultSchema,
+  procedureTreeEditorCommitRequestSchema,
+  procedureTreeEditorCommitResultSchema,
+  procedureTreeEditorRevisionCommitSchema,
+  procedureTreeEditorBranchHistoryRequestSchema,
+  procedureTreeEditorBranchHistoryResultSchema,
+  procedureTreeEditorCommentCreateRequestSchema,
+  procedureTreeEditorCommentCreateResultSchema,
+  procedureTreeEditorCommentListRequestSchema,
+  procedureTreeEditorCommentListResultSchema,
+  procedureTreeEditorParameterFormRequestSchema,
+  procedureTreeEditorParameterFormResultSchema,
   storedProcedureTreeSchema,
   plannerGenerateRequestSchema,
   plannerGenerationErrorSchema,
@@ -159,6 +183,126 @@ mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
 
 const schemas = [
+  [
+    'procedure-tree-editor-branch-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-create-request.json',
+    procedureTreeEditorBranchCreateRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-create-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-create-result.json',
+    procedureTreeEditorBranchCreateResultSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-get-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-get-request.json',
+    procedureTreeEditorBranchGetRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-get-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-get-result.json',
+    procedureTreeEditorBranchGetResultSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-list-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-list-request.json',
+    procedureTreeEditorBranchListRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-list-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-list-result.json',
+    procedureTreeEditorBranchListResultSchema,
+  ],
+  [
+    'procedure-tree-editor-workspace-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-workspace-request.json',
+    procedureTreeEditorWorkspaceRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-workspace-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-workspace-result.json',
+    procedureTreeEditorWorkspaceResultSchema,
+  ],
+  [
+    'procedure-tree-editor-diff-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-diff-result.json',
+    procedureTreeEditorDiffResultSchema,
+  ],
+  [
+    'procedure-tree-editor-edit-preview-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-edit-preview-request.json',
+    procedureTreeEditorEditPreviewRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-edit-preview-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-edit-preview-result.json',
+    procedureTreeEditorEditPreviewResultSchema,
+  ],
+  [
+    'procedure-tree-editor-merge-preview-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-merge-preview-request.json',
+    procedureTreeEditorMergePreviewRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-merge-preview-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-merge-preview-result.json',
+    procedureTreeEditorMergePreviewResultSchema,
+  ],
+  [
+    'procedure-tree-editor-commit-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-commit-request.json',
+    procedureTreeEditorCommitRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-commit-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-commit-result.json',
+    procedureTreeEditorCommitResultSchema,
+  ],
+  [
+    'procedure-tree-editor-revision-commit.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-revision-commit.json',
+    procedureTreeEditorRevisionCommitSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-history-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-history-request.json',
+    procedureTreeEditorBranchHistoryRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-branch-history-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-history-result.json',
+    procedureTreeEditorBranchHistoryResultSchema,
+  ],
+  [
+    'procedure-tree-editor-comment-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-comment-create-request.json',
+    procedureTreeEditorCommentCreateRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-comment-create-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-comment-create-result.json',
+    procedureTreeEditorCommentCreateResultSchema,
+  ],
+  [
+    'procedure-tree-editor-comment-list-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-comment-list-request.json',
+    procedureTreeEditorCommentListRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-comment-list-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-comment-list-result.json',
+    procedureTreeEditorCommentListResultSchema,
+  ],
+  [
+    'procedure-tree-editor-parameter-form-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-parameter-form-request.json',
+    procedureTreeEditorParameterFormRequestSchema,
+  ],
+  [
+    'procedure-tree-editor-parameter-form-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tree-editor-parameter-form-result.json',
+    procedureTreeEditorParameterFormResultSchema,
+  ],
   [
     'companion-session-hello-request.schema.json',
     'https://operatingline.dev/schema/v1/companion-session-hello-request.json',
@@ -922,6 +1066,86 @@ function hardenDraft7Tuples(value: unknown): void {
   for (const nested of Object.values(record)) hardenDraft7Tuples(nested);
 }
 
+function hardenProcedureTreeMergeResolutions(value: unknown): void {
+  if (value === null || typeof value !== 'object') return;
+  const record = value as Record<string, unknown>;
+  const properties = record['properties'];
+  if (properties !== null && typeof properties === 'object') {
+    const propertyRecord = properties as Record<string, unknown>;
+    const choice = propertyRecord['choice'];
+    if (
+      propertyRecord['conflict'] !== undefined &&
+      propertyRecord['custom'] !== undefined &&
+      choice !== null &&
+      typeof choice === 'object' &&
+      Array.isArray((choice as Record<string, unknown>)['enum']) &&
+      ((choice as Record<string, unknown>)['enum'] as unknown[]).includes('custom')
+    ) {
+      record['allOf'] = [
+        {
+          if: { properties: { choice: { const: 'custom' } }, required: ['choice'] },
+          then: { required: ['custom'] },
+          else: { not: { required: ['custom'] } },
+        },
+      ];
+    }
+  }
+  for (const nested of Object.values(record)) hardenProcedureTreeMergeResolutions(nested);
+}
+
+function hardenProcedureTreeEditorSchema(filename: string, schema: Record<string, unknown>): void {
+  hardenProcedureTreeMergeResolutions(schema);
+  if (filename === 'procedure-tree-editor-parameter-form-result.schema.json') {
+    schema['$comment'] =
+      'Field minimum, maximum, pattern, and length members are sibling metadata for the editor UI. Generic JSON Schema validators cannot enforce every metadata-to-value dependency; the runtime Zod contract is authoritative for those relationships.';
+  }
+  if (filename === 'procedure-tree-editor-commit-request.schema.json') {
+    schema['allOf'] = [
+      {
+        if: { properties: { operation: { const: 'edit' } }, required: ['operation'] },
+        then: {
+          properties: {
+            previewBinding: {
+              properties: { operation: { const: 'edit' } },
+              required: ['operation'],
+            },
+          },
+        },
+      },
+      {
+        if: { properties: { operation: { const: 'merge' } }, required: ['operation'] },
+        then: {
+          properties: {
+            previewBinding: {
+              properties: { operation: { const: 'merge' } },
+              required: ['operation'],
+            },
+          },
+        },
+      },
+    ];
+  }
+  if (filename === 'procedure-tree-editor-revision-commit.schema.json') {
+    schema['allOf'] = [
+      {
+        if: { properties: { operation: { const: 'edit' } }, required: ['operation'] },
+        then: {
+          properties: { source: { type: 'null' }, mergeBase: { type: 'null' } },
+        },
+      },
+      {
+        if: { properties: { operation: { const: 'merge' } }, required: ['operation'] },
+        then: {
+          properties: {
+            source: { type: 'object' },
+            mergeBase: { type: 'object' },
+          },
+        },
+      },
+    ];
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
   const draft7TupleSchema =
     filename.startsWith('procedure-tutorial-media-') ||
@@ -930,6 +1154,7 @@ for (const [filename, id, schema] of schemas) {
     target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
   });
   if (draft7TupleSchema) hardenDraft7Tuples(jsonSchema);
+  hardenProcedureTreeEditorSchema(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

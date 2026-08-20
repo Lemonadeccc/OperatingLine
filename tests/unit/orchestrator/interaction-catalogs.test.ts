@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.32.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.33.0');
     const latestShortcut = blenderInteractionCatalog.recipes.find(
       (recipe) => recipe.actionName === 'blender.mesh.create_cube',
     )?.procedureMaterialization?.shortcut;
@@ -1468,11 +1468,33 @@ describe('interaction catalog registry', () => {
       'f1e8a04f577fdba050bb35ee7c3dc962b9d07208aab0c4e0b000bd6d7e50f624',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.32.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     active.catalogVersion = frozen.catalogVersion;
     active.actionCatalogVersion = frozen.actionCatalogVersion;
     active.description = frozen.description;
     expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.32.0 before catalog-grounded semantic projections', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.32.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'ad65a899d677486dfff62645e1bb10749d8d1715f38419059f60b470bf6f78a0',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const frozenUvSphere = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    );
+    const activeUvSphere = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    );
+    expect(frozenUvSphere?.procedureMaterialization?.semantic).toBeUndefined();
+    expect(activeUvSphere?.procedureMaterialization?.semantic).toMatchObject({
+      source: 'catalog.semantic_parameter_projections',
+    });
   });
 
   it('keeps the latest TypeScript and Blender extension catalogs byte-identical', () => {

@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
+import {
+  procedureParameterPathSegmentSchema,
+  procedureParameterTransformSchema,
+  type ProcedureParameterTransform,
+} from './procedure-parameter-projection.js';
 import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const interactionTargetKindSchema = z.enum([
@@ -275,12 +280,48 @@ export type ShortcutProcedureMaterialization = z.infer<
   typeof shortcutProcedureMaterializationSchema
 >;
 
+export const semanticParameterProjectionSchema = z.strictObject({
+  id: guideStepIdSchema,
+  semanticAction: guideStepIdSchema,
+  path: z.array(procedureParameterPathSegmentSchema).min(1).max(32),
+  actionArgument: parameterAssignmentNameSchema,
+  transform: procedureParameterTransformSchema,
+});
+export type SemanticParameterProjection = z.infer<typeof semanticParameterProjectionSchema>;
+
+export const semanticProcedureMaterializationSchema = z.strictObject({
+  source: z.literal('catalog.semantic_parameter_projections'),
+  projections: z.array(semanticParameterProjectionSchema).min(1),
+  omittedActionArguments: z.array(omittedActionArgumentSchema),
+});
+export type SemanticProcedureMaterialization = z.infer<
+  typeof semanticProcedureMaterializationSchema
+>;
+
 export const procedureMaterializationSchema = z.strictObject({
+  semantic: semanticProcedureMaterializationSchema.optional(),
   menu: menuProcedureMaterializationSchema,
   shortcut: shortcutProcedureMaterializationSchema,
   mcp: unavailableProcedureMaterializationSchema,
 });
 export type ProcedureMaterialization = z.infer<typeof procedureMaterializationSchema>;
+
+function isProcedureParameterPathPrefix(
+  candidate: SemanticParameterProjection['path'],
+  path: SemanticParameterProjection['path'],
+): boolean {
+  return (
+    candidate.length <= path.length &&
+    candidate.every((segment, index) => {
+      const compared = path[index];
+      if (compared === undefined) return false;
+      if (segment.kind === 'field') {
+        return compared.kind === 'field' && segment.name === compared.name;
+      }
+      return compared.kind === 'index' && segment.index === compared.index;
+    })
+  );
+}
 
 export const interactionRecipeSchema = z.strictObject({
   id: guideStepIdSchema,
@@ -359,12 +400,54 @@ function isFixedNumericVector3Schema(schema: unknown): boolean {
   );
 }
 
+function isIdentityProjectionSchema(schema: unknown): boolean {
+  if (typeof schema !== 'object' || schema === null || !('type' in schema)) return false;
+  if (
+    schema.type === 'boolean' ||
+    schema.type === 'string' ||
+    schema.type === 'number' ||
+    schema.type === 'integer'
+  ) {
+    return true;
+  }
+  return (
+    schema.type === 'array' &&
+    'items' in schema &&
+    isNumericSchema(schema.items) &&
+    'minItems' in schema &&
+    typeof schema.minItems === 'number' &&
+    schema.minItems >= 1 &&
+    'maxItems' in schema &&
+    typeof schema.maxItems === 'number' &&
+    schema.maxItems <= 4
+  );
+}
+
+function validateIdentityProjectionSchema(
+  recipe: InteractionRecipe,
+  modality: 'semantic' | 'menu' | 'shortcut',
+  argumentSchemas: Readonly<Record<string, unknown>>,
+  argumentName: string,
+  transform: ProcedureParameterTransform,
+): void {
+  if (
+    transform !== 'identity' ||
+    !Object.hasOwn(argumentSchemas, argumentName) ||
+    isIdentityProjectionSchema(argumentSchemas[argumentName])
+  ) {
+    return;
+  }
+  throw new Error(
+    `Interaction recipe ${recipe.id} ${modality} identity projection requires a scalar or one-to-four-item numeric array action argument ${argumentName}`,
+  );
+}
+
 function validateActionArgumentCoverage(
   recipe: InteractionRecipe,
   argumentSchemas: Record<string, unknown>,
   assignments: readonly ParameterAssignment[],
   omittedActionArguments: readonly OmittedActionArgument[],
-  modality: 'menu' | 'shortcut',
+  modality: 'semantic' | 'menu' | 'shortcut',
 ): void {
   const coverage = new Map<string, { whole: boolean; components: Set<'x' | 'y' | 'z'> }>();
   const segmentFrameOutputs = ['distance', 'midpoint', 'rotation_euler_xyz_align_z'] as const;
@@ -550,6 +633,42 @@ function validateActionArgumentCoverage(
 }
 
 function validateRecipe(recipe: InteractionRecipe): void {
+  const semantic = recipe.procedureMaterialization?.semantic;
+  if (semantic !== undefined) {
+    const projectionIds = new Set<string>();
+    const targetPaths: Array<{
+      semanticAction: string;
+      path: SemanticParameterProjection['path'];
+    }> = [];
+    for (const projection of semantic.projections) {
+      if (projectionIds.has(projection.id)) {
+        throw new Error(
+          `Interaction recipe ${recipe.id} repeats semantic parameter projection ${projection.id}`,
+        );
+      }
+      projectionIds.add(projection.id);
+      const overlappingTarget = targetPaths.find(
+        (target) =>
+          target.semanticAction === projection.semanticAction &&
+          (isProcedureParameterPathPrefix(target.path, projection.path) ||
+            isProcedureParameterPathPrefix(projection.path, target.path)),
+      );
+      if (overlappingTarget !== undefined) {
+        const exactTarget =
+          overlappingTarget.path.length === projection.path.length &&
+          isProcedureParameterPathPrefix(overlappingTarget.path, projection.path);
+        throw new Error(
+          exactTarget
+            ? `Interaction recipe ${recipe.id} repeats semantic parameter target ${projection.semanticAction}`
+            : `Interaction recipe ${recipe.id} overlaps semantic parameter target ${projection.semanticAction}`,
+        );
+      }
+      targetPaths.push({
+        semanticAction: projection.semanticAction,
+        path: projection.path,
+      });
+    }
+  }
   if (recipe.procedureMaterialization?.menu.availability === 'available') {
     if (
       recipe.guidance.kind !== 'native_path' ||
@@ -873,6 +992,75 @@ export function validateInteractionCatalog(
   for (const recipe of catalog.recipes) {
     const action = actionsByName.get(recipe.actionName)!;
     const argumentSchemas = action.argumentsSchema.properties;
+    const semantic = recipe.procedureMaterialization?.semantic;
+    if (semantic !== undefined) {
+      validateActionArgumentCoverage(
+        recipe,
+        argumentSchemas,
+        semantic.projections.map((projection) => ({
+          name: projection.id,
+          source: {
+            kind: 'action_argument' as const,
+            argumentName: projection.actionArgument,
+            transform: projection.transform,
+          },
+        })),
+        semantic.omittedActionArguments,
+        'semantic',
+      );
+      for (const projection of semantic.projections) {
+        validateIdentityProjectionSchema(
+          recipe,
+          'semantic',
+          argumentSchemas,
+          projection.actionArgument,
+          projection.transform,
+        );
+      }
+
+      const menu = recipe.procedureMaterialization?.menu;
+      if (menu?.availability === 'available') {
+        if (menu.parameterBinding === 'accepted_action_arguments') {
+          for (const argumentName of Object.keys(argumentSchemas)) {
+            validateIdentityProjectionSchema(
+              recipe,
+              'menu',
+              argumentSchemas,
+              argumentName,
+              'identity',
+            );
+          }
+        } else {
+          for (const assignment of [
+            ...menu.operatorParameters,
+            ...menu.controlOperations.operations.flatMap((operation) => operation.parameters),
+          ]) {
+            if (assignment.source.kind !== 'action_argument') continue;
+            validateIdentityProjectionSchema(
+              recipe,
+              'menu',
+              argumentSchemas,
+              assignment.source.argumentName,
+              assignment.source.transform,
+            );
+          }
+        }
+      }
+
+      const shortcut = recipe.procedureMaterialization?.shortcut;
+      if (shortcut?.availability === 'available') {
+        for (const assignment of shortcut.operations.flatMap((operation) => operation.parameters)) {
+          if (assignment.source.kind !== 'action_argument') continue;
+          validateIdentityProjectionSchema(
+            recipe,
+            'shortcut',
+            argumentSchemas,
+            assignment.source.argumentName,
+            assignment.source.transform,
+          );
+        }
+      }
+    }
     const menu = recipe.procedureMaterialization?.menu;
     if (
       menu?.availability === 'available' &&

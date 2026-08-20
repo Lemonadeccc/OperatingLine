@@ -296,6 +296,86 @@ export type RecordProcedureTreeResult =
       latestRevision: number;
     };
 
+export interface ProcedureTreeRevisionRef {
+  revision: number;
+  contentSha256: string;
+}
+
+export interface ProcedureTreeBranchInput {
+  treeId: string;
+  branchId: string;
+  createdFrom: ProcedureTreeRevisionRef;
+  createdAt: string;
+  payload: unknown;
+}
+
+export type StoredProcedureTreeBranch = ProcedureTreeBranchInput;
+
+export type CreateProcedureTreeBranchResult =
+  | { result: 'accepted' | 'duplicate'; branch: StoredProcedureTreeBranch }
+  | { result: 'conflict' | 'not_found' };
+
+export type ProcedureTreeRevisionOperation = 'edit' | 'merge';
+
+export interface ProcedureTreeRevisionCommitInput {
+  requestId: string;
+  branchId: string;
+  operation: ProcedureTreeRevisionOperation;
+  base: ProcedureTreeRevisionRef;
+  expectedLatestRevision: number;
+  target: Omit<ProcedureTreeRecordInput, 'atomicEvidence'>;
+  source?:
+    | (ProcedureTreeRevisionRef & {
+        branchId: string;
+      })
+    | undefined;
+  mergeBase?: ProcedureTreeRevisionRef | undefined;
+  message?: string | undefined;
+  occurredAt: string;
+  payload: unknown;
+}
+
+export interface StoredProcedureTreeRevisionCommit {
+  sequence: number;
+  requestId: string;
+  treeId: string;
+  branchId: string;
+  operation: ProcedureTreeRevisionOperation;
+  base: ProcedureTreeRevisionRef;
+  target: ProcedureTreeRevisionRef;
+  source: (ProcedureTreeRevisionRef & { branchId: string }) | null;
+  mergeBase: ProcedureTreeRevisionRef | null;
+  expectedLatestRevision: number;
+  message: string | null;
+  occurredAt: string;
+  payload: unknown;
+}
+
+export type CommitProcedureTreeRevisionResult =
+  | {
+      result: 'accepted' | 'duplicate';
+      commit: StoredProcedureTreeRevisionCommit;
+      record: StoredProcedureTreeRecord;
+    }
+  | { result: 'stale_head' | 'conflict' | 'not_found' };
+
+export interface ProcedureTreeCommentInput {
+  commentId: string;
+  treeId: string;
+  branchId: string;
+  tree: ProcedureTreeRevisionRef;
+  occurredAt: string;
+  payload: unknown;
+}
+
+export interface StoredProcedureTreeComment extends ProcedureTreeCommentInput {
+  sequence: number;
+}
+
+export type AppendProcedureTreeCommentResult =
+  | { result: 'accepted' | 'duplicate'; comment: StoredProcedureTreeComment }
+  | { result: 'conflict' | 'not_found' };
+
 export type ProcedureOperationIndexModality = 'semantic' | 'menu' | 'shortcut' | 'mcp';
 
 export type ProcedureOperationIndexKind =
@@ -816,6 +896,26 @@ export interface OperatingLineDatabase {
   ): CommitProcedureRefinementDiscardReviewResult;
   listActiveProcedureRefinementRuns(treeId?: string): unknown[];
   recordProcedureTree(input: ProcedureTreeRecordInput): RecordProcedureTreeResult;
+  createProcedureTreeBranch(input: ProcedureTreeBranchInput): CreateProcedureTreeBranchResult;
+  getProcedureTreeBranch(treeId: string, branchId: string): StoredProcedureTreeBranch | null;
+  listProcedureTreeBranches(treeId: string): StoredProcedureTreeBranch[];
+  getProcedureTreeBranchHead(treeId: string, branchId: string): ProcedureTreeRevisionRef | null;
+  getProcedureTreeRevisionCommit(requestId: string): StoredProcedureTreeRevisionCommit | null;
+  listProcedureTreeRevisionCommits(
+    treeId: string,
+    branchId?: string,
+  ): StoredProcedureTreeRevisionCommit[];
+  commitProcedureTreeRevision(
+    input: ProcedureTreeRevisionCommitInput,
+  ): CommitProcedureTreeRevisionResult;
+  appendProcedureTreeComment(input: ProcedureTreeCommentInput): AppendProcedureTreeCommentResult;
+  getProcedureTreeComment(commentId: string): StoredProcedureTreeComment | null;
+  listProcedureTreeComments(
+    treeId: string,
+    branchId: string,
+    afterSequence: number,
+    limit: number,
+  ): StoredProcedureTreeComment[];
   getProcedureTree(treeId: string, revision?: number): StoredProcedureTreeRecord | null;
   listProcedureTrees(
     afterSequence: number,
@@ -1488,6 +1588,111 @@ export function openOperatingLineDatabase(
     VALUES (18, datetime('now'));
   `);
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS procedure_tree_branches (
+      tree_id TEXT NOT NULL,
+      branch_id TEXT NOT NULL,
+      created_from_revision INTEGER NOT NULL CHECK (created_from_revision > 0),
+      created_from_content_sha256 TEXT NOT NULL CHECK (
+        length(created_from_content_sha256) = 64
+        AND created_from_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      created_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      PRIMARY KEY (tree_id, branch_id),
+      FOREIGN KEY (tree_id, created_from_revision)
+        REFERENCES procedure_trees(tree_id, revision)
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS procedure_tree_revision_commits (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT NOT NULL UNIQUE,
+      tree_id TEXT NOT NULL,
+      branch_id TEXT NOT NULL,
+      base_revision INTEGER NOT NULL CHECK (base_revision > 0),
+      base_content_sha256 TEXT NOT NULL CHECK (
+        length(base_content_sha256) = 64 AND base_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      target_revision INTEGER NOT NULL CHECK (target_revision > 0),
+      target_content_sha256 TEXT NOT NULL CHECK (
+        length(target_content_sha256) = 64 AND target_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      operation TEXT NOT NULL CHECK (operation IN ('edit', 'merge')),
+      source_branch_id TEXT,
+      source_revision INTEGER CHECK (source_revision IS NULL OR source_revision > 0),
+      source_content_sha256 TEXT CHECK (
+        source_content_sha256 IS NULL OR (
+          length(source_content_sha256) = 64
+          AND source_content_sha256 NOT GLOB '*[^0-9a-f]*'
+        )
+      ),
+      merge_base_revision INTEGER CHECK (merge_base_revision IS NULL OR merge_base_revision > 0),
+      merge_base_content_sha256 TEXT CHECK (
+        merge_base_content_sha256 IS NULL OR (
+          length(merge_base_content_sha256) = 64
+          AND merge_base_content_sha256 NOT GLOB '*[^0-9a-f]*'
+        )
+      ),
+      expected_latest_revision INTEGER NOT NULL CHECK (expected_latest_revision > 0),
+      message TEXT,
+      occurred_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      UNIQUE (tree_id, target_revision),
+      CHECK (
+        (operation = 'edit'
+          AND source_branch_id IS NULL
+          AND source_revision IS NULL
+          AND source_content_sha256 IS NULL
+          AND merge_base_revision IS NULL
+          AND merge_base_content_sha256 IS NULL)
+        OR (operation = 'merge'
+          AND source_branch_id IS NOT NULL
+          AND source_revision IS NOT NULL
+          AND source_content_sha256 IS NOT NULL
+          AND merge_base_revision IS NOT NULL
+          AND merge_base_content_sha256 IS NOT NULL)
+      ),
+      FOREIGN KEY (tree_id, branch_id)
+        REFERENCES procedure_tree_branches(tree_id, branch_id),
+      FOREIGN KEY (tree_id, base_revision)
+        REFERENCES procedure_trees(tree_id, revision),
+      FOREIGN KEY (tree_id, target_revision)
+        REFERENCES procedure_trees(tree_id, revision),
+      FOREIGN KEY (tree_id, source_branch_id)
+        REFERENCES procedure_tree_branches(tree_id, branch_id),
+      FOREIGN KEY (tree_id, source_revision)
+        REFERENCES procedure_trees(tree_id, revision),
+      FOREIGN KEY (tree_id, merge_base_revision)
+        REFERENCES procedure_trees(tree_id, revision)
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS procedure_tree_revision_commits_branch
+    ON procedure_tree_revision_commits (tree_id, branch_id, target_revision);
+
+    CREATE TABLE IF NOT EXISTS procedure_tree_comments (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      comment_id TEXT NOT NULL UNIQUE,
+      tree_id TEXT NOT NULL,
+      branch_id TEXT NOT NULL,
+      tree_revision INTEGER NOT NULL CHECK (tree_revision > 0),
+      tree_content_sha256 TEXT NOT NULL CHECK (
+        length(tree_content_sha256) = 64 AND tree_content_sha256 NOT GLOB '*[^0-9a-f]*'
+      ),
+      payload TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      FOREIGN KEY (tree_id, branch_id)
+        REFERENCES procedure_tree_branches(tree_id, branch_id),
+      FOREIGN KEY (tree_id, tree_revision)
+        REFERENCES procedure_trees(tree_id, revision)
+    ) STRICT;
+
+    CREATE INDEX IF NOT EXISTS procedure_tree_comments_tree_sequence
+    ON procedure_tree_comments (tree_id, branch_id, sequence);
+
+    INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+    VALUES (19, datetime('now'));
+  `);
+
   const insertEvent = sqlite.prepare(`
     INSERT INTO execution_events (id, event_type, payload, created_at)
     VALUES (?, ?, ?, ?)
@@ -1665,6 +1870,67 @@ export function openOperatingLineDatabase(
       stored_at
     FROM procedure_trees
     WHERE sequence > ? AND adapter_id = ?
+    ORDER BY sequence
+    LIMIT ?
+  `);
+  const insertProcedureTreeBranch = sqlite.prepare(`
+    INSERT INTO procedure_tree_branches (
+      tree_id, branch_id, created_from_revision, created_from_content_sha256, created_at, payload
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const findProcedureTreeBranch = sqlite.prepare(`
+    SELECT tree_id, branch_id, created_from_revision, created_from_content_sha256, created_at, payload
+    FROM procedure_tree_branches
+    WHERE tree_id = ? AND branch_id = ?
+  `);
+  const listProcedureTreeBranchRows = sqlite.prepare(`
+    SELECT tree_id, branch_id, created_from_revision, created_from_content_sha256, created_at, payload
+    FROM procedure_tree_branches
+    WHERE tree_id = ?
+    ORDER BY created_at, branch_id
+  `);
+  const findProcedureTreeBranchHeadRow = sqlite.prepare(`
+    SELECT target_revision AS revision, target_content_sha256 AS content_sha256
+    FROM procedure_tree_revision_commits
+    WHERE tree_id = ? AND branch_id = ?
+    ORDER BY target_revision DESC
+    LIMIT 1
+  `);
+  const findProcedureTreeRevisionCommit = sqlite.prepare(`
+    SELECT * FROM procedure_tree_revision_commits WHERE request_id = ?
+  `);
+  const listProcedureTreeRevisionCommitRows = sqlite.prepare(`
+    SELECT * FROM procedure_tree_revision_commits
+    WHERE tree_id = ?
+    ORDER BY target_revision
+  `);
+  const listProcedureTreeRevisionCommitRowsByBranch = sqlite.prepare(`
+    SELECT * FROM procedure_tree_revision_commits
+    WHERE tree_id = ? AND branch_id = ?
+    ORDER BY target_revision
+  `);
+  const insertProcedureTreeRevisionCommit = sqlite.prepare(`
+    INSERT INTO procedure_tree_revision_commits (
+      request_id, tree_id, branch_id, base_revision, base_content_sha256,
+      target_revision, target_content_sha256, operation, source_branch_id,
+      source_revision, source_content_sha256, merge_base_revision,
+      merge_base_content_sha256, expected_latest_revision, message, occurred_at, payload
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const findProcedureTreeComment = sqlite.prepare(`
+    SELECT sequence, comment_id, tree_id, branch_id, tree_revision, tree_content_sha256, payload, occurred_at
+    FROM procedure_tree_comments
+    WHERE comment_id = ?
+  `);
+  const insertProcedureTreeComment = sqlite.prepare(`
+    INSERT INTO procedure_tree_comments (
+      comment_id, tree_id, branch_id, tree_revision, tree_content_sha256, payload, occurred_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const listProcedureTreeCommentRows = sqlite.prepare(`
+    SELECT sequence, comment_id, tree_id, branch_id, tree_revision, tree_content_sha256, payload, occurred_at
+    FROM procedure_tree_comments
+    WHERE tree_id = ? AND branch_id = ? AND sequence > ?
     ORDER BY sequence
     LIMIT ?
   `);
@@ -2600,6 +2866,117 @@ export function openOperatingLineDatabase(
     return { ...summary, tree: JSON.parse(payload) as unknown };
   };
 
+  const parseProcedureTreeBranchRow = (row: unknown): StoredProcedureTreeBranch => {
+    const candidate = row as Record<string, unknown>;
+    if (
+      typeof candidate['tree_id'] !== 'string' ||
+      typeof candidate['branch_id'] !== 'string' ||
+      typeof candidate['created_from_revision'] !== 'number' ||
+      typeof candidate['created_from_content_sha256'] !== 'string' ||
+      typeof candidate['created_at'] !== 'string' ||
+      typeof candidate['payload'] !== 'string'
+    ) {
+      throw new Error('SQLite returned an invalid procedure tree branch');
+    }
+    return {
+      treeId: candidate['tree_id'],
+      branchId: candidate['branch_id'],
+      createdFrom: {
+        revision: candidate['created_from_revision'],
+        contentSha256: candidate['created_from_content_sha256'],
+      },
+      createdAt: candidate['created_at'],
+      payload: JSON.parse(candidate['payload']) as unknown,
+    };
+  };
+
+  const parseProcedureTreeRevisionCommitRow = (row: unknown): StoredProcedureTreeRevisionCommit => {
+    const candidate = row as Record<string, unknown>;
+    if (
+      typeof candidate['sequence'] !== 'number' ||
+      typeof candidate['request_id'] !== 'string' ||
+      typeof candidate['tree_id'] !== 'string' ||
+      typeof candidate['branch_id'] !== 'string' ||
+      typeof candidate['base_revision'] !== 'number' ||
+      typeof candidate['base_content_sha256'] !== 'string' ||
+      typeof candidate['target_revision'] !== 'number' ||
+      typeof candidate['target_content_sha256'] !== 'string' ||
+      (candidate['operation'] !== 'edit' && candidate['operation'] !== 'merge') ||
+      typeof candidate['expected_latest_revision'] !== 'number' ||
+      (candidate['message'] !== null && typeof candidate['message'] !== 'string') ||
+      typeof candidate['occurred_at'] !== 'string' ||
+      typeof candidate['payload'] !== 'string'
+    ) {
+      throw new Error('SQLite returned an invalid procedure tree revision commit');
+    }
+    const nullableRef = (revisionKey: string, shaKey: string): ProcedureTreeRevisionRef | null => {
+      const revision = candidate[revisionKey];
+      const contentSha256 = candidate[shaKey];
+      if (revision === null && contentSha256 === null) return null;
+      if (typeof revision !== 'number' || typeof contentSha256 !== 'string') {
+        throw new Error('SQLite returned an invalid procedure tree revision commit reference');
+      }
+      return { revision, contentSha256 };
+    };
+    const sourceRef = nullableRef('source_revision', 'source_content_sha256');
+    const sourceBranchId = candidate['source_branch_id'];
+    if (
+      (sourceRef === null && sourceBranchId !== null) ||
+      (sourceRef !== null && typeof sourceBranchId !== 'string')
+    ) {
+      throw new Error('SQLite returned an invalid procedure tree revision commit source');
+    }
+    return {
+      sequence: candidate['sequence'],
+      requestId: candidate['request_id'],
+      treeId: candidate['tree_id'],
+      branchId: candidate['branch_id'],
+      operation: candidate['operation'],
+      base: {
+        revision: candidate['base_revision'],
+        contentSha256: candidate['base_content_sha256'],
+      },
+      target: {
+        revision: candidate['target_revision'],
+        contentSha256: candidate['target_content_sha256'],
+      },
+      source: sourceRef === null ? null : { branchId: sourceBranchId as string, ...sourceRef },
+      mergeBase: nullableRef('merge_base_revision', 'merge_base_content_sha256'),
+      expectedLatestRevision: candidate['expected_latest_revision'],
+      message: candidate['message'] as string | null,
+      occurredAt: candidate['occurred_at'],
+      payload: JSON.parse(candidate['payload']) as unknown,
+    };
+  };
+
+  const parseProcedureTreeCommentRow = (row: unknown): StoredProcedureTreeComment => {
+    const candidate = row as Record<string, unknown>;
+    if (
+      typeof candidate['sequence'] !== 'number' ||
+      typeof candidate['comment_id'] !== 'string' ||
+      typeof candidate['tree_id'] !== 'string' ||
+      typeof candidate['branch_id'] !== 'string' ||
+      typeof candidate['tree_revision'] !== 'number' ||
+      typeof candidate['tree_content_sha256'] !== 'string' ||
+      typeof candidate['payload'] !== 'string' ||
+      typeof candidate['occurred_at'] !== 'string'
+    ) {
+      throw new Error('SQLite returned an invalid procedure tree comment');
+    }
+    return {
+      sequence: candidate['sequence'],
+      commentId: candidate['comment_id'],
+      treeId: candidate['tree_id'],
+      branchId: candidate['branch_id'],
+      tree: {
+        revision: candidate['tree_revision'],
+        contentSha256: candidate['tree_content_sha256'],
+      },
+      payload: JSON.parse(candidate['payload']) as unknown,
+      occurredAt: candidate['occurred_at'],
+    };
+  };
+
   const parseIndexedStringArray = (payload: unknown, field: string): string[] => {
     if (typeof payload !== 'string') {
       throw new Error(`SQLite returned an invalid procedure operation ${field}`);
@@ -2824,6 +3201,74 @@ export function openOperatingLineDatabase(
     validateShortcutSurfaceLifecycle(input.tree);
   };
 
+  const validateProcedureTreeRevisionRef = (
+    reference: ProcedureTreeRevisionRef,
+    label: string,
+  ): void => {
+    if (!Number.isSafeInteger(reference.revision) || reference.revision < 1) {
+      throw new Error(`${label} revision must be a positive safe integer`);
+    }
+    if (!/^[a-f0-9]{64}$/.test(reference.contentSha256)) {
+      throw new Error(`${label} content SHA-256 must be lowercase hexadecimal`);
+    }
+  };
+
+  const exactProcedureTreeRefExists = (
+    treeId: string,
+    reference: ProcedureTreeRevisionRef,
+  ): boolean => {
+    const row = findProcedureTree.get(treeId, reference.revision);
+    return (
+      row !== undefined && parseProcedureTreeRow(row).contentSha256 === reference.contentSha256
+    );
+  };
+
+  const procedureTreeBranchHead = (branch: StoredProcedureTreeBranch): ProcedureTreeRevisionRef => {
+    const row = findProcedureTreeBranchHeadRow.get(branch.treeId, branch.branchId) as
+      { revision?: unknown; content_sha256?: unknown } | undefined;
+    if (row === undefined) return branch.createdFrom;
+    if (typeof row.revision !== 'number' || typeof row.content_sha256 !== 'string') {
+      throw new Error('SQLite returned an invalid procedure tree branch head');
+    }
+    return { revision: row.revision, contentSha256: row.content_sha256 };
+  };
+
+  const procedureTreeRefBelongsToBranchLineage = (
+    treeId: string,
+    branchId: string,
+    target: ProcedureTreeRevisionRef,
+  ): boolean => {
+    const branchRow = findProcedureTreeBranch.get(treeId, branchId);
+    if (branchRow === undefined) return false;
+    const branch = parseProcedureTreeBranchRow(branchRow);
+    const commitsByRevision = new Map(
+      listProcedureTreeRevisionCommitRows
+        .all(treeId)
+        .map(parseProcedureTreeRevisionCommitRow)
+        .map((commit) => [commit.target.revision, commit] as const),
+    );
+    const referenceKey = (reference: ProcedureTreeRevisionRef): string =>
+      canonicalJson({
+        revision: reference.revision,
+        contentSha256: reference.contentSha256,
+      });
+    const targetKey = referenceKey(target);
+    const visited = new Set<number>();
+    const containsTarget = (reference: ProcedureTreeRevisionRef): boolean => {
+      if (referenceKey(reference) === targetKey) return true;
+      if (visited.has(reference.revision)) return false;
+      visited.add(reference.revision);
+      const commit = commitsByRevision.get(reference.revision);
+      if (commit === undefined || referenceKey(commit.target) !== referenceKey(reference)) {
+        return false;
+      }
+      return (
+        containsTarget(commit.base) || (commit.source !== null && containsTarget(commit.source))
+      );
+    };
+    return containsTarget(procedureTreeBranchHead(branch));
+  };
+
   const recordProcedureTreeInTransaction = (
     input: ProcedureTreeRecordInput,
   ): RecordProcedureTreeResult => {
@@ -2978,6 +3423,333 @@ export function openOperatingLineDatabase(
         sqlite.exec('ROLLBACK;');
         throw error;
       }
+    },
+    createProcedureTreeBranch(input) {
+      if (input.treeId.trim().length === 0 || input.branchId.trim().length === 0) {
+        throw new Error('Procedure tree branch identity fields must be nonempty');
+      }
+      validateProcedureTreeRevisionRef(input.createdFrom, 'Procedure tree branch base');
+      if (!isOffsetIsoDateTime(input.createdAt)) {
+        throw new Error('Procedure tree branch createdAt must be an ISO date-time with an offset');
+      }
+      const payload = canonicalJson(input.payload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingRow = findProcedureTreeBranch.get(input.treeId, input.branchId);
+        if (existingRow !== undefined) {
+          const branch = parseProcedureTreeBranchRow(existingRow);
+          const duplicate =
+            branch.createdFrom.revision === input.createdFrom.revision &&
+            branch.createdFrom.contentSha256 === input.createdFrom.contentSha256 &&
+            branch.createdAt === input.createdAt &&
+            canonicalJson(branch.payload) === payload;
+          sqlite.exec('COMMIT;');
+          return duplicate ? { result: 'duplicate', branch } : { result: 'conflict' };
+        }
+        if (!exactProcedureTreeRefExists(input.treeId, input.createdFrom)) {
+          sqlite.exec('COMMIT;');
+          return { result: 'not_found' };
+        }
+        insertProcedureTreeBranch.run(
+          input.treeId,
+          input.branchId,
+          input.createdFrom.revision,
+          input.createdFrom.contentSha256,
+          input.createdAt,
+          payload,
+        );
+        insertEvent.run(
+          `procedure-tree-branch:${input.treeId}:${input.branchId}`,
+          'procedure.tree.branch.created',
+          payload,
+          input.createdAt,
+        );
+        const storedRow = findProcedureTreeBranch.get(input.treeId, input.branchId);
+        if (storedRow === undefined)
+          throw new Error('Procedure tree branch could not be read back');
+        const branch = parseProcedureTreeBranchRow(storedRow);
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', branch };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getProcedureTreeBranch(treeId, branchId) {
+      if (treeId.trim().length === 0 || branchId.trim().length === 0) {
+        throw new Error('Procedure tree branch identity fields must be nonempty');
+      }
+      const row = findProcedureTreeBranch.get(treeId, branchId);
+      return row === undefined ? null : parseProcedureTreeBranchRow(row);
+    },
+    listProcedureTreeBranches(treeId) {
+      if (treeId.trim().length === 0) throw new Error('Procedure tree id must be nonempty');
+      return listProcedureTreeBranchRows.all(treeId).map(parseProcedureTreeBranchRow);
+    },
+    getProcedureTreeBranchHead(treeId, branchId) {
+      if (treeId.trim().length === 0 || branchId.trim().length === 0) {
+        throw new Error('Procedure tree branch identity fields must be nonempty');
+      }
+      const row = findProcedureTreeBranch.get(treeId, branchId);
+      return row === undefined ? null : procedureTreeBranchHead(parseProcedureTreeBranchRow(row));
+    },
+    getProcedureTreeRevisionCommit(requestId) {
+      if (requestId.trim().length === 0)
+        throw new Error('Procedure tree commit request id must be nonempty');
+      const row = findProcedureTreeRevisionCommit.get(requestId);
+      return row === undefined ? null : parseProcedureTreeRevisionCommitRow(row);
+    },
+    listProcedureTreeRevisionCommits(treeId, branchId) {
+      if (treeId.trim().length === 0) throw new Error('Procedure tree id must be nonempty');
+      if (branchId !== undefined && branchId.trim().length === 0) {
+        throw new Error('Procedure tree branch id must be nonempty');
+      }
+      const rows =
+        branchId === undefined
+          ? listProcedureTreeRevisionCommitRows.all(treeId)
+          : listProcedureTreeRevisionCommitRowsByBranch.all(treeId, branchId);
+      return rows.map(parseProcedureTreeRevisionCommitRow);
+    },
+    commitProcedureTreeRevision(input) {
+      if (input.requestId.trim().length === 0 || input.branchId.trim().length === 0) {
+        throw new Error('Procedure tree commit identity fields must be nonempty');
+      }
+      validateProcedureTreeRevisionRef(input.base, 'Procedure tree commit base');
+      validateProcedureTreeRecordInput(input.target);
+      if (!Number.isSafeInteger(input.expectedLatestRevision) || input.expectedLatestRevision < 1) {
+        throw new Error('Expected latest procedure tree revision must be a positive safe integer');
+      }
+      if (!isOffsetIsoDateTime(input.occurredAt)) {
+        throw new Error('Procedure tree commit occurredAt must be an ISO date-time with an offset');
+      }
+      if (input.operation !== 'edit' && input.operation !== 'merge') {
+        throw new Error('Procedure tree commit operation must be edit or merge');
+      }
+      if (input.message !== undefined && input.message.trim().length === 0) {
+        throw new Error('Procedure tree commit message must be nonempty when present');
+      }
+      if (input.operation === 'edit') {
+        if (input.source !== undefined || input.mergeBase !== undefined) {
+          throw new Error('Edit commits cannot contain merge references');
+        }
+      } else {
+        if (input.source === undefined || input.mergeBase === undefined) {
+          throw new Error('Merge commits require source and merge-base references');
+        }
+        if (input.source.branchId.trim().length === 0) {
+          throw new Error('Procedure tree merge source branch id must be nonempty');
+        }
+        if (input.source.branchId === input.branchId) {
+          throw new Error('Procedure tree merge source and target branches must differ');
+        }
+        validateProcedureTreeRevisionRef(input.source, 'Procedure tree merge source');
+        validateProcedureTreeRevisionRef(input.mergeBase, 'Procedure tree merge base');
+        if (
+          input.mergeBase.revision > input.base.revision ||
+          input.mergeBase.revision > input.source.revision
+        ) {
+          throw new Error('Procedure tree merge base cannot follow either branch head');
+        }
+      }
+      const payload = canonicalJson(input.payload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingRow = findProcedureTreeRevisionCommit.get(input.requestId);
+        if (existingRow !== undefined) {
+          const commit = parseProcedureTreeRevisionCommitRow(existingRow);
+          const targetRow = findProcedureTree.get(commit.treeId, commit.target.revision);
+          if (targetRow === undefined)
+            throw new Error('Stored procedure tree commit target is missing');
+          const record = parseProcedureTreeRow(targetRow);
+          const inputSource = input.source ?? null;
+          const inputMergeBase = input.mergeBase ?? null;
+          const duplicate =
+            commit.treeId === input.target.treeId &&
+            commit.branchId === input.branchId &&
+            commit.operation === input.operation &&
+            canonicalJson(commit.base) === canonicalJson(input.base) &&
+            canonicalJson(commit.source) === canonicalJson(inputSource) &&
+            canonicalJson(commit.mergeBase) === canonicalJson(inputMergeBase) &&
+            commit.expectedLatestRevision === input.expectedLatestRevision &&
+            commit.message === (input.message ?? null) &&
+            commit.occurredAt === input.occurredAt &&
+            canonicalJson(commit.payload) === payload &&
+            record.revision === input.target.revision &&
+            record.title === input.target.title &&
+            record.adapterId === input.target.adapterId &&
+            record.actionCatalogVersion === input.target.actionCatalogVersion &&
+            record.interactionCatalogVersion === input.target.interactionCatalogVersion &&
+            record.hostVersionRange === input.target.hostVersionRange &&
+            record.contentSha256 === input.target.contentSha256 &&
+            canonicalJson(record.tree) === canonicalJson(input.target.tree);
+          sqlite.exec('COMMIT;');
+          return duplicate ? { result: 'duplicate', commit, record } : { result: 'conflict' };
+        }
+
+        const branchRow = findProcedureTreeBranch.get(input.target.treeId, input.branchId);
+        if (branchRow === undefined) {
+          sqlite.exec('COMMIT;');
+          return { result: 'not_found' };
+        }
+        const latestRow = findLatestProcedureTree.get(input.target.treeId);
+        if (latestRow === undefined) {
+          sqlite.exec('COMMIT;');
+          return { result: 'not_found' };
+        }
+        const latest = parseProcedureTreeRow(latestRow);
+        if (
+          latest.revision !== input.expectedLatestRevision ||
+          input.target.revision !== latest.revision + 1
+        ) {
+          sqlite.exec('COMMIT;');
+          return { result: 'stale_head' };
+        }
+        const branch = parseProcedureTreeBranchRow(branchRow);
+        if (canonicalJson(procedureTreeBranchHead(branch)) !== canonicalJson(input.base)) {
+          sqlite.exec('COMMIT;');
+          return { result: 'stale_head' };
+        }
+        if (input.operation === 'merge') {
+          const source = input.source!;
+          const sourceRow = findProcedureTreeBranch.get(input.target.treeId, source.branchId);
+          if (sourceRow === undefined) {
+            sqlite.exec('COMMIT;');
+            return { result: 'not_found' };
+          }
+          const sourceHead = procedureTreeBranchHead(parseProcedureTreeBranchRow(sourceRow));
+          if (
+            sourceHead.revision !== source.revision ||
+            sourceHead.contentSha256 !== source.contentSha256
+          ) {
+            sqlite.exec('COMMIT;');
+            return { result: 'stale_head' };
+          }
+          if (!exactProcedureTreeRefExists(input.target.treeId, input.mergeBase!)) {
+            sqlite.exec('COMMIT;');
+            return { result: 'not_found' };
+          }
+        }
+
+        const treeResult = recordProcedureTreeInTransaction(input.target);
+        if (treeResult.result !== 'accepted') {
+          sqlite.exec('ROLLBACK;');
+          return { result: treeResult.result === 'stale' ? 'stale_head' : 'conflict' };
+        }
+        insertProcedureTreeRevisionCommit.run(
+          input.requestId,
+          input.target.treeId,
+          input.branchId,
+          input.base.revision,
+          input.base.contentSha256,
+          input.target.revision,
+          input.target.contentSha256,
+          input.operation,
+          input.source?.branchId ?? null,
+          input.source?.revision ?? null,
+          input.source?.contentSha256 ?? null,
+          input.mergeBase?.revision ?? null,
+          input.mergeBase?.contentSha256 ?? null,
+          input.expectedLatestRevision,
+          input.message ?? null,
+          input.occurredAt,
+          payload,
+        );
+        insertEvent.run(
+          `procedure-tree-commit:${input.requestId}`,
+          'procedure.tree.revision.committed',
+          payload,
+          input.occurredAt,
+        );
+        const storedRow = findProcedureTreeRevisionCommit.get(input.requestId);
+        if (storedRow === undefined)
+          throw new Error('Procedure tree commit could not be read back');
+        const commit = parseProcedureTreeRevisionCommitRow(storedRow);
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', commit, record: treeResult.record };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    appendProcedureTreeComment(input) {
+      if (
+        input.commentId.trim().length === 0 ||
+        input.treeId.trim().length === 0 ||
+        input.branchId.trim().length === 0
+      ) {
+        throw new Error('Procedure tree comment identity fields must be nonempty');
+      }
+      validateProcedureTreeRevisionRef(input.tree, 'Procedure tree comment target');
+      if (!isOffsetIsoDateTime(input.occurredAt)) {
+        throw new Error(
+          'Procedure tree comment occurredAt must be an ISO date-time with an offset',
+        );
+      }
+      const payload = canonicalJson(input.payload);
+      sqlite.exec('BEGIN IMMEDIATE;');
+      try {
+        const existingRow = findProcedureTreeComment.get(input.commentId);
+        if (existingRow !== undefined) {
+          const comment = parseProcedureTreeCommentRow(existingRow);
+          const duplicate =
+            comment.treeId === input.treeId &&
+            comment.branchId === input.branchId &&
+            canonicalJson(comment.tree) === canonicalJson(input.tree) &&
+            comment.occurredAt === input.occurredAt &&
+            canonicalJson(comment.payload) === payload;
+          sqlite.exec('COMMIT;');
+          return duplicate ? { result: 'duplicate', comment } : { result: 'conflict' };
+        }
+        if (!procedureTreeRefBelongsToBranchLineage(input.treeId, input.branchId, input.tree)) {
+          sqlite.exec('COMMIT;');
+          return { result: 'not_found' };
+        }
+        insertProcedureTreeComment.run(
+          input.commentId,
+          input.treeId,
+          input.branchId,
+          input.tree.revision,
+          input.tree.contentSha256,
+          payload,
+          input.occurredAt,
+        );
+        insertEvent.run(
+          `procedure-tree-comment:${input.commentId}`,
+          'procedure.tree.comment.appended',
+          payload,
+          input.occurredAt,
+        );
+        const storedRow = findProcedureTreeComment.get(input.commentId);
+        if (storedRow === undefined)
+          throw new Error('Procedure tree comment could not be read back');
+        const comment = parseProcedureTreeCommentRow(storedRow);
+        sqlite.exec('COMMIT;');
+        return { result: 'accepted', comment };
+      } catch (error) {
+        sqlite.exec('ROLLBACK;');
+        throw error;
+      }
+    },
+    getProcedureTreeComment(commentId) {
+      if (commentId.trim().length === 0) {
+        throw new Error('Procedure tree comment id must be nonempty');
+      }
+      const row = findProcedureTreeComment.get(commentId);
+      return row === undefined ? null : parseProcedureTreeCommentRow(row);
+    },
+    listProcedureTreeComments(treeId, branchId, afterSequence, limit) {
+      if (treeId.trim().length === 0 || branchId.trim().length === 0) {
+        throw new Error('Procedure tree comment branch identity fields must be nonempty');
+      }
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+        throw new Error('Procedure tree comment cursor must be a non-negative safe integer');
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000) {
+        throw new Error('Procedure tree comment limit must be an integer between 1 and 10000');
+      }
+      return listProcedureTreeCommentRows
+        .all(treeId, branchId, afterSequence, limit)
+        .map(parseProcedureTreeCommentRow);
     },
     getProcedureTree(treeId, revision) {
       if (treeId.trim().length === 0) {

@@ -223,7 +223,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.32.0');
+    expect(catalog.catalogVersion).toBe('1.33.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -281,6 +281,7 @@ describe('interaction catalog protocol', () => {
       '1.30.0',
       '1.31.0',
       '1.32.0',
+      '1.33.0',
     ]);
     const frozen117 = blenderInteractionCatalogs.find(
       (versionedCatalog) => versionedCatalog.catalogVersion === '1.17.0',
@@ -2192,6 +2193,82 @@ describe('interaction catalog protocol', () => {
         readFileSync(resolve('protocol/schemas/v1/interaction-catalog.schema.json'), 'utf8'),
       ) as object,
       cases,
+    );
+  });
+
+  it('rejects unsafe or tampered semantic projection declarations', () => {
+    for (const name of ['__proto__', 'constructor', 'prototype']) {
+      const unsafe = structuredClone(blenderInteractionCatalog) as unknown as Record<
+        string,
+        unknown
+      >;
+      const recipes = unsafe['recipes'] as Array<Record<string, unknown>>;
+      const materialization = recipes[0]!['procedureMaterialization'] as Record<string, unknown>;
+      const semantic = materialization['semantic'] as Record<string, unknown>;
+      const projections = semantic['projections'] as Array<Record<string, unknown>>;
+      projections[0]!['path'] = [{ kind: 'field', name }];
+      expect(interactionCatalogSchema.safeParse(unsafe).success).toBe(false);
+    }
+
+    const duplicateTarget = structuredClone(blenderInteractionCatalog);
+    const duplicateSemantic = duplicateTarget.recipes[0]!.procedureMaterialization?.semantic;
+    if (duplicateSemantic === undefined) throw new Error('Expected semantic projection fixture');
+    const duplicate = structuredClone(duplicateSemantic.projections[0]!);
+    duplicate.id = 'projection.semantic.duplicate_target';
+    duplicateSemantic.projections.push(duplicate);
+    expect(() => validateInteractionCatalog(duplicateTarget, blenderActionCatalog)).toThrow(
+      'repeats semantic parameter target',
+    );
+
+    const overlappingTarget = structuredClone(blenderInteractionCatalog);
+    const overlapSemantic = overlappingTarget.recipes[0]!.procedureMaterialization?.semantic;
+    if (overlapSemantic === undefined) throw new Error('Expected semantic projection fixture');
+    const child = structuredClone(overlapSemantic.projections[0]!);
+    child.id = 'projection.semantic.overlapping_target';
+    child.path = [...child.path, { kind: 'index', index: 0 }];
+    overlapSemantic.projections.push(child);
+    expect(() => validateInteractionCatalog(overlappingTarget, blenderActionCatalog)).toThrow(
+      'overlaps semantic parameter target',
+    );
+
+    const invalidTransform = structuredClone(blenderInteractionCatalog);
+    const invalidSemantic = invalidTransform.recipes[0]!.procedureMaterialization?.semantic;
+    if (invalidSemantic === undefined) throw new Error('Expected semantic projection fixture');
+    const scale = invalidSemantic.projections.find(
+      (projection) => projection.actionArgument === 'radius',
+    );
+    if (scale === undefined) throw new Error('Expected radius semantic projection');
+    scale.transform = 'vector3_x';
+    expect(() => validateInteractionCatalog(invalidTransform, blenderActionCatalog)).toThrow(
+      'vector3_x requires fixed three-item numeric array action argument radius',
+    );
+
+    const invalidIdentityCatalog = structuredClone(blenderActionCatalog);
+    const sphereAction = invalidIdentityCatalog.actions.find(
+      (action) => action.name === 'blender.mesh.create_uv_sphere',
+    );
+    if (sphereAction === undefined) throw new Error('Expected UV Sphere action fixture');
+    sphereAction.argumentsSchema.properties['objectName'] = {
+      type: 'array',
+      items: { type: 'string' },
+      minItems: 1,
+      maxItems: 1,
+    };
+    expect(() =>
+      validateInteractionCatalog(blenderInteractionCatalog, invalidIdentityCatalog),
+    ).toThrow(
+      'semantic identity projection requires a scalar or one-to-four-item numeric array action argument objectName',
+    );
+
+    const mappedAndOmitted = structuredClone(blenderInteractionCatalog);
+    const overlappingSemantic = mappedAndOmitted.recipes[0]!.procedureMaterialization?.semantic;
+    if (overlappingSemantic === undefined) throw new Error('Expected semantic projection fixture');
+    overlappingSemantic.omittedActionArguments.push({
+      argumentName: 'radius',
+      reason: 'Tampered overlap.',
+    });
+    expect(() => validateInteractionCatalog(mappedAndOmitted, blenderActionCatalog)).toThrow(
+      'action argument radius cannot be both mapped and omitted',
     );
   });
 });

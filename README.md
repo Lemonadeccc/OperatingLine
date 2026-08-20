@@ -99,10 +99,18 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   最后一次 Provider 调用。完整 Provider tree 经本地 scope sanitization、locality、compile 和九摘要 review
   gate 后才能原子 store；discard 同样原子记录。重启不重放 requested-only 外部调用，任何入口都不会创建
   Proposal 或执行 Blender。见 [ADR 0087](docs/adr/0087-evidence-bound-procedure-refinement.md)。
+- **本地 ProcedureTree revision 编辑工作台**：打开 `/procedure-editor#token=<access-token>` 后，页面把
+  fragment token 转存到当前标签页 `sessionStorage` 并立即清除 URL，再以 Bearer API 读取已有树。工作台
+  可视化 group/leaf 与 semantic/menu/shortcut/MCP 轨迹，支持节点增删/移动/重排、树/节点文本、目录证明的
+  Action 参数表单、锚点评论、提交历史、revision 分支和逐冲突三方合并。InteractionCatalog 声明的
+  `parameterProjection 1.0.0` 会由服务端把 Action 修改同步到语义、菜单和快捷键参数；旧树、omitted 参数和
+  不支持的 Schema 约束只读。diff/preview、树哈希、唯一最低共同祖先和全局 immutable revision CAS 均由服务端权威计算；冲突 fail closed，评论作为 branch-lineage append-only 记录保存在树哈希
+  之外，重启后仍可读取。任何编辑都不调用 Provider、创建 Proposal 或执行 Blender。见
+  [ADR 0088](docs/adr/0088-local-procedure-tree-revision-editor.md)。
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
-  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.32.0`
+  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.33.0`
   已用该形状声明 Icosphere、Edit Mode Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface Modifier 的 candidate shortcut；
   六条轨迹均有 Blender 4.5.3/5.1.1 前台事件证据，但仍保持 `structural_only`，不冒充 managed action
   等价执行。见 [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md) 与
@@ -158,7 +166,8 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   Runtime 先流式返回助手文本，只有语义置信度达到固定 `0.8` 才进行第二次也是最后一次 Provider 调用；
   完整 Provider tree 经本地 scope sanitization、locality 和 compile gate 后才进入精确 review。Store/discard
   审阅与终态在同一事务中提交，重启恢复不重放不确定的 Provider 调用，也不会创建 Proposal 或执行宿主。
-  可视化编辑器、从一句话零基线生成完整树和训练导出仍未完成。见
+  从一句话零基线生成完整树和训练导出仍未完成；已有树的本地可视化 revision 编辑见
+  [ADR 0088](docs/adr/0088-local-procedure-tree-revision-editor.md)。其余 authoring 边界见
   [ADR 0045](docs/adr/0045-provider-neutral-procedure-authoring.md)、
   [ADR 0070](docs/adr/0070-explicit-procedure-authoring-provider.md) 与
   [ADR 0075](docs/adr/0075-evidence-bound-tutorial-transcript-authoring.md)、
@@ -204,11 +213,12 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.32.0` 为
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.33.0` 为
   UV Sphere 生成七步菜单，
   以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
   `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
-  `resourceId` 不进入 UI operation。Icosphere 同版本生成四步原生菜单加 Location、Object Name 两步参数
+  `resourceId` 不进入 UI operation；同一目录还声明 semantic/menu/shortcut 的 stable 参数投影，供本地编辑器
+  从 Action arguments 权威同步训练轨迹。Icosphere 同版本生成四步原生菜单加 Location、Object Name 两步参数
   控件，精确保留 `subdivisions`、`radius`、`location` 和 `objectName`；其九步 candidate shortcut 依次绑定
   `Shift+A → Mesh → Ico Sphere`、`F9`、Subdivisions、Radius、`ENTER`、`G X/Y/Z` 与 `F2`。
   `resourceId` 不进入 UI operation，MCP 仍因没有真实 action-level tool 而 unavailable。Cube 与 Plane
@@ -348,10 +358,10 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.32.0` 精确绑定
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.33.0` 精确绑定
   ActionCatalog `1.22.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.31.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.32.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与
@@ -1286,7 +1296,8 @@ Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion �
 MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、显式蒙皮/权重与 pose transform 动画、
 Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单、显式 revision fork/merge，以及
 Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内自动语义重规划，以及最多三次的
-同 Action Observation 有界自动重试。
+同 Action Observation 有界自动重试。已有 ProcedureTree 还可在本地浏览器工作台中可视化编辑、评论，
+并通过服务端 preview、immutable revision 分支与 fail-closed 三方合并保存。
 当前仍未完成：
 
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实

@@ -1343,11 +1343,11 @@ describe('procedure compilation runtime', () => {
       ).not.toContain('resourceId');
       expect(materializedLeaf.action.arguments['resourceId']).toBe('snowman.eye.left');
       expect(materializedLeaf.semanticOperations[1]!.parameters).toEqual({
-        location: [9, 9, 9],
-        scale: [8, 8, 8],
+        location: [0.32, -0.86, 2.14],
+        scale: [0.12, 0.12, 0.12],
       });
       expect(materializedLeaf.semanticOperations[2]!.parameters).toEqual({
-        name: 'Forged.Semantic.Name',
+        name: 'OperatingLine.EyeLeft',
       });
       const shortcutTrack = materializedLeaf.shortcutTracks[0];
       if (shortcutTrack?.availability !== 'available') {

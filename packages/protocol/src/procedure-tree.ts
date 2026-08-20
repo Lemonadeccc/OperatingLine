@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
 import { rollbackModeSchema } from './adapter.js';
-import { protocolJsonValueCanonicalization } from './canonical-json-value.js';
+import {
+  canonicalizeProtocolJsonValue,
+  protocolJsonValueCanonicalization,
+} from './canonical-json-value.js';
 import {
   guidePlanSchema,
   guideProtocolVersion,
@@ -11,6 +14,13 @@ import {
   semanticAnchorSchema,
   type GuidePlan,
 } from './guide.js';
+import {
+  procedureParameterProjectionSchema,
+  projectProcedureParameter,
+  readProcedureParameterPath,
+  type ProcedureParameterBinding,
+  type ProcedureParameterProjectionTarget,
+} from './procedure-parameter-projection.js';
 import { catalogVersionSchema, stableVersionRangeSchema } from './version.js';
 
 export const procedureTreeFormatVersion = '1.0.0' as const;
@@ -275,6 +285,7 @@ export const procedureLeafNodeSchema = z.strictObject({
     checkpointRequired: z.boolean(),
   }),
   validation: procedureValidationSchema,
+  parameterProjection: procedureParameterProjectionSchema.optional(),
 });
 export type ProcedureLeafNode = z.infer<typeof procedureLeafNodeSchema>;
 
@@ -765,7 +776,196 @@ function validateAvailableTrack(
   }
 }
 
-function validateLeaf(leaf: ProcedureLeafNode, evidenceIds: ReadonlySet<string>): void {
+function sameCanonicalJson(left: unknown, right: unknown): boolean {
+  const leftBytes = canonicalizeProtocolJsonValue(left);
+  const rightBytes = canonicalizeProtocolJsonValue(right);
+  return (
+    leftBytes.byteLength === rightBytes.byteLength &&
+    leftBytes.every((value, index) => value === rightBytes[index])
+  );
+}
+
+function projectionTargetScope(target: ProcedureParameterProjectionTarget): string {
+  return target.modality === 'semantic'
+    ? `semantic\u0000${target.operationId}`
+    : `${target.modality}\u0000${target.trackId}\u0000${target.operationId}`;
+}
+
+function pathIsPrefix(
+  left: ProcedureParameterBinding['target']['path'],
+  right: ProcedureParameterBinding['target']['path'],
+): boolean {
+  return (
+    left.length <= right.length &&
+    left.every((segment, index) => sameCanonicalJson(segment, right[index]))
+  );
+}
+
+function projectionParameters(
+  leaf: ProcedureLeafNode,
+  target: ProcedureParameterProjectionTarget,
+): Readonly<Record<string, unknown>> {
+  if (target.modality === 'semantic') {
+    const operation = leaf.semanticOperations.find(
+      (candidate) => candidate.id === target.operationId,
+    );
+    if (operation === undefined) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter projection references unknown semantic operation ${target.operationId}`,
+      );
+    }
+    return operation.parameters;
+  }
+  if (target.modality === 'menu') {
+    const track = leaf.menuTracks.find((candidate) => candidate.id === target.trackId);
+    const operation =
+      track?.availability === 'available'
+        ? track.operations.find((candidate) => candidate.id === target.operationId)
+        : undefined;
+    if (operation === undefined) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter projection references unknown available menu operation ${target.operationId}`,
+      );
+    }
+    return operation.parameters;
+  }
+  if (target.modality === 'shortcut') {
+    const track = leaf.shortcutTracks.find((candidate) => candidate.id === target.trackId);
+    const operation =
+      track?.availability === 'available'
+        ? track.operations.find((candidate) => candidate.id === target.operationId)
+        : undefined;
+    if (operation === undefined) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter projection references unknown available shortcut operation ${target.operationId}`,
+      );
+    }
+    return operation.parameters;
+  }
+  const track = leaf.mcpTracks.find((candidate) => candidate.id === target.trackId);
+  const operation =
+    track?.availability === 'available'
+      ? track.operations.find((candidate) => candidate.id === target.operationId)
+      : undefined;
+  if (operation === undefined) {
+    throw new Error(
+      `Procedure leaf ${leaf.id} parameter projection references unknown available MCP operation ${target.operationId}`,
+    );
+  }
+  return operation.arguments;
+}
+
+function validateParameterProjection(
+  leaf: ProcedureLeafNode,
+  interactionCatalogVersion: string,
+): void {
+  const projection = leaf.parameterProjection;
+  if (projection === undefined) return;
+  if (leaf.action === null) {
+    throw new Error(`Actionless procedure leaf ${leaf.id} cannot declare parameter projection`);
+  }
+  if (projection.provenance.interactionCatalogVersion !== interactionCatalogVersion) {
+    throw new Error(
+      `Procedure leaf ${leaf.id} parameter projection catalog version does not match its tree`,
+    );
+  }
+
+  const actionArgumentNames = Object.keys(leaf.action.arguments).sort();
+  const coverageByArgument = new Map<string, (typeof projection.arguments)[number]>();
+  for (const coverage of projection.arguments) {
+    if (coverageByArgument.has(coverage.actionArgument)) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} repeats parameter coverage for ${coverage.actionArgument}`,
+      );
+    }
+    coverageByArgument.set(coverage.actionArgument, coverage);
+  }
+  if (
+    actionArgumentNames.length !== coverageByArgument.size ||
+    actionArgumentNames.some((name) => !coverageByArgument.has(name))
+  ) {
+    throw new Error(
+      `Procedure leaf ${leaf.id} parameter projection must cover every action argument exactly once`,
+    );
+  }
+
+  const bindingsById = new Map<string, ProcedureParameterBinding>();
+  const bindingsByArgument = new Map<string, string[]>();
+  const bindingsByScope = new Map<string, ProcedureParameterBinding[]>();
+  for (const binding of projection.bindings) {
+    if (bindingsById.has(binding.id)) {
+      throw new Error(`Procedure leaf ${leaf.id} repeats parameter binding ${binding.id}`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(leaf.action.arguments, binding.actionArgument)) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter binding ${binding.id} references unknown action argument ${binding.actionArgument}`,
+      );
+    }
+    bindingsById.set(binding.id, binding);
+    bindingsByArgument.set(binding.actionArgument, [
+      ...(bindingsByArgument.get(binding.actionArgument) ?? []),
+      binding.id,
+    ]);
+    const scope = projectionTargetScope(binding.target);
+    const scoped = bindingsByScope.get(scope) ?? [];
+    const overlap = scoped.find(
+      (candidate) =>
+        pathIsPrefix(candidate.target.path, binding.target.path) ||
+        pathIsPrefix(binding.target.path, candidate.target.path),
+    );
+    if (overlap !== undefined) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter bindings ${overlap.id} and ${binding.id} overlap one target path`,
+      );
+    }
+    scoped.push(binding);
+    bindingsByScope.set(scope, scoped);
+
+    const parameters = projectionParameters(leaf, binding.target);
+    const actual = readProcedureParameterPath(parameters, binding.target.path);
+    const expected = projectProcedureParameter(
+      leaf.action.arguments[binding.actionArgument],
+      binding.transform,
+    );
+    if (!sameCanonicalJson(actual, expected)) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter binding ${binding.id} does not match its action argument projection`,
+      );
+    }
+  }
+
+  const referencedBindingIds = new Set<string>();
+  for (const coverage of projection.arguments) {
+    const actualIds = [...(bindingsByArgument.get(coverage.actionArgument) ?? [])].sort();
+    const declaredIds = [...coverage.bindingIds].sort();
+    if (
+      coverage.disposition === 'omitted'
+        ? actualIds.length !== 0
+        : !sameCanonicalJson(actualIds, declaredIds)
+    ) {
+      throw new Error(
+        `Procedure leaf ${leaf.id} parameter coverage for ${coverage.actionArgument} does not match its bindings`,
+      );
+    }
+    for (const bindingId of coverage.bindingIds) {
+      if (!bindingsById.has(bindingId) || referencedBindingIds.has(bindingId)) {
+        throw new Error(
+          `Procedure leaf ${leaf.id} parameter coverage references invalid binding ${bindingId}`,
+        );
+      }
+      referencedBindingIds.add(bindingId);
+    }
+  }
+  if (referencedBindingIds.size !== projection.bindings.length) {
+    throw new Error(`Procedure leaf ${leaf.id} contains an unclaimed parameter binding`);
+  }
+}
+
+function validateLeaf(
+  leaf: ProcedureLeafNode,
+  evidenceIds: ReadonlySet<string>,
+  interactionCatalogVersion: string,
+): void {
   if (leaf.action === null && leaf.observationPolicy !== undefined) {
     throw new Error(`Actionless procedure leaf ${leaf.id} cannot declare an observation policy`);
   }
@@ -796,6 +996,7 @@ function validateLeaf(leaf: ProcedureLeafNode, evidenceIds: ReadonlySet<string>)
   if (leaf.validation.status === 'verified' && leaf.validation.validatedHostVersions.length === 0) {
     throw new Error(`Verified procedure leaf ${leaf.id} requires a validated host version`);
   }
+  validateParameterProjection(leaf, interactionCatalogVersion);
 }
 
 function validateShortcutSurfaceProtocol(tree: ProcedureTree): void {
@@ -1093,7 +1294,9 @@ export function validateProcedureTree(tree: ProcedureTree): void {
   }
 
   for (const node of tree.nodes) {
-    if (node.kind === 'leaf') validateLeaf(node, evidenceIds);
+    if (node.kind === 'leaf') {
+      validateLeaf(node, evidenceIds, tree.interactionCatalogVersion);
+    }
   }
 }
 

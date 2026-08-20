@@ -3202,7 +3202,7 @@ describe('OperatingLine persistence', () => {
 
       const inspected = new DatabaseSync(databasePath);
       expect(inspected.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()).toEqual({
-        count: 18,
+        count: 19,
       });
       expect(
         inspected.prepare("PRAGMA table_list('procedure_leaf_replay_attestation_reports')").get(),

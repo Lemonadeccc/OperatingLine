@@ -24,6 +24,156 @@ function readFixture(): ProcedureTree {
   );
 }
 
+function installProjection(tree: ProcedureTree): void {
+  const leaf = tree.nodes.find((node) => node.kind === 'leaf');
+  if (leaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+  const semantic = (
+    id: string,
+    actionArgument: string,
+    transform: 'identity' | 'uniform_vector3',
+    operationId: string,
+    name: string,
+  ) => ({
+    id,
+    actionArgument,
+    transform,
+    target: {
+      modality: 'semantic' as const,
+      operationId,
+      path: [{ kind: 'field' as const, name }],
+    },
+  });
+  const tracked = (
+    id: string,
+    actionArgument: string,
+    transform: 'identity' | 'uniform_vector3' | 'vector3_x' | 'vector3_y' | 'vector3_z',
+    modality: 'menu' | 'shortcut',
+    trackId: string,
+    operationId: string,
+    name: string,
+  ) => ({
+    id,
+    actionArgument,
+    transform,
+    target: { modality, trackId, operationId, path: [{ kind: 'field' as const, name }] },
+  });
+  const bindings = [
+    semantic('binding.semantic.location', 'location', 'identity', 'semantic.transform', 'location'),
+    semantic('binding.semantic.scale', 'radius', 'uniform_vector3', 'semantic.transform', 'scale'),
+    semantic('binding.semantic.name', 'objectName', 'identity', 'semantic.rename', 'name'),
+    tracked(
+      'binding.menu.location',
+      'location',
+      'identity',
+      'menu',
+      'menu.layout.default',
+      'menu.location',
+      'value',
+    ),
+    tracked(
+      'binding.menu.scale',
+      'radius',
+      'uniform_vector3',
+      'menu',
+      'menu.layout.default',
+      'menu.scale',
+      'value',
+    ),
+    tracked(
+      'binding.menu.name',
+      'objectName',
+      'identity',
+      'menu',
+      'menu.layout.default',
+      'menu.rename',
+      'value',
+    ),
+    tracked(
+      'binding.shortcut.x',
+      'location',
+      'vector3_x',
+      'shortcut',
+      'shortcut.blender.default',
+      'shortcut.move_x',
+      'value',
+    ),
+    tracked(
+      'binding.shortcut.y',
+      'location',
+      'vector3_y',
+      'shortcut',
+      'shortcut.blender.default',
+      'shortcut.move_y',
+      'value',
+    ),
+    tracked(
+      'binding.shortcut.z',
+      'location',
+      'vector3_z',
+      'shortcut',
+      'shortcut.blender.default',
+      'shortcut.move_z',
+      'value',
+    ),
+    tracked(
+      'binding.shortcut.scale',
+      'radius',
+      'identity',
+      'shortcut',
+      'shortcut.blender.default',
+      'shortcut.scale',
+      'value',
+    ),
+    tracked(
+      'binding.shortcut.name',
+      'objectName',
+      'identity',
+      'shortcut',
+      'shortcut.blender.default',
+      'shortcut.rename',
+      'text',
+    ),
+  ];
+  leaf.parameterProjection = {
+    formatVersion: '1.0.0',
+    provenance: {
+      kind: 'interaction_catalog_materialization',
+      interactionCatalogVersion: tree.interactionCatalogVersion,
+      recipeId: 'blender.mesh.create_uv_sphere.native',
+    },
+    arguments: [
+      {
+        actionArgument: 'location',
+        disposition: 'projected',
+        bindingIds: bindings
+          .filter((binding) => binding.actionArgument === 'location')
+          .map((binding) => binding.id),
+      },
+      {
+        actionArgument: 'objectName',
+        disposition: 'projected',
+        bindingIds: bindings
+          .filter((binding) => binding.actionArgument === 'objectName')
+          .map((binding) => binding.id),
+      },
+      {
+        actionArgument: 'radius',
+        disposition: 'projected',
+        bindingIds: bindings
+          .filter((binding) => binding.actionArgument === 'radius')
+          .map((binding) => binding.id),
+      },
+      {
+        actionArgument: 'resourceId',
+        disposition: 'omitted',
+        bindingIds: [],
+        reason: 'Logical resource identity has no projected UI parameter.',
+      },
+    ],
+    bindings,
+  };
+}
+
 describe('procedure tree protocol', () => {
   it('keeps concrete values at the exact semantic, menu, and shortcut operation', () => {
     const tree = readFixture();
@@ -64,6 +214,114 @@ describe('procedure tree protocol', () => {
       availability: 'unavailable',
       modality: 'mcp',
     });
+  });
+
+  it('validates projection coverage, non-overlapping targets, values, and catalog version', () => {
+    const valid = readFixture();
+    installProjection(valid);
+    expect(() => validateProcedureTree(valid)).not.toThrow();
+
+    const actionless = structuredClone(valid);
+    const actionlessLeaf = actionless.nodes.find((node) => node.kind === 'leaf');
+    if (actionlessLeaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    actionlessLeaf.action = null;
+    delete actionlessLeaf.observationPolicy;
+    expect(() => validateProcedureTree(actionless)).toThrow(
+      'Actionless procedure leaf snowman.head.eyes.left cannot declare parameter projection',
+    );
+
+    const wrongVersion = structuredClone(valid);
+    const wrongVersionLeaf = wrongVersion.nodes.find((node) => node.kind === 'leaf');
+    if (wrongVersionLeaf?.kind !== 'leaf' || wrongVersionLeaf.parameterProjection === undefined) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    wrongVersionLeaf.parameterProjection.provenance.interactionCatalogVersion = '999.0.0';
+    expect(() => validateProcedureTree(wrongVersion)).toThrow('catalog version does not match');
+
+    const missingCoverage = structuredClone(valid);
+    const missingCoverageLeaf = missingCoverage.nodes.find((node) => node.kind === 'leaf');
+    if (
+      missingCoverageLeaf?.kind !== 'leaf' ||
+      missingCoverageLeaf.parameterProjection === undefined
+    ) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    missingCoverageLeaf.parameterProjection.arguments.pop();
+    expect(() => validateProcedureTree(missingCoverage)).toThrow(
+      'must cover every action argument exactly once',
+    );
+
+    const duplicateCoverage = structuredClone(valid);
+    const duplicateCoverageLeaf = duplicateCoverage.nodes.find((node) => node.kind === 'leaf');
+    if (
+      duplicateCoverageLeaf?.kind !== 'leaf' ||
+      duplicateCoverageLeaf.parameterProjection === undefined
+    ) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    duplicateCoverageLeaf.parameterProjection.arguments.push(
+      structuredClone(duplicateCoverageLeaf.parameterProjection.arguments[0]!),
+    );
+    expect(() => validateProcedureTree(duplicateCoverage)).toThrow(
+      'repeats parameter coverage for location',
+    );
+
+    const mismatchedCoverage = structuredClone(valid);
+    const mismatchedCoverageLeaf = mismatchedCoverage.nodes.find((node) => node.kind === 'leaf');
+    if (
+      mismatchedCoverageLeaf?.kind !== 'leaf' ||
+      mismatchedCoverageLeaf.parameterProjection === undefined
+    ) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    const locationCoverage = mismatchedCoverageLeaf.parameterProjection.arguments.find(
+      (coverage) => coverage.actionArgument === 'location',
+    );
+    if (locationCoverage?.disposition !== 'projected') throw new Error('Expected coverage');
+    locationCoverage.bindingIds = locationCoverage.bindingIds.slice(1);
+    expect(() => validateProcedureTree(mismatchedCoverage)).toThrow(
+      'parameter coverage for location does not match its bindings',
+    );
+
+    const overlap = structuredClone(valid);
+    const overlapLeaf = overlap.nodes.find((node) => node.kind === 'leaf');
+    if (overlapLeaf?.kind !== 'leaf' || overlapLeaf.parameterProjection === undefined) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    const nested = structuredClone(overlapLeaf.parameterProjection.bindings[1]!);
+    nested.id = 'binding.semantic.scale.component';
+    nested.transform = 'identity';
+    nested.target.path.push({ kind: 'index', index: 0 });
+    overlapLeaf.parameterProjection.bindings.push(nested);
+    const radiusCoverage = overlapLeaf.parameterProjection.arguments.find(
+      (coverage) => coverage.actionArgument === 'radius',
+    );
+    if (radiusCoverage?.disposition !== 'projected') throw new Error('Expected coverage');
+    radiusCoverage.bindingIds.push(nested.id);
+    expect(() => validateProcedureTree(overlap)).toThrow('overlap one target path');
+
+    const wrongValue = structuredClone(valid);
+    const wrongValueLeaf = wrongValue.nodes.find((node) => node.kind === 'leaf');
+    if (wrongValueLeaf?.kind !== 'leaf') throw new Error('Expected procedure leaf');
+    wrongValueLeaf.semanticOperations.find(
+      (operation) => operation.id === 'semantic.transform',
+    )!.parameters['scale'] = [9, 9, 9];
+    expect(() => validateProcedureTree(wrongValue)).toThrow(
+      'does not match its action argument projection',
+    );
+
+    const unknownArgument = structuredClone(valid);
+    const unknownArgumentLeaf = unknownArgument.nodes.find((node) => node.kind === 'leaf');
+    if (
+      unknownArgumentLeaf?.kind !== 'leaf' ||
+      unknownArgumentLeaf.parameterProjection === undefined
+    ) {
+      throw new Error('Expected projected procedure leaf');
+    }
+    unknownArgumentLeaf.parameterProjection.bindings[0]!.actionArgument = 'missing';
+    expect(() => validateProcedureTree(unknownArgument)).toThrow(
+      'references unknown action argument missing',
+    );
   });
 
   it('accepts optional shortcut key mode while keeping legacy trees compatible', () => {
