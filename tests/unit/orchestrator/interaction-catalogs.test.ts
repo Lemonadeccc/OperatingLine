@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.36.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.37.0');
     const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
       (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
     );
@@ -319,6 +319,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
+      'blender.mesh.create_cone',
       'blender.mesh.create_torus',
     ]);
     const uvSphereMcp = availableMcpRecipes[0]?.procedureMaterialization?.mcp;
@@ -1032,8 +1033,10 @@ describe('interaction catalog registry', () => {
         reason: 'No verified shortcut procedure is available.',
       },
       mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        toolName: 'operatingline.blender.action.execute',
+        authorization: 'accepted_replay_next_step',
       },
     });
     expect(
@@ -1564,6 +1567,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_icosphere',
       'blender.mesh.create_plane',
       'blender.mesh.create_cube',
+      'blender.mesh.create_cone',
       'blender.mesh.create_torus',
     ]);
   });
@@ -1576,7 +1580,9 @@ describe('interaction catalog registry', () => {
       '0b2a1216412bef2db3ce23baa56758f6ffa4e8023b1ec0dafbd65a935f0391f6',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.36.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     expect(frozen.catalogVersion).toBe('1.35.0');
     expect(
       frozen.recipes
@@ -1603,6 +1609,45 @@ describe('interaction catalog registry', () => {
     );
     active.catalogVersion = frozen.catalogVersion;
     activeTorus.procedureMaterialization.mcp = frozenTorusMcp!;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.36.0 and changes only Cone MCP materialization in 1.37.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.36.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '24050fafa64d05b7339a2af3e4a0b5d6d90f6b76f3be8cf55dbc342653b4b763',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    expect(frozen.catalogVersion).toBe('1.36.0');
+    expect(
+      frozen.recipes
+        .filter((recipe) => recipe.procedureMaterialization?.mcp.availability === 'available')
+        .map((recipe) => recipe.actionName),
+    ).toEqual([
+      'blender.mesh.create_uv_sphere',
+      'blender.mesh.create_icosphere',
+      'blender.mesh.create_plane',
+      'blender.mesh.create_cube',
+      'blender.mesh.create_torus',
+    ]);
+    const frozenConeMcp = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_cone',
+    )?.procedureMaterialization?.mcp;
+    const activeCone = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_cone',
+    );
+    if (activeCone?.procedureMaterialization === undefined) {
+      throw new Error('Expected active Cone procedure materialization');
+    }
+    expect(activeCone.procedureMaterialization.mcp).toEqual(
+      active.recipes.find((recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere')
+        ?.procedureMaterialization?.mcp,
+    );
+    active.catalogVersion = frozen.catalogVersion;
+    activeCone.procedureMaterialization.mcp = frozenConeMcp!;
     expect(active).toEqual(frozen);
   });
 

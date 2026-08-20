@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.36.0")
+        self.assertEqual(catalog.catalog_version, "1.37.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -1378,13 +1378,7 @@ class InteractionCatalogTests(unittest.TestCase):
             ),
             ("unavailable", "No verified shortcut procedure is available."),
         )
-        self.assertEqual(
-            (
-                cone.procedure_materialization.mcp.availability,
-                cone.procedure_materialization.mcp.reason,
-            ),
-            ("unavailable", "No approved action-level MCP tool is available."),
-        )
+        self.assertEqual(cone.procedure_materialization.mcp, mcp)
         cylinder = next(
             recipe
             for recipe in catalog.recipes
@@ -2026,6 +2020,39 @@ class InteractionCatalogTests(unittest.TestCase):
                 "blender.mesh.create_icosphere",
                 "blender.mesh.create_plane",
                 "blender.mesh.create_cube",
+            ),
+        )
+
+    def test_loads_byte_frozen_torus_action_level_mcp_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.36.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "24050fafa64d05b7339a2af3e4a0b5d6d90f6b76f3be8cf55dbc342653b4b763",
+        )
+        self.assertEqual(frozen.catalog_version, "1.36.0")
+        self.assertEqual(
+            tuple(
+                recipe.action_name
+                for recipe in frozen.recipes
+                if recipe.procedure_materialization is not None
+                and recipe.procedure_materialization.mcp.availability == "available"
+            ),
+            (
+                "blender.mesh.create_uv_sphere",
+                "blender.mesh.create_icosphere",
+                "blender.mesh.create_plane",
+                "blender.mesh.create_cube",
+                "blender.mesh.create_torus",
             ),
         )
 
