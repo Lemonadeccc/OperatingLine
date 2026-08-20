@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.38.0",
+  "catalogVersion": "1.37.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -1863,14 +1863,8 @@
           "reason": "No verified shortcut procedure is available."
         },
         "mcp": {
-          "availability": "available",
-          "source": "catalog.action_level_mcp",
-          "semanticBinding": "all_leaf_operations",
-          "parameterBinding": "accepted_action_arguments",
-          "serverName": "operating-line",
-          "toolName": "operatingline.blender.action.execute",
-          "authorization": "accepted_replay_next_step",
-          "resultBinding": "companion_state_report"
+          "availability": "unavailable",
+          "reason": "No approved action-level MCP tool is available."
         }
       }
     },

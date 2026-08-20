@@ -4689,6 +4689,13 @@ describe('procedure compilation runtime', () => {
       fixture: (packet: ProcedureAuthoringPromptPacket) =>
         primitiveReplayAuthoringCandidateFixture(packet, 'cone'),
     },
+    {
+      catalogVersion: '1.37.0',
+      primitive: 'Cylinder',
+      goal: '创建一个端点、半径和方向精确的 Cylinder。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'cylinder'),
+    },
   ])(
     'rejects a frozen InteractionCatalog $catalogVersion $primitive binding at action execution',
     async ({ catalogVersion, goal, fixture }) => {
@@ -4896,6 +4903,15 @@ describe('procedure compilation runtime', () => {
       goal: '创建一个端点、半径和方向精确的 Cone。',
       fixture: (packet: ProcedureAuthoringPromptPacket) =>
         primitiveReplayAuthoringCandidateFixture(packet, 'cone'),
+      topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
+      geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
+    },
+    {
+      primitive: 'cylinder',
+      actionName: 'blender.mesh.create_cylinder',
+      goal: '创建一个端点、半径和方向精确的 Cylinder。',
+      fixture: (packet: ProcedureAuthoringPromptPacket) =>
+        primitiveReplayAuthoringCandidateFixture(packet, 'cylinder'),
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
     },
@@ -6919,7 +6935,7 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'] as const,
       shortcutCoverage: 'unavailable' as const,
-      mcpCoverage: 'unavailable' as const,
+      mcpCoverage: 'materialized' as const,
     },
   ])(
     'attests an approved managed $primitive replay with exact geometry and topology',

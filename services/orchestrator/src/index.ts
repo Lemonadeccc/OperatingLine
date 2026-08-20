@@ -2684,7 +2684,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, or Cone leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, or Cylinder leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },

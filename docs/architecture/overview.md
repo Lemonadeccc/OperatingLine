@@ -455,8 +455,8 @@ stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.37.0` 精确绑定 ActionCatalog `1.22.0`，冻结授权 UV Sphere、Icosphere、Cube、Plane 与 Torus
-action-level MCP 的 `1.36.0`；`1.36.0` 另冻结 `1.35.0`。当前目录为 UV Sphere 声明七步 ordered menu 与六步
+`1.38.0` 精确绑定 ActionCatalog `1.22.0`，冻结授权 UV Sphere、Icosphere、Cube、Plane、Torus 与 Cone
+action-level MCP 的 `1.37.0`；`1.37.0` 另冻结 `1.36.0`。当前目录为 UV Sphere 声明七步 ordered menu 与六步
 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 `1.33.0` 另以 `procedureMaterialization.semantic` 明确声明 location、radius 与 objectName 到语义操作的
@@ -527,19 +527,21 @@ Cylinder 同样声明六步 ordered menu：四步 guidance operator 严格按序
 `segment_frame` 公式及三输出各恰好一次的约束；canonical zero-roll XYZ Euler 将本地
 `+Z` 对齐 `end-start`，本地 `-Z` 端对应 `start`，本地 `+Z` 端对应
 `end`，两端使用同一 `radius`，且不声称与 managed executor quaternion/roll 精确等价。
-`resourceId` 省略，shortcut/MCP unavailable。
-`1.37.0` 为 UV Sphere、Icosphere、Cube、Plane、Torus 与 Cone 的 accepted leaf 物化唯一
+`resourceId` 省略，shortcut unavailable；`1.38.0` 另为 Cylinder 显式授权 action-level MCP，更早目录中的
+unavailable binding 不获得新权限。
+`1.38.0` 为 UV Sphere、Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 的 accepted leaf 物化唯一
 `operatingline.blender.action.execute` operation。公开请求只携带 request/replay identity 与当前 report CAS；
 Runtime 从精确版本 replay binding 推导 Action 和完整参数，不接受调用方提供的 action、arguments、operator 或
 Python。action execution status 继续受 decision → Start → lease → CAS → trusted report → 与 replay finalize
 共用的强 Observation → Blender 原生 Undo checkpoint 链约束；成功 `next` checkpoint 必须直接引用 CAS
 所绑定的 Start checkpoint，dispatch 后的不确定
-重启进入 `recovery_required`。`1.36.0` 历史 binding 仍不允许 Cone；Cylinder 在 `1.37.0` 中仍为 unavailable。
-该 managed Action 入口不把 menu/shortcut grounding 升级为逐控件或逐按键执行证据。见
+重启进入 `recovery_required`。`1.37.0` 历史 binding 仍不允许 Cylinder；其它二十个 action 在 `1.38.0` 中仍为
+unavailable。该 managed Action 入口不把 menu/shortcut grounding 升级为逐控件或逐按键执行证据。见
 [ADR 0089](../adr/0089-accepted-uv-sphere-action-level-mcp.md) 与
 [ADR 0090](../adr/0090-simple-primitive-action-level-mcp.md) 与
 [ADR 0091](../adr/0091-torus-action-level-mcp.md) 与
-[ADR 0092](../adr/0092-cone-action-level-mcp.md)。
+[ADR 0092](../adr/0092-cone-action-level-mcp.md) 与
+[ADR 0093](../adr/0093-cylinder-action-level-mcp.md)。
 `action.status=succeeded` 已通过完整 primitive 几何和拓扑校验，但不是追加式 provenance attestation；后续
 replay finalize 复用同一 validator 并固化认证 receipt，二者都不证明报告之后的当前宿主状态。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
