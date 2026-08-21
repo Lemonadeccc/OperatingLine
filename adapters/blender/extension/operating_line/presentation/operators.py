@@ -4,6 +4,7 @@ import json
 import bpy
 
 from ..application import ObservationGateError
+from ..application.provider_handoff import PROVIDER_AUTHORITY_UNAVAILABLE
 from ..infrastructure import (
     cancel_native_history,
     commit_native_history,
@@ -431,46 +432,23 @@ class OPERATINGLINE_OT_select_initial_plan_provider(bpy.types.Operator):
 class OPERATINGLINE_OT_run_initial_plan_provider(bpy.types.Operator):
     bl_idname = "operating_line.run_initial_plan_provider"
     bl_label = "Confirm Initial Planner Run"
-    bl_description = (
-        "Authorize one initial planner run; its proposal still requires Accept or Reject"
-    )
+    bl_description = "Unavailable until signed packet-bound Provider authority is implemented"
 
     def invoke(self, context, _event):
         handoff = _companion().initial_plan_handoff
-        if not handoff.can_run:
-            message = "Select an available provider after the runtime acknowledges the goal"
-            handoff.message = message
-            self.report({"ERROR"}, message)
-            return {"CANCELLED"}
-        self._confirmation_opened = True
-        return context.window_manager.invoke_props_dialog(self, width=520)
+        del context
+        handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        self.report({"ERROR"}, PROVIDER_AUTHORITY_UNAVAILABLE)
+        return {"CANCELLED"}
 
     def draw(self, _context):
-        provider = _companion().initial_plan_handoff.selected_provider
-        if provider is None:
-            self.layout.label(text="No provider selected", icon="ERROR")
-            return
-        _draw_provider_authorization(self.layout, provider, initial=True)
+        self.layout.label(text=PROVIDER_AUTHORITY_UNAVAILABLE, icon="LOCKED")
 
     def execute(self, _context):
         companion = _companion()
-        if not getattr(self, "_confirmation_opened", False):
-            message = "Open and confirm the initial planner authorization dialog first"
-            companion.initial_plan_handoff.message = message
-            self.report({"ERROR"}, message)
-            return {"CANCELLED"}
-        self._confirmation_opened = False
-        try:
-            request = companion.begin_initial_plan_run()
-        except ValueError as error:
-            companion.initial_plan_handoff.message = str(error)
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
-        self.report(
-            {"INFO"},
-            f"Initial planner run {request['generationRequestId'][:8]} queued; scene unchanged",
-        )
-        return {"FINISHED"}
+        companion.initial_plan_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        self.report({"ERROR"}, PROVIDER_AUTHORITY_UNAVAILABLE)
+        return {"CANCELLED"}
 
 
 class OPERATINGLINE_OT_accept_proposal(bpy.types.Operator):
@@ -836,13 +814,20 @@ class OPERATINGLINE_OT_select_replan_provider(bpy.types.Operator):
 
 class OPERATINGLINE_OT_run_replan_provider(bpy.types.Operator):
     bl_idname = "operating_line.run_replan_provider"
-    bl_label = "Confirm Provider Run"
+    bl_label = "Provider Authority Unavailable"
     bl_description = (
-        "Authorize one provider run; a created proposal still requires Accept or Reject"
+        "Requires a trusted signed ProviderCallAuthorization that this extension "
+        "cannot currently obtain"
     )
 
     def invoke(self, context, _event):
         handoff = _companion().provider_handoff
+        if handoff.selected_provider is not None and (
+            handoff.acknowledged_revision_request_id is not None
+        ):
+            handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+            self.report({"ERROR"}, PROVIDER_AUTHORITY_UNAVAILABLE)
+            return {"CANCELLED"}
         if not handoff.can_run:
             message = (
                 "Select an available provider after the runtime acknowledges the request"
@@ -921,64 +906,24 @@ class OPERATINGLINE_OT_select_dialogue_provider(bpy.types.Operator):
 class OPERATINGLINE_OT_run_dialogue_provider(bpy.types.Operator):
     bl_idname = "operating_line.run_dialogue_provider"
     bl_label = "Confirm Dialogue Turn"
-    bl_description = (
-        "Authorize one streamed turn and an optional threshold-gated replan; "
-        "a created Proposal still requires review"
-    )
+    bl_description = "Unavailable until signed packet-bound Provider authority is implemented"
 
     def invoke(self, context, _event):
         companion = _companion()
         handoff = companion.dialogue_handoff
-        message = context.window_manager.operating_line_revision_message.strip()
-        if not handoff.can_run:
-            detail = "Select an available streamed dialogue provider"
-            handoff.message = detail
-            self.report({"ERROR"}, detail)
-            return {"CANCELLED"}
-        if not companion.revision_reference_nodes() or not message:
-            detail = "Reference at least one task node and enter a dialogue message"
-            handoff.message = detail
-            self.report({"ERROR"}, detail)
-            return {"CANCELLED"}
-        self._confirmation_opened = True
-        return context.window_manager.invoke_props_dialog(self, width=560)
+        del context
+        handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        self.report({"ERROR"}, PROVIDER_AUTHORITY_UNAVAILABLE)
+        return {"CANCELLED"}
 
-    def draw(self, context):
-        handoff = _companion().dialogue_handoff
-        provider = handoff.selected_provider
-        if provider is None:
-            self.layout.label(text="No dialogue provider selected", icon="ERROR")
-            return
-        _draw_provider_authorization(self.layout, provider, dialogue=True)
-        message = context.window_manager.operating_line_revision_message.strip()
-        if message:
-            self.layout.separator()
-            self.layout.label(text="Current user message", icon="GREASEPENCIL")
-            for line in (message[index : index + 72] for index in range(0, len(message), 72)):
-                self.layout.label(text=line)
+    def draw(self, _context):
+        self.layout.label(text=PROVIDER_AUTHORITY_UNAVAILABLE, icon="LOCKED")
 
-    def execute(self, context):
+    def execute(self, _context):
         companion = _companion()
-        if not getattr(self, "_confirmation_opened", False):
-            message = "Open and confirm the dialogue authorization dialog first"
-            companion.dialogue_handoff.message = message
-            self.report({"ERROR"}, message)
-            return {"CANCELLED"}
-        self._confirmation_opened = False
-        try:
-            request = companion.begin_dialogue_run(
-                context.window_manager.operating_line_revision_message
-            )
-        except ValueError as error:
-            companion.dialogue_handoff.message = str(error)
-            self.report({"ERROR"}, str(error))
-            return {"CANCELLED"}
-        context.window_manager.operating_line_revision_message = ""
-        self.report(
-            {"INFO"},
-            f"Dialogue {request['dialogueRequestId'][:8]} queued; scene unchanged",
-        )
-        return {"FINISHED"}
+        companion.dialogue_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        self.report({"ERROR"}, PROVIDER_AUTHORITY_UNAVAILABLE)
+        return {"CANCELLED"}
 
 
 class OPERATINGLINE_OT_toggle_overlay(bpy.types.Operator):

@@ -7,10 +7,14 @@ contract and keeps provider execution state separate from scene/session state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import re
 from typing import Any
 import uuid
+
+from ..domain.provider_authorization import (
+    PROVIDER_AUTHORITY_REQUIRED as PROVIDER_AUTHORITY_REQUIRED,
+    validate_provider_call_authorization,
+)
 
 
 TERMINAL_REPLAN_RUN_PHASES = frozenset(
@@ -102,6 +106,10 @@ TERMINAL_DIALOGUE_RUN_PHASES = frozenset(
     {"answered", "needs_revision", "proposal_created", "failed", "interrupted"}
 )
 DIALOGUE_MAXIMUM_MESSAGE_CHARACTERS = 4_000
+PROVIDER_AUTHORITY_UNAVAILABLE = (
+    "provider_authority_unavailable: this Blender extension has no trusted "
+    "ProviderCallAuthorization delivery channel"
+)
 
 
 def _uuid(value: Any, label: str) -> str:
@@ -436,7 +444,7 @@ class ReplanRunState:
         self.retry_mode = None
         self.needs_revision_summary = ""
         self.needs_revision_findings = ()
-        self.message = "Revision request is ready for an optional provider run"
+        self.message = PROVIDER_AUTHORITY_UNAVAILABLE
 
     def adopt_dialogue_revision(self, request_id: Any) -> None:
         """Make a durable dialogue request available for an explicit recovery run."""
@@ -521,7 +529,13 @@ class ReplanRunState:
         if self.active:
             raise ValueError("Wait for the active provider run before refreshing providers")
 
-    def begin(self, *, target_instance_id: str) -> dict[str, Any]:
+    def begin(
+        self,
+        *,
+        target_instance_id: str,
+        generation_request_id: Any,
+        authorization: Any,
+    ) -> dict[str, Any]:
         if not self.can_run:
             raise ValueError(
                 "Select an available provider after the runtime acknowledges the request"
@@ -531,7 +545,14 @@ class ReplanRunState:
         revision_request_id = self.acknowledged_revision_request_id
         assert revision_request_id is not None
         target_instance_id = _uuid(target_instance_id, "Target instance id")
-        generation_request_id = str(uuid.uuid4())
+        generation_request_id = _uuid(
+            generation_request_id, "Generation request id"
+        )
+        signed_authorization = validate_provider_call_authorization(
+            authorization,
+            provider_id=provider["id"],
+            provider_version=provider["version"],
+        )
         self.generation_request_id = generation_request_id
         self.target_instance_id = target_instance_id
         self.proposal_id = None
@@ -547,15 +568,7 @@ class ReplanRunState:
             "providerVersion": provider["version"],
             "targetAdapterId": "blender",
             "targetInstanceId": target_instance_id,
-            "authorization": {
-                "disclosureVersion": "1.0.0",
-                "dataHandlingAcknowledged": True,
-                "possibleChargesAcknowledged": True,
-                "proposalCreationAcknowledged": True,
-                "authorizedAt": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
-            },
+            "authorization": signed_authorization,
         }
 
     def reject_authorization(self, generation_request_id: Any, message: Any) -> None:
@@ -592,7 +605,7 @@ class ReplanRunState:
             "updatedAt",
         }:
             raise ValueError("Replan run status contains unsupported fields")
-        if payload.get("contractVersion") != "1.0.0":
+        if payload.get("contractVersion") != "1.1.0":
             raise ValueError("Unsupported replan run contract version")
         generation_request_id = _uuid(
             payload.get("generationRequestId"), "Run generation request id"
@@ -792,21 +805,7 @@ class DialogueRunState:
 
     @property
     def can_run(self) -> bool:
-        provider = self.selected_provider
-        retry_allowed = not (
-            self.phase in {"failed", "interrupted"} and self.retry_mode == "never"
-        )
-        return bool(
-            provider is not None
-            and provider["availability"]["available"]
-            and not self.active
-            and self.phase != "proposal_created"
-            and (
-                not self.revision_request_recorded
-                or self.phase == "proposal_rejected"
-            )
-            and retry_allowed
-        )
+        return False
 
     def _clear_run(self) -> None:
         self.dialogue_request_id = None
@@ -883,79 +882,9 @@ class DialogueRunState:
         revision_request: dict[str, Any],
         target_instance_id: str,
     ) -> dict[str, Any]:
-        if not isinstance(revision_request, dict):
-            raise ValueError("Dialogue revision request must be a JSON object")
-        if self.revision_request_recorded:
-            if self.phase == "proposal_rejected":
-                candidate_id = _uuid(
-                    revision_request.get("requestId"),
-                    "Dialogue revision request id",
-                )
-                if candidate_id == self.revision_request_id:
-                    raise ValueError(
-                        "A rejected dialogue revision requires a fresh request id"
-                    )
-                self._clear_run()
-            else:
-                raise ValueError(
-                    "Recover the stored dialogue revision with the ordinary Provider replan"
-                )
-        if not self.can_run:
-            raise ValueError("Select an available streamed dialogue provider")
-        provider = self.selected_provider
-        assert provider is not None
-        revision_request_id = _uuid(
-            revision_request.get("requestId"), "Dialogue revision request id"
-        )
-        if revision_request.get("adapterId") != "blender":
-            raise ValueError("Dialogue revision request must target Blender")
-        target_instance_id = _uuid(target_instance_id, "Target instance id")
-        if revision_request.get("instanceId") != target_instance_id:
-            raise ValueError("Dialogue revision request targets another Blender instance")
-        current_user_message = _bounded_text(
-            revision_request.get("message"),
-            "Dialogue user message",
-            DIALOGUE_MAXIMUM_MESSAGE_CHARACTERS,
-        )
-        dialogue_request_id = str(uuid.uuid4())
-        replan_generation_request_id = str(uuid.uuid4())
-        self.dialogue_request_id = dialogue_request_id
-        self.revision_request_id = revision_request_id
-        self.replan_generation_request_id = replan_generation_request_id
-        self.target_instance_id = target_instance_id
-        self.proposal_id = None
-        self.phase = "queued"
-        self.message = "Dialogue queued; scene and active plan are unchanged"
-        self.assistant_message = ""
-        self.assistant_message_revision = 0
-        self.semantic_decision = None
-        self.revision_request_recorded = False
-        self.retry_mode = None
-        self.needs_revision_summary = ""
-        self.needs_revision_findings = ()
-        self._current_user_message = current_user_message
-        self._history_recorded_request_id = None
-        return {
-            "dialogueRequestId": dialogue_request_id,
-            "replanGenerationRequestId": replan_generation_request_id,
-            "providerId": provider["id"],
-            "providerVersion": provider["version"],
-            "targetAdapterId": "blender",
-            "targetInstanceId": target_instance_id,
-            "revisionRequest": revision_request,
-            "history": [dict(item) for item in self.history[-12:]],
-            "authorization": {
-                "disclosureVersion": "1.0.0",
-                "dataHandlingAcknowledged": True,
-                "possibleChargesAcknowledged": True,
-                "authorizedProviderCallLimit": 2,
-                "automaticReplanAcknowledged": True,
-                "proposalCreationAcknowledged": True,
-                "authorizedAt": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
-            },
-        }
+        del revision_request, target_instance_id
+        self.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        raise ValueError(PROVIDER_AUTHORITY_UNAVAILABLE)
 
     def reject_authorization(self, dialogue_request_id: Any, message: Any) -> None:
         rejected_id = _uuid(dialogue_request_id, "Rejected dialogue request id")
@@ -1341,18 +1270,7 @@ class InitialPlanRunState:
 
     @property
     def can_run(self) -> bool:
-        provider = self.selected_provider
-        retry_allowed = not (
-            self.phase in {"failed", "interrupted"} and self.retry_mode == "never"
-        )
-        return bool(
-            provider is not None
-            and provider["availability"]["available"]
-            and self.acknowledged_goal_request_id is not None
-            and not self.active
-            and self.phase != "proposal_created"
-            and retry_allowed
-        )
+        return False
 
     def clear(self) -> None:
         self.providers = ()
@@ -1429,39 +1347,9 @@ class InitialPlanRunState:
             raise ValueError("Wait for the active initial-plan run before refreshing providers")
 
     def begin(self, *, target_instance_id: str) -> dict[str, Any]:
-        if not self.can_run:
-            raise ValueError(
-                "Select an available provider after the runtime acknowledges the goal"
-            )
-        provider = self.selected_provider
-        goal_request_id = self.acknowledged_goal_request_id
-        assert provider is not None and goal_request_id is not None
-        generation_request_id = str(uuid.uuid4())
-        self.generation_request_id = generation_request_id
-        self.target_instance_id = _uuid(target_instance_id, "Target instance id")
-        self.proposal_id = None
-        self.phase = "queued"
-        self.retry_mode = None
-        self.needs_revision_summary = ""
-        self.needs_revision_findings = ()
-        self.message = "Initial planner run queued; scene and active plan are unchanged"
-        return {
-            "generationRequestId": generation_request_id,
-            "goalRequestId": goal_request_id,
-            "providerId": provider["id"],
-            "providerVersion": provider["version"],
-            "targetAdapterId": "blender",
-            "targetInstanceId": self.target_instance_id,
-            "authorization": {
-                "disclosureVersion": "1.0.0",
-                "dataHandlingAcknowledged": True,
-                "possibleChargesAcknowledged": True,
-                "proposalCreationAcknowledged": True,
-                "authorizedAt": datetime.now(timezone.utc)
-                .isoformat()
-                .replace("+00:00", "Z"),
-            },
-        }
+        del target_instance_id
+        self.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        raise ValueError(PROVIDER_AUTHORITY_UNAVAILABLE)
 
     def reject_authorization(self, generation_request_id: Any, message: Any) -> None:
         rejected_id = _uuid(generation_request_id, "Rejected generation request id")

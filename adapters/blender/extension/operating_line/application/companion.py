@@ -25,7 +25,12 @@ from ..infrastructure.companion_transport import CompanionTransport
 from ..infrastructure.observations import evaluate_observations
 from .session import DemoSession, ObservationGateState
 from .goal_request import GoalRequestState, build_goal_request
-from .provider_handoff import DialogueRunState, InitialPlanRunState, ReplanRunState
+from .provider_handoff import (
+    DialogueRunState,
+    InitialPlanRunState,
+    PROVIDER_AUTHORITY_UNAVAILABLE,
+    ReplanRunState,
+)
 from .parameter_form import ParameterField, action_parameter_fields
 from .interaction_catalog import BUNDLED_INTERACTION_CATALOG, RESOURCE_PATH
 from .revision_review import (
@@ -230,10 +235,10 @@ class CompanionController:
             transport.submit_goal_request(retained_goal)
         for decision in self._pending_proposal_decisions.values():
             transport.submit_proposal_decision(decision)
-        if self.initial_plan_handoff.active and self._initial_plan_run_request is not None:
-            transport.start_initial_plan_run(self._initial_plan_run_request)
-        if self.dialogue_handoff.active and self._dialogue_run_request is not None:
-            transport.start_dialogue_run(self._dialogue_run_request)
+        if self.initial_plan_handoff.active:
+            self.initial_plan_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        if self.dialogue_handoff.active:
+            self.dialogue_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
 
     def disconnect(
         self,
@@ -961,23 +966,14 @@ class CompanionController:
         return self.initial_plan_handoff.select(provider_id)
 
     def begin_initial_plan_run(self) -> dict[str, Any]:
-        """Queue one authorized initial plan run without accepting or executing it."""
+        """Fail closed until initial planning has signed packet-bound authority."""
         transport = self._transport
         if transport is None or not transport.running:
             raise ValueError("Connect the runtime before running an initial planner")
         if self.goal_request.acknowledged_request_id is None:
             raise ValueError("Wait for the runtime to acknowledge the goal first")
-        self.initial_plan_handoff.goal_acknowledged(
-            self.goal_request.acknowledged_request_id
-        )
-        if self.proposed_plan is not None:
-            raise ValueError("Review the current proposal before running an initial planner")
-        if self.provider_handoff.active or self.dialogue_handoff.blocks_plan_work:
-            raise ValueError("Finish the active revision provider workflow first")
-        request = self.initial_plan_handoff.begin(target_instance_id=self.instance_id)
-        self._initial_plan_run_request = request
-        transport.start_initial_plan_run(request)
-        return request
+        self.initial_plan_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        raise ValueError(PROVIDER_AUTHORITY_UNAVAILABLE)
 
     def _invalidate_handoff_for_plan_install(
         self,
@@ -1011,7 +1007,7 @@ class CompanionController:
             )
 
     def begin_replan_run(self) -> dict[str, Any]:
-        """Queue one authorized provider run without changing plan or scene state."""
+        """Fail closed until a trusted authority-delivery seam is available."""
         if self.dialogue_handoff.blocks_plan_work:
             raise ValueError("Finish the streamed dialogue workflow first")
         if self.goal_request.active or self.initial_plan_handoff.active:
@@ -1019,12 +1015,15 @@ class CompanionController:
         transport = self._transport
         if transport is None or not transport.running:
             raise ValueError("Connect the runtime before running a provider")
-        request = self.provider_handoff.begin(target_instance_id=self.instance_id)
-        transport.start_replan_run(request)
-        return request
+        if not self.provider_handoff.can_run:
+            raise ValueError(
+                "Select an available provider after the runtime acknowledges the request"
+            )
+        self.provider_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        raise ValueError(PROVIDER_AUTHORITY_UNAVAILABLE)
 
     def begin_dialogue_run(self, message: str) -> dict[str, Any]:
-        """Stream one assistant turn and optionally create a review-only replan."""
+        """Fail closed until dialogue has signed packet-bound authority."""
         if self.goal_request.active or self.initial_plan_handoff.active:
             raise ValueError("Finish the active goal workflow before starting dialogue")
         if self.provider_handoff.active:
@@ -1039,22 +1038,9 @@ class CompanionController:
         transport = self._transport
         if transport is None or not transport.running:
             raise ValueError("Connect the runtime before starting model dialogue")
-        fresh_thread = self.dialogue_handoff.phase == "proposal_rejected"
-        request = self._build_revision_request(
-            message,
-            dialogue=True,
-            fresh_thread=fresh_thread,
-        )
-        run_request = self.dialogue_handoff.begin(
-            revision_request=request,
-            target_instance_id=self.instance_id,
-        )
-        self._dialogue_run_request = run_request
-        transport.start_dialogue_run(run_request)
-        self.revision_request_status = (
-            f"Dialogue {run_request['dialogueRequestId'][:8]} queued; scene unchanged"
-        )
-        return run_request
+        del message
+        self.dialogue_handoff.message = PROVIDER_AUTHORITY_UNAVAILABLE
+        raise ValueError(PROVIDER_AUTHORITY_UNAVAILABLE)
 
     def _build_revision_request(
         self,

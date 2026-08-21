@@ -98,6 +98,40 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
     load_task_tree,
     load_task_tree_data,
 )
+
+
+def begin_authorized_replan(state, target_instance_id: str) -> dict:
+    provider = state.selected_provider
+    assert provider is not None
+    return state.begin(
+        target_instance_id=target_instance_id,
+        generation_request_id=str(uuid.uuid4()),
+        authorization={
+            "formatVersion": "1.0.0",
+            "canonicalization": "operatingline-authority-json-v1",
+            "kind": "ProviderCallAuthorization",
+            "authorityId": str(uuid.uuid4()),
+            "issuer": "trusted-integration-operator",
+            "notBefore": "2026-08-21T00:00:00Z",
+            "expiresAt": "2099-08-21T00:00:00Z",
+            "provider": {
+                "providerId": provider["id"],
+                "descriptorVersion": provider["version"],
+                "model": "integration-model",
+            },
+            "operation": "semantic_replan_generation",
+            "generationRequestSha256": "a" * 64,
+            "disclosedDataSha256": "b" * 64,
+            "maximumCallCount": 1,
+            "signature": {
+                "signerId": "trusted-integration-operator",
+                "keyId": "integration-key-1",
+                "algorithm": "ed25519",
+                "signature": "A" * 86,
+                "signedAt": "2026-08-21T00:00:00Z",
+            },
+        },
+    )
 from operating_line_extension.operating_line.infrastructure.snowman_actions.common import (  # noqa: E402
     ALLOWED_ACTIONS,
     COLLECTION_NAME,
@@ -5358,7 +5392,7 @@ def assert_companion_and_plan_semantics() -> None:
                 terminal = replan_run_polls[0] >= 2
                 self._reply(
                     {
-                        "contractVersion": "1.0.0",
+                        "contractVersion": "1.1.0",
                         "generationRequestId": run["generationRequestId"],
                         "revisionRequestId": run["revisionRequestId"],
                         "targetAdapterId": "blender",
@@ -5537,7 +5571,7 @@ def assert_companion_and_plan_semantics() -> None:
                     return
                 self._reply(
                     {
-                        "contractVersion": "1.0.0",
+                        "contractVersion": "1.1.0",
                         "generationRequestId": payload["generationRequestId"],
                         "revisionRequestId": payload["revisionRequestId"],
                         "targetAdapterId": "blender",
@@ -5847,9 +5881,9 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion.last_revision_request_id == revision_request["requestId"]
         assert companion.revision_parameter_edit_count == 0
 
-        # One explicit authorization queues on the worker and is polled without
-        # blocking Blender's main thread. A terminal proposal-created status is
-        # still only a review handoff: scene and accepted Session stay unchanged.
+        # Blender cannot invent ProviderCallAuthorization. The ordinary UI path
+        # fails closed; this trusted-boundary fixture then supplies one opaque
+        # signed record to exercise polling and proposal-review ordering.
         assert companion.provider_handoff.acknowledged_revision_request_id == (
             revision_request["requestId"]
         )
@@ -5863,16 +5897,46 @@ def assert_companion_and_plan_semantics() -> None:
             raise AssertionError("Direct execute must not bypass provider confirmation")
         assert replan_runs == []
         assert companion.provider_handoff.generation_request_id is None
-        run_request = companion.begin_replan_run()
+        try:
+            companion.begin_replan_run()
+        except ValueError as error:
+            assert "provider_authority_unavailable" in str(error)
+        else:
+            raise AssertionError("Blender must not create its own provider authority")
+        assert replan_post_attempts == []
+        try:
+            transport.start_replan_run(
+                {
+                    "generationRequestId": str(uuid.uuid4()),
+                    "revisionRequestId": revision_request["requestId"],
+                    "providerId": "available-planner",
+                    "providerVersion": "0.1.0",
+                    "targetAdapterId": "blender",
+                    "targetInstanceId": companion.instance_id,
+                    "authorization": {
+                        "dataHandlingAcknowledged": True,
+                        "possibleChargesAcknowledged": True,
+                        "proposalCreationAcknowledged": True,
+                    },
+                }
+            )
+        except ValueError as error:
+            assert "provider_authority_required" in str(error)
+        else:
+            raise AssertionError("Transport must reject legacy Boolean authorization")
+        assert transport.replan_runs.empty()
+        assert replan_post_attempts == []
+        run_request = begin_authorized_replan(
+            companion.provider_handoff, companion.instance_id
+        )
+        transport.start_replan_run(run_request)
         assert run_request["revisionRequestId"] == revision_request["requestId"]
         assert run_request["providerId"] == "available-planner"
-        assert run_request["authorization"] == {
-            "disclosureVersion": "1.0.0",
-            "dataHandlingAcknowledged": True,
-            "possibleChargesAcknowledged": True,
-            "proposalCreationAcknowledged": True,
-            "authorizedAt": run_request["authorization"]["authorizedAt"],
-        }
+        assert run_request["authorization"]["kind"] == "ProviderCallAuthorization"
+        assert run_request["authorization"]["operation"] == (
+            "semantic_replan_generation"
+        )
+        assert run_request["authorization"]["signature"]["algorithm"] == "ed25519"
         active_run_identity = (
             companion.provider_handoff.acknowledged_revision_request_id,
             companion.provider_handoff.generation_request_id,
@@ -6062,7 +6126,10 @@ def assert_companion_and_plan_semantics() -> None:
             revision_request["requestId"]
         )
         reject_replan_runs[0] = True
-        rejected_request = companion.begin_replan_run()
+        rejected_request = begin_authorized_replan(
+            companion.provider_handoff, companion.instance_id
+        )
+        transport.start_replan_run(rejected_request)
         rejected_deadline = time.monotonic() + 2.0
         while time.monotonic() < rejected_deadline:
             companion.pump()
@@ -6228,8 +6295,9 @@ def assert_companion_and_plan_semantics() -> None:
             ordering_controller.provider_handoff.revision_acknowledged(
                 ordering_request_id
             )
-            ordering_run = ordering_controller.provider_handoff.begin(
-                target_instance_id=ordering_controller.instance_id
+            ordering_run = begin_authorized_replan(
+                ordering_controller.provider_handoff,
+                ordering_controller.instance_id,
             )
             ordering_plan = deepcopy(dynamic_plan)
             ordering_plan["revision"] = DYNAMIC_REVISION + 20
@@ -6292,7 +6360,7 @@ def assert_companion_and_plan_semantics() -> None:
                 },
             }
             ordering_status = {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "generationRequestId": ordering_run["generationRequestId"],
                 "revisionRequestId": ordering_request_id,
                 "targetAdapterId": "blender",
@@ -6353,8 +6421,9 @@ def assert_companion_and_plan_semantics() -> None:
         bounded_request_id = str(uuid.uuid4())
         bounded_controller.provider_handoff.revision_submitted(bounded_request_id)
         bounded_controller.provider_handoff.revision_acknowledged(bounded_request_id)
-        bounded_run = bounded_controller.provider_handoff.begin(
-            target_instance_id=bounded_controller.instance_id
+        bounded_run = begin_authorized_replan(
+            bounded_controller.provider_handoff,
+            bounded_controller.instance_id,
         )
         bounded_proposal_id = str(uuid.uuid4())
         bounded_plan = deepcopy(dynamic_plan)
@@ -6428,7 +6497,7 @@ def assert_companion_and_plan_semantics() -> None:
         bounded_controller._transport = None
         bounded_controller.provider_handoff.apply_status(
             {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "generationRequestId": bounded_run["generationRequestId"],
                 "revisionRequestId": bounded_request_id,
                 "targetAdapterId": "blender",
@@ -6477,8 +6546,9 @@ def assert_companion_and_plan_semantics() -> None:
         drift_controller.select_replan_provider("available-planner")
         drift_controller.provider_handoff.revision_submitted(drift_request_id)
         drift_controller.provider_handoff.revision_acknowledged(drift_request_id)
-        drift_run = drift_controller.provider_handoff.begin(
-            target_instance_id=drift_controller.instance_id
+        drift_run = begin_authorized_replan(
+            drift_controller.provider_handoff,
+            drift_controller.instance_id,
         )
         drift_proposal = {
             "protocolVersion": "1.1.0",
@@ -6520,7 +6590,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert drift_controller.install_plan(drifted_plan)
         drift_controller.provider_handoff.apply_status(
             {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "generationRequestId": drift_run["generationRequestId"],
                 "revisionRequestId": drift_request_id,
                 "targetAdapterId": "blender",
@@ -6595,8 +6665,9 @@ def assert_companion_and_plan_semantics() -> None:
         legacy_request_id = str(uuid.uuid4())
         legacy_controller.provider_handoff.revision_submitted(legacy_request_id)
         legacy_controller.provider_handoff.revision_acknowledged(legacy_request_id)
-        legacy_run = legacy_controller.provider_handoff.begin(
-            target_instance_id=legacy_controller.instance_id
+        legacy_run = begin_authorized_replan(
+            legacy_controller.provider_handoff,
+            legacy_controller.instance_id,
         )
         legacy_plan = deepcopy(dynamic_plan)
         legacy_plan["revision"] = DYNAMIC_REVISION + 40
@@ -6618,7 +6689,7 @@ def assert_companion_and_plan_semantics() -> None:
         assert legacy_controller.stage_proposal(legacy_proposal)
         legacy_controller.provider_handoff.apply_status(
             {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "generationRequestId": legacy_run["generationRequestId"],
                 "revisionRequestId": legacy_request_id,
                 "targetAdapterId": "blender",
@@ -8096,289 +8167,45 @@ def assert_companion_and_plan_semantics() -> None:
 
 
 def assert_dialogue_proposal_round_trip() -> None:
-    """Exercise proposal-first delivery through the Blender main-thread boundary."""
-    base_session = operating_line.get_session()
-    base_plan = base_session.source_plan_copy()
-    assert base_plan is not None
     controller = CompanionController()
-    provider_payload = {
-        "contractVersion": "1.0.0",
-        "generationAvailable": True,
-        "providers": [
-            {
-                "contractVersion": "1.0.0",
-                "id": "dialogue-planner",
-                "version": "0.1.0",
-                "displayName": "Dialogue Planner",
-                "description": "Deterministic streamed dialogue integration provider.",
-                "availability": {"available": True},
-                "limits": {"maxConcurrency": 1},
-                "dataHandling": {
-                    "executionLocation": "local",
-                    "dataTransmission": "none",
-                    "credentialManagement": "provider_managed",
-                },
-            }
-        ],
-    }
-    controller.dialogue_handoff.set_providers(provider_payload)
-    controller.select_dialogue_provider("dialogue-planner")
-    controller.add_revision_reference("active", base_session.root.id)
     queued_runs = []
-    decisions = []
 
     class DialogueTransport:
         running = True
         session_snapshot = FAKE_SESSION_VIEW
 
-        def __init__(self):
-            self.incoming = Queue()
+        def start_dialogue_run(self, request):
+            queued_runs.append(request)
+
+    controller._transport = DialogueTransport()
+    try:
+        controller.begin_dialogue_run("This legacy boolean path must remain unavailable")
+    except ValueError as error:
+        assert "provider_authority_unavailable" in str(error)
+    else:
+        raise AssertionError("Companion dialogue must fail closed without signed authority")
+    assert queued_runs == []
+
+
+def assert_dialogue_proposal_first_failure_promotes_review() -> None:
+    controller = CompanionController()
+    queued_runs = []
+
+    class DialogueTransport:
+        running = True
+        session_snapshot = FAKE_SESSION_VIEW
 
         def start_dialogue_run(self, request):
             queued_runs.append(request)
 
-        def submit_proposal_decision(self, decision):
-            decisions.append(decision)
-
-        def accept_plan(self, _plan_id, _revision, _plan_content_sha256):
-            pass
-
-        def follow_revision_thread(self, _thread_id):
-            pass
-
-        def send_report(self, _report):
-            pass
-
-    transport = DialogueTransport()
-    controller._transport = transport
-    scene_before = {item.as_pointer() for item in bpy.data.objects}
-    run_request = controller.begin_dialogue_run(
-        "Make this guide clearer and prepare a revision if needed"
-    )
-    assert queued_runs == [run_request]
-    assert run_request["authorization"]["authorizedProviderCallLimit"] == 2
-    assert run_request["authorization"]["automaticReplanAcknowledged"] is True
-    assert run_request["authorization"]["proposalCreationAcknowledged"] is True
-    revision_request = run_request["revisionRequest"]
-
-    proposed_plan = deepcopy(base_plan)
-    proposed_plan["revision"] = base_session.revision + 1
-    proposal_id = str(uuid.uuid4())
-    proposal = {
-        "protocolVersion": "1.4.0",
-        "proposalId": proposal_id,
-        "targetAdapterId": "blender",
-        "targetInstanceId": controller.instance_id,
-        "catalogVersion": ACTION_CATALOG["catalogVersion"],
-        "revisionRequestId": revision_request["requestId"],
-        "revisionThread": revision_request["revisionThread"],
-        "revisionOperation": {"kind": "revise"},
-        "plan": proposed_plan,
-        "planDiff": {
-            "basePlan": {
-                "id": base_session.plan_id,
-                "revision": base_session.revision,
-            },
-            "targetPlan": {
-                "id": proposed_plan["id"],
-                "revision": proposed_plan["revision"],
-            },
-            "summary": {
-                "planFields": 0,
-                "addedSteps": 0,
-                "removedSteps": 0,
-                "updatedSteps": 0,
-                "movedSteps": 0,
-            },
-            "planChanges": [],
-            "stepChanges": [],
-        },
-        "proposedAt": "2026-08-12T12:00:03Z",
-    }
-    status = {
-        "contractVersion": "1.0.0",
-        "dialogueRequestId": run_request["dialogueRequestId"],
-        "revisionRequestId": revision_request["requestId"],
-        "replanGenerationRequestId": run_request["replanGenerationRequestId"],
-        "targetAdapterId": "blender",
-        "targetInstanceId": controller.instance_id,
-        "provider": {
-            "id": "dialogue-planner",
-            "version": "0.1.0",
-            "displayName": "Dialogue Planner",
-        },
-        "status": "proposal_created",
-        "terminal": True,
-        "sceneChanged": False,
-        "assistantMessage": "I prepared a reviewable revision.",
-        "assistantMessageRevision": 1,
-        "semanticDecision": {
-            "kind": "replan",
-            "confidence": 0.91,
-            "threshold": 0.8,
-        },
-        "revisionRequestRecorded": True,
-        "proposalId": proposal_id,
-        "error": None,
-        "needsRevision": None,
-        "updatedAt": "2026-08-12T12:00:02Z",
-    }
-
-    transport.incoming.put({"kind": "proposal", "proposal": proposal})
-    transport.incoming.put({"kind": "dialogue_run_status", "run": status})
-    controller.pump()
-    assert controller.proposed_plan is proposal
-    assert controller.dialogue_handoff.phase == "proposal_created"
-    assert controller.dialogue_handoff.blocks_plan_work
-    assert controller.last_revision_request_id == revision_request["requestId"]
-    assert operating_line.get_session() is base_session
-    assert {item.as_pointer() for item in bpy.data.objects} == scene_before
-
-    assert controller.accept_proposal()
-    assert decisions[-1]["proposalId"] == proposal_id
-    assert decisions[-1]["decision"] == "accepted"
-    assert controller.dialogue_handoff.phase == "idle"
-    assert not controller.dialogue_handoff.blocks_plan_work
-    assert controller.dialogue_handoff.history[-1] == {
-        "role": "assistant",
-        "message": "I prepared a reviewable revision.",
-    }
-    assert operating_line.get_session().revision == base_session.revision + 1
-    assert {item.as_pointer() for item in bpy.data.objects} == scene_before
-
-    controller._transport = None
-    replace_operating_line_session(base_session)
-
-
-def assert_dialogue_proposal_first_failure_promotes_review() -> None:
-    """Reveal a cached same-request Proposal after the Dialogue terminal fails."""
-    base_session = operating_line.get_session()
-    base_plan = base_session.source_plan_copy()
-    assert base_plan is not None
-    controller = CompanionController()
-    provider_payload = {
-        "contractVersion": "1.0.0",
-        "generationAvailable": True,
-        "providers": [
-            {
-                "contractVersion": "1.0.0",
-                "id": "dialogue-planner",
-                "version": "0.1.0",
-                "displayName": "Dialogue Planner",
-                "description": "Deterministic dialogue race provider.",
-                "availability": {"available": True},
-                "limits": {"maxConcurrency": 1},
-                "dataHandling": {
-                    "executionLocation": "local",
-                    "dataTransmission": "none",
-                    "credentialManagement": "provider_managed",
-                },
-            }
-        ],
-    }
-    controller.dialogue_handoff.set_providers(provider_payload)
-    controller.select_dialogue_provider("dialogue-planner")
-    controller.add_revision_reference("active", base_session.root.id)
-
-    class DialogueRaceTransport:
-        running = True
-        session_snapshot = FAKE_SESSION_VIEW
-
-        def __init__(self):
-            self.incoming = Queue()
-
-        def start_dialogue_run(self, _request):
-            pass
-
-        def submit_proposal_decision(self, _decision):
-            pass
-
-        def follow_revision_thread(self, _thread_id):
-            pass
-
-        def send_report(self, _report):
-            pass
-
-    transport = DialogueRaceTransport()
-    controller._transport = transport
-    run_request = controller.begin_dialogue_run("Prepare a bounded review revision")
-    revision_request = run_request["revisionRequest"]
-    proposed_plan = deepcopy(base_plan)
-    proposed_plan["revision"] = base_session.revision + 1
-    proposal = {
-        "protocolVersion": "1.4.0",
-        "proposalId": str(uuid.uuid4()),
-        "targetAdapterId": "blender",
-        "targetInstanceId": controller.instance_id,
-        "catalogVersion": ACTION_CATALOG["catalogVersion"],
-        "revisionRequestId": revision_request["requestId"],
-        "revisionThread": revision_request["revisionThread"],
-        "revisionOperation": {"kind": "revise"},
-        "plan": proposed_plan,
-        "planDiff": {
-            "basePlan": {
-                "id": base_session.plan_id,
-                "revision": base_session.revision,
-            },
-            "targetPlan": {
-                "id": proposed_plan["id"],
-                "revision": proposed_plan["revision"],
-            },
-            "summary": {
-                "planFields": 0,
-                "addedSteps": 0,
-                "removedSteps": 0,
-                "updatedSteps": 0,
-                "movedSteps": 0,
-            },
-            "planChanges": [],
-            "stepChanges": [],
-        },
-        "proposedAt": "2026-08-12T12:00:03Z",
-    }
-    failed = {
-        "contractVersion": "1.0.0",
-        "dialogueRequestId": run_request["dialogueRequestId"],
-        "revisionRequestId": revision_request["requestId"],
-        "replanGenerationRequestId": run_request["replanGenerationRequestId"],
-        "targetAdapterId": "blender",
-        "targetInstanceId": controller.instance_id,
-        "provider": {
-            "id": "dialogue-planner",
-            "version": "0.1.0",
-            "displayName": "Dialogue Planner",
-        },
-        "status": "failed",
-        "terminal": True,
-        "sceneChanged": False,
-        "assistantMessage": "I prepared the requested bounded revision.",
-        "assistantMessageRevision": 1,
-        "semanticDecision": {
-            "kind": "replan",
-            "confidence": 0.91,
-            "threshold": 0.8,
-        },
-        "revisionRequestRecorded": True,
-        "proposalId": None,
-        "error": {
-            "code": "planner_generation_conflict",
-            "retryMode": "new_request_id",
-            "message": "An external Proposal won the review slot.",
-        },
-        "needsRevision": None,
-        "updatedAt": "2026-08-12T12:00:04Z",
-    }
-
-    assert controller.stage_proposal(proposal)
-    assert controller.proposed_plan is None
-    transport.incoming.put({"kind": "dialogue_run_status", "run": failed})
-    controller.pump()
-    assert controller.dialogue_handoff.phase == "failed"
-    assert controller.proposed_plan is proposal
-    assert controller.provider_handoff.acknowledged_revision_request_id == revision_request[
-        "requestId"
-    ]
-    controller._transport = None
+    controller._transport = DialogueTransport()
+    try:
+        controller.begin_dialogue_run("No stale dialogue request may be queued")
+    except ValueError as error:
+        assert "provider_authority_unavailable" in str(error)
+    else:
+        raise AssertionError("Companion dialogue must not construct legacy authorization")
+    assert queued_runs == []
 
 
 def assert_mirror_round_trip_and_guards() -> None:
@@ -9703,208 +9530,21 @@ def main() -> None:
         (goal_proposal["proposalId"], "rejected"),
     ]
 
-    # An optional initial provider remains a separate, explicit authorization
-    # gate and binds the delivered proposal to the exact goal/run/instance.
+    # Legacy initial-plan boolean self-attestation is never queued or posted.
     initial_goal = registered_companion.submit_goal_request(
-        "Build a provider-authored reviewed guide"
+        "This legacy initial-plan request must remain unavailable"
     )
     registered_companion.goal_request.acknowledged(initial_goal["requestId"])
-    registered_companion.initial_plan_handoff.goal_acknowledged(
-        initial_goal["requestId"]
-    )
-    assert registered_companion.selected_initial_plan_provider_id is None
-    registered_companion.refresh_initial_plan_providers()
-    assert goal_transport.initial_provider_refreshes == 1
-    registered_companion.initial_plan_handoff.set_providers(
-        {
-            "contractVersion": "1.0.0",
-            "generationAvailable": True,
-            "providers": [
-                {
-                    "contractVersion": "1.0.0",
-                    "id": "available-planner",
-                    "version": "0.1.0",
-                    "displayName": "Available Planner",
-                    "description": "Local deterministic initial planner.",
-                    "availability": {"available": True},
-                    "limits": {"maxConcurrency": 1},
-                    "dataHandling": {
-                        "executionLocation": "local",
-                        "dataTransmission": "none",
-                        "credentialManagement": "provider_managed",
-                    },
-                }
-            ],
-        }
-    )
-    assert registered_companion.selected_initial_plan_provider_id is None
+    before_initial_posts = list(goal_transport.initial_runs)
     try:
-        bpy.ops.operating_line.run_initial_plan_provider()
-    except RuntimeError as error:
-        assert "authorization dialog" in str(error)
+        registered_companion.begin_initial_plan_run()
+    except ValueError as error:
+        assert "provider_authority_unavailable" in str(error)
     else:
-        raise AssertionError("Direct execute must not bypass initial provider confirmation")
-    assert goal_transport.initial_runs == []
-    assert registered_companion.select_initial_plan_provider(
-        "available-planner"
-    )["id"] == "available-planner"
-    scene_before_initial_run = {item.as_pointer() for item in bpy.data.objects}
-    session_before_initial_run = operating_line.get_session()
-    initial_run = registered_companion.begin_initial_plan_run()
-    assert goal_transport.initial_runs == [initial_run]
-    assert initial_run["goalRequestId"] == initial_goal["requestId"]
-    assert initial_run["targetInstanceId"] == registered_companion.instance_id
-    assert operating_line.get_session() is session_before_initial_run
-    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
-    initial_proposal_id = str(uuid.uuid4())
-    registered_companion.initial_plan_handoff.apply_status(
-        {
-            "contractVersion": "1.0.0",
-            "generationRequestId": initial_run["generationRequestId"],
-            "goalRequestId": initial_goal["requestId"],
-            "targetAdapterId": "blender",
-            "targetInstanceId": registered_companion.instance_id,
-            "provider": {
-                "id": "available-planner",
-                "version": "0.1.0",
-                "displayName": "Available Planner",
-            },
-            "status": "proposal_created",
-            "terminal": True,
-            "sceneChanged": False,
-            "proposalId": initial_proposal_id,
-            "error": None,
-            "needsRevision": None,
-            "updatedAt": "2026-08-09T12:00:01.000Z",
-        }
-    )
-    initial_plan = deepcopy(BUNDLED_PLAN)
-    initial_plan["id"] = initial_goal["planId"]
-    initial_plan["revision"] += 21
-    initial_plan["protocolVersion"] = "1.2.0"
-    initial_proposal = {
-        "protocolVersion": "1.2.0",
-        "proposalId": initial_proposal_id,
-        "goalRequestId": initial_goal["requestId"],
-        "targetAdapterId": "blender",
-        "targetInstanceId": registered_companion.instance_id,
-        "catalogVersion": ACTION_CATALOG["catalogVersion"],
-        "plan": initial_plan,
-        "planDiff": None,
-        "proposedAt": "2026-08-09T12:00:02Z",
-    }
-    assert registered_companion.stage_proposal(initial_proposal)
-    assert registered_companion.proposed_plan is initial_proposal
-    assert operating_line.get_session() is session_before_initial_run
-    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
-    assert registered_companion.reject_proposal()
-    assert registered_companion.goal_request.active is False
-    assert registered_companion.initial_plan_handoff.phase == "idle"
-    assert operating_line.get_session() is session_before_initial_run
-    assert {item.as_pointer() for item in bpy.data.objects} == scene_before_initial_run
-
-    # An external MCP Goal Proposal may win the unresolved Proposal slot while
-    # an Initial Run is still generating. The Run then fails safely, but the
-    # already-delivered external Proposal must become reviewable in either
-    # delivery ordering without being relabeled as the Provider result.
-    def initial_race_fixture(label):
-        controller = CompanionController()
-        transport = GoalFakeTransport()
-        controller._transport = transport
-        goal = controller.submit_goal_request(f"External proposal race {label}")
-        controller.goal_request.acknowledged(goal["requestId"])
-        controller.initial_plan_handoff.goal_acknowledged(goal["requestId"])
-        controller.initial_plan_handoff.set_providers(
-            {
-                "contractVersion": "1.0.0",
-                "generationAvailable": True,
-                "providers": [
-                    {
-                        "contractVersion": "1.0.0",
-                        "id": "available-planner",
-                        "version": "0.1.0",
-                        "displayName": "Available Planner",
-                        "description": "Local deterministic initial planner.",
-                        "availability": {"available": True},
-                        "limits": {"maxConcurrency": 1},
-                        "dataHandling": {
-                            "executionLocation": "local",
-                            "dataTransmission": "none",
-                            "credentialManagement": "provider_managed",
-                        },
-                    }
-                ],
-            }
+        raise AssertionError(
+            "Companion initial planning must fail closed without signed authority"
         )
-        controller.select_initial_plan_provider("available-planner")
-        run = controller.begin_initial_plan_run()
-        plan = deepcopy(BUNDLED_PLAN)
-        plan["id"] = goal["planId"]
-        plan["revision"] += 30
-        plan["protocolVersion"] = "1.2.0"
-        proposal = {
-            "protocolVersion": "1.2.0",
-            "proposalId": str(uuid.uuid4()),
-            "goalRequestId": goal["requestId"],
-            "targetAdapterId": "blender",
-            "targetInstanceId": controller.instance_id,
-            "catalogVersion": ACTION_CATALOG["catalogVersion"],
-            "plan": plan,
-            "planDiff": None,
-            "proposedAt": "2026-08-09T12:00:03Z",
-        }
-        failed = {
-            "contractVersion": "1.0.0",
-            "generationRequestId": run["generationRequestId"],
-            "goalRequestId": goal["requestId"],
-            "targetAdapterId": "blender",
-            "targetInstanceId": controller.instance_id,
-            "provider": {
-                "id": "available-planner",
-                "version": "0.1.0",
-                "displayName": "Available Planner",
-            },
-            "status": "failed",
-            "terminal": True,
-            "sceneChanged": False,
-            "proposalId": None,
-            "error": {
-                "code": "planner_internal_failed",
-                "retryMode": "new_request_id",
-                "message": "Provider result lost the Proposal review slot",
-            },
-            "needsRevision": None,
-            "updatedAt": "2026-08-09T12:00:04Z",
-        }
-        return controller, transport, proposal, failed
-
-    proposal_first, proposal_first_transport, external_first, failed_after = (
-        initial_race_fixture("proposal-first")
-    )
-    assert proposal_first.stage_proposal(external_first)
-    assert proposal_first.proposed_plan is None
-    proposal_first_transport.incoming.put(
-        {"kind": "initial_plan_run_status", "run": failed_after}
-    )
-    proposal_first.pump()
-    assert proposal_first.proposed_plan is external_first
-    assert proposal_first.initial_plan_handoff.phase == "failed"
-    assert proposal_first.goal_request.phase == "proposal_received"
-    assert proposal_first.reject_proposal()
-
-    status_first, status_first_transport, external_after, failed_first = (
-        initial_race_fixture("status-first")
-    )
-    status_first_transport.incoming.put(
-        {"kind": "initial_plan_run_status", "run": failed_first}
-    )
-    status_first.pump()
-    assert status_first.proposed_plan is None
-    assert status_first.stage_proposal(external_after)
-    assert status_first.proposed_plan is external_after
-    assert status_first.initial_plan_handoff.phase == "failed"
-    assert status_first.goal_request.phase == "proposal_received"
-    assert status_first.reject_proposal()
+    assert goal_transport.initial_runs == before_initial_posts
 
     registered_companion._transport = None
     assert all(

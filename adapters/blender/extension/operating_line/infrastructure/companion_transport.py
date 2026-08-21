@@ -29,6 +29,7 @@ from ..domain import (
     SUPPORTED_PROTOCOL_VERSIONS,
     is_action_level_mcp_action,
 )
+from ..domain.provider_authorization import validate_provider_call_authorization
 
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 REPLAN_RUN_STATUSES = frozenset(
@@ -62,6 +63,7 @@ TERMINAL_DIALOGUE_RUN_STATUSES = DIALOGUE_RUN_STATUSES - {
     "replanning",
 }
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+PORTABLE_AUTHORITY_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
 COMPANION_SESSION_CONTRACT_VERSION = "1.0.0"
 BLENDER_ADAPTER_CAPABILITIES = {
     "presentation": {
@@ -358,10 +360,49 @@ class CompanionTransport:
         self.control.put({"kind": "refresh_replan_providers"})
 
     def start_replan_run(self, request: dict[str, Any]) -> None:
+        if not isinstance(request, dict):
+            raise ValueError("provider_authority_required: replan request must be an object")
+        self._validate_exact_keys(
+            request,
+            {
+                "generationRequestId",
+                "revisionRequestId",
+                "providerId",
+                "providerVersion",
+                "targetAdapterId",
+                "targetInstanceId",
+                "authorization",
+            },
+            "Replan request",
+        )
         generation_request_id = request.get("generationRequestId")
-        self._validated_optional_uuid(
+        self._validated_required_uuid(
             generation_request_id,
             "Replan generation request id",
+        )
+        self._validated_required_uuid(
+            request.get("revisionRequestId"), "Replan revision request id"
+        )
+        if (
+            not isinstance(request.get("providerId"), str)
+            or PORTABLE_AUTHORITY_ID_PATTERN.fullmatch(request["providerId"]) is None
+            or not isinstance(request.get("providerVersion"), str)
+            or re.fullmatch(
+                r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)",
+                request["providerVersion"],
+            )
+            is None
+        ):
+            raise ValueError("Replan provider binding is invalid")
+        if (
+            request.get("targetAdapterId") != "blender"
+            or request.get("targetInstanceId") != self._instance_id
+        ):
+            raise ValueError("Replan request targets a different Blender instance")
+        validate_provider_call_authorization(
+            request.get("authorization"),
+            provider_id=request.get("providerId"),
+            provider_version=request.get("providerVersion"),
         )
         self.replan_runs.put(request)
 
@@ -370,21 +411,22 @@ class CompanionTransport:
         self.control.put({"kind": "refresh_dialogue_providers"})
 
     def start_dialogue_run(self, request: dict[str, Any]) -> None:
-        dialogue_request_id = request.get("dialogueRequestId")
-        self._validated_optional_uuid(dialogue_request_id, "Dialogue request id")
-        self.dialogue_runs.put(request)
+        del request
+        raise ValueError(
+            "provider_authority_unavailable: companion dialogue requires signed "
+            "packet-bound authority"
+        )
 
     def refresh_initial_plan_providers(self) -> None:
         """Queue an explicit initial-planner provider discovery request."""
         self.control.put({"kind": "refresh_initial_plan_providers"})
 
     def start_initial_plan_run(self, request: dict[str, Any]) -> None:
-        generation_request_id = request.get("generationRequestId")
-        self._validated_optional_uuid(
-            generation_request_id,
-            "Initial-plan generation request id",
+        del request
+        raise ValueError(
+            "provider_authority_unavailable: companion initial planning requires "
+            "signed packet-bound authority"
         )
-        self.initial_plan_runs.put(request)
 
     def decide_proposal(self, proposal_id: str, decision: str) -> None:
         self.submit_proposal_decision(
@@ -2185,6 +2227,8 @@ class CompanionTransport:
     def _validate_replan_run_response(
         response: dict[str, Any], generation_request_id: Any
     ) -> str:
+        if response.get("contractVersion") != "1.1.0":
+            raise ValueError("Runtime returned an unsupported replan run contract")
         if response.get("generationRequestId") != generation_request_id:
             raise ValueError("Runtime returned the wrong replan run")
         status = response.get("status")

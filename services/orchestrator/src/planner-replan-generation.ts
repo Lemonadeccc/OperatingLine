@@ -15,6 +15,7 @@ import {
   type PlannerReplanGenerateRequest,
   type PlannerReplanGenerationResult,
   type PlanningQualityReport,
+  type PlannerProviderRuntimeTreatmentAttestation,
   type ReplanningPromptPacket,
   type ReplanningPromptRequest,
 } from '@operatingline/protocol';
@@ -25,6 +26,7 @@ import {
   snapshotPlannerProviderRuntimeTreatment,
 } from './planner-provider-attestation.js';
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
+import type { RegisteredPlannerProvider } from './planner-provider-registry.js';
 import {
   createPlannerProviderInvocationManager,
   plannerProviderRequestFingerprint,
@@ -59,6 +61,15 @@ export interface PlannerReplanGenerationCoordinatorOptions {
 
 export interface PlannerReplanGenerationCoordinator {
   generate(request: PlannerReplanGenerateRequest): Promise<PlannerReplanGenerationResult>;
+  generateAuthorized(
+    request: PlannerReplanGenerateRequest,
+    authorize: (input: {
+      readonly request: PlannerReplanGenerateRequest;
+      readonly packet: ReplanningPromptPacket;
+      readonly registered: RegisteredPlannerProvider;
+      readonly runtimeTreatment: PlannerProviderRuntimeTreatmentAttestation | undefined;
+    }) => void,
+  ): Promise<PlannerReplanGenerationResult>;
   completedResult(requestId: string): PlannerReplanGenerationResult | null;
   close(): Promise<void>;
 }
@@ -172,6 +183,7 @@ export function createPlannerReplanGenerationCoordinator(
     requestFingerprint: string,
     packet: ReplanningPromptPacket,
     attemptContext: PlannerProviderAttemptContext,
+    authorize?: Parameters<PlannerReplanGenerationCoordinator['generateAuthorized']>[1],
   ): Promise<PlannerReplanGenerationResult> => {
     const startedAt = Date.now();
     let requestRecorded = false;
@@ -222,6 +234,12 @@ export function createPlannerReplanGenerationCoordinator(
         },
         'same_request_id',
       );
+      authorize?.({
+        request,
+        packet: structuredClone(packet),
+        registered: attemptContext.registered,
+        runtimeTreatment,
+      });
       attemptContext.markAttempted();
       requestRecorded = true;
 
@@ -356,50 +374,56 @@ export function createPlannerReplanGenerationCoordinator(
     }
   };
 
+  const generate = async (
+    requestInput: PlannerReplanGenerateRequest,
+    authorize?: Parameters<PlannerReplanGenerationCoordinator['generateAuthorized']>[1],
+  ): Promise<PlannerReplanGenerationResult> => {
+    const request = plannerReplanGenerateRequestSchema.parse(requestInput);
+    const requestFingerprint = plannerProviderRequestFingerprint(request);
+    let packet: ReplanningPromptPacket | null = null;
+    const result = await invocationManager.execute({
+      requestId: request.requestId,
+      operation: 'local_replan',
+      fingerprint: requestFingerprint,
+      providerId: request.providerId,
+      planKey: () => {
+        try {
+          packet = replanningPromptPacketSchema.parse(
+            options.buildPacket(requestToPrompt(request)),
+          );
+        } catch (error) {
+          if (error instanceof PlannerGenerationRuntimeError) {
+            throw error;
+          }
+          throw new PlannerGenerationRuntimeError(
+            'planner_catalog_invalid',
+            'Replanning Packet could not be built from the immutable host request and catalog',
+            'same_request_id',
+          );
+        }
+        return [
+          packet.context.revisionRequest.adapterId,
+          packet.context.revisionRequest.basePlan.id,
+        ];
+      },
+      requiresReplan: true,
+      attempt: (attemptContext) => {
+        if (packet === null) {
+          throw new PlannerGenerationRuntimeError(
+            'planner_internal_failed',
+            'Planner replan invocation began without a prepared prompt packet',
+            'same_request_id',
+          );
+        }
+        return generateAttempt(request, requestFingerprint, packet, attemptContext, authorize);
+      },
+    });
+    return plannerReplanGenerationResultSchema.parse(result);
+  };
+
   return {
-    generate: async (requestInput) => {
-      const request = plannerReplanGenerateRequestSchema.parse(requestInput);
-      const requestFingerprint = plannerProviderRequestFingerprint(request);
-      let packet: ReplanningPromptPacket | null = null;
-      const result = await invocationManager.execute({
-        requestId: request.requestId,
-        operation: 'local_replan',
-        fingerprint: requestFingerprint,
-        providerId: request.providerId,
-        planKey: () => {
-          try {
-            packet = replanningPromptPacketSchema.parse(
-              options.buildPacket(requestToPrompt(request)),
-            );
-          } catch (error) {
-            if (error instanceof PlannerGenerationRuntimeError) {
-              throw error;
-            }
-            throw new PlannerGenerationRuntimeError(
-              'planner_catalog_invalid',
-              'Replanning Packet could not be built from the immutable host request and catalog',
-              'same_request_id',
-            );
-          }
-          return [
-            packet.context.revisionRequest.adapterId,
-            packet.context.revisionRequest.basePlan.id,
-          ];
-        },
-        requiresReplan: true,
-        attempt: (attemptContext) => {
-          if (packet === null) {
-            throw new PlannerGenerationRuntimeError(
-              'planner_internal_failed',
-              'Planner replan invocation began without a prepared prompt packet',
-              'same_request_id',
-            );
-          }
-          return generateAttempt(request, requestFingerprint, packet, attemptContext);
-        },
-      });
-      return plannerReplanGenerationResultSchema.parse(result);
-    },
+    generate: (requestInput) => generate(requestInput),
+    generateAuthorized: (requestInput, authorize) => generate(requestInput, authorize),
     completedResult: (requestId) => {
       const result = invocationManager.completedResult(requestId, 'local_replan');
       return result === null ? null : plannerReplanGenerationResultSchema.parse(result);

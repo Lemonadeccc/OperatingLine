@@ -85,15 +85,19 @@ export const companionDialogueRunCreateRequestSchema = z
     targetInstanceId: z.uuid(),
     revisionRequest: guideRevisionRequestSchema,
     history: z.array(plannerDialogueHistoryMessageSchema).max(12),
-    authorization: z.strictObject({
-      disclosureVersion: companionDialogueRunDisclosureVersionSchema,
-      dataHandlingAcknowledged: z.literal(true),
-      possibleChargesAcknowledged: z.literal(true),
-      authorizedProviderCallLimit: z.literal(2),
-      automaticReplanAcknowledged: z.literal(true),
-      proposalCreationAcknowledged: z.literal(true),
-      authorizedAt: z.iso.datetime({ offset: true }),
-    }),
+    authorization: z
+      .strictObject({
+        disclosureVersion: companionDialogueRunDisclosureVersionSchema,
+        dataHandlingAcknowledged: z.literal(true),
+        possibleChargesAcknowledged: z.literal(true),
+        authorizedProviderCallLimit: z.literal(2),
+        automaticReplanAcknowledged: z.literal(true),
+        proposalCreationAcknowledged: z.literal(true),
+        authorizedAt: z.iso.datetime({ offset: true }),
+      })
+      .describe(
+        'Legacy boolean disclosure receipt retained for wire parsing only; it never authorizes Provider side effects.',
+      ),
   })
   .superRefine((request, context) => {
     const ids = [
@@ -145,7 +149,10 @@ export const companionDialogueRunCreateRequestSchema = z
         message: 'Dialogue history must end with an assistant response',
       });
     }
-  });
+  })
+  .describe(
+    'Legacy read-only compatibility request. No executable coordinator accepts this request as Provider authority.',
+  );
 export type CompanionDialogueRunCreateRequest = z.infer<
   typeof companionDialogueRunCreateRequestSchema
 >;

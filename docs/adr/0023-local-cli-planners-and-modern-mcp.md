@@ -1,5 +1,8 @@
 # ADR 0023：本机 CLI Planner 与 MCP 2026-07-28 兼容
 
+> 2026-08-21 安全修订：本文所述 Companion Initial Plan Run 当前暂停；旧 Blender boolean confirmation
+> 不构成 Provider authority。独立 Bearer-authenticated operator MCP/HTTP planner/replan generate 路径保持可用。
+
 ## 状态
 
 已接受。

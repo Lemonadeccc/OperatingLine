@@ -236,8 +236,8 @@ Companion protocol v1 以单宿主计划为投递单位：一个 GuidePlan 的�
 供应商无关 PlanningPromptPacket。客户端先 evaluate 完整 draft，再把 draft 与 `goalRequestId` 交给
 既有 `operatingline.guide.propose`；Orchestrator 核对请求身份并把 Proposal 只投递给原实例。请求提交、
 packet 获取、规划、Proposal 到达和 Reject 都不改变宿主场景；Accept 只安装，`Next` 才可能执行动作。
-同一实例只保留一个 pending goal request，并在 Initial Plan Run、Replan Run、Dialogue Run 与未决 Proposal 之间执行
-目标级互斥。Goal 来源 PlanningContext 只携带发起实例的状态；规划事件在 packet 外层保存
+同一实例只保留一个 pending goal request，并在签署 Replan Run 与未决 Proposal 之间执行目标级互斥；
+升级前的非终态 Initial Plan/Dialogue Run 会在启动时退休，不再占用该槽。Goal 来源 PlanningContext 只携带发起实例的状态；规划事件在 packet 外层保存
 request/instance 来源，实例范围 Eval 不接受无来源或其他实例的 context、prompt、quality 证据。
 完整请求边界见 [ADR 0020](../adr/0020-host-initiated-goal-to-guidance.md)。
 
@@ -262,14 +262,8 @@ Plan 或场景。
 Provider 收到完整 ancestor/source/target 与权威 `expectedMergedPlan`，输出必须与其深度相等；它不能自行
 解决冲突。Merge Proposal 保存 `mergeBaseRequestId`，仍经过同一 diff 与 Accept/Reject 门。
 
-`CompanionDialogueRun 1.0.0` 为 Revision Workspace 增加一条独立、逐轮授权的模型对话路径。用户必须
-明确选择支持 dialogue/replan 的 Provider，并确认数据处理、可能费用、最多两次 Provider 调用、固定
-`0.8` 自动重规划阈值以及只创建 Proposal 的边界。第一次调用把助手文本增量持久化为 append-only
-revision，并只返回严格的 `answer` 或 `replan(confidence)` 决策；没有 replan 决策或置信度低于阈值时
-只结束回答。达到阈值时，Runtime 才把预先授权的普通 `revise` 候选原子保存为 GuideRevisionRequest，
-再以第二次调用复用既有类型化 replan、quality/locality gate 与 canonical propose。Blender 不直接消费
-Provider SSE，只短轮询 durable Run 状态；任何成功重规划最多进入只读 Proposal，Accept 前不安装计划，
-`Next` 前不修改场景。完整边界见
+`CompanionDialogueRun 1.0.0` 当前冻结为历史 wire/status 兼容。旧 boolean confirmation 不构成 Provider
+authority，create/status 入口 fail closed，启动退休升级前非终态记录且不重放 Provider。完整历史边界见
 [ADR 0035](../adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 
 `operatingline.replan.thread.get` 与 `/api/v1/replan/thread` 从现有请求、Proposal 和决策表派生只读
@@ -784,13 +778,15 @@ request 关联、revision-proposed 事件与 provider-generation provenance 在�
 
 初始和局部 provider generation 都把缺失 coverage、未知 capability、不存在或 actionless 的 step、
 action/capability 不匹配以及局部范围外 step 作为 planning-quality error。结果状态为
-`needs_revision`，`proposalCreated` 保持 `false`；只有单独的 canonical propose（或已逐次授权的 Run
+`needs_revision`，`proposalCreated` 保持 `false`；只有单独的 canonical propose（或持有有效签名 authority 的 Run
 组合该调用）才能创建待审 Proposal。Coverage 不改变 provider 的显式选择、数据披露、宿主 Accept 或
 `Start`/`Next` 执行边界。
 
-能够等待长 Promise 的 MCP/HTTP 客户端继续使用上述分离路径。Initial Goal 还可以在 Goal 已持久化后，
-由宿主用户明确选择 Provider、查看数据/可能费用披露并逐次确认异步
-`CompanionInitialPlanRun 1.0.0`：
+能够等待长 Promise 的 Bearer-authenticated MCP/HTTP operator 客户端继续使用上述分离路径。
+`CompanionInitialPlanRun 1.0.0` 当前固定禁用：旧 boolean confirmation 不是 Provider authority，Runtime
+不装配协调器，create/status 返回 503 `provider_authority_unavailable`，Blender 不构造或 POST 旧请求。
+
+以下流程图仅保留为历史设计，不代表当前可用入口：
 
 ```text
 Goal acknowledgement + explicit provider + per-call disclosure confirmation
@@ -813,11 +809,12 @@ generate 不能以相同 UUID 冒充宿主授权。Goal Proposal、请求关联�
 [ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
 
 局部修订的宿主 Companion 另有版本化异步
-`CompanionReplanRun 1.0.0`：它在用户查看 Provider descriptor 并逐次确认后，先持久化授权并立即返回
-`202 queued`，再由 Orchestrator 后台复用相同 generate 和 canonical propose 权威。
+`CompanionReplanRun 1.1.0`：它只接受可信 operator 签发、绑定精确 Provider packet 且可消费的 authority，
+先持久化验证证据并立即返回 `202 queued`，再由 Orchestrator 后台复用 authorized generate 和 canonical
+propose 权威。Blender 不自签 authority。
 
 ```text
-host acknowledgement + explicit provider + per-call disclosure confirmation
+trusted operator signature + exact packet/provider binding
                                 │
                                 ▼
 POST companion/replan-run ── 202 queued
@@ -831,8 +828,8 @@ short GET status ◄────────────────────
 existing Companion delivery → in-host Accept/Reject → Next may mutate scene
 ```
 
-Run request 不携带凭据、endpoint、模型或 reasoning；它绑定 generation/revision UUID、Provider ID/version、
-adapter/instance，以及数据处理、可能费用和 Proposal creation 三项确认。同一宿主实例只允许一个非终态
+Run request 不携带凭据、endpoint、模型或 reasoning；它绑定 generation/revision UUID、Provider
+descriptor/model、packet/disclosed-data 摘要、adapter/instance、调用上限和有效期。同一宿主实例只允许一个非终态
 Run，且已有待决 Proposal 时拒绝新 Run；所有 Proposal 写入还会在事务中原子取得一个 unresolved slot，
 所以 Provider 等待期间的并发外部 Proposal 最多让 Run 安全失败，不会留下两个待审项。状态仅为 `queued | generating | needs_revision |
 proposal_created | failed | interrupted`，携带 `sceneChanged: false`、安全错误或确定性 quality/locality
@@ -864,20 +861,21 @@ provider-free standalone                 services/openai-runtime
 ```
 
 本机 CLI 使用第三个显式 composition root `pnpm dev:clients`。它同时注册 Codex CLI 与 Claude Code CLI
-descriptor；缺失的 executable 保留为不可用项。Blender 仍通过同一个宿主授权 Initial/Replan Run 调用，
-而不是新增一条绕过 Provider 契约的命令路径。
+descriptor；缺失的 executable 保留为不可用项。外部 Bearer-authenticated operator 仍使用明确的
+generate → propose 两步路径。Companion Initial/Dialogue 固定禁用；Replan 只有在另行提供可信签名、
+packet-bound authority 时可组合相同 Provider 契约。
 
 ```text
 pnpm dev:clients
     │ probe installed executables only
     ▼
 services/cli-runtime
-    │ exact renderedPrompt over stdin after one Blender confirmation
+    │ exact renderedPrompt over stdin after explicit operator generate
     ├─> Codex: temporary cwd + ephemeral + read-only + no shell env inheritance
     └─> Claude: safe mode + no tools/session + bounded per-run budget
               │ JSON only
               ▼
-      canonical Provider validation → pending Proposal → in-host Accept/Reject
+      canonical Provider validation → explicit propose → pending Proposal → in-host Accept/Reject
 ```
 
 CLI 子进程不会继承任何 `OPERATINGLINE_*` 或 MCPB signing 变量。Codex/Claude 自己管理认证与远端费用；
@@ -902,8 +900,9 @@ ActionCatalog 约束的动态 records，不符合厂商严格 Structured Outputs
 该 provider 的公开 descriptor 声明 `executionLocation: remote`、
 `dataTransmission: provider_managed` 与 `credentialManagement: provider_managed`。它不公开模型凭据；
 模型只存在于 provider 配置和描述文本，不进入通用 generate wire request。该实现用同一清洗后的
-Responses 边界支持初始 `generate()`、局部 `replan()` 与 streamed dialogue；前两者不会自动创建
-Proposal，dialogue 也只有在逐次授权且语义阈值通过后才可能组合一个待审 Proposal。这些路径都不证明
+Responses 边界实现初始 `generate()`、局部 `replan()` 与 streamed dialogue 的 Provider 能力；前两者不会自动创建
+Proposal。Companion Dialogue 协调器当前固定禁用，默认 composition root 不提供签发器或 trust source，
+因此没有生产入口调用 dialogue 或由它组合 Proposal；该能力须完成签名 packet-bound authority 迁移后才能恢复。这些路径都不证明
 任意目标或节点修改的语义规划质量。具体厂商决策见
 [ADR 0014](../adr/0014-openai-responses-planner-provider.md)，类型化局部重规划决策见
 [ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
@@ -1064,11 +1063,11 @@ OpenAI Responses Provider 与 opt-in composition root 见
 [ADR 0017](../adr/0017-catalog-grounded-goal-coverage.md)。
 类型化 Provider 节点局部重规划见
 [ADR 0015](../adr/0015-typed-provider-local-replanning.md)。
-宿主授权的异步 Replan Run 见
+签名授权的异步 Replan Run 见
 [ADR 0016](../adr/0016-host-mediated-asynchronous-replan-runs.md)。
-宿主授权的异步 Initial Plan Run 见
+已暂停的旧版异步 Initial Plan Run 见
 [ADR 0021](../adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
-流式模型对话与授权内语义重规划见
+已暂停的旧版流式模型对话与语义重规划见
 [ADR 0035](../adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 本机 CLI Planner、现代 MCP 协商与 MCPB 签名边界见
 [ADR 0023](../adr/0023-local-cli-planners-and-modern-mcp.md)。

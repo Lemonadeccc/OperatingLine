@@ -1,9 +1,12 @@
 # ADR 0035：流式模型对话与置信度门控语义重规划
 
-- 状态：已接受
+- 状态：已暂停（2026-08-21；等待签署 packet-bound Provider authority 迁移）
 - 日期：2026-08-12
 
 ## 背景
+
+> 安全修订：本文记录的 boolean confirmation 不构成 Provider authority。Runtime 当前不装配该协调器，
+> create/status 路由固定返回 503 `provider_authority_unavailable`，Blender 不构造或发送旧请求。
 
 Revision Workspace 已支持结构化引用、显式 Provider Replan Run 和 Proposal 审批，但每轮修改仍要求用户
 先判断“这是问题还是改动”，再选择不同工具。直接把聊天流接进 Blender 或允许模型自行重试/执行会破坏

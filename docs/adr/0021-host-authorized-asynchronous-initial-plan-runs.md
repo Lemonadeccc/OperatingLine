@@ -1,9 +1,12 @@
 # ADR 0021：宿主授权的异步 Initial Plan Run
 
-- 状态：已接受
+- 状态：已暂停（2026-08-21；等待签署 packet-bound Provider authority 迁移）
 - 日期：2026-08-09
 
 ## 背景
+
+> 安全修订：本文记录的 boolean confirmation 不构成 Provider authority。Runtime 当前不装配该协调器，
+> create/status 路由固定返回 503 `provider_authority_unavailable`，Blender 不构造或发送旧请求。
 
 ADR 0020 已让 Blender 用户从原生 `Goal to Guidance` 提交不可变目标。默认流程保持供应商无关：
 Codex、Claude 或其他 MCP 客户端发现 Goal、取得精确 Planner Packet，再显式提交 Proposal。这条路径可审计，

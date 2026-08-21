@@ -26,13 +26,17 @@ export const companionInitialPlanRunCreateRequestSchema = z
     providerVersion: catalogVersionSchema,
     targetAdapterId: z.string().trim().min(1).max(180),
     targetInstanceId: z.uuid(),
-    authorization: z.strictObject({
-      disclosureVersion: companionInitialPlanRunDisclosureVersionSchema,
-      dataHandlingAcknowledged: z.literal(true),
-      possibleChargesAcknowledged: z.literal(true),
-      proposalCreationAcknowledged: z.literal(true),
-      authorizedAt: z.iso.datetime({ offset: true }),
-    }),
+    authorization: z
+      .strictObject({
+        disclosureVersion: companionInitialPlanRunDisclosureVersionSchema,
+        dataHandlingAcknowledged: z.literal(true),
+        possibleChargesAcknowledged: z.literal(true),
+        proposalCreationAcknowledged: z.literal(true),
+        authorizedAt: z.iso.datetime({ offset: true }),
+      })
+      .describe(
+        'Legacy boolean disclosure receipt retained for wire parsing only; it never authorizes Provider side effects.',
+      ),
   })
   .superRefine((request, context) => {
     if (request.generationRequestId === request.goalRequestId) {
@@ -42,7 +46,10 @@ export const companionInitialPlanRunCreateRequestSchema = z
         message: 'generationRequestId must differ from goalRequestId',
       });
     }
-  });
+  })
+  .describe(
+    'Legacy read-only compatibility request. No executable coordinator accepts this request as Provider authority.',
+  );
 export type CompanionInitialPlanRunCreateRequest = z.infer<
   typeof companionInitialPlanRunCreateRequestSchema
 >;

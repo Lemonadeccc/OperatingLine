@@ -159,6 +159,40 @@ def visual_provider_list():
     }
 
 
+def begin_visual_replan(state, instance_id):
+    provider = state.selected_provider
+    assert provider is not None
+    return state.begin(
+        target_instance_id=instance_id,
+        generation_request_id=str(uuid.uuid4()),
+        authorization={
+            "formatVersion": "1.0.0",
+            "canonicalization": "operatingline-authority-json-v1",
+            "kind": "ProviderCallAuthorization",
+            "authorityId": str(uuid.uuid4()),
+            "issuer": "trusted-visual-fixture",
+            "notBefore": "2026-08-21T00:00:00Z",
+            "expiresAt": "2099-08-21T00:00:00Z",
+            "provider": {
+                "providerId": provider["id"],
+                "descriptorVersion": provider["version"],
+                "model": "visual-fixture",
+            },
+            "operation": "semantic_replan_generation",
+            "generationRequestSha256": "a" * 64,
+            "disclosedDataSha256": "b" * 64,
+            "maximumCallCount": 1,
+            "signature": {
+                "signerId": "trusted-visual-fixture",
+                "keyId": "visual-key-1",
+                "algorithm": "ed25519",
+                "signature": "A" * 86,
+                "signedAt": "2026-08-21T00:00:00Z",
+            },
+        },
+    )
+
+
 def configure_provider_handoff(*, generating):
     companion = extension.get_companion()
     fake_transport = StrictFakeTransport()
@@ -174,10 +208,13 @@ def configure_provider_handoff(*, generating):
         f"Request {revision_request_id[:8]} stored in runtime for MCP planner"
     )
     if generating:
-        run = companion.begin_replan_run()
+        run = begin_visual_replan(
+            companion.provider_handoff, companion.instance_id
+        )
+        fake_transport.start_replan_run(run)
         companion.provider_handoff.apply_status(
             {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "generationRequestId": run["generationRequestId"],
                 "revisionRequestId": revision_request_id,
                 "targetAdapterId": "blender",

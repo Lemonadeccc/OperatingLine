@@ -6,8 +6,8 @@
 > 当前阶段：`0.1.0` 垂直切片。Blender 内引导与本地 Orchestrator ↔ Companion
 > 计划投递/状态回传闭环已可运行；用户现在可以直接在 Blender 的 `Goal to Guidance` 输入目标，
 > 再由 Codex、Claude 或其他 MCP 客户端发现不可变请求、取得精确 Planner Packet，并提交只返回该
-> Blender 实例的待审 GuideProposal；若显式 Runtime 已配置 Provider，用户也可以留在 Blender 中查看
-> 数据传输/可能费用、逐次确认异步 Initial Plan Run。两条路径最终都只创建待审 Proposal。用户在
+> Blender 实例的待审 GuideProposal；Companion Initial Plan Run 当前因缺少签署 packet-bound Provider
+> authority 而固定禁用。外部 operator planner 路径仍只创建待审 Proposal。用户在
 > Blender 内预览完整任务树并明确接受或拒绝。用户还可从活动树或待审树引用节点、提交不可变修订
 > 请求，再由外部 MCP 客户端返回只投递给该 Blender 实例的完整新版 Proposal。内置计划可完成并
 > 回退一张确定性的雪人渲染预览。
@@ -25,9 +25,8 @@
 > 也可显式注入进程内 Planner Provider，生成经严格验证但尚未提交的初始草案。节点修订现在还有独立
 > capability-aware `PlanningPromptPacket` / `ReplanningPromptPacket 1.1.0`、引用子树 locality 门禁和可选
 > provider `replan()`；历史目录继续使用 `1.0.0` packet 精确回放。MCP 客户端仍以
-> 两个显式步骤完成 generate 与 propose。Blender 用户现在也可在 Runtime 确认 Goal 或 revision request
-> 后，明确选择一个已注册 Provider、查看数据传输/可能费用披露，并逐次确认异步 Initial Plan Run 或
-> Replan Run；Runtime 只在 canonical
+> 两个显式步骤完成 generate 与 propose。Blender 的 Companion Replan Run 只接受可信 operator 签发、
+> 与精确 packet 绑定的 Provider authority；Runtime 只在 canonical
 > 结果 ready 时创建待审 Proposal，之后仍必须在 Blender Accept/Reject。仓库提供一个同时支持初始/局部规划的可选 OpenAI Responses Provider、
 > 本机 Codex/Claude CLI Provider 和各自独立的 opt-in composition root；默认 standalone 仍不加载这些
 > Provider 或凭据。MCP HTTP 与 stdio bridge 已自动协商稳定版 `2026-07-28`，同时兼容旧客户端。Blender 内已有可折叠的
@@ -62,10 +61,10 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   `server/discover` / 旧版 `initialize`）会把
   `pending request → exact packet → evaluate → propose → Blender review` 工作流交给客户端，连接本身
   不授予执行权限。
-- **Blender 内逐次调用本机 CLI Planner**：`pnpm dev:clients` 显式注册 Codex CLI 与 Claude Code CLI。
-  Blender 复用已有 Provider 列表、远程数据/可能费用披露和原生确认 dialog；Runtime 仅把精确 Planner
-  Packet 通过 stdin 交给 CLI，并把返回 JSON 送入相同的严格目录、coverage、quality/locality 与 Proposal
-  审批边界。Codex 使用临时空目录、ephemeral/read-only 和无 shell 环境继承；Claude 禁用 tools、配置
+- **本机 CLI Planner Provider 注册**：`pnpm dev:clients` 显式注册 Codex CLI 与 Claude Code CLI，供外部
+  Bearer-authenticated MCP/HTTP operator 调用。Runtime 仅把精确 Planner Packet 通过 stdin 交给 CLI，
+  并把返回 JSON 送入相同的严格目录、coverage、quality/locality 门；generate 固定不创建 Proposal，外部
+  operator 仍须显式 propose。Codex 使用临时空目录、ephemeral/read-only 和无 shell 环境继承；Claude 禁用 tools、配置
   与 session persistence，并默认限制每次最多 1 USD。两者都不获得 OperatingLine Token，也不能直接
   执行 Blender action。桌面 GUI 没有稳定 headless API，仍由用户在 GUI 内通过 MCP 发起任务。
 - **MCP `2026-07-28` 与签名分发**：HTTP Runtime 由官方 SDK 提供现代/旧版双时代入口；stdio bridge
@@ -417,14 +416,9 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   `operatingline.goal.prompt.get` 取得同一 Planner Packet，evaluate 完整 draft 后把它与
   `goalRequestId` 交给既有 `operatingline.guide.propose`。Proposal 只投递给原实例，仍须在 Blender
   Accept/Reject；请求、packet、规划、预览和 Reject 都不改场景。默认 Runtime 不自动调用 Provider。
-- **宿主授权的异步 Initial Plan Run**：Goal 获得 Runtime acknowledgement 后，Blender 可刷新公开
-  Planner Provider descriptor；默认不选择，用户选中后会看到目标、ActionCatalog、精确宿主实例状态的
-  local/remote 传输方式与可能费用提示。每次原生确认只授权一个新 generation UUID；
-  `POST /api/v1/companion/initial-plan-run` 立即返回 `202`，后台只在严格结果 ready 时创建 Goal-linked
-  Proposal。普通 MCP generate 与 Goal Run 使用不同 provenance fingerprint，Proposal 还原子保存
-  `generationRequestId → proposalId`，因此重启只恢复精确来源而不重复调用 Provider。整个 Run、预览和
-  Reject 不改场景；Accept 只安装，`Start` / `Next` 才可能执行。默认 standalone 的 Provider 列表为空，
-  前述 Codex/Claude MCP 路径不受影响。
+- **Companion Initial Plan Run 暂停**：旧版 Blender boolean confirmation 不是 Provider authority。
+  create/status 路由固定返回 503 `provider_authority_unavailable`，Runtime 不装配协调器，Blender 显示禁用
+  状态且不构造或 POST 旧请求。独立、Bearer-authenticated 的 operator planner/MCP 路径不受影响。
 - **显式 Planner Provider 边界**：嵌入 Orchestrator 的调用方可通过
   `@operatingline/planner-provider-sdk` 注入一个或多个进程内 provider，再由
   `operatingline.planner.providers.list` 与 `operatingline.planner.generate` 显式选择并调用。
@@ -461,11 +455,11 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   历史无能力目录仍使用 packet `1.0.0` 回放。要把 provider 草案送审，`replan.propose` 必须携带 canonical
   `generationRequestId` 且逐字段匹配草案，才会原子记录 Proposal/request/provenance；随后仍须宿主用户
   接受。既有 provider-free 完整 Plan 提交路径继续兼容。
-- **宿主授权的异步 Replan Run**：Blender 只在 revision request 已由 Runtime acknowledgement 后开放
-  可选 Provider handoff。公开 descriptor 不含凭据，界面不自动选择 Provider；远端调用前明确说明会
-  发送修订消息、完整 base Plan/引用、ActionCatalog 和最新 Companion 状态，并提示可能产生费用。
-  每次 `Confirm Provider Run` 或 Retry 的 `Confirm New Provider Run` 都通过 Blender 原生确认 dialog 取得一次性授权和新的 generation
-  UUID。`POST /api/v1/companion/replan-run` 快速返回 `202`，Orchestrator 后台复用现有严格 generate 与
+- **签名授权的异步 Replan Run**：`CompanionReplanRun 1.1.0` 只接受可信 operator 签发、与精确
+  Provider descriptor/model、generation/revision UUID、canonical packet、披露数据和有效期绑定的
+  `ProviderCallAuthorization`。Blender 不签发、猜测或用本地 boolean confirmation 替代该凭证；没有配置
+  trust source 时 create/status 固定返回 `503 provider_authority_unavailable`。授权存在时，
+  `POST /api/v1/companion/replan-run` 快速返回 `202`，Orchestrator 后台复用现有严格 generate 与
   canonical propose，Blender 继续用短请求轮询 `queued`、`generating`、`needs_revision`、
   `proposal_created`、`failed` 或 `interrupted`。同一宿主实例只允许一个非终态 Run。所有 Proposal
   writer 还会原子争用一个待决槽；并发外部 Proposal 最多使 Run 安全失败，不会隐藏旧提案。
@@ -476,14 +470,12 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   禁用；精确 Run ID 不会被普通 Plan/Proposal 投递或晚到 ACK 清除。Proposal 与 terminal status 即使
   乱序到达，也只按 `(revisionRequestId, proposalId)` 绑定；Accept 前还会核对当前 Plan 仍等于 diff base。
   旧版 request-linked Proposal 若没有可验证的 diff base，只能只读查看或 Reject，不能直接 Accept。
-  默认 standalone 的 Provider 列表为空，外部 MCP 路径仍可用。
-- **流式模型对话与授权内语义重规划**：Revision Workspace 可明确选择支持 dialogue/replan 的 Provider，
-  并在每轮原生确认中同时授权可能的数据传输、费用、最多两次调用、固定 `0.8` 阈值与 Proposal-only
-  结果。首次调用的助手文本先持久化再由 Blender 短轮询显示；answer 或低于阈值的 replan 只结束回答，
-  达到阈值才原子保存候选 revision request，并自动使用第二次调用进入既有严格 replan。成功结果最多
-  创建只读 Proposal，仍需 Accept/Reject；默认不选择 Provider、不后台调用、不复用授权、不自动重试、
-  接受或执行。已保存但失败的 request 可通过普通 Replan Run 重新显式授权恢复；Reject 后的新 Dialogue
-  从当前 accepted Plan 开启新 thread。见 [ADR 0035](docs/adr/0035-streamed-dialogue-and-semantic-replanning.md)。
+  默认 composition root 不提供签发器或 trust source；独立 Bearer-authenticated MCP/HTTP
+  `replan.generate` 与 `replan.propose` 路径仍可用。
+- **Companion 流式模型对话暂停**：旧版每轮 boolean confirmation 不是 Provider authority。create/status
+  路由固定返回 503 `provider_authority_unavailable`，Runtime 不装配协调器，Blender 显示禁用状态且不构造
+  或 POST 旧请求。恢复该能力前必须迁移到可信签署、packet-bound authority。见
+  [ADR 0035](docs/adr/0035-streamed-dialogue-and-semantic-replanning.md)。
 - **修订消息历史**：`operatingline.replan.thread.get` 与对应 HTTP 接口从规范化持久化记录还原每轮
   用户请求、完整 Proposal、Plan diff 和同实例人工决策。默认读取最新页，使用 `beforeTurn` 向前
   分页；Blender Sidebar 可查看最近三轮、展开已加载轮次并继续加载更早内容。
@@ -600,9 +592,9 @@ Blender Extension 已在 Blender 4.5.3 LTS 和 5.1.1 中通过无界面集成测
 > 拆解”。默认 standalone 启动路径不加载 provider、凭据或任意模块；可选 OpenAI composition root
 > 必须由操作者显式启动并提供模型与 API Key。进程内插件与 Orchestrator 共享进程，不构成强安全
 > 隔离。当前已经支持 Blender 原生 Revision Workspace、可追溯 revision DAG、Plan diff、结构化历史、
-> 参数表单、显式 branch/merge、provider-backed local replan，以及宿主内逐次授权的异步 Run。OpenAI
-> composition root 还支持流式模型对话：每轮显式选择并确认，最多两次调用；只有模型给出 replan 且
-> confidence 达到固定 `0.8` 才在本轮授权内自动进入第二次严格重规划，最终最多创建待审 Proposal。
+> 参数表单、显式 branch/merge 和外部 operator 发起的 provider-backed local replan。Companion Replan Run
+> 已迁移到签名、packet-bound authority，但默认 composition root 不提供签发器；Initial Plan Run 与流式
+> Dialogue 当前固定禁用，旧版逐次 boolean confirmation 不再触发 Provider 调用。
 > 系统仍不会自动选择 Provider、后台发起调用、复用授权、接受 Proposal 或执行场景。Locality、结构质量门和需求覆盖链只证明
 > provider 的声明符合机器约束并可追溯到真实目录 action，不证明需求抽取正确、参数满足描述或模型
 > 理解了任意目标/修改意图。人工 Eval 的版本化协议、本地采集/盲审工具和 7 个 collecting 案例已经完成，
@@ -669,7 +661,7 @@ Transform Geometry Nodes、两种材质赋值、Armature、显式蒙皮权重、
 [ADR 0014](docs/adr/0014-openai-responses-planner-provider.md)。
 类型化 Provider 节点局部重规划、canonical propose 与 provenance 见
 [ADR 0015](docs/adr/0015-typed-provider-local-replanning.md)。
-宿主逐次授权、异步 Run、重启/重试与场景不变量见
+签名 packet-bound authority、异步 Replan Run、重启/重试与场景不变量见
 [ADR 0016](docs/adr/0016-host-mediated-asynchronous-replan-runs.md)。
 目录约束的目标需求覆盖证据、packet/baseline 兼容与非评分边界见
 [ADR 0017](docs/adr/0017-catalog-grounded-goal-coverage.md)。
@@ -679,7 +671,7 @@ Transform Geometry Nodes、两种材质赋值、Armature、显式蒙皮权重、
 [ADR 0019](docs/adr/0019-local-human-eval-capture-and-blind-review.md)。
 宿主发起的初始 Goal 请求与实例定向 Proposal 见
 [ADR 0020](docs/adr/0020-host-initiated-goal-to-guidance.md)。
-宿主逐次授权的异步 Initial Plan Run 见
+已暂停的旧版异步 Initial Plan Run 见
 [ADR 0021](docs/adr/0021-host-authorized-asynchronous-initial-plan-runs.md)。
 Codex/Claude 本地配置、MCP instructions 与 Claude Desktop MCPB 见
 [ADR 0022](docs/adr/0022-local-ai-client-distribution.md)。
@@ -876,11 +868,9 @@ pnpm package:claude-desktop
    provider 已开始后的失败、超时或进程中断不会自动重试，显式重试需使用新的 UUID。默认 `pnpm dev`
    standalone 没有配置 provider，因此列表为空且不会调用模型。
 
-   若启动的是显式配置 Provider 的 Runtime，Goal 被 acknowledgement 后也可以完全留在 Blender：刷新
-   `Goal to Guidance` 内的 Provider 列表，明确选择一项，阅读传输范围和可能费用，再点击
-   `Confirm Initial Planner Run` 并在原生 dialog 中确认。Blender 只轮询短状态请求；`needs_revision` 或失败
-   不创建 Proposal，`proposal_created` 仍只进入同一只读树与 Accept/Reject 审批。Retry 会重新披露、
-   重新确认并使用新 generation UUID。该入口不自动选择或调用 Provider。
+   Companion Initial Plan Run 当前固定禁用：旧版 Blender boolean confirmation 不是 Provider authority，
+   UI 不构造或 POST 该请求，Runtime create/status 返回 `503 provider_authority_unavailable`。显式配置的
+   Provider 仍可由外部 operator 通过上述 Bearer-authenticated generate → propose 两步路径使用。
 
 6. 若要修改某个局部节点，在活动树或待审树点击 `Ref`，在 `Revision request` 中描述变化并发送。
    MCP 客户端先调用 `operatingline.replan.requests.list` 读取 pending request。Provider-free 客户端可用
@@ -898,17 +888,13 @@ pnpm package:claude-desktop
    thread 的下一轮。调用
    `operatingline.replan.thread.get` 并传入 `{ threadId, targetAdapterId, instanceId, beforeTurn?, limit? }`
    可分页读取完整结构化历史。
-   也可以完全留在 Blender Revision Workspace：请求显示为 Runtime acknowledged 后，选择一个明确的
-   Provider，阅读 local/remote 数据处理、发送范围和可能费用提示，再点 `Confirm Provider Run` 并在
-   原生 dialog 确认。该确认只授权本次异步 Run；Retry 会换新 generation UUID 并再次确认。界面只轮询
+   Companion Replan Run 只有在收到可信 operator 签发、与精确 packet 绑定的 authority 后才可运行；
+   本地 UI 不签发或猜测该凭证。界面只轮询
    短状态请求，最终 Proposal 仍走相同的 diff 与 Accept/Reject 审批。默认 `pnpm dev` 无 Provider 时，
    该区域显示空列表，前述 MCP 路径继续可用。
 
-   使用 OpenAI composition root 时，也可在同一 Revision Workspace 刷新 `Streamed model dialogue`
-   Provider、明确选择并确认一次 Dialogue Turn。该确认披露并授权最多两次调用：第一次流式返回助手
-   文本和严格 answer/replan 决策；只有 replan confidence 达到固定 `0.8`，Runtime 才保存候选 revision
-   request 并自动执行第二次类型化 replan。Blender 只短轮询 durable 状态，不直接连接 Provider SSE。
-   低于阈值只显示回答；达到阈值的成功结果也只创建 Proposal，仍需人工 Accept 后才安装。
+   `Streamed model dialogue` 当前显示 authority-unavailable 禁用状态；旧逐轮 boolean confirmation 不构成
+   Provider authority，Blender 不 POST 该请求。
 
 7. 需要保存评测或回放证据时，调用 `operatingline.eval.export`，第一页传入
    `{ targetAdapterId, planId, instanceId?, afterSequence: 0, limit? }`；也可请求
@@ -924,7 +910,7 @@ pnpm package:claude-desktop
 | Blender `Create Guidance`           | 否                     | 否            | 否             |
 | `goal.requests.list` / `prompt.get` | 否                     | 否            | 否             |
 | 客户端自己的模型调用                | 由客户端决定           | 否            | 否             |
-| Blender Initial Plan Run            | 是（每次确认）         | ready 时是    | 否             |
+| Blender Initial Plan Run            | 否（当前禁用）         | 否            | 否             |
 | `planning.evaluate`                 | 否                     | 否            | 否             |
 | `guide.propose` + `goalRequestId`   | 否                     | 是            | 否             |
 | Blender `Accept Plan`               | 否                     | 审批既有提案  | 只安装         |
@@ -937,24 +923,25 @@ pnpm package:claude-desktop
 | `replan.prompt.get`      | 否                     | 否            | 否             |
 | `replan.generate`        | 是                     | 否            | 否             |
 | `replan.propose`         | 否                     | 是            | 否             |
-| Blender Replan Run       | 是（每次确认）         | ready 时是    | 否             |
+| Blender Replan Run       | 仅有可信签名授权时     | ready 时是    | 否             |
 | Blender `Accept Plan`    | 否                     | 审批既有提案  | 只安装         |
 | Blender `Start` / `Next` | 否                     | 否            | 用户显式执行   |
 
 流式模型对话的权限边界：
 
-| 操作                        | 调用 provider/可能计费       | 创建 Proposal            | 安装或执行计划 |
-| --------------------------- | ---------------------------- | ------------------------ | -------------- |
-| 刷新/选择 Dialogue Provider | 否                           | 否                       | 否             |
-| Blender Dialogue Turn       | 是（每次确认，最多两次调用） | 仅阈值及严格门禁通过时是 | 否             |
-| 低于 `0.8` 的回答           | 已包含在本轮首次调用         | 否                       | 否             |
-| Blender `Accept Plan`       | 否                           | 审批既有提案             | 只安装         |
-| Blender `Start` / `Next`    | 否                           | 否                       | 用户显式执行   |
+| 操作                        | 调用 provider/可能计费 | 创建 Proposal | 安装或执行计划 |
+| --------------------------- | ---------------------- | ------------- | -------------- |
+| 刷新/选择 Dialogue Provider | 否                     | 否            | 否             |
+| Blender Dialogue Turn       | 否（当前禁用）         | 否            | 否             |
+| 旧版低于 `0.8` 的回答路径   | 否（已停用）           | 否            | 否             |
+| Blender `Accept Plan`       | 否                     | 审批既有提案  | 只安装         |
+| Blender `Start` / `Next`    | 否                     | 否            | 用户显式执行   |
 
 ### 显式启用本机 Codex/Claude CLI Planner
 
-`pnpm dev:clients` 是 Blender 内调用本机 CLI 的独立 composition root。先用各 CLI 自己的登录流程完成
-认证；OperatingLine 不读取或保存其凭据。可选配置如下：
+`pnpm dev:clients` 注册本机 CLI Provider，供独立、Bearer-authenticated MCP/HTTP operator 路径显式调用。
+Blender 的 Initial Plan Run 与 Dialogue 当前禁用；Replan Run 还需要该 composition root 默认不提供的可信
+签名 authority。先用各 CLI 自己的登录流程完成认证；OperatingLine 不读取或保存其凭据。可选配置如下：
 
 ```bash
 export OPERATINGLINE_ACCESS_TOKEN='replace-with-a-local-secret-token'
@@ -968,12 +955,11 @@ export OPERATINGLINE_CLAUDE_MAX_BUDGET_USD=1.00
 pnpm dev:clients
 ```
 
-连接 Blender 后，在 `Goal to Guidance` 创建目标并等待 acknowledgement；刷新 Provider 列表即可看到
-`Codex CLI Planner` 和 `Claude Code CLI Planner`。未安装的 CLI 会保留为不可用项并说明原因。选择一项、
-阅读传输与可能费用说明，然后点击 `Confirm Initial Planner Run` 并在原生 dialog 确认。局部修改在
-Revision Workspace 中以相同步骤选择并确认。每次确认只授权一个 generation UUID；失败、超时或
-`needs_revision` 不会自动重试，也不修改场景。Codex 的实际模型费用由其 CLI 配置决定，OperatingLine
-无法给出价格上限；Claude 默认带 1 USD 单次上限，可通过上述变量在 0.01–100 USD 内调整。
+启动后，外部 operator 可读取 Provider descriptor，再显式调用 `planner.generate` / `replan.generate`，并在
+严格验证后分别调用 `guide.propose` / `replan.propose`。这些 Bearer-authenticated 入口不等同于 Blender
+Companion 授权。失败、超时或 `needs_revision` 不会自动重试，也不修改场景。Codex 的实际模型费用由其
+CLI 配置决定，OperatingLine 无法给出价格上限；Claude 默认带 1 USD 单次上限，可通过上述变量在
+0.01–100 USD 内调整。
 
 ### 显式启用 OpenAI Planner Provider
 
@@ -993,16 +979,14 @@ pnpm dev:openai
 该入口只注册 OpenAI provider，不会在后台自动调用模型。未设置独立 embedding model 时不会公布
 Procedure embedding 能力。外部调用方仍须先读取
 `operatingline.planner.providers.list` 或 `operatingline.replan.providers.list` 的远端传输声明，再显式
-提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`；Blender 路径则要求用户
-在 Goal Workspace 或 Revision Workspace 选择该 Provider 并对每个 Run 单独确认。Streamed dialogue
-还要求从独立 dialogue provider 列表明确选择，并对每一轮最多两次调用单独确认；只有严格 replan 决策
-达到 `0.8` 才在该授权内自动执行第二次调用。Packet 中的目标或修订
+提供 `providerId` 与新 UUID 调用相应的 `planner.generate` 或 `replan.generate`。Blender Replan Run
+另要求可信 operator 签署的 packet-bound authority；Initial Plan Run 与 Streamed dialogue 当前禁用。
+Packet 中的目标或修订
 消息、宿主状态和 ActionCatalog 会发送给 OpenAI；成功返回的严格草案、需求覆盖链、
 quality/locality 报告和 provenance
 会进入 OperatingLine 的未脱敏 Eval 证据。底层 generation 不会创建 Proposal、修改 Blender 或执行
-节点；外部初始规划仍须单独调用 `guide.propose`，已逐次确认的 Blender Initial Plan Run 可在 ready 时
-组合同一 Proposal 权威。局部规划可以由外部调用方用 canonical
-`generationRequestId` 调用 `replan.propose`，或由已逐次确认的 Blender Replan Run 在 ready 时组合该
+节点；外部初始规划仍须单独调用 `guide.propose`。局部规划可以由外部调用方用 canonical
+`generationRequestId` 调用 `replan.propose`，或由持有有效签名 authority 的 Blender Replan Run 在 ready 时组合该
 调用；两者产生的 Proposal 都必须由宿主用户接受。
 
 例如，MCP 客户端在规划前使用：
@@ -1071,13 +1055,12 @@ transport 近期可达，不等同于 Blender 主线程执行就绪或全 API �
    Proposal，输入区会显示将继续的 thread 与下一 turn。
 10. `Revision history` 显示每轮操作、请求、规划器返回的 revision/diff 和接受状态；默认展示最近三轮，
     `All loaded` 展开当前缓存，`Load Older Turns` 按稳定 turn 游标加载更早页面。
-11. `Goal to Guidance` 在 Goal acknowledgement 后可显示可选 Initial Plan Provider；列表默认不选择，
-    每次调用都要重新确认。queued、generating、needs_revision、failed、interrupted 或
-    proposal_created 状态只描述后台规划，不代表场景已改变。
+11. `Goal to Guidance` 的旧版 Initial Plan Provider 控件固定显示 authority unavailable，不构造或 POST
+    boolean-confirmation 请求。外部 operator 仍可通过 Bearer-authenticated generate → propose 路径提交
+    待审计划；任何后台规划状态都不代表场景已改变。
 12. `Connect`/`Disconnect` 控制本地实时 Companion；普通 Disconnect 会停止网络并取消尚未安装的
-    `guide.publish` 更新，但保留待审 Proposal、Goal 关联、活动 Initial Plan Run 的精确授权、修订草稿
-    和待确认的精确决策。重新 Connect 后只会以同一 generation UUID 恢复状态，不会另行授权一次
-    Provider 调用；Extension 卸载/重载才清理这些进程内状态。
+    `guide.publish` 更新，但保留待审 Proposal、Goal 关联、修订草稿和待确认的精确决策。重新 Connect
+    不会签发、恢复或重放旧版 Initial/Dialogue Provider 授权；Extension 卸载/重载才清理这些进程内状态。
 
 Blender 公开 Python UI API 不提供任意内置控件的稳定屏幕矩形。当前对象和世界坐标锚点会绘制
 真实目标线；版本适配器只在 Guidance 可见时替换经过 Blender 4.5/5.1 测试的
@@ -1315,7 +1298,7 @@ Changesets 版本 PR。Phase 0 不使用 PAT 或 registry credential。
 Blender 内人工审批与可回退建模、真实 Orchestrator ↔ Companion 跨进程闭环、受限的现有 Blender
 MCP Bridge、首个 Edit Mode/Modifier/Geometry Nodes 有界切片、显式蒙皮/权重与 pose transform 动画、
 Observation 成功门、Blender 原生 Undo/Redo、Revision 参数表单、显式 revision fork/merge，以及
-Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内自动语义重规划，以及最多三次的
+Codex/Claude 本地配置、Claude Desktop MCPB、签名授权的 Replan Run 边界，以及最多三次的
 同 Action Observation 有界自动重试。已有 ProcedureTree 还可在本地浏览器工作台中可视化编辑、评论，
 并通过服务端 preview、immutable revision 分支与 fail-closed 三方合并保存。
 当前仍未完成：
@@ -1323,9 +1306,10 @@ Codex/Claude 本地配置、Claude Desktop MCPB、流式模型对话与授权内
 1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
    每个 Run 仍需至少两名独立 reviewer 盲审，并附加真实宿主执行与渲染 artifact。首个可选 OpenAI
-   Responses 插件、类型化局部重规划后端、原生 Revision Workspace、逐轮授权的流式语义重规划，以及
-   Provider/Blender 运行时 treatment/artifact attestation 已经
-   完成，但它们不证明任意目标语义规划可靠；系统仍不自动选择 Provider、后台调用、接受或执行。
+   Responses 插件、类型化局部重规划后端、原生 Revision Workspace，以及 Provider/Blender 运行时
+   treatment/artifact attestation 已经完成，但它们不证明任意目标语义规划可靠；Companion Initial Plan
+   Run 与流式 Dialogue 仍等待签名 packet-bound authority 迁移，系统也不自动选择 Provider、后台调用、
+   接受或执行。
    OperatingLine 核心仍只负责 packet、权威严格验证、证据和人工审批。
 2. 在已完成的原始 eval/replay 证据导出和无分数人工判断层之上，另行设计显式评分器、数据脱敏与
    同意/保留策略、数据集切分和训练流水线；当前导出与 comparison 都不自动评分，Human Eval 的

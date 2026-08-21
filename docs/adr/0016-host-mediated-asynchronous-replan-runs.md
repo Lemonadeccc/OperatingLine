@@ -1,6 +1,6 @@
 # ADR 0016：宿主授权的异步 Replan Run
 
-- 状态：已接受
+- 状态：已接受（2026-08-21 安全边界修订）
 - 日期：2026-08-05
 
 ## 背景
@@ -49,15 +49,13 @@ GET short status polling ◄───────────────┴─�
 
 ## 版本化 wire contract
 
-Run request 使用协议 `1.0.0`，包含：
+Run request 使用协议 `1.1.0`，包含：
 
 - 独立 UUID `generationRequestId` 与已持久化的 `revisionRequestId`；二者不能相同；
 - 明确的 `providerId` 与 `providerVersion`；
 - `targetAdapterId` 与 `targetInstanceId`，服务端仍从 revision request 重新核对目标；
-- `authorization.disclosureVersion: "1.0.0"`；
-- `dataHandlingAcknowledged`、`possibleChargesAcknowledged` 和
-  `proposalCreationAcknowledged` 三个必须为 `true` 的确认；
-- RFC 3339 `authorizedAt` 审计时间。
+- `authorization`，其内容由可信 operator 以 `ProviderCallAuthorization 1.0.0` 签署，并绑定本次
+  generation request、Provider descriptor/model、规范 packet 摘要、披露数据摘要、调用上限与有效期。
 
 请求不得携带 API Key、Provider endpoint、模型配置、原始响应或 reasoning。Provider 版本必须与用户所
 查看的当前公开 descriptor 匹配；Provider 不可用、请求未 acknowledgement、已非 pending/thread head、
@@ -131,7 +129,8 @@ Proposal 的权威证据。
 
 ## Blender 交互
 
-Revision request 被 Runtime acknowledgement 后才显示可运行的 Provider handoff：
+Revision request 被 Runtime acknowledgement 后，只有宿主收到可信 operator 签发且与精确 packet 绑定的
+authority，Provider handoff 才可运行：
 
 1. Provider 选择默认空；即使只有一个可用 Provider，也不自动选择。
 2. 不可用 Provider 可显示原因，但不可运行。
@@ -139,12 +138,18 @@ Revision request 被 Runtime acknowledgement 后才显示可运行的 Provider h
    `remote + provider-managed transmission`。
 4. 所有 Provider 都说明可能存在 Provider 使用费用且 OperatingLine 无法估价；远端文案还明确列出发送
    的数据范围。本地/no-transmission 只描述数据传输，不被误写成免费。
-5. `Confirm Provider Run` 打开 Blender 原生确认 dialog；重试显示 `Confirm New Provider Run`，确认只对本次调用有效。
+5. `Confirm Provider Run` 不会自行签发 authority；缺少可信签署 packet 时固定禁用并显示
+   `provider_authority_unavailable`。
 6. Provider/request 改变、断开、终态或 Retry 都使确认失效。
 7. Blender 只执行短 POST 与短 GET 轮询；Run 不阻塞既有 Guide、history、decision 和 report I/O。
 
 Blender 不存 Provider API Key、模型或 endpoint。Loopback Bearer token 继续只存在当前 Blender 进程。
-Provider-free standalone 显示无可用 Provider，但外部 MCP planner 路径保持可用。
+Provider-free standalone 显示无可用 Provider，但独立、Bearer-authenticated 的 operator MCP/HTTP
+`replan.generate` 路径保持可用。旧 Companion dialogue 与 initial-plan 的 boolean confirmation 不能作为
+Provider authority；其 create/status 路由固定返回 503，Blender 不构造或发送旧请求，直到它们迁移到同一
+签署 packet-bound authority 边界。Runtime 启动时会把升级前遗留的 initial-plan
+`queued/generating` 与 dialogue `queued/streaming/replanning` 记录以 compare-and-set 原子退休为
+`interrupted/provider_authority_unavailable`，不调用或重放 Provider，从而释放签署 Replan Run 的实例槽。
 
 ## 场景与 Session 不变量
 
@@ -169,7 +174,7 @@ Session，但仍不执行 action；Next 才按计划修改场景。
 - Blender 获得可见、可审计、不会冻结短轮询的 Provider 局部重规划入口。
 - 异步 Run 是宿主中立的应用协议，第二软件 Companion 可以复用相同状态机和安全边界。
 - 默认 standalone 仍无 Provider、无凭据读取、无自动调用；OpenAI 仍只由 opt-in composition root 提供。
-- Run 授权是 UX 与审计事实，不是强身份凭证；进程内 Provider 仍不是安全沙箱。
+- Run authority 是可验证、可消费且绑定精确 Provider packet 的签署凭证；UX confirmation 不能替代它。
 - Descriptor 当前不能证明实际价格、接收方或保留期；若需要合规级披露，应版本化扩展 Provider policy
   identity，而不是由宿主 UI 猜测。
 - 通用任意目标自动拆解、参数表单编辑、语义质量评分/训练治理、第二软件宿主仍属于后续里程碑。

@@ -9,6 +9,7 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import type { AppAdapter } from '@operatingline/adapter-sdk';
 import {
   openOperatingLineDatabase,
+  SqliteAuthorityConsumptionStore,
   type ExecutionEventInput,
   type StoredProcedureOperationIndex as DatabaseStoredProcedureOperationIndex,
   type StoredProcedureTreeRecord as DatabaseStoredProcedureTreeRecord,
@@ -36,13 +37,9 @@ import {
   companionShortcutProofResultSchema,
   companionShortcutProofStatusRequestSchema,
   companionShortcutProofStatusSchema,
-  companionDialogueRunCreateRequestSchema,
-  companionDialogueRunStatusRequestSchema,
   companionHeartbeatRequestSchema,
   companionGuideDeliverySchema,
   companionGuideRequestSchema,
-  companionInitialPlanRunCreateRequestSchema,
-  companionInitialPlanRunStatusRequestSchema,
   companionReplanRunCreateRequestSchema,
   companionReplanRunStatusRequestSchema,
   companionSessionHelloRequestSchema,
@@ -204,21 +201,16 @@ import {
   BlenderShortcutProofExecutionError,
   createBlenderShortcutProofExecutionCoordinator,
 } from './blender-shortcut-proof-execution.js';
-import {
-  CompanionDialogueRunRequestError,
-  createCompanionDialogueRunCoordinator,
-  type CompanionDialogueRunCoordinator,
-} from './companion-dialogue-run.js';
-import {
-  CompanionInitialPlanRunRequestError,
-  createCompanionInitialPlanRunCoordinator,
-  type CompanionInitialPlanRunCoordinator,
-} from './companion-initial-plan-run.js';
+import { retireLegacyCompanionDialogueRuns } from './companion-dialogue-run.js';
+import { retireLegacyCompanionInitialPlanRuns } from './companion-initial-plan-run.js';
 import {
   CompanionReplanRunRequestError,
   createCompanionReplanRunCoordinator,
   type CompanionReplanRunCoordinator,
+  type CompanionReplanRunProviderAuthority,
 } from './companion-replan-run.js';
+import { AuthorityConsumptionCoordinator } from './authority-consumption.js';
+import { AuthorityVerifier, type AuthorityTrustSource } from './authority-verifier.js';
 import {
   CompanionLeaseError,
   createCompanionLeaseManager,
@@ -390,6 +382,10 @@ export interface StartRuntimeOptions {
   interactionCatalogs?: readonly InteractionCatalog[];
   plannerProviders?: readonly PlannerProvider[];
   plannerProviderTimeoutMs?: number;
+  companionReplanProviderAuthority?: {
+    readonly trustSource: AuthorityTrustSource;
+    readonly resolveEstimatedCost?: CompanionReplanRunProviderAuthority['resolveEstimatedCost'];
+  };
   youtubeCaptionSource?: ProcedureTutorialYoutubeCaptionSource;
   tutorialMediaRuntime?: ProcedureTutorialMediaRuntime;
   companionLeases?: CompanionLeaseManagerOptions;
@@ -610,6 +606,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
       });
       databaseForCleanup = database;
+      retireLegacyCompanionInitialPlanRuns(database);
+      retireLegacyCompanionDialogueRuns(database);
       const procedureLeafReplayCurrentStateCoordinator =
         createProcedureLeafReplayCurrentStateCoordinator(database);
       const guideRevisionRequestService = createGuideRevisionRequestService({
@@ -660,14 +658,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let procedureTutorialYoutubeTrackSelectionCoordinator:
     ProcedureTutorialYoutubeTrackSelectionCoordinator | undefined;
   let procedureTutorialMediaCoordinator: ProcedureTutorialMediaCoordinator | undefined;
-  let companionInitialPlanRunCoordinator: CompanionInitialPlanRunCoordinator | undefined;
   let companionReplanRunCoordinator: CompanionReplanRunCoordinator | undefined;
-  let companionDialogueRunCoordinator: CompanionDialogueRunCoordinator | undefined;
+  let companionReplanAuthorityStore: SqliteAuthorityConsumptionStore | undefined;
   const cleanupSteps: CleanupStep[] = [
-    () => companionInitialPlanRunCoordinator?.beginClose(),
     () => companionReplanRunCoordinator?.beginClose(),
     () => {
-      companionDialogueRunCoordinator?.beginClose();
       procedureRefinementCoordinator?.beginClose();
       procedureTutorialAuthoringRunCoordinator?.beginClose();
       procedureTutorialMediaAuthoringRunCoordinator?.beginClose();
@@ -690,9 +685,8 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     () => procedureTutorialMediaAuthoringRunCoordinator?.close(),
     () => procedureTutorialMediaCoordinator?.close(),
     () => tutorialMediaPipelineForCleanup?.close(),
-    () => companionInitialPlanRunCoordinator?.close(),
     () => companionReplanRunCoordinator?.close(),
-    () => companionDialogueRunCoordinator?.close(),
+    () => companionReplanAuthorityStore?.close(),
     () => procedureRefinementCoordinator?.close(),
     () => plannerProviderRegistry.close(),
     () => app?.close(),
@@ -3296,27 +3290,40 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         ),
       appendEvent: (event) => database.appendEvent(event),
     });
-    companionReplanRunCoordinator = createCompanionReplanRunCoordinator({
-      database,
-      providerRegistry: plannerProviderRegistry,
-      generationCoordinator: plannerReplanGenerationCoordinator,
-      replanningService,
-    });
-    companionDialogueRunCoordinator = createCompanionDialogueRunCoordinator({
-      database,
-      providerRegistry: plannerProviderRegistry,
-      invocationManager: plannerProviderInvocationManager,
-      generationCoordinator: plannerReplanGenerationCoordinator,
-      replanningService,
-      revisionRequestService: guideRevisionRequestService,
-    });
-    companionInitialPlanRunCoordinator = createCompanionInitialPlanRunCoordinator({
-      database,
-      providerRegistry: plannerProviderRegistry,
-      generationCoordinator: plannerGenerationCoordinator,
-      createProposal: (input) => createProposal(input).proposal,
-    });
-
+    if (options.companionReplanProviderAuthority !== undefined) {
+      companionReplanAuthorityStore = new SqliteAuthorityConsumptionStore(options.databasePath);
+      companionReplanRunCoordinator = createCompanionReplanRunCoordinator({
+        database,
+        providerRegistry: plannerProviderRegistry,
+        generationCoordinator: plannerReplanGenerationCoordinator,
+        replanningService,
+        authorityConsumptionCoordinator: new AuthorityConsumptionCoordinator(
+          companionReplanAuthorityStore,
+          {
+            resolveDurableCompletion: (completion) => {
+              if (completion.consumptionKind !== 'provider_authorization_consumed') return false;
+              const result = plannerReplanGenerationCoordinator?.completedResult(
+                completion.operationId,
+              );
+              return (
+                result !== null &&
+                result !== undefined &&
+                createHash('sha256').update(canonicalizeProtocolJsonValue(result)).digest('hex') ===
+                  completion.durableReceiptSha256
+              );
+            },
+          },
+        ),
+        liveProviderAuthorityVerifier: new AuthorityVerifier(
+          options.companionReplanProviderAuthority.trustSource,
+        ),
+        ...(options.companionReplanProviderAuthority.resolveEstimatedCost === undefined
+          ? {}
+          : {
+              resolveEstimatedCost: options.companionReplanProviderAuthority.resolveEstimatedCost,
+            }),
+      });
+    }
     const runtimeMcpHandler = createMcpHandler(() => {
       const server = new McpServer(
         { name: 'operating-line', version: runtimeVersion },
@@ -7428,98 +7435,32 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     });
     runtimeApp.post('/api/v1/companion/initial-plan-run', async (request, reply) => {
-      const parsedRequest = companionInitialPlanRunCreateRequestSchema.safeParse(request.body);
-      if (!parsedRequest.success) {
-        return reply.code(400).send({
-          error: 'invalid_request',
-          message: 'Companion initial plan run authorization violates the strict public contract',
-        });
-      }
-      try {
-        const run = companionInitialPlanRunCoordinator!.create(parsedRequest.data);
-        return reply.code(202).send(run);
-      } catch (error) {
-        if (error instanceof CompanionInitialPlanRunRequestError) {
-          return reply.code(error.statusCode).send({
-            error: error.code,
-            message: error.message,
-          });
-        }
-        return reply.code(500).send({
-          error: 'initial_plan_run_failed',
-          message: 'The initial plan run could not be safely authorized',
-        });
-      }
+      void request;
+      return reply.code(503).send({
+        error: 'provider_authority_unavailable',
+        message: 'Companion initial-plan Provider calls require signed packet-bound authority',
+      });
     });
     runtimeApp.get('/api/v1/companion/initial-plan-run', async (request, reply) => {
-      const parsedRequest = companionInitialPlanRunStatusRequestSchema.safeParse(request.query);
-      if (!parsedRequest.success) {
-        return reply.code(400).send({
-          error: 'invalid_request',
-          message: 'Companion initial plan run status request violates the strict public contract',
-        });
-      }
-      try {
-        const run = companionInitialPlanRunCoordinator!.get(parsedRequest.data.generationRequestId);
-        return run === null
-          ? reply.code(404).send({
-              error: 'initial_plan_run_not_found',
-              message: 'The requested companion initial plan run was not found',
-            })
-          : run;
-      } catch {
-        return reply.code(500).send({
-          error: 'initial_plan_run_unavailable',
-          message: 'The initial plan run status could not be read safely',
-        });
-      }
+      void request;
+      return reply.code(503).send({
+        error: 'provider_authority_unavailable',
+        message: 'Companion initial-plan Provider calls require signed packet-bound authority',
+      });
     });
     runtimeApp.post('/api/v1/companion/dialogue-run', async (request, reply) => {
-      const parsedRequest = companionDialogueRunCreateRequestSchema.safeParse(request.body);
-      if (!parsedRequest.success) {
-        return reply.code(400).send({
-          error: 'invalid_request',
-          message: 'Companion dialogue authorization violates the strict public contract',
-        });
-      }
-      try {
-        const run = companionDialogueRunCoordinator!.create(parsedRequest.data);
-        return reply.code(202).send(run);
-      } catch (error) {
-        if (error instanceof CompanionDialogueRunRequestError) {
-          return reply.code(error.statusCode).send({
-            error: error.code,
-            message: error.message,
-          });
-        }
-        return reply.code(500).send({
-          error: 'dialogue_run_failed',
-          message: 'The dialogue run could not be safely authorized',
-        });
-      }
+      void request;
+      return reply.code(503).send({
+        error: 'provider_authority_unavailable',
+        message: 'Companion dialogue Provider calls require signed packet-bound authority',
+      });
     });
     runtimeApp.get('/api/v1/companion/dialogue-run', async (request, reply) => {
-      const parsedRequest = companionDialogueRunStatusRequestSchema.safeParse(request.query);
-      if (!parsedRequest.success) {
-        return reply.code(400).send({
-          error: 'invalid_request',
-          message: 'Companion dialogue status request violates the strict public contract',
-        });
-      }
-      try {
-        const run = companionDialogueRunCoordinator!.get(parsedRequest.data.dialogueRequestId);
-        return run === null
-          ? reply.code(404).send({
-              error: 'dialogue_run_not_found',
-              message: 'The requested companion dialogue run was not found',
-            })
-          : run;
-      } catch {
-        return reply.code(500).send({
-          error: 'dialogue_run_unavailable',
-          message: 'The dialogue run status could not be read safely',
-        });
-      }
+      void request;
+      return reply.code(503).send({
+        error: 'provider_authority_unavailable',
+        message: 'Companion dialogue Provider calls require signed packet-bound authority',
+      });
     });
     runtimeApp.get('/api/v1/replan/providers', async () =>
       plannerProviderRegistry.listReplanners(),
@@ -7641,6 +7582,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     });
     runtimeApp.post('/api/v1/companion/replan-run', async (request, reply) => {
+      if (companionReplanRunCoordinator === undefined) {
+        return reply.code(503).send({
+          error: 'provider_authority_unavailable',
+          message: 'Companion Provider calls require configured operator authority verification',
+        });
+      }
       const parsedRequest = companionReplanRunCreateRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
         return reply.code(400).send({
@@ -7649,7 +7596,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
       try {
-        const run = companionReplanRunCoordinator!.create(parsedRequest.data);
+        const run = companionReplanRunCoordinator.create(parsedRequest.data);
         return reply.code(202).send(run);
       } catch (error) {
         if (error instanceof CompanionReplanRunRequestError) {
@@ -7665,6 +7612,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       }
     });
     runtimeApp.get('/api/v1/companion/replan-run', async (request, reply) => {
+      if (companionReplanRunCoordinator === undefined) {
+        return reply.code(503).send({
+          error: 'provider_authority_unavailable',
+          message: 'Companion Provider calls require configured operator authority verification',
+        });
+      }
       const parsedRequest = companionReplanRunStatusRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
         return reply.code(400).send({
@@ -7673,7 +7626,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
       try {
-        const run = companionReplanRunCoordinator!.get(parsedRequest.data.generationRequestId);
+        const run = companionReplanRunCoordinator.get(parsedRequest.data.generationRequestId);
         return run === null
           ? reply.code(404).send({
               error: 'replan_run_not_found',
@@ -8551,6 +8504,10 @@ export {
 } from './planner-generation.js';
 export { evaluatePlanningQuality } from './planning-quality.js';
 export { createPlannerProviderRegistry } from './planner-provider-registry.js';
+export {
+  companionReplanDisclosedDataSha256,
+  companionReplanGenerationRequestSha256,
+} from './companion-replan-run.js';
 export {
   createProcedureSemanticRetrievalCoordinator,
   procedureSemanticRetrievalEvidenceEventTypes,

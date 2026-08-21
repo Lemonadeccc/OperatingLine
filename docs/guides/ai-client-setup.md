@@ -6,13 +6,14 @@ OperatingLine 的推荐产品形态不是独立桌面窗口，而是：
 Codex / Claude Code ── Streamable HTTP ──┐
 Claude Desktop ── stdio MCPB bridge ─────┤
                                          ▼
-OperatingLine Runtime ────────────────── Blender Companion
-        │                                  │ explicit confirmation
-        └──────── spawn local CLI <────────┘
+OperatingLine Runtime ── Proposal delivery ── Blender Companion
+        │                                      │ review / accept / execute
+        └── spawn registered local CLI Provider
+            only for explicit Bearer-authenticated operator generate
 ```
 
 AI 客户端负责理解目标和生成完整 GuideProposal；Runtime 负责精确上下文、严格验证、持久证据和实例
-路由；Blender 负责树、数字、引导线、审批与显式执行。
+路由；Blender 负责树、数字、引导线、审批与显式执行，不签发 Provider 调用权限。
 
 ## 1. 启动 Runtime
 
@@ -27,13 +28,15 @@ pnpm dev
 有三种互斥的 composition root：
 
 - `pnpm dev`：Codex/Claude 桌面端或 CLI 作为外部 MCP Host，由用户在客户端内发起任务；
-- `pnpm dev:clients`：Blender 内逐次确认后，由 Runtime 启动本机 Codex/Claude CLI 生成计划；
-- `pnpm dev:openai`：Blender 内逐次确认后，Runtime 直接调用明确配置的 OpenAI Responses API。
+- `pnpm dev:clients`：注册本机 Codex/Claude CLI Provider，供外部 Bearer-authenticated MCP/HTTP
+  operator 显式调用；
+- `pnpm dev:openai`：注册明确配置的 OpenAI Responses Provider，供同一外部 operator 路径显式调用。
 
-三者都不会自动选择 Provider、后台调用模型或绕过 Blender Proposal 审批。只有 `dev:openai` 的
-Dialogue Turn 在用户逐轮确认的最多两次调用授权内，才可能于固定 `0.8` 阈值后自动执行第二次严格
-replan。Codex/Claude 桌面 GUI 没有稳定的本机 headless 调用 API，因此 Blender 内启动只支持可执行的
-CLI；桌面 GUI 继续走外部 MCP 路径。
+三者都不会自动选择 Provider、后台调用模型或绕过 Blender Proposal 审批。Companion Initial Plan Run
+与 Dialogue 当前固定禁用；Companion Replan Run 只接受可信 operator 签发的 packet-bound authority，
+默认 composition root 不提供签发器或 trust source。外部 Bearer-authenticated MCP/HTTP
+`planner.generate` / `replan.generate` 路径保持可用。Codex/Claude 桌面 GUI 没有稳定的本机 headless
+调用 API；桌面 GUI 继续走外部 MCP 路径。
 
 ## 2. 连接 Blender
 
@@ -135,7 +138,7 @@ Claude Desktop 的 `Customize → Connectors` 属于云端远程 Connector，不
 Runtime 与 stdio bridge 使用官方 MCP SDK 2.0：新版客户端会通过 `server/discover` 协商稳定版
 `2026-07-28`，旧版客户端仍可回退到 `initialize`。当前 OperatingLine 流程不使用已弃用的 Sampling。
 
-## 6. 从 Blender 调用本机 Codex/Claude CLI
+## 6. 注册本机 Codex/Claude CLI Provider
 
 先通过 CLI 自己的登录流程完成认证，再启动：
 
@@ -148,22 +151,22 @@ pnpm dev:clients
 
 可选变量：`OPERATINGLINE_CODEX_BIN`、`OPERATINGLINE_CODEX_MODEL`、
 `OPERATINGLINE_CLAUDE_BIN`、`OPERATINGLINE_CLAUDE_MODEL` 和
-`OPERATINGLINE_PLANNER_TIMEOUT_MS`（100–120000 ms）。未安装的 CLI 在 Blender 中显示为不可用，不会
+`OPERATINGLINE_PLANNER_TIMEOUT_MS`（100–120000 ms）。未安装的 CLI 会保留为不可用 descriptor，不会
 阻止 Runtime 启动。
 
-在 Blender 创建 Goal 并收到 Runtime acknowledgement 后，刷新 Provider 列表，选择 `Codex CLI
-Planner` 或 `Claude Code CLI Planner`，阅读发送范围、远程数据处理和可能费用，再确认一次 Initial
-Plan Run。局部修改在 Revision Workspace 以相同方式确认 Replan Run。Runtime 通过 stdin 发送精确
-packet；命令参数不包含目标、Token 或模型输出。Codex 在临时空目录以 ephemeral/read-only 运行，Claude
-禁用 tools、自定义配置和 session persistence。返回结果只在严格校验 ready 时创建待审 Proposal。
+Blender Companion 的 Initial Plan Run 当前固定禁用：旧 boolean confirmation 不是 Provider authority，
+Blender 不构造或 POST 该请求。局部 Replan Run 只在取得可信 operator 签发且与精确 packet 绑定的
+authority 后可用。独立 Bearer-authenticated operator MCP/HTTP planner/replan generate 入口保持可用。
+Runtime 通过 stdin 发送精确 packet；命令参数不包含目标、Token 或模型输出。Codex 在临时空目录以 ephemeral/read-only 运行，Claude
+禁用 tools、自定义配置和 session persistence。严格校验为 ready 的 generate 结果仍固定
+`proposalCreated: false`；外部 operator 必须再显式调用对应 propose 入口，才会创建待审 Proposal。
 
 Claude 默认每次最多 1 USD，可在 0.01–100 USD 内调整；Codex 费用由其 CLI 登录、订阅、模型和 provider
-配置决定，OperatingLine 无法估价或强制美元上限。每次 Run 都必须重新确认，失败不会自动重试。
+配置决定，OperatingLine 无法估价或强制美元上限。每个外部 generate 请求都使用独立 request ID，失败
+不会自动重试。
 
-CLI Provider 当前只实现初始规划与局部 replan，不出现在 dialogue provider 列表。若使用
-`pnpm dev:openai`，Revision Workspace 可另行刷新 `Streamed model dialogue`，选择 OpenAI Provider 并
-逐轮确认最多两次调用。首次调用流式返回助手文字；只有严格 replan 决策达到固定 `0.8` 才在同一授权
-内执行第二次 replan。Blender 读取 Runtime 的 durable 短轮询状态；结果最多创建待审 Proposal。
+Companion streamed dialogue 当前同样固定禁用；旧逐轮 boolean confirmation 不构成 Provider authority，
+Blender 不构造或 POST 该请求，Runtime create/status 路由返回 503 `provider_authority_unavailable`。
 
 ## 7. 从外部 MCP 客户端发起任务
 
@@ -185,10 +188,10 @@ Proposal 到达后，在 Blender：
 
 ## 8. 当前边界
 
-- `pnpm dev:clients` 只在 Blender 逐次确认后启动本机 CLI；不会启动 Codex/Claude 桌面 GUI，也不会
-  自动选择或后台调用 Provider。
+- `pnpm dev:clients` 只注册本机 CLI Provider，供外部 Bearer-authenticated operator 显式调用；不会
+  启动 Codex/Claude 桌面 GUI，也不会自动选择或后台调用 Provider。
 - Web/云任务访问不到回环 Runtime。
 - 当前 Blender ActionCatalog 只允许已验证动作；目录外工作必须保持 actionless/manual。
 - MCPB 是连接器，不包含 Runtime 或 Blender，不扩大场景执行权限。
-- 不自动选择 Planner Provider，也不在逐次确认范围外产生额外 API 调用；Dialogue Turn 的确认会明确
-  披露其最多两次调用和可能费用。
+- 不自动选择 Planner Provider；Companion initial-plan/dialogue 在可信签署 packet-bound authority 迁移完成
+  前不会产生 Provider API 调用。

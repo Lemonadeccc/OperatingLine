@@ -1,18 +1,27 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
-import type {
-  CompanionReplanRun,
-  CompanionReplanRunCreateRequest,
-  GuidePlan,
-  ReplanningPromptPacket,
+import {
+  authoritySignatureDomainPrefix,
+  authoritySignedContent,
+  canonicalizeProtocolJsonValue,
+  type PlannerProviderDescriptor,
+  type ProviderCallAuthorization,
+  type CompanionReplanRun,
+  type GuidePlan,
+  type ReplanningPromptPacket,
 } from '@operatingline/protocol';
 import { FakePlannerProvider } from '@operatingline/test-kit';
-import { startRuntime, type RunningRuntime } from '@operatingline/orchestrator';
+import {
+  companionReplanDisclosedDataSha256,
+  companionReplanGenerationRequestSha256,
+  startRuntime as startOperatingLineRuntime,
+  type RunningRuntime,
+} from '@operatingline/orchestrator';
 import { describe, expect, it } from 'vitest';
 
 const accessToken = 'companion-replan-run-test-token';
@@ -34,6 +43,57 @@ const capabilityCoverage = {
     },
   ],
 };
+const authorityKeys = generateKeyPairSync('ed25519');
+const authorizationByGenerationRequestId = new Map<string, ProviderCallAuthorization>();
+const providerDescriptor = {
+  contractVersion: '1.0.0',
+  id: 'fake-planner',
+  version: '0.1.0',
+  displayName: 'Fake Planner',
+  description: 'Deterministic replanner for asynchronous companion tests.',
+  availability: { available: true },
+  limits: { maxConcurrency: 1 },
+  dataHandling: {
+    executionLocation: 'local',
+    dataTransmission: 'none',
+    credentialManagement: 'provider_managed',
+  },
+} as const satisfies PlannerProviderDescriptor;
+
+function authorityMessage(kind: string, content: unknown): Buffer {
+  return Buffer.concat([
+    Buffer.from(authoritySignatureDomainPrefix(kind as never)),
+    Buffer.from(canonicalizeProtocolJsonValue(content)),
+  ]);
+}
+
+async function startRuntime(options: Parameters<typeof startOperatingLineRuntime>[0]) {
+  const registry = {
+    version: 'companion-replan-integration-v1',
+    revocationLog: {
+      length: 0,
+      headSha256: createHash('sha256').update(canonicalizeProtocolJsonValue([])).digest('hex'),
+    },
+    signers: [
+      {
+        signerId: 'operator',
+        keyId: 'companion-key',
+        algorithm: 'ed25519' as const,
+        canonicalization: 'operatingline-authority-json-v1' as const,
+        publicKeyPem: authorityKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+        roles: ['provider_call_authorizer' as const],
+      },
+    ],
+  };
+  return startOperatingLineRuntime({
+    ...options,
+    companionReplanProviderAuthority: {
+      trustSource: {
+        readSnapshot: () => ({ registry, revocations: [] }),
+      },
+    },
+  });
+}
 
 function validDraft(packet: ReplanningPromptPacket) {
   const plan = structuredClone(packet.context.revisionRequest.basePlan);
@@ -62,21 +122,40 @@ function provider(
     () => {
       throw new Error('Initial generation must not run in companion replan tests');
     },
-    {
-      contractVersion: '1.0.0',
-      id: 'fake-planner',
-      version: '0.1.0',
-      displayName: 'Fake Planner',
-      description: 'Deterministic replanner for asynchronous companion tests.',
-      availability: { available: true },
-      limits: { maxConcurrency: 1 },
-      dataHandling: {
-        executionLocation: 'local',
-        dataTransmission: 'none',
-        credentialManagement: 'provider_managed',
-      },
-    },
+    providerDescriptor,
     handler,
+    undefined,
+    (operation) => ({
+      profile: {
+        descriptor: providerDescriptor,
+        vendor: 'OperatingLine test fixture',
+        implementation: { name: 'fake-planner', version: '0.1.0' },
+        model: {
+          requested: 'fake-v1',
+          resolvedRevision: 'fake-v1',
+          resolution: 'resolved',
+        },
+        api: {
+          surface: operation,
+          version: '1.0.0',
+          sdkName: '@operatingline/test-kit',
+          sdkVersion: '0.1.0',
+          endpointClass: 'local',
+          serviceTier: null,
+          region: null,
+        },
+      },
+      generationSettings: {
+        normalizedParameters: { modelName: 'fake-v1' },
+        seed: null,
+        determinism: 'deterministic',
+      },
+      costPolicy: {
+        possibleProviderCost: false,
+        basis: 'no_provider_cost',
+        publicStatement: 'This deterministic test Provider has no external cost.',
+      },
+    }),
   );
 }
 
@@ -110,7 +189,22 @@ function runRequest(
   revisionRequestId: string,
   instanceId: string,
   generationRequestId = randomUUID(),
-): CompanionReplanRunCreateRequest {
+): Omit<
+  CompanionReplanRun,
+  | 'contractVersion'
+  | 'provider'
+  | 'status'
+  | 'terminal'
+  | 'sceneChanged'
+  | 'proposalId'
+  | 'error'
+  | 'needsRevision'
+  | 'updatedAt'
+> & {
+  readonly providerId: string;
+  readonly providerVersion: string;
+  readonly authorization?: unknown;
+} {
   return {
     generationRequestId,
     revisionRequestId,
@@ -118,21 +212,68 @@ function runRequest(
     providerVersion: '0.1.0',
     targetAdapterId: 'blender',
     targetInstanceId: instanceId,
-    authorization: {
-      disclosureVersion: '1.0.0',
-      dataHandlingAcknowledged: true,
-      possibleChargesAcknowledged: true,
-      proposalCreationAcknowledged: true,
-      authorizedAt: new Date().toISOString(),
-    },
   };
 }
 
-async function createRun(runtime: RunningRuntime, request: CompanionReplanRunCreateRequest) {
+async function createRun(runtime: RunningRuntime, request: ReturnType<typeof runRequest>) {
+  let authorization = request.authorization;
+  if (authorization === undefined) {
+    authorization = authorizationByGenerationRequestId.get(request.generationRequestId);
+    if (authorization === undefined) {
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/replan/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ revisionRequestId: request.revisionRequestId }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const disclosedPacket = await promptResponse.json();
+      const now = new Date();
+      const unsigned = {
+        formatVersion: '1.0.0',
+        canonicalization: 'operatingline-authority-json-v1',
+        kind: 'ProviderCallAuthorization',
+        authorityId: randomUUID(),
+        issuer: 'operator',
+        notBefore: new Date(now.getTime() - 60_000).toISOString(),
+        expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
+        provider: {
+          providerId: request.providerId,
+          descriptorVersion: request.providerVersion,
+          model: 'fake-v1',
+        },
+        operation: 'semantic_replan_generation',
+        generationRequestSha256: companionReplanGenerationRequestSha256(request),
+        disclosedDataSha256: companionReplanDisclosedDataSha256(disclosedPacket),
+        maximumCallCount: 1,
+        signature: {
+          signerId: 'operator',
+          keyId: 'companion-key',
+          algorithm: 'ed25519',
+          signature: 'A'.repeat(86),
+          signedAt: now.toISOString(),
+        },
+      } as const;
+      authorization = {
+        ...unsigned,
+        signature: {
+          ...unsigned.signature,
+          signature: sign(
+            null,
+            authorityMessage(unsigned.kind, authoritySignedContent(unsigned)),
+            authorityKeys.privateKey,
+          ).toString('base64url'),
+        },
+      } satisfies ProviderCallAuthorization;
+      authorizationByGenerationRequestId.set(
+        request.generationRequestId,
+        authorization as ProviderCallAuthorization,
+      );
+    }
+  }
   return fetch(`${runtime.baseUrl}/api/v1/companion/replan-run`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(request),
+    body: JSON.stringify({ ...request, authorization }),
   });
 }
 
@@ -220,6 +361,180 @@ function removeProposalEvidence(
 }
 
 describe('asynchronous companion replan runs', () => {
+  it('reports the Provider side-effect route unavailable without operator trust configuration', async () => {
+    const fakeProvider = provider(({ packet }) => validDraft(packet));
+    const runtime = await startOperatingLineRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      plannerProviders: [fakeProvider],
+    });
+    try {
+      const response = await fetch(`${runtime.baseUrl}/api/v1/companion/replan-run`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: 'provider_authority_unavailable',
+        message: 'Companion Provider calls require configured operator authority verification',
+      });
+      expect(fakeProvider.replanInputs).toHaveLength(0);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it.each([
+    ['initial', 'queued'],
+    ['initial', 'generating'],
+    ['dialogue', 'queued'],
+    ['dialogue', 'streaming'],
+    ['dialogue', 'replanning'],
+  ] as const)(
+    'retires a pre-upgrade %s %s row without replay and releases the signed replan slot',
+    async (kind, status) => {
+      const directory = mkdtempSync(join(tmpdir(), 'operatingline-legacy-provider-run-'));
+      const databasePath = join(directory, 'runtime.sqlite');
+      const instanceId = randomUUID();
+      const sqlite = new DatabaseSync(databasePath);
+      sqlite.close();
+
+      const initialized = await startOperatingLineRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+      });
+      await initialized.stop();
+
+      const seeded = new DatabaseSync(databasePath);
+      seeded.exec('PRAGMA foreign_keys = OFF;');
+      const now = new Date().toISOString();
+      const providerIdentity = {
+        id: 'fake-planner',
+        version: '0.1.0',
+        displayName: 'Fake Planner',
+      };
+      let legacyId: string;
+      if (kind === 'initial') {
+        legacyId = randomUUID();
+        const payload = {
+          contractVersion: '1.0.0',
+          generationRequestId: legacyId,
+          goalRequestId: randomUUID(),
+          targetAdapterId: 'blender',
+          targetInstanceId: instanceId,
+          provider: providerIdentity,
+          status,
+          terminal: false,
+          sceneChanged: false,
+          proposalId: null,
+          error: null,
+          needsRevision: null,
+          updatedAt: now,
+          request: {},
+          authorizedProvider: {},
+          goalRequest: {},
+        };
+        seeded
+          .prepare(
+            `INSERT INTO companion_initial_plan_runs
+             (generation_request_id, goal_request_id, target_adapter_id, target_instance_id,
+              status, updated_at, payload)
+             VALUES (?, ?, 'blender', ?, ?, ?, ?)`,
+          )
+          .run(legacyId, payload.goalRequestId, instanceId, status, now, JSON.stringify(payload));
+      } else {
+        legacyId = randomUUID();
+        const revisionRequestId = randomUUID();
+        const assistantMessage = status === 'queued' ? '' : 'Legacy partial response';
+        const payload = {
+          contractVersion: '1.0.0',
+          dialogueRequestId: legacyId,
+          revisionRequestId,
+          replanGenerationRequestId: randomUUID(),
+          targetAdapterId: 'blender',
+          targetInstanceId: instanceId,
+          provider: providerIdentity,
+          status,
+          terminal: false,
+          sceneChanged: false,
+          assistantMessage,
+          assistantMessageRevision: assistantMessage.length === 0 ? 0 : 1,
+          semanticDecision:
+            status === 'replanning' ? { kind: 'replan', confidence: 0.9, threshold: 0.8 } : null,
+          revisionRequestRecorded: status === 'replanning',
+          proposalId: null,
+          error: null,
+          needsRevision: null,
+          updatedAt: now,
+          request: {},
+          authorizedProvider: {},
+        };
+        seeded
+          .prepare(
+            `INSERT INTO companion_dialogue_runs
+             (dialogue_request_id, revision_request_id, replan_generation_request_id,
+              target_adapter_id, target_instance_id, status, assistant_message_revision,
+              updated_at, payload)
+             VALUES (?, ?, ?, 'blender', ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            legacyId,
+            revisionRequestId,
+            payload.replanGenerationRequestId,
+            instanceId,
+            status,
+            payload.assistantMessageRevision,
+            now,
+            JSON.stringify(payload),
+          );
+      }
+      seeded.close();
+
+      const fakeProvider = provider(({ packet }) => validDraft(packet));
+      const runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        plannerProviders: [fakeProvider],
+      });
+      try {
+        const revision = await submitRevision(runtime, instanceId);
+        const request = runRequest(revision.revisionRequestId, instanceId);
+        expect((await createRun(runtime, request)).status).toBe(202);
+        await expect(waitForTerminal(runtime, request.generationRequestId)).resolves.toMatchObject({
+          status: 'proposal_created',
+        });
+        expect(fakeProvider.inputs).toHaveLength(0);
+        expect(fakeProvider.dialogueInputs).toHaveLength(0);
+        expect(fakeProvider.replanInputs).toHaveLength(1);
+
+        const inspected = new DatabaseSync(databasePath);
+        const table =
+          kind === 'initial' ? 'companion_initial_plan_runs' : 'companion_dialogue_runs';
+        const idColumn = kind === 'initial' ? 'generation_request_id' : 'dialogue_request_id';
+        const row = inspected
+          .prepare(`SELECT status, payload FROM ${table} WHERE ${idColumn} = ?`)
+          .get(legacyId) as { status: string; payload: string };
+        inspected.close();
+        expect(row.status).toBe('interrupted');
+        expect(JSON.parse(row.payload)).toMatchObject({
+          terminal: true,
+          error: {
+            code: 'planner_provider_unavailable',
+            retryMode: 'never',
+            message: expect.stringContaining('provider_authority_unavailable'),
+          },
+        });
+      } finally {
+        await runtime.stop();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('shares the durable instance work slot with pending host goals in both creation orders', async () => {
     let releaseProvider!: () => void;
     const providerGate = new Promise<void>((resolveGate) => {

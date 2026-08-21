@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { OperatingLineDatabase } from '@operatingline/persistence';
@@ -5,6 +6,7 @@ import {
   companionReplanRunContractVersion,
   companionReplanRunCreateRequestSchema,
   companionReplanRunSchema,
+  canonicalizeProtocolJsonValue,
   guideRevisionRequestSchema,
   plannerProviderDescriptorSchema,
   type CompanionReplanRun,
@@ -14,8 +16,14 @@ import {
   type CompanionReplanRunStatus,
   type PlannerReplanGenerationResult,
   type PlannerProviderDescriptor,
+  type ProviderCallAuthorization,
 } from '@operatingline/protocol';
 
+import {
+  type AuthorityConsumptionCoordinator,
+  type LiveProviderAuthorityVerifier,
+  type ProviderCallBinding,
+} from './authority-consumption.js';
 import type { PlannerProviderRegistry } from './planner-provider-registry.js';
 import type { PlannerReplanGenerationCoordinator } from './planner-replan-generation.js';
 import { safePlannerRuntimeError } from './planner-provider-errors.js';
@@ -34,6 +42,7 @@ export class CompanionReplanRunRequestError extends Error {
     | 'provider_not_found'
     | 'provider_unavailable'
     | 'provider_binding_mismatch'
+    | 'provider_authorization_invalid'
     | 'target_binding_mismatch'
     | 'revision_request_not_pending'
     | 'replan_run_conflict'
@@ -59,10 +68,21 @@ export interface CompanionReplanRunCoordinator {
   close(): Promise<void>;
 }
 
-interface CompanionReplanRunCoordinatorOptions {
+export interface CompanionReplanRunProviderAuthority {
+  readonly authorityConsumptionCoordinator: AuthorityConsumptionCoordinator;
+  readonly liveProviderAuthorityVerifier: LiveProviderAuthorityVerifier;
+  readonly resolveEstimatedCost?: (
+    authorization: ProviderCallAuthorization,
+  ) => ProviderCallBinding['estimatedCost'];
+}
+
+interface CompanionReplanRunCoordinatorOptions extends CompanionReplanRunProviderAuthority {
   readonly database: OperatingLineDatabase;
   readonly providerRegistry: PlannerProviderRegistry;
-  readonly generationCoordinator: PlannerReplanGenerationCoordinator;
+  readonly generationCoordinator: Pick<
+    PlannerReplanGenerationCoordinator,
+    'generateAuthorized' | 'completedResult'
+  >;
   readonly replanningService: ReplanningService;
 }
 
@@ -70,6 +90,26 @@ const safeFailureMessage =
   'The replan run failed before a Proposal could be safely created; the host scene was not changed.';
 const safeInterruptedMessage =
   'The runtime stopped before this generation completed; it was not retried automatically.';
+
+export function companionReplanGenerationRequestSha256(input: {
+  readonly generationRequestId: string;
+  readonly revisionRequestId: string;
+  readonly providerId: string;
+}): string {
+  return createHash('sha256')
+    .update(
+      canonicalizeProtocolJsonValue({
+        requestId: input.generationRequestId,
+        revisionRequestId: input.revisionRequestId,
+        providerId: input.providerId,
+      }),
+    )
+    .digest('hex');
+}
+
+export function companionReplanDisclosedDataSha256(packet: unknown): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(packet)).digest('hex');
+}
 
 function publicRun(run: StoredCompanionReplanRun): CompanionReplanRun {
   return companionReplanRunSchema.parse({
@@ -168,6 +208,24 @@ function generationMatchesAuthorization(
   );
 }
 
+/**
+ * Small proposal-only seam for callers that already hold a completed, explicitly authorized
+ * semantic generation result. It performs no Provider selection or call and does not accept or
+ * execute the resulting Proposal.
+ */
+export function proposeCompletedCompanionReplanResult(
+  replanningService: Pick<ReplanningService, 'propose'>,
+  result: PlannerReplanGenerationResult,
+) {
+  return replanningService.propose({
+    generationRequestId: result.requestId,
+    requestId: result.revisionRequestId,
+    catalogVersion: result.draft.catalogVersion,
+    planning: result.draft.planning,
+    plan: result.draft.plan,
+  });
+}
+
 export function createCompanionReplanRunCoordinator(
   options: CompanionReplanRunCoordinatorOptions,
 ): CompanionReplanRunCoordinator {
@@ -199,14 +257,22 @@ export function createCompanionReplanRunCoordinator(
     run: StoredCompanionReplanRun,
     result: PlannerReplanGenerationResult,
   ): StoredCompanionReplanRun => {
-    const proposal = options.replanningService.propose({
-      generationRequestId: result.requestId,
-      requestId: result.revisionRequestId,
-      catalogVersion: result.draft.catalogVersion,
-      planning: result.draft.planning,
-      plan: result.draft.plan,
-    });
+    const proposal = proposeCompletedCompanionReplanResult(options.replanningService, result);
     return terminalRun(run, 'proposal_created', { proposalId: proposal.proposalId });
+  };
+
+  const completeProviderAuthorization = (
+    run: StoredCompanionReplanRun,
+    result: PlannerReplanGenerationResult,
+  ): void => {
+    const authorization = run.request.authorization;
+    const state = options.authorityConsumptionCoordinator.stateFor(authorization.authorityId);
+    if (state?.status === 'completed') return;
+    options.authorityConsumptionCoordinator.complete({
+      credentialId: authorization.authorityId,
+      operationId: run.generationRequestId,
+      durableReceiptSha256: companionReplanDisclosedDataSha256(result),
+    });
   };
 
   const reconcileNonterminalRuns = (): void => {
@@ -230,6 +296,7 @@ export function createCompanionReplanRunCoordinator(
         if (!generationMatchesAuthorization(run, result)) {
           throw new Error('Completed replan identity does not match its authorization');
         }
+        completeProviderAuthorization(run, result);
         transition(
           result.status === 'needs_revision'
             ? terminalRun(run, 'needs_revision', {
@@ -261,17 +328,51 @@ export function createCompanionReplanRunCoordinator(
       return;
     }
     try {
-      const result = await options.generationCoordinator.generate({
-        requestId: generating.generationRequestId,
-        revisionRequestId: generating.revisionRequestId,
-        providerId: generating.provider.id,
-      });
+      const result = await options.generationCoordinator.generateAuthorized(
+        {
+          requestId: generating.generationRequestId,
+          revisionRequestId: generating.revisionRequestId,
+          providerId: generating.provider.id,
+        },
+        ({ request, packet, registered, runtimeTreatment }) => {
+          if (runtimeTreatment === undefined) {
+            throw new Error('Provider runtime treatment is required for authorization binding');
+          }
+          const authorization = generating.request.authorization;
+          const estimatedCost = options.resolveEstimatedCost?.(authorization);
+          const binding: ProviderCallBinding = {
+            provider: {
+              providerId: registered.descriptor.id,
+              descriptorVersion: registered.descriptor.version,
+              model: runtimeTreatment.treatment.profile.model.requested,
+            },
+            operation: 'semantic_replan_generation',
+            generationRequestSha256: companionReplanGenerationRequestSha256({
+              generationRequestId: request.requestId,
+              revisionRequestId: request.revisionRequestId,
+              providerId: request.providerId,
+            }),
+            disclosedDataSha256: companionReplanDisclosedDataSha256(packet),
+            ...(estimatedCost === undefined ? {} : { estimatedCost }),
+          };
+          const claim = options.authorityConsumptionCoordinator.consumeProviderAuthorization({
+            authorization,
+            binding,
+            liveVerifier: options.liveProviderAuthorityVerifier,
+            operationId: generating.generationRequestId,
+          });
+          if (claim.status !== 'started') {
+            throw new Error('Provider authorization was already consumed before this process');
+          }
+        },
+      );
       if (closing) {
         return;
       }
       if (!generationMatchesAuthorization(generating, result)) {
         throw new Error('Generated replan identity no longer matches its authorization');
       }
+      completeProviderAuthorization(generating, result);
       if (result.status === 'needs_revision') {
         transition(
           terminalRun(generating, 'needs_revision', {
@@ -386,6 +487,19 @@ export function createCompanionReplanRunCoordinator(
           422,
           'provider_unavailable',
           'The explicitly selected replanning provider is unavailable',
+        );
+      }
+
+      const authorization = request.authorization;
+      if (
+        authorization.provider.providerId !== registered.descriptor.id ||
+        authorization.provider.descriptorVersion !== registered.descriptor.version ||
+        authorization.generationRequestSha256 !== companionReplanGenerationRequestSha256(request)
+      ) {
+        throw new CompanionReplanRunRequestError(
+          422,
+          'provider_authorization_invalid',
+          'Provider authorization does not match the exact generation request',
         );
       }
 

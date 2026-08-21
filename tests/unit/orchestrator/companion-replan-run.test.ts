@@ -1,18 +1,61 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { openOperatingLineDatabase } from '@operatingline/persistence';
-import type { GuidePlan } from '@operatingline/protocol';
+import {
+  authoritySignedContent,
+  canonicalizeProtocolJsonValue,
+  type GuidePlan,
+  type ProviderCallAuthorization,
+} from '@operatingline/protocol';
 import { FakePlannerProvider } from '@operatingline/test-kit';
 import { describe, expect, it } from 'vitest';
 
-import { createCompanionReplanRunCoordinator } from '../../../services/orchestrator/src/companion-replan-run.js';
+import {
+  companionReplanDisclosedDataSha256,
+  companionReplanGenerationRequestSha256,
+  createCompanionReplanRunCoordinator,
+} from '../../../services/orchestrator/src/companion-replan-run.js';
+import {
+  AuthorityConsumptionCoordinator,
+  InMemoryAuthorityConsumptionStore,
+} from '../../../services/orchestrator/src/authority-consumption.js';
 import { createPlannerProviderRegistry } from '../../../services/orchestrator/src/planner-provider-registry.js';
 
 const basePlan = JSON.parse(
   readFileSync(resolve('protocol/fixtures/v1/snowman-teaching.plan.json'), 'utf8'),
 ) as GuidePlan;
+
+function authorization(input: {
+  generationRequestId: string;
+  revisionRequestId: string;
+}): ProviderCallAuthorization {
+  return {
+    formatVersion: '1.0.0',
+    canonicalization: 'operatingline-authority-json-v1',
+    kind: 'ProviderCallAuthorization',
+    authorityId: randomUUID(),
+    issuer: 'operator',
+    notBefore: '2026-08-21T00:00:00.000Z',
+    expiresAt: '2099-08-21T00:00:00.000Z',
+    provider: { providerId: 'fake-planner', descriptorVersion: '0.1.0', model: 'fake-v1' },
+    operation: 'semantic_replan_generation',
+    generationRequestSha256: companionReplanGenerationRequestSha256({
+      ...input,
+      providerId: 'fake-planner',
+    }),
+    disclosedDataSha256: companionReplanDisclosedDataSha256({}),
+    maximumCallCount: 1,
+    signature: {
+      signerId: 'operator',
+      keyId: 'key-1',
+      algorithm: 'ed25519',
+      signature: 'A'.repeat(86),
+      signedAt: '2026-08-21T00:00:00.000Z',
+    },
+  };
+}
 
 describe('companion replan run coordinator', () => {
   it.each(['generationRequestId', 'revisionRequestId'] as const)(
@@ -67,15 +110,27 @@ describe('companion replan run coordinator', () => {
         database,
         providerRegistry,
         generationCoordinator: {
-          generate: async () =>
-            ({
+          generate: async () => {
+            throw new Error('authorized path required');
+          },
+          generateAuthorized: async (request, authorizeProviderCall) => {
+            authorizeProviderCall({
+              request,
+              packet: {} as never,
+              registered: providerRegistry.findReplanner('fake-planner')!,
+              runtimeTreatment: {
+                treatment: { profile: { model: { requested: 'fake-v1' } } },
+              } as never,
+            });
+            return {
               requestId: mismatch === 'generationRequestId' ? randomUUID() : generationRequestId,
               revisionRequestId:
                 mismatch === 'revisionRequestId' ? randomUUID() : revisionRequestId,
               provider: { id: 'fake-planner', version: '0.1.0' },
               targetAdapterId: 'blender',
               targetInstanceId: instanceId,
-            }) as never,
+            } as never;
+          },
           completedResult: () => null,
           close: async () => undefined,
         },
@@ -84,6 +139,30 @@ describe('companion replan run coordinator', () => {
           propose: () => {
             proposeCalls += 1;
             return {} as never;
+          },
+        },
+        authorityConsumptionCoordinator: new AuthorityConsumptionCoordinator(
+          new InMemoryAuthorityConsumptionStore(),
+        ),
+        liveProviderAuthorityVerifier: {
+          verify: ({ record, targetSha256 }) => {
+            const parsed = record as ProviderCallAuthorization;
+            return {
+              formatVersion: '1.0.0',
+              receiptId: randomUUID(),
+              authorityKind: parsed.kind,
+              authorityId: parsed.authorityId,
+              authorityContentSha256: createHash('sha256')
+                .update(canonicalizeProtocolJsonValue(authoritySignedContent(parsed)))
+                .digest('hex'),
+              signerId: parsed.signature.signerId,
+              keyId: parsed.signature.keyId,
+              registryVersion: 'test-v1',
+              validatedAt: new Date().toISOString(),
+              revocationLogHeadSha256: '0'.repeat(64),
+              targetSha256,
+              sideEffect: 'provider_call',
+            };
           },
         },
       });
@@ -95,13 +174,7 @@ describe('companion replan run coordinator', () => {
           providerVersion: '0.1.0',
           targetAdapterId: 'blender',
           targetInstanceId: instanceId,
-          authorization: {
-            disclosureVersion: '1.0.0',
-            dataHandlingAcknowledged: true,
-            possibleChargesAcknowledged: true,
-            proposalCreationAcknowledged: true,
-            authorizedAt: new Date().toISOString(),
-          },
+          authorization: authorization({ generationRequestId, revisionRequestId }),
         });
         const deadline = Date.now() + 1_000;
         while (coordinator.get(generationRequestId)?.terminal !== true && Date.now() < deadline) {

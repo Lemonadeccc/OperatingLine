@@ -941,7 +941,8 @@
         "proposalCreationAcknowledged",
         "authorizedAt"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Legacy boolean disclosure receipt retained for wire parsing only; it never authorizes Provider side effects."
     }
   },
   "required": [
@@ -956,6 +957,7 @@
     "authorization"
   ],
   "additionalProperties": false,
+  "description": "Legacy read-only compatibility request. No executable coordinator accepts this request as Provider authority.",
   "$defs": {
     "__schema0": {
       "anyOf": [

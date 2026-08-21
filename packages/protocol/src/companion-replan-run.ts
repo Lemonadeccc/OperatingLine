@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { providerCallAuthorizationSchema } from './authority.js';
 import {
   plannerGenerationErrorCodeSchema,
   plannerGenerationRetryModeSchema,
@@ -9,13 +10,8 @@ import { planningQualityFindingSchema } from './planning.js';
 import { localReplanFindingSchema } from './replanning-provider.js';
 import { catalogVersionSchema } from './version.js';
 
-export const companionReplanRunContractVersion = '1.0.0' as const;
+export const companionReplanRunContractVersion = '1.1.0' as const;
 export const companionReplanRunContractVersionSchema = z.literal(companionReplanRunContractVersion);
-
-export const companionReplanRunDisclosureVersion = '1.0.0' as const;
-export const companionReplanRunDisclosureVersionSchema = z.literal(
-  companionReplanRunDisclosureVersion,
-);
 
 export const companionReplanRunCreateRequestSchema = z
   .strictObject({
@@ -25,13 +21,7 @@ export const companionReplanRunCreateRequestSchema = z
     providerVersion: catalogVersionSchema,
     targetAdapterId: z.string().trim().min(1).max(180),
     targetInstanceId: z.uuid(),
-    authorization: z.strictObject({
-      disclosureVersion: companionReplanRunDisclosureVersionSchema,
-      dataHandlingAcknowledged: z.literal(true),
-      possibleChargesAcknowledged: z.literal(true),
-      proposalCreationAcknowledged: z.literal(true),
-      authorizedAt: z.iso.datetime({ offset: true }),
-    }),
+    authorization: providerCallAuthorizationSchema,
   })
   .superRefine((request, context) => {
     if (request.generationRequestId === request.revisionRequestId) {
@@ -39,6 +29,13 @@ export const companionReplanRunCreateRequestSchema = z
         code: 'custom',
         path: ['generationRequestId'],
         message: 'generationRequestId must differ from revisionRequestId',
+      });
+    }
+    if (request.authorization.operation !== 'semantic_replan_generation') {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'operation'],
+        message: 'Companion replan runs require semantic_replan_generation authority',
       });
     }
   });
