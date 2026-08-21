@@ -10,3 +10,4 @@ export * from './integrity.js';
 export * from './records.js';
 export * from './review-policy.js';
 export * from './worklist.js';
+export * from './tutorial-media-recognition-dataset.js';
