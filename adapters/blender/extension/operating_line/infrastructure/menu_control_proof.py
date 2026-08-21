@@ -41,6 +41,17 @@ EXPECTED_TOPOLOGY = MappingProxyType(
 HISTORY_DEPTH = 8
 EVENT_SIMULATE_COUNT = 146
 SUPPORTED_BLENDER_VERSIONS = ((4, 5, 3), (5, 1, 1))
+MUTATION_STAGES = (
+    "uv_sphere_created",
+    "location_x_set",
+    "location_y_set",
+    "location_z_set",
+    "scale_x_set",
+    "scale_y_set",
+    "scale_z_set",
+    "object_name_set",
+)
+MINIMUM_MUTATION_STAGE_COUNT_BY_OPERATION_COUNT = (0, 0, 0, 0, 1, 4, 7, 8)
 
 
 def expected_arguments_payload() -> dict[str, object]:
@@ -116,6 +127,61 @@ def execution_evidence_claims() -> dict[str, object]:
     }
 
 
+def _completed_mutation_stages(snapshot: dict[str, object]) -> list[str]:
+    """Derive the exact current native-history prefix without guessing."""
+
+    objects = snapshot.get("objects")
+    if not isinstance(objects, list):
+        raise ValueError("Menu-control failure snapshot has no object list")
+    candidates = [
+        item
+        for item in objects
+        if isinstance(item, dict)
+        and item.get("name") in {"Sphere", EXPECTED_ARGUMENTS["objectName"]}
+    ]
+    if not candidates:
+        return []
+    if len(candidates) != 1:
+        raise ValueError("Menu-control failure snapshot has ambiguous proof objects")
+    item = candidates[0]
+    mesh = item.get("mesh")
+    if (
+        item.get("type") != "MESH"
+        or not isinstance(mesh, dict)
+        or {key: mesh.get(key) for key in EXPECTED_TOPOLOGY} != dict(EXPECTED_TOPOLOGY)
+    ):
+        raise ValueError("Menu-control failure proof object identity is invalid")
+    location = item.get("location")
+    scale = item.get("scale")
+    if not isinstance(location, list) or len(location) != 3:
+        raise ValueError("Menu-control failure location is invalid")
+    if not isinstance(scale, list) or len(scale) != 3:
+        raise ValueError("Menu-control failure scale is invalid")
+    values = (
+        (location[0], 0.0, 1.25),
+        (location[1], 0.0, -2.0),
+        (location[2], 0.0, 0.75),
+        (scale[0], 1.0, 1.5),
+        (scale[1], 1.0, 1.5),
+        (scale[2], 1.0, 1.5),
+    )
+    completed = [MUTATION_STAGES[0]]
+    saw_incomplete = False
+    for index, (actual, baseline, expected) in enumerate(values, start=1):
+        if actual == expected and not saw_incomplete:
+            completed.append(MUTATION_STAGES[index])
+        elif actual == baseline:
+            saw_incomplete = True
+        else:
+            raise ValueError("Menu-control failure transform is not a canonical history stage")
+    expected_name = EXPECTED_ARGUMENTS["objectName"]
+    if item.get("name") == expected_name and not saw_incomplete:
+        completed.append(MUTATION_STAGES[-1])
+    elif item.get("name") != "Sphere":
+        raise ValueError("Menu-control failure object name is not canonical")
+    return completed
+
+
 @dataclass(frozen=True)
 class _Step:
     label: str
@@ -175,16 +241,26 @@ class UVSphereMenuControlProof:
         preflight_hook: Callable[[], bool],
         on_complete: Callable[[dict[str, object]], None],
         on_failure: Callable[[dict[str, object]], None],
+        continuation_guard: Callable[[], bool] | None = None,
     ) -> None:
         """Run strict preflight before scheduling any timer or native input."""
 
         if self._on_complete is not None or self._steps:
             raise RuntimeError("Menu-control proof driver instances are single-use")
-        if not all(callable(item) for item in (preflight_hook, on_complete, on_failure)):
+        continuation_guard = preflight_hook if continuation_guard is None else continuation_guard
+        if not all(
+            callable(item)
+            for item in (
+                preflight_hook,
+                on_complete,
+                on_failure,
+                continuation_guard,
+            )
+        ):
             raise TypeError("Menu-control proof callbacks must be callable")
         self._on_complete = on_complete
         self._on_failure = on_failure
-        self._continuation_guard = preflight_hook
+        self._continuation_guard = continuation_guard
         try:
             if preflight_hook() is not True:
                 raise RuntimeError("Menu-control proof authorization hook rejected execution")
@@ -644,8 +720,39 @@ class UVSphereMenuControlProof:
             and current_fingerprint == self._baseline_fingerprint
         )
         uncertain = self._mutation_started and not restored
+        current_mutation_stages: list[str] = []
+        minimum_completed_stage_count = MINIMUM_MUTATION_STAGE_COUNT_BY_OPERATION_COUNT[
+            len(self._operation_summaries)
+        ]
+        completed_mutation_stages = list(
+            MUTATION_STAGES[:minimum_completed_stage_count]
+        )
+        native_history_cursor: int | None = 0 if not self._mutation_started else None
+        evidence_derivation_error: str | None = None
+        if self._mutation_started:
+            if current_snapshot is None:
+                evidence_derivation_error = (
+                    "Menu-control failure current Scene could not be observed"
+                )
+            else:
+                try:
+                    current_mutation_stages = _completed_mutation_stages(current_snapshot)
+                    native_history_cursor = len(current_mutation_stages)
+                    completed_stage_count = max(
+                        minimum_completed_stage_count,
+                        len(current_mutation_stages),
+                    )
+                    if self._final_snapshot is not None:
+                        completed_stage_count = len(MUTATION_STAGES)
+                    completed_mutation_stages = list(
+                        MUTATION_STAGES[:completed_stage_count]
+                    )
+                except (KeyError, TypeError, ValueError) as derivation_error:
+                    evidence_derivation_error = str(derivation_error)
         if self._mutation_started and restored:
             failure_status = "failed_restored"
+        elif self._mutation_started and self._final_snapshot is not None:
+            failure_status = "recovery_required"
         elif self._mutation_started:
             failure_status = "failed_checkpointed"
         elif self._preflight_completed:
@@ -659,6 +766,9 @@ class UVSphereMenuControlProof:
             "failedStep": self._current_label,
             "mutationStarted": self._mutation_started,
             "lastCompletedOperation": self._operation_summaries[-1]["operationId"] if self._operation_summaries else None,
+            "operationSummaries": list(self._operation_summaries),
+            "completedMutationStages": completed_mutation_stages,
+            "nativeHistoryCursor": native_history_cursor,
             "requiresUndoRecovery": uncertain,
             "recoveryRequirement": "native_undo_checkpoint_required" if uncertain else None,
             "failureStatus": failure_status,
@@ -667,6 +777,9 @@ class UVSphereMenuControlProof:
             "currentSceneSnapshot": current_snapshot,
             "currentSceneFingerprintSha256": current_fingerprint,
         }
+        if evidence_derivation_error is not None:
+            payload["failureStatus"] = "recovery_required"
+            payload["evidenceDerivationError"] = evidence_derivation_error
         callback = self._on_failure
         if callback is not None:
             callback(payload)

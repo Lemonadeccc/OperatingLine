@@ -170,6 +170,9 @@ def _success_evidence() -> dict[str, object]:
 
 def _terminal(status: str = "succeeded"):
     def build(checkpoint: dict[str, object]) -> dict[str, object]:
+        checkpoint_key = (
+            "nativeUndoCheckpoint" if status == "succeeded" else "checkpoint"
+        )
         return {
             "formatVersion": "1.0.0",
             "proofId": PROOF_ID,
@@ -177,8 +180,10 @@ def _terminal(status: str = "succeeded"):
             "status": status,
             "terminalEvidence": {
                 "kind": "menu_control_" + status,
-                "checkpointId": checkpoint["checkpointId"],
-                "undoLockId": checkpoint["undoLockId"],
+                checkpoint_key: {
+                    "checkpointId": checkpoint["checkpointId"],
+                    "undoLockId": checkpoint["undoLockId"],
+                },
             },
         }
     return build
@@ -273,6 +278,102 @@ class MenuControlHistoryTests(unittest.TestCase):
             self.assertEqual(self.controller.cursor, expected_cursor)
             self.assertEqual(self.controller.mutation_locked, expected_cursor != 0)
         self.assertEqual(self.controller.status, "restored")
+
+    def test_terminal_outbox_reconciliation_is_read_only_and_acknowledged_durably(
+        self,
+    ) -> None:
+        request_id = str(uuid.uuid4())
+        delivery_id = str(uuid.uuid4())
+        receipt_hash = "c" * 64
+
+        def terminal_builder(checkpoint: dict[str, object]) -> dict[str, object]:
+            return {
+                "formatVersion": "1.0.0",
+                "requestId": request_id,
+                "replayId": REPLAY_ID,
+                "proofId": PROOF_ID,
+                "deliveryId": delivery_id,
+                "target": {"adapterId": "blender", "instanceId": INSTANCE_ID},
+                "lease": {"leaseId": LEASE_ID},
+                "status": "succeeded",
+                "managedActionResult": "not_executed",
+                "managedIdentityVerified": False,
+                "managedReceiptCreated": False,
+                "requiresUndoToUnlock": True,
+                "terminalEvidence": {
+                    "kind": "succeeded_locked",
+                    "operationReceipts": [{"contentSha256": receipt_hash}],
+                    "nativeUndoCheckpoint": {
+                        "checkpointId": checkpoint["checkpointId"],
+                        "undoLockId": checkpoint["undoLockId"],
+                        "finalSceneFingerprintSha256": _fingerprint(8),
+                    },
+                },
+                "error": None,
+                "occurredAt": "2020-01-01T00:00:00Z",
+            }
+
+        self.controller.register()
+        self.controller.arm(
+            self.scene,
+            _success_evidence(),
+            proof_id=PROOF_ID,
+            replay_id=REPLAY_ID,
+            target_id="proof.uv_sphere.eye",
+            terminal_result_builder=terminal_builder,
+        )
+        pending = self.controller.pending_terminal_result()
+        self.assertIsNotNone(pending)
+        challenge = {
+            **{
+                key: deepcopy(value)
+                for key, value in pending.items()
+                if key
+                not in {
+                    "status",
+                    "managedActionResult",
+                    "managedIdentityVerified",
+                    "managedReceiptCreated",
+                    "requiresUndoToUnlock",
+                    "terminalEvidence",
+                    "error",
+                    "occurredAt",
+                }
+            },
+            "kind": "native_terminal_reconcile",
+            "recoveryId": str(uuid.uuid4()),
+            "acknowledgedProgressReceiptChainHeads": [receipt_hash],
+            "recoveryRequestedAt": "2020-01-01T00:00:01Z",
+        }
+
+        ack = self.controller.build_terminal_reconciliation_ack(
+            self.scene, challenge
+        )
+
+        self.assertEqual(ack["result"], pending)
+        self.assertEqual(ack["currentSceneFingerprintSha256"], _fingerprint(8))
+        self.assertEqual(
+            ack["terminalResultContentSha256"], history._canonical_sha256(pending)
+        )
+        self.assertTrue(
+            self.controller.acknowledge_terminal_result(
+                ack["terminalResultContentSha256"]
+            )
+        )
+        self.assertIsNone(self.controller.pending_terminal_result())
+        marker = history.MenuControlHistoryController._read_marker(self.scene)
+        self.assertEqual(
+            marker["acknowledgedTerminalResultContentSha256"],
+            ack["terminalResultContentSha256"],
+        )
+
+        marker["acknowledgedTerminalResultContentSha256"] = "d" * 64
+        marker["markerContentSha256"] = history._canonical_sha256(
+            history.MenuControlHistoryController._marker_identity(marker)
+        )
+        self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY] = json.dumps(marker)
+        with self.assertRaisesRegex(RuntimeError, "acknowledgement identity"):
+            history.MenuControlHistoryController._read_marker(self.scene)
 
     def test_each_adjacent_redo_relocks_and_moves_one_cursor(self) -> None:
         self._arm()
@@ -447,6 +548,21 @@ class MenuControlHistoryTests(unittest.TestCase):
         self.assertFalse(self.controller.unregister())
         self.assertIn(history._menu_control_load_post, handlers.load_post)
 
+    def test_retire_hands_load_handlers_to_one_replacement_controller(self) -> None:
+        self._arm()
+        self.controller.retire(keep_handlers=True)
+        self.assertNotIn(self.controller, history._REGISTERED_CONTROLLERS)
+        self.assertIn(history._menu_control_load_post, handlers.load_post)
+        self.assertEqual(self.controller.status, "retired")
+
+        replacement = history.MenuControlHistoryController(self.gate)
+        replacement.register()
+        self.assertEqual(history._REGISTERED_CONTROLLERS, {replacement})
+        self.assertEqual(replacement.status, "recovery_required")
+        replacement.retire()
+        self.assertEqual(history._REGISTERED_CONTROLLERS, set())
+        self.assertNotIn(history._menu_control_load_post, handlers.load_post)
+
     def test_scene_binding_rejects_non_context_or_unregistered_scene(self) -> None:
         self.controller.register()
         other = _Scene(44)
@@ -461,8 +577,12 @@ class MenuControlHistoryTests(unittest.TestCase):
             lambda result: result.update({"proofId": str(uuid.uuid4())}),
             lambda result: result.update({"replayId": str(uuid.uuid4())}),
             lambda result: result.update({"status": "restored"}),
-            lambda result: result["terminalEvidence"].update({"checkpointId": str(uuid.uuid4())}),
-            lambda result: result["terminalEvidence"].update({"undoLockId": str(uuid.uuid4())}),
+            lambda result: result["terminalEvidence"]["nativeUndoCheckpoint"].update(
+                {"checkpointId": str(uuid.uuid4())}
+            ),
+            lambda result: result["terminalEvidence"]["nativeUndoCheckpoint"].update(
+                {"undoLockId": str(uuid.uuid4())}
+            ),
         )
         for mutate in mutations:
             with self.subTest(mutation=mutate):
@@ -482,6 +602,27 @@ class MenuControlHistoryTests(unittest.TestCase):
                         terminal_result_builder=forged,
                     )
                 self.assertNotIn(history.MENU_CONTROL_HISTORY_MARKER_KEY, self.scene)
+
+    def test_legacy_root_checkpoint_terminal_fails_closed(self) -> None:
+        self._arm()
+        marker = json.loads(self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY])
+        nested = marker["terminalResult"]["terminalEvidence"].pop(
+            "nativeUndoCheckpoint"
+        )
+        marker["terminalResult"]["terminalEvidence"].update(nested)
+        marker["terminalResultContentSha256"] = history._canonical_sha256(
+            marker["terminalResult"]
+        )
+        marker["checkpointContentSha256"] = history._canonical_sha256(
+            history.MenuControlHistoryController._checkpoint_identity_from_marker(marker)
+        )
+        marker["markerContentSha256"] = history._canonical_sha256(
+            history.MenuControlHistoryController._marker_identity(marker)
+        )
+        self.scene[history.MENU_CONTROL_HISTORY_MARKER_KEY] = json.dumps(marker)
+
+        with self.assertRaisesRegex(RuntimeError, "terminal outbox identity"):
+            history.MenuControlHistoryController._read_marker(self.scene)
 
     def test_rebind_requires_independent_complete_authority(self) -> None:
         self._arm()

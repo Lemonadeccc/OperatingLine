@@ -119,6 +119,17 @@ class CompanionController:
         self._shortcut_proof_delivery: dict[str, Any] | None = None
         self._shortcut_proof_checkpoint: dict[str, Any] | None = None
         self._seen_shortcut_proof_request_ids: set[str] = set()
+        self._menu_control_proof_driver: Any | None = None
+        self._menu_control_proof_delivery: dict[str, Any] | None = None
+        self._menu_control_proof_checkpoint: dict[str, Any] | None = None
+        self._seen_menu_control_proof_request_ids: set[str] = set()
+        self._menu_control_terminal_resubmitted_lease_id: str | None = None
+        self._pending_menu_control_terminal_reconciliation: dict[str, Any] | None = None
+        self._menu_control_native_guidance_suspended = False
+        self._menu_control_recovery_locked = False
+        from ..infrastructure.menu_control_history import MenuControlHistoryController
+
+        self._menu_control_history = MenuControlHistoryController()
 
     @staticmethod
     def _canonical_uuid(candidate: str | None, label: str) -> str:
@@ -140,7 +151,13 @@ class CompanionController:
     def shortcut_mutation_blocked(self) -> bool:
         from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
 
-        return self._shortcut_proof_driver is not None or shortcut_history_mutation_locked()
+        return (
+            self._shortcut_proof_driver is not None
+            or self._menu_control_proof_driver is not None
+            or shortcut_history_mutation_locked()
+            or self._menu_control_history.mutation_locked
+            or self._menu_control_recovery_locked
+        )
 
     def _transport_connection_state(self) -> tuple[bool, str]:
         transport = self._transport
@@ -188,6 +205,7 @@ class CompanionController:
             reapplied_result_builder=self._shortcut_history_reapplied,
             transition_result_callback=self._submit_shortcut_transition_result,
         )
+        self._menu_control_history.register()
         if self._timer_registered:
             return
         bpy.app.timers.register(self._timer_callback, first_interval=0.1, persistent=True)
@@ -196,6 +214,7 @@ class CompanionController:
     def unregister_timer(self, *, document_replaced: bool = False) -> None:
         if document_replaced:
             self._abandon_active_shortcut_proof()
+            self._abandon_active_menu_control_proof()
         self.disconnect(
             flush_timeout=0.0,
             wait_timeout=0.1,
@@ -207,6 +226,7 @@ class CompanionController:
         if self._timer_registered and bpy.app.timers.is_registered(self._timer_callback):
             bpy.app.timers.unregister(self._timer_callback)
         self._timer_registered = False
+        self._menu_control_history.retire(keep_handlers=document_replaced)
 
     def connect(self, base_url: str, token: str) -> None:
         if not getattr(bpy.app, "online_access", True):
@@ -270,6 +290,9 @@ class CompanionController:
     ) -> None:
         self._cancel_active_shortcut_proof(
             "Companion disconnected while shortcut proof was executing"
+        )
+        self._cancel_active_menu_control_proof(
+            "Companion disconnected while menu-control proof was executing"
         )
         transport = self._transport
         self._transport = None
@@ -374,6 +397,62 @@ class CompanionController:
             "Shortcut proof document was replaced; Runtime recovery is required"
         )
         self.status = "Shortcut proof recovery required"
+
+    def _cancel_active_menu_control_proof(self, reason: str) -> None:
+        """Stop the fixed menu driver before its transport lease is discarded."""
+
+        driver = self._menu_control_proof_driver
+        if driver is None:
+            return
+        cancel = getattr(driver, "cancel", None)
+        try:
+            if callable(cancel):
+                cancel(reason)
+            else:
+                self._hard_stop_shortcut_driver(driver)
+                self.error = "Menu-control proof driver cannot be cancelled safely"
+                self.status = "Menu-control proof recovery required"
+        except Exception as error:
+            self._hard_stop_shortcut_driver(driver)
+            self.error = f"Menu-control proof cancellation failed closed: {error}"
+            self.status = "Menu-control proof recovery required"
+        finally:
+            if self._menu_control_proof_driver is driver:
+                self._menu_control_proof_driver = None
+            guidance_error = self._restore_menu_control_native_guidance()
+            if guidance_error is not None:
+                self.error = guidance_error
+                self.status = "Menu-control guidance recovery required"
+
+    def _abandon_active_menu_control_proof(self) -> None:
+        """Hard-stop old-document input without reading the replacement Scene."""
+
+        driver = self._menu_control_proof_driver
+        had_state = (
+            driver is not None
+            or self._menu_control_proof_delivery is not None
+            or self._menu_control_proof_checkpoint is not None
+        )
+        abandon = getattr(driver, "abandon", None)
+        try:
+            if driver is None:
+                pass
+            elif callable(abandon):
+                abandon()
+            else:
+                self._hard_stop_shortcut_driver(driver)
+        except Exception as error:
+            self._hard_stop_shortcut_driver(driver)
+            self.error = f"Menu-control proof document replacement stop failed: {error}"
+        finally:
+            if self._menu_control_proof_driver is driver:
+                self._menu_control_proof_driver = None
+        self._menu_control_proof_delivery = None
+        self._menu_control_proof_checkpoint = None
+        self._pending_menu_control_terminal_reconciliation = None
+        self._menu_control_native_guidance_suspended = False
+        if had_state:
+            self.status = "Menu-control proof recovery required"
 
     @staticmethod
     def _hard_stop_shortcut_driver(driver: Any) -> None:
@@ -2118,8 +2197,15 @@ class CompanionController:
         from .. import get_session
         from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
 
-        if require_idle_driver and self._shortcut_proof_driver is not None:
-            raise ValueError("Another shortcut proof is already executing")
+        if require_idle_driver and (
+            self._shortcut_proof_driver is not None
+            or self._menu_control_proof_driver is not None
+        ):
+            raise ValueError("Another native-input proof is already executing")
+        if self._menu_control_history.mutation_locked:
+            raise ValueError("A menu-control mutation remains locked pending native Undo")
+        if self._menu_control_recovery_locked:
+            raise ValueError("A menu-control recovery lock requires explicit document recovery")
         if shortcut_history_mutation_locked():
             raise ValueError("A shortcut proof mutation remains locked pending native Undo")
         transport = self._transport
@@ -2832,6 +2918,606 @@ class CompanionController:
             self.error = str(error_message)
             self.status = "Action execution failed"
 
+    @staticmethod
+    def _menu_control_identity(delivery: dict[str, Any]) -> dict[str, Any]:
+        return deepcopy(delivery)
+
+    def _menu_control_occurred_at(self, delivery: dict[str, Any]) -> str:
+        now = datetime.now(timezone.utc)
+        dispatched = datetime.fromisoformat(
+            delivery["dispatchedAt"].replace("Z", "+00:00")
+        )
+        if now < dispatched:
+            raise RuntimeError("Menu-control proof local clock predates dispatch")
+        if (now - dispatched).total_seconds() > 120:
+            raise RuntimeError("Menu-control proof exceeded its 120-second execution window")
+        return now.isoformat().replace("+00:00", "Z")
+
+    def _validate_menu_control_proof_authority(
+        self, delivery: dict[str, Any], *, require_idle_driver: bool
+    ) -> tuple[DemoSession, dict[str, Any]]:
+        from .. import get_session
+        from ..infrastructure.menu_control_proof import (
+            EXECUTOR_ID,
+            OPERATION_IDS,
+            TARGET_PROFILE,
+            expected_arguments_payload,
+        )
+        from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
+
+        if require_idle_driver and (
+            self._menu_control_proof_driver is not None
+            or self._shortcut_proof_driver is not None
+        ):
+            raise ValueError("Another native-input proof is already executing")
+        if self._menu_control_history.mutation_locked:
+            raise ValueError("A menu-control mutation remains locked pending native Undo")
+        if self._menu_control_recovery_locked:
+            raise ValueError("A menu-control recovery lock requires explicit document recovery")
+        if shortcut_history_mutation_locked():
+            raise ValueError("A shortcut proof mutation remains locked pending native Undo")
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Menu-control proof requires the live Companion lease")
+        snapshot = transport.session_snapshot
+        if snapshot is None:
+            raise ValueError("Menu-control proof requires a negotiated Companion session")
+        lease = delivery["lease"]
+        if delivery["target"] != {"adapterId": "blender", "instanceId": self.instance_id}:
+            raise ValueError("Menu-control proof targets a different Companion")
+        if (
+            lease["leaseId"] != snapshot.lease_id
+            or lease["sessionId"] != snapshot.session_id
+            or lease["target"] != delivery["target"]
+            or lease["documentIncarnationId"] != snapshot.document_incarnation_id
+        ):
+            raise ValueError("Menu-control proof lease is not the current live document lease")
+        if delivery["executorId"] != EXECUTOR_ID or delivery["targetProfile"] != TARGET_PROFILE:
+            raise ValueError("Menu-control proof executor identity is unsupported")
+        if tuple(delivery["operationIds"]) != OPERATION_IDS:
+            raise ValueError("Menu-control proof operation identity is unsupported")
+        binding = delivery["binding"]
+        if binding["acceptedAction"] != {
+            "adapterId": "blender",
+            "name": "blender.mesh.create_uv_sphere",
+            "arguments": expected_arguments_payload(),
+        }:
+            raise ValueError("Menu-control proof action is not the fixed UV Sphere proof")
+        if any(
+            binding[field] != delivery[field]
+            for field in (
+                "requestId", "replayId", "proofId", "proposalId", "executionId",
+                "leafId", "proposalRecordContentSha256", "proposalContentSha256",
+                "packetContentSha256", "inputTreeContentSha256",
+                "outputTreeContentSha256", "materializationContentSha256",
+            )
+        ) or binding["integrity"]["contentSha256"] != delivery["bindingContentSha256"]:
+            raise ValueError("Menu-control proof immutable binding identity changed")
+        if self._last_accepted_proposal_id != delivery["proposalId"]:
+            raise ValueError("Menu-control proof proposal was not accepted locally")
+        if self._last_accepted_proposal_decision != binding["acceptedDecision"]:
+            raise ValueError("Menu-control proof does not bind the exact local acceptance")
+        if self.proposed_plan is not None or self._proposal_candidates or self.pending_plan is not None:
+            raise ValueError("A plan or proposal is still pending review")
+        session = get_session()
+        if session.observation_blocked or not session.started or session.execution_id is None:
+            raise ValueError("The accepted walkthrough is not ready for menu-control proof")
+        expected_plan = {
+            "id": session.plan_id,
+            "revision": session.revision,
+            "contentSha256": session.plan_content_sha256,
+        }
+        if delivery["plan"] != expected_plan or binding["plan"] != expected_plan:
+            raise ValueError("Menu-control proof plan does not match the active session")
+        if delivery["executionId"] != session.execution_id:
+            raise ValueError("Menu-control proof execution id does not match the active session")
+        last_report = self.last_report
+        if not isinstance(last_report, dict) or delivery["expectedState"] != {
+            "reportId": last_report.get("reportId"),
+            "sequence": last_report.get("sequence"),
+        }:
+            raise ValueError("Menu-control proof expected state is stale")
+        if delivery["startCheckpoint"] != binding["startState"]:
+            raise ValueError("Menu-control proof start checkpoint changed")
+        if delivery["expectedState"]["sequence"] > getattr(
+            transport, "last_delivered_sequence", self.last_delivered_sequence
+        ):
+            raise ValueError("Menu-control proof expected state was not delivered")
+        next_index = session.active_index + 1
+        if next_index < 0 or next_index >= len(session.steps):
+            raise ValueError("The accepted walkthrough has no next leaf")
+        candidate = session.steps[next_index]
+        source_step = self._source_step(session, candidate.id)
+        if source_step is None or candidate.id != delivery["leafId"]:
+            raise ValueError("Menu-control proof leaf is not the exact accepted next leaf")
+        if source_step.get("action") != binding["acceptedAction"]:
+            raise ValueError("Menu-control proof action does not match the accepted next leaf")
+        raw_catalog = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        proof = BUNDLED_INTERACTION_CATALOG.recipe_for(binding["actionName"])
+        definition = (
+            None
+            if proof is None or proof.procedure_materialization is None
+            else proof.procedure_materialization.menu.proof_execution
+        )
+        if (
+            delivery["interactionCatalogContentSha256"]
+            != self._shortcut_canonical_sha256(raw_catalog)
+            or definition is None
+            or definition.executor_id != delivery["executorId"]
+            or definition.target_profile != delivery["targetProfile"]
+            or definition.execution_boundary != delivery["executionBoundary"]
+            or definition.authorization != delivery["authorization"]
+            or definition.transport != delivery["transport"]
+            or definition.operation_ids != tuple(delivery["operationIds"])
+            or definition.native_undo_depth != delivery["nativeUndoDepth"]
+            or definition.proof_arguments.resource_id != "proof.uv_sphere.eye"
+            or definition.managed_action_executed is not False
+            or definition.managed_receipt_created is not False
+        ):
+            raise ValueError("Menu-control proof is not authorized by the bundled catalog")
+        return session, source_step
+
+    def _menu_control_receipts(
+        self, delivery: dict[str, Any], summaries: list[dict[str, Any]], occurred_at: str
+    ) -> list[dict[str, Any]]:
+        operation_ids = [item.get("operationId") for item in summaries]
+        if not summaries or operation_ids != delivery["operationIds"][: len(summaries)]:
+            raise ValueError("Menu-control proof summaries are not the exact operation sequence")
+        receipts: list[dict[str, Any]] = []
+        previous = None
+        for index, item in enumerate(summaries):
+            summary = {"status": item["status"], "path": deepcopy(item["path"])}
+            summary.update(deepcopy(item.get("parameters") or {}))
+            receipt = {
+                "receiptId": str(uuid.uuid4()),
+                "proofId": delivery["proofId"],
+                "requestId": delivery["requestId"],
+                "deliveryId": delivery["deliveryId"],
+                "bindingContentSha256": delivery["bindingContentSha256"],
+                "operationId": delivery["operationIds"][index],
+                "order": index + 1,
+                "previousReceiptContentSha256": previous,
+                "outcome": "succeeded",
+                "summary": summary,
+                "occurredAt": occurred_at,
+            }
+            receipt["contentSha256"] = self._shortcut_canonical_sha256(receipt)
+            receipts.append(receipt)
+            previous = receipt["contentSha256"]
+        return receipts
+
+    def _validate_menu_control_proof_continuation_authority(
+        self,
+        delivery: dict[str, Any],
+        driver: Any,
+    ) -> None:
+        """Re-check authority that cannot be rewritten by the audited Undo probe."""
+
+        from ..infrastructure.shortcut_history import shortcut_history_mutation_locked
+
+        if (
+            self._menu_control_proof_driver is not driver
+            or self._menu_control_proof_delivery != delivery
+            or self._shortcut_proof_driver is not None
+        ):
+            raise ValueError("Menu-control proof continuation identity changed")
+        if self._menu_control_history.mutation_locked:
+            raise ValueError("A menu-control mutation remains locked pending native Undo")
+        if self._menu_control_recovery_locked:
+            raise ValueError("A menu-control recovery lock requires explicit document recovery")
+        if shortcut_history_mutation_locked():
+            raise ValueError("A shortcut proof mutation remains locked pending native Undo")
+        transport = self._transport
+        if transport is None or not transport.running:
+            raise ValueError("Menu-control proof requires the live Companion lease")
+        snapshot = transport.session_snapshot
+        if snapshot is None:
+            raise ValueError("Menu-control proof requires a negotiated Companion session")
+        lease = delivery["lease"]
+        expected_target = {"adapterId": "blender", "instanceId": self.instance_id}
+        if (
+            delivery["target"] != expected_target
+            or lease["leaseId"] != snapshot.lease_id
+            or lease["sessionId"] != snapshot.session_id
+            or lease["target"] != expected_target
+            or lease["documentIncarnationId"] != snapshot.document_incarnation_id
+        ):
+            raise ValueError("Menu-control proof continuation lease authority changed")
+        binding = delivery["binding"]
+        if (
+            self._last_accepted_proposal_id != delivery["proposalId"]
+            or self._last_accepted_proposal_decision != binding["acceptedDecision"]
+            or self.proposed_plan is not None
+            or self._proposal_candidates
+            or self.pending_plan is not None
+        ):
+            raise ValueError("Menu-control proof local acceptance authority changed")
+        if delivery["expectedState"]["sequence"] > getattr(
+            transport,
+            "last_delivered_sequence",
+            self.last_delivered_sequence,
+        ):
+            raise ValueError("Menu-control proof expected state is no longer delivered")
+
+    def _suspend_menu_control_native_guidance(self) -> None:
+        """Restore the audited stock menu layout for the bounded UI proof."""
+
+        from ..presentation.native_menu_guidance import (
+            disable_native_menu_guidance,
+            native_menu_guidance_enabled,
+        )
+
+        if self._menu_control_native_guidance_suspended:
+            return
+        if native_menu_guidance_enabled():
+            disable_native_menu_guidance()
+            self._menu_control_native_guidance_suspended = True
+
+    def _restore_menu_control_native_guidance(self) -> str | None:
+        if not self._menu_control_native_guidance_suspended:
+            return None
+        self._menu_control_native_guidance_suspended = False
+        try:
+            from .. import get_session
+            from ..presentation.native_menu_guidance import (
+                enable_native_menu_guidance,
+            )
+
+            if not enable_native_menu_guidance(get_session):
+                raise RuntimeError("native menu guidance is unsupported")
+        except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+            return f"Menu-control proof could not restore native menu guidance: {error}"
+        return None
+
+    def _submit_menu_control_progress(
+        self, delivery: dict[str, Any], receipts: list[dict[str, Any]], occurred_at: str
+    ) -> None:
+        transport = self._transport
+        if transport is None:
+            raise RuntimeError("Menu-control proof transport is unavailable")
+        cursors = (0, 0, 0, 1, 4, 7, 8)
+        stages = (
+            "uv_sphere_created", "location_x_set", "location_y_set", "location_z_set",
+            "scale_x_set", "scale_y_set", "scale_z_set", "object_name_set",
+        )
+        for count in range(1, len(receipts) + 1):
+            cursor = cursors[count - 1]
+            transport.submit_menu_control_proof_progress({
+                **self._menu_control_identity(delivery),
+                "status": "in_progress",
+                "completedOperationIds": deepcopy(delivery["operationIds"][:count]),
+                "operationReceipts": deepcopy(receipts[:count]),
+                "receiptChainHeadSha256": receipts[count - 1]["contentSha256"],
+                "nativeHistoryCursor": cursor,
+                "completedMutationStages": list(stages[:cursor]),
+                "occurredAt": occurred_at,
+            })
+
+    def _menu_control_result(
+        self, delivery: dict[str, Any], *, status: str, terminal: dict[str, Any],
+        error: str | None, occurred_at: str,
+    ) -> dict[str, Any]:
+        return {
+            **self._menu_control_identity(delivery),
+            "status": status,
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "managedReceiptCreated": False,
+            "requiresUndoToUnlock": status in {
+                "succeeded", "failed_checkpointed", "recovery_required"
+            },
+            "terminalEvidence": terminal,
+            "error": error,
+            "occurredAt": occurred_at,
+        }
+
+    def _handle_menu_control_proof_complete(
+        self, delivery: dict[str, Any], evidence: dict[str, Any]
+    ) -> None:
+        transport = self._transport
+        try:
+            occurred_at = self._menu_control_occurred_at(delivery)
+            receipts = self._menu_control_receipts(
+                delivery, list(evidence["operationSummaries"]), occurred_at
+            )
+            self._submit_menu_control_progress(delivery, receipts, occurred_at)
+            final = evidence["finalState"]
+            strong = {
+                "kind": "uv_sphere_menu_controls_ready", "satisfied": True,
+                "observationId": str(uuid.uuid4()), "objectName": final["objectName"],
+                "objectType": final["objectType"], "location": deepcopy(final["location"]),
+                "scale": deepcopy(final["scale"]), "meshTopology": deepcopy(final["meshTopology"]),
+                "meshSha256": final["meshSha256"],
+                "sceneFingerprintSha256": evidence["finalSceneFingerprintSha256"],
+                "observedAt": occurred_at,
+            }
+            strong["contentSha256"] = self._shortcut_canonical_sha256(strong)
+            result: dict[str, Any] | None = None
+
+            def build(checkpoint: dict[str, Any]) -> dict[str, Any]:
+                nonlocal result
+                result_at = self._menu_control_occurred_at(delivery)
+                native = {
+                    "checkpointId": checkpoint["checkpointId"],
+                    "undoLockId": checkpoint["undoLockId"], "nativeUndoDepth": 8,
+                    "nativeHistoryCursor": 8,
+                    "mutationStages": [
+                        "uv_sphere_created", "location_x_set", "location_y_set", "location_z_set",
+                        "scale_x_set", "scale_y_set", "scale_z_set", "object_name_set",
+                    ],
+                    "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                    "finalSceneFingerprintSha256": evidence["finalSceneFingerprintSha256"],
+                    "restoredSceneFingerprintSha256": evidence["restoredSceneFingerprintSha256"],
+                    "reappliedSceneFingerprintSha256": evidence["reappliedSceneFingerprintSha256"],
+                    "receiptChainRootSha256": receipts[0]["contentSha256"],
+                    "receiptChainHeadSha256": receipts[-1]["contentSha256"],
+                    "strongObservationContentSha256": strong["contentSha256"],
+                    "committedAt": checkpoint["committedAt"],
+                }
+                terminal = {
+                    "kind": "succeeded_locked",
+                    "operationSummaries": [
+                        {"operationId": receipt["operationId"],
+                         "summaryContentSha256": self._shortcut_canonical_sha256(receipt["summary"])}
+                        for receipt in receipts
+                    ],
+                    "operationReceipts": deepcopy(receipts),
+                    "strongObservation": strong,
+                    "nativeUndoCheckpoint": native,
+                }
+                result = self._menu_control_result(
+                    delivery, status="succeeded", terminal=terminal,
+                    error=None, occurred_at=result_at,
+                )
+                return result
+
+            checkpoint = self._menu_control_history.arm(
+                bpy.context.scene, evidence, proof_id=delivery["proofId"],
+                replay_id=delivery["replayId"], target_id="proof.uv_sphere.eye",
+                terminal_result_builder=build,
+            )
+            if result is None:
+                raise RuntimeError("Menu-control terminal result was not persisted")
+            self._menu_control_proof_checkpoint = deepcopy(checkpoint)
+            self._menu_control_proof_delivery = deepcopy(delivery)
+            if transport is None:
+                raise RuntimeError("Menu-control proof transport disappeared")
+            transport.submit_menu_control_proof_result(result)
+            self._menu_control_proof_driver = None
+            self.error = ""
+            self._menu_control_recovery_locked = False
+            self.status = "Menu-control proof succeeded; native Undo required to unlock"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._menu_control_proof_driver = None
+            self._menu_control_recovery_locked = True
+            self.error = f"Menu-control proof completion failed closed: {error}"
+            self.status = "Menu-control proof recovery required"
+        finally:
+            self._drain_pending_menu_control_terminal_reconciliation()
+            guidance_error = self._restore_menu_control_native_guidance()
+            if guidance_error is not None:
+                self.error = guidance_error
+                self.status = "Menu-control guidance recovery required"
+
+    def _handle_menu_control_proof_failure(
+        self, delivery: dict[str, Any], evidence: dict[str, Any]
+    ) -> None:
+        was_recovery_locked = self._menu_control_recovery_locked
+        self._menu_control_proof_driver = None
+        transport = self._transport
+        error = str(evidence.get("error") or "Menu-control proof failed")
+        try:
+            occurred_at = self._menu_control_occurred_at(delivery)
+            summaries = list(evidence.get("operationSummaries") or [])
+            receipts = self._menu_control_receipts(delivery, summaries, occurred_at) if summaries else []
+            if receipts:
+                self._submit_menu_control_progress(delivery, receipts, occurred_at)
+            failure_status = evidence.get("failureStatus")
+            if failure_status in {"preflight_rejected", "failed_no_mutation"}:
+                status = "failed_no_mutation"
+                terminal = {
+                    "kind": status, "receiptPrefix": [], "lastCompletedOperationId": None,
+                    "internalHistoryCursor": 0, "completedMutationStages": [],
+                    "automaticReplay": False,
+                }
+            elif failure_status == "failed_checkpointed" and receipts:
+                stages = list(evidence.get("completedMutationStages") or [])
+                native_history_cursor = evidence.get("nativeHistoryCursor")
+                if not stages:
+                    raise ValueError("Checkpointed failure lacks completed mutation stages")
+                if (
+                    isinstance(native_history_cursor, bool)
+                    or not isinstance(native_history_cursor, int)
+                    or native_history_cursor != len(stages)
+                ):
+                    raise ValueError("Checkpointed failure has an invalid native history cursor")
+                result: dict[str, Any] | None = None
+
+                def build_failure(checkpoint_value: dict[str, Any]) -> dict[str, Any]:
+                    nonlocal result
+                    result_at = self._menu_control_occurred_at(delivery)
+                    failure_checkpoint = {
+                        "formatVersion": "1.0.0",
+                        "checkpointId": checkpoint_value["checkpointId"],
+                        "undoLockId": checkpoint_value["undoLockId"],
+                        "proofId": delivery["proofId"],
+                        "replayId": delivery["replayId"],
+                        "target": {**delivery["target"], "resourceId": "proof.uv_sphere.eye"},
+                        "internalHistoryCursor": native_history_cursor,
+                        "completedMutationStages": deepcopy(stages),
+                        "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                        "currentSceneFingerprintSha256": evidence["currentSceneFingerprintSha256"],
+                        "receiptChainRootSha256": receipts[0]["contentSha256"],
+                        "receiptChainHeadSha256": receipts[-1]["contentSha256"],
+                        "committedAt": checkpoint_value["committedAt"],
+                    }
+                    failure_checkpoint["contentSha256"] = self._shortcut_canonical_sha256(
+                        failure_checkpoint
+                    )
+                    terminal_value = {
+                        "kind": "failed_checkpointed",
+                        "checkpoint": failure_checkpoint,
+                        "receiptPrefix": deepcopy(receipts),
+                        "lastCompletedOperationId": receipts[-1]["operationId"],
+                        "internalHistoryCursor": native_history_cursor,
+                        "completedMutationStages": deepcopy(stages),
+                        "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                        "currentSceneFingerprintSha256": evidence["currentSceneFingerprintSha256"],
+                        "automaticReplay": False,
+                    }
+                    result = self._menu_control_result(
+                        delivery, status="failed_checkpointed", terminal=terminal_value,
+                        error=error, occurred_at=result_at,
+                    )
+                    return result
+
+                checkpoint = self._menu_control_history.arm_failed(
+                    bpy.context.scene, evidence, proof_id=delivery["proofId"],
+                    replay_id=delivery["replayId"], target_id="proof.uv_sphere.eye",
+                    terminal_result_builder=build_failure,
+                )
+                if result is None:
+                    raise RuntimeError("Menu-control failure result was not persisted")
+                self._menu_control_proof_checkpoint = deepcopy(checkpoint)
+                self._menu_control_proof_delivery = deepcopy(delivery)
+                transport.submit_menu_control_proof_result(result)
+                self.error = error
+                self._menu_control_recovery_locked = was_recovery_locked
+                self.status = "Menu-control proof failed with mutation; native Undo required"
+                return
+            else:
+                status = "failed_restored" if failure_status == "failed_restored" else "recovery_required"
+                stages = list(evidence.get("completedMutationStages") or [])
+                native_history_cursor = evidence.get("nativeHistoryCursor")
+                if (
+                    isinstance(native_history_cursor, bool)
+                    or not isinstance(native_history_cursor, int)
+                    or not 0 <= native_history_cursor <= 8
+                ):
+                    raise ValueError("Menu-control failure has an invalid native history cursor")
+                terminal = {
+                    "kind": status, "receiptPrefix": deepcopy(receipts),
+                    "lastCompletedOperationId": receipts[-1]["operationId"] if receipts else None,
+                    "internalHistoryCursor": native_history_cursor,
+                    "completedMutationStages": stages,
+                    "baselineSceneFingerprintSha256": evidence["baselineSceneFingerprintSha256"],
+                    "currentSceneFingerprintSha256": evidence["currentSceneFingerprintSha256"],
+                    "automaticReplay": False,
+                }
+            result = self._menu_control_result(
+                delivery, status=status, terminal=terminal, error=error, occurred_at=occurred_at
+            )
+            if transport is None:
+                raise RuntimeError("Menu-control proof transport disappeared")
+            transport.submit_menu_control_proof_result(result)
+            self.error = error
+            self._menu_control_recovery_locked = (
+                was_recovery_locked or status == "recovery_required"
+            )
+            self.status = {
+                "failed_no_mutation": "Menu-control proof rejected before mutation",
+                "failed_restored": "Menu-control proof failed and restored",
+                "recovery_required": "Menu-control proof recovery required",
+            }[status]
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as reporting_error:
+            self._menu_control_recovery_locked = (
+                was_recovery_locked or bool(evidence.get("mutationStarted"))
+            )
+            self.error = f"{error}; evidence reporting failed closed: {reporting_error}"
+            self.status = "Menu-control proof recovery required"
+        finally:
+            self._drain_pending_menu_control_terminal_reconciliation()
+            guidance_error = self._restore_menu_control_native_guidance()
+            if guidance_error is not None:
+                self.error = guidance_error
+                self.status = "Menu-control guidance recovery required"
+
+    def _handle_menu_control_proof_request(self, delivery: Any) -> None:
+        from ..infrastructure.menu_control_proof import UVSphereMenuControlProof
+
+        if not isinstance(delivery, dict) or self._transport is None:
+            return
+        request_id = delivery.get("requestId")
+        if request_id in self._seen_menu_control_proof_request_ids:
+            self.error = "Menu-control proof request was already consumed"
+            self.status = "Menu-control proof recovery required"
+            return
+        if isinstance(request_id, str):
+            if len(self._seen_menu_control_proof_request_ids) >= 256:
+                self._seen_menu_control_proof_request_ids.pop()
+            self._seen_menu_control_proof_request_ids.add(request_id)
+        try:
+            self._validate_menu_control_proof_authority(delivery, require_idle_driver=True)
+            driver = UVSphereMenuControlProof()
+            self._menu_control_proof_driver = driver
+            self._menu_control_proof_delivery = deepcopy(delivery)
+            self._suspend_menu_control_native_guidance()
+
+            def preflight() -> bool:
+                self._validate_menu_control_proof_authority(delivery, require_idle_driver=False)
+                return self._menu_control_proof_driver is driver and self._menu_control_proof_delivery == delivery
+
+            def continuation() -> bool:
+                self._validate_menu_control_proof_continuation_authority(
+                    delivery,
+                    driver,
+                )
+                return True
+
+            driver.start(
+                preflight_hook=preflight,
+                on_complete=lambda evidence: self._handle_menu_control_proof_complete(delivery, evidence),
+                on_failure=lambda evidence: self._handle_menu_control_proof_failure(delivery, evidence),
+                continuation_guard=continuation,
+            )
+            self.error = ""
+            self.status = "Menu-control proof executing"
+        except (IndexError, KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self._handle_menu_control_proof_failure(delivery, {
+                "failureStatus": "preflight_rejected", "error": str(error),
+                "mutationStarted": False,
+            })
+
+    def _resubmit_menu_control_terminal_outbox(self, lease_id: Any) -> None:
+        if not isinstance(lease_id, str) or lease_id == self._menu_control_terminal_resubmitted_lease_id:
+            return
+        transport = self._transport
+        if transport is None:
+            return
+        pending = self._menu_control_history.pending_terminal_result()
+        if pending is None:
+            return
+        self._menu_control_terminal_resubmitted_lease_id = lease_id
+        transport.submit_menu_control_proof_result(pending)
+        self.status = "Menu-control terminal evidence queued for reconciliation"
+
+    def _handle_menu_control_terminal_reconcile_request(self, delivery: Any) -> None:
+        transport = self._transport
+        if not isinstance(delivery, dict) or transport is None:
+            return
+        self._pending_menu_control_terminal_reconciliation = deepcopy(delivery)
+        if self._menu_control_proof_driver is not None:
+            self.status = "Menu-control terminal reconciliation deferred until input completes"
+            return
+        try:
+            ack = self._menu_control_history.build_terminal_reconciliation_ack(
+                bpy.context.scene,
+                delivery,
+            )
+            transport.submit_menu_control_proof_recovery_ack(ack)
+            self._pending_menu_control_terminal_reconciliation = None
+            self.error = ""
+            self.status = "Menu-control terminal reconciliation submitted"
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self.error = f"Menu-control terminal reconciliation failed closed: {error}"
+            self.status = "Menu-control proof recovery required"
+
+    def _drain_pending_menu_control_terminal_reconciliation(self) -> None:
+        delivery = self._pending_menu_control_terminal_reconciliation
+        if delivery is None or self._menu_control_proof_driver is not None:
+            return
+        self._handle_menu_control_terminal_reconcile_request(delivery)
+
     def pump(self) -> float | None:
         from .. import get_session
 
@@ -2859,6 +3545,70 @@ class CompanionController:
                     break
                 if message.get("kind") == "action_execute_request":
                     self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") in {
+                    "menu_control_proof_request",
+                    "menu_control_proof_execute_request",
+                }:
+                    self._handle_menu_control_proof_request(message.get("request"))
+                elif message.get("kind") in {
+                    "menu_control_proof_progress_rejected",
+                    "menu_control_proof_result_rejected",
+                }:
+                    self.error = str(
+                        message.get("message")
+                        or "Runtime rejected menu-control proof evidence"
+                    )
+                    self.status = "Menu-control proof reporting failed closed"
+                elif message.get("kind") == "menu_control_proof_progress_acknowledged":
+                    if not self.error:
+                        self.status = "Menu-control proof progress acknowledged"
+                elif message.get("kind") == "menu_control_proof_result_acknowledged":
+                    try:
+                        acknowledged = (
+                            self._menu_control_history.acknowledge_terminal_result(
+                                message.get("resultContentSha256")
+                            )
+                        )
+                    except (TypeError, ValueError) as error:
+                        acknowledged = False
+                        self.error = f"Menu-control terminal acknowledgement rejected: {error}"
+                        self.status = "Menu-control proof recovery required"
+                    if acknowledged:
+                        self._menu_control_terminal_resubmitted_lease_id = None
+                    if not self.error and acknowledged:
+                        self.status = "Menu-control proof evidence acknowledged"
+                elif (
+                    message.get("kind")
+                    == "menu_control_proof_terminal_reconcile_request"
+                ):
+                    self._handle_menu_control_terminal_reconcile_request(
+                        message.get("request")
+                    )
+                elif message.get("kind") == "menu_control_proof_recovery_acknowledged":
+                    try:
+                        acknowledged = (
+                            self._menu_control_history.acknowledge_terminal_result(
+                                message.get("resultContentSha256")
+                            )
+                        )
+                    except (TypeError, ValueError):
+                        acknowledged = False
+                    if acknowledged:
+                        self._menu_control_terminal_resubmitted_lease_id = None
+                        self.error = ""
+                        self.status = "Menu-control terminal evidence reconciled"
+                    else:
+                        self.error = (
+                            "Menu-control reconciliation acknowledgement did not match "
+                            "the persisted terminal outbox"
+                        )
+                        self.status = "Menu-control proof recovery required"
+                elif message.get("kind") == "menu_control_proof_recovery_rejected":
+                    self.error = str(
+                        message.get("message")
+                        or "Runtime rejected menu-control terminal reconciliation"
+                    )
+                    self.status = "Menu-control proof recovery required"
                 elif message.get("kind") == "shortcut_proof_execute_request":
                     self._handle_shortcut_proof_execute_request(message.get("request"))
                 elif message.get("kind") == "shortcut_proof_recovery_request":
@@ -3183,8 +3933,21 @@ class CompanionController:
                     self.status = "Action result rejected"
                 elif message.get("kind") == "session_established":
                     self.error = ""
+                    outbox_error: str | None = None
+                    try:
+                        self._resubmit_menu_control_terminal_outbox(
+                            message.get("leaseId")
+                        )
+                    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+                        outbox_error = (
+                            "Menu-control terminal outbox resubmission failed closed: "
+                            f"{error}"
+                        )
                     session = get_session()
-                    if self.proposal_session is not None:
+                    if outbox_error is not None:
+                        self.error = outbox_error
+                        self.status = "Menu-control proof recovery required"
+                    elif self.proposal_session is not None:
                         self.status = (
                             f"Plan proposal {self.proposal_session.plan_id} "
                             f"r{self.proposal_session.revision} awaiting review"

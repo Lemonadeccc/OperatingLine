@@ -16,6 +16,7 @@ from .infrastructure import (
     action_registry,
     disable_overlay,
     discard_native_history,
+    enable_overlay,
     forget_managed_collection,
     register_native_history,
     register_shortcut_history,

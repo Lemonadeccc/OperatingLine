@@ -419,6 +419,7 @@ class MenuControlHistoryEntry:
     armed_at: str
     terminal_result_content_sha256: str
     terminal_result: dict[str, object]
+    acknowledged_terminal_result_content_sha256: str | None = None
     transition_result_content_sha256s: tuple[str, ...] = ()
     transition_results: tuple[dict[str, object], ...] = ()
 
@@ -484,6 +485,31 @@ class MenuControlHistoryController:
             "terminalResultContentSha256": marker.get("terminalResultContentSha256"),
         }
 
+    @staticmethod
+    def _terminal_marker_identity_from_marker(
+        marker: Mapping[str, object],
+    ) -> dict[str, object]:
+        fingerprints = marker.get("stageFingerprints")
+        checkpoint_kind = marker.get("checkpointKind")
+        if not isinstance(fingerprints, Sequence) or len(fingerprints) != 9:
+            raise ValueError("Menu-control terminal marker stage fingerprints are invalid")
+        locked_index = 8 if checkpoint_kind == "success" else 1
+        return {
+            "formatVersion": marker.get("formatVersion"),
+            "executorId": marker.get("executorId"),
+            "checkpointId": marker.get("checkpointId"),
+            "undoLockId": marker.get("undoLockId"),
+            "proofId": marker.get("proofId"),
+            "replayId": marker.get("replayId"),
+            "targetId": marker.get("targetId"),
+            "checkpointKind": checkpoint_kind,
+            "baselineSceneFingerprintSha256": fingerprints[0],
+            "lockedSceneFingerprintSha256": fingerprints[locked_index],
+            "terminalResultContentSha256": marker.get(
+                "terminalResultContentSha256"
+            ),
+        }
+
     @classmethod
     def _marker_payload(cls, entry: MenuControlHistoryEntry) -> dict[str, object]:
         marker: dict[str, object] = {
@@ -502,8 +528,15 @@ class MenuControlHistoryController:
             "terminalResult": deepcopy(entry.terminal_result),
             "transitionResults": deepcopy(list(entry.transition_results)),
         }
+        if entry.acknowledged_terminal_result_content_sha256 is not None:
+            marker["acknowledgedTerminalResultContentSha256"] = (
+                entry.acknowledged_terminal_result_content_sha256
+            )
         marker["checkpointContentSha256"] = _canonical_sha256(
             cls._checkpoint_identity_from_marker(marker)
+        )
+        marker["terminalMarkerContentSha256"] = _canonical_sha256(
+            cls._terminal_marker_identity_from_marker(marker)
         )
         marker["markerContentSha256"] = _canonical_sha256(cls._marker_identity(marker))
         return marker
@@ -541,24 +574,69 @@ class MenuControlHistoryController:
         terminal_hash = _require_sha256(marker.get("terminalResultContentSha256"), "terminal result")
         if not isinstance(terminal, dict) or _canonical_sha256(terminal) != terminal_hash:
             raise RuntimeError("Menu-control history terminal outbox is invalid")
+        acknowledged_terminal_hash = marker.get(
+            "acknowledgedTerminalResultContentSha256"
+        )
+        if (
+            acknowledged_terminal_hash is not None
+            and _require_sha256(
+                acknowledged_terminal_hash, "acknowledged terminal result"
+            )
+            != terminal_hash
+        ):
+            raise RuntimeError(
+                "Menu-control history terminal acknowledgement identity is invalid"
+            )
         terminal_evidence = terminal.get("terminalEvidence")
         expected_terminal_status = (
             "succeeded" if marker["checkpointKind"] == "success" else "failed_checkpointed"
+        )
+        terminal_checkpoint = (
+            terminal_evidence.get("nativeUndoCheckpoint")
+            if expected_terminal_status == "succeeded"
+            and isinstance(terminal_evidence, Mapping)
+            else terminal_evidence.get("checkpoint")
+            if isinstance(terminal_evidence, Mapping)
+            else None
         )
         if (
             terminal.get("proofId") != marker["proofId"]
             or terminal.get("replayId") != marker["replayId"]
             or terminal.get("status") != expected_terminal_status
             or not isinstance(terminal_evidence, Mapping)
-            or terminal_evidence.get("checkpointId") != marker["checkpointId"]
-            or terminal_evidence.get("undoLockId") != marker["undoLockId"]
+            or not isinstance(terminal_checkpoint, Mapping)
+            or terminal_checkpoint.get("checkpointId") != marker["checkpointId"]
+            or terminal_checkpoint.get("undoLockId") != marker["undoLockId"]
         ):
             raise RuntimeError("Menu-control history terminal outbox identity is invalid")
+        if marker["checkpointKind"] == "success":
+            reported_baseline = terminal_checkpoint.get(
+                "baselineSceneFingerprintSha256"
+            )
+            reported_locked = terminal_checkpoint.get("finalSceneFingerprintSha256")
+        else:
+            reported_baseline = terminal_checkpoint.get(
+                "baselineSceneFingerprintSha256"
+            )
+            reported_locked = terminal_checkpoint.get("currentSceneFingerprintSha256")
+        if (
+            reported_baseline is not None
+            and reported_baseline != fingerprints[0]
+            or reported_locked is not None
+            and reported_locked
+            != fingerprints[8 if marker["checkpointKind"] == "success" else 1]
+        ):
+            raise RuntimeError("Menu-control history terminal Scene identity is invalid")
         checkpoint_hash = _require_sha256(
             marker.get("checkpointContentSha256"), "checkpoint content"
         )
         if checkpoint_hash != _canonical_sha256(cls._checkpoint_identity_from_marker(marker)):
             raise RuntimeError("Menu-control history checkpoint content hash is invalid")
+        terminal_marker_hash = marker.get("terminalMarkerContentSha256")
+        if terminal_marker_hash is not None and _require_sha256(
+            terminal_marker_hash, "terminal marker content"
+        ) != _canonical_sha256(cls._terminal_marker_identity_from_marker(marker)):
+            raise RuntimeError("Menu-control history terminal marker content hash is invalid")
         results = marker.get("transitionResults")
         result_hashes = marker.get("transitionResultContentSha256s")
         if (
@@ -627,6 +705,9 @@ class MenuControlHistoryController:
     def register(self) -> None:
         if self._registered:
             return
+        if self._status == "retired":
+            self._status = "idle"
+            self.error = ""
         for handlers, callback in (
             (bpy.app.handlers.undo_post, _menu_control_undo_post),
             (bpy.app.handlers.redo_post, _menu_control_redo_post),
@@ -657,6 +738,24 @@ class MenuControlHistoryController:
         _REGISTERED_CONTROLLERS.discard(self)
         self._registered = False
         return True
+
+    def retire(self, *, keep_handlers: bool = False) -> None:
+        """Detach one controller without mutating a persisted Scene marker."""
+
+        _REGISTERED_CONTROLLERS.discard(self)
+        if self._registered and not keep_handlers and not _REGISTERED_CONTROLLERS:
+            for handlers, callback in (
+                (bpy.app.handlers.undo_post, _menu_control_undo_post),
+                (bpy.app.handlers.redo_post, _menu_control_redo_post),
+                (bpy.app.handlers.load_post, _menu_control_load_post),
+            ):
+                if callback in handlers:
+                    handlers.remove(callback)
+        self._registered = False
+        self._current = None
+        self._orphan_marker = None
+        self._locked = False
+        self._status = "retired"
 
     def _discover_marker(self) -> None:
         found = []
@@ -694,13 +793,21 @@ class MenuControlHistoryController:
             raise TypeError("Menu-control terminal result builder must be callable")
         result = dict(builder(deepcopy(dict(checkpoint))))
         terminal = result.get("terminalEvidence")
+        terminal_checkpoint = (
+            terminal.get("nativeUndoCheckpoint")
+            if expected_status == "succeeded" and isinstance(terminal, Mapping)
+            else terminal.get("checkpoint")
+            if isinstance(terminal, Mapping)
+            else None
+        )
         if (
             result.get("proofId") != entry.proof_id
             or result.get("replayId") != entry.replay_id
             or result.get("status") != expected_status
             or not isinstance(terminal, Mapping)
-            or terminal.get("checkpointId") != entry.checkpoint_id
-            or terminal.get("undoLockId") != entry.undo_lock_id
+            or not isinstance(terminal_checkpoint, Mapping)
+            or terminal_checkpoint.get("checkpointId") != entry.checkpoint_id
+            or terminal_checkpoint.get("undoLockId") != entry.undo_lock_id
         ):
             raise ValueError("Menu-control terminal result identity is invalid")
         return result
@@ -716,6 +823,7 @@ class MenuControlHistoryController:
             "checkpointKind": entry.checkpoint_kind,
             "cursor": entry.cursor,
             "stageFingerprints": list(entry.stage_fingerprints),
+            "committedAt": entry.armed_at,
         }
 
     def arm(
@@ -941,9 +1049,13 @@ class MenuControlHistoryController:
             target_id=str(marker["targetId"]), owner_scene_uid=int(scene.session_uid), checkpoint_kind=str(marker["checkpointKind"]),
             stage_fingerprints=tuple(str(value) for value in marker["stageFingerprints"]), cursor=cursor, armed_at=_utc_now(),
             terminal_result_content_sha256=str(marker["terminalResultContentSha256"]), terminal_result=deepcopy(marker["terminalResult"]),
+            acknowledged_terminal_result_content_sha256=marker.get(
+                "acknowledgedTerminalResultContentSha256"
+            ),
             transition_result_content_sha256s=tuple(str(value) for value in marker["transitionResultContentSha256s"]),
             transition_results=tuple(deepcopy(item) for item in marker["transitionResults"]),
         )
+        self._write_marker(scene, entry)
         self._current = entry
         self._entries.append(entry)
         self._orphan_marker = None
@@ -978,6 +1090,146 @@ class MenuControlHistoryController:
             return
         self._current = updated
         self._entries[-1] = updated
+
+    @staticmethod
+    def _terminal_receipt_chain_heads(result: Mapping[str, object]) -> list[str]:
+        terminal = result.get("terminalEvidence")
+        if not isinstance(terminal, Mapping):
+            raise ValueError("Menu-control terminal outbox evidence is unavailable")
+        if terminal.get("kind") == "succeeded_locked":
+            receipts = terminal.get("operationReceipts")
+        elif terminal.get("kind") == "failed_checkpointed":
+            receipts = terminal.get("receiptPrefix")
+        else:
+            raise ValueError(
+                "Menu-control terminal reconciliation requires a locked checkpoint"
+            )
+        if not isinstance(receipts, Sequence) or isinstance(receipts, (str, bytes)):
+            raise ValueError("Menu-control terminal outbox receipt chain is invalid")
+        heads: list[str] = []
+        for receipt in receipts:
+            if not isinstance(receipt, Mapping):
+                raise ValueError("Menu-control terminal outbox receipt is invalid")
+            heads.append(_require_sha256(receipt.get("contentSha256"), "terminal receipt"))
+        return heads
+
+    def build_terminal_reconciliation_ack(
+        self,
+        scene: Any,
+        delivery: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Prove a persisted locked terminal without replaying native input."""
+
+        self._require_context_scene(scene)
+        entry = self._current
+        if entry is None or not self._locked:
+            raise RuntimeError("Menu-control terminal outbox is not locked and active")
+        owner = self._owner_scene(entry)
+        if owner is not scene:
+            raise RuntimeError("Menu-control terminal outbox belongs to another Scene")
+        marker = self._read_marker(scene)
+        if marker is None or marker != self._marker_payload(entry):
+            raise RuntimeError("Menu-control terminal marker changed before reconciliation")
+        if delivery.get("kind") != "native_terminal_reconcile":
+            raise ValueError("Menu-control terminal reconciliation challenge is invalid")
+        result = deepcopy(entry.terminal_result)
+        if _canonical_sha256(result) != entry.terminal_result_content_sha256:
+            raise RuntimeError("Menu-control terminal result hash changed")
+        immutable_result_fields = {
+            key: value
+            for key, value in result.items()
+            if key
+            not in {
+                "status",
+                "managedActionResult",
+                "managedIdentityVerified",
+                "managedReceiptCreated",
+                "requiresUndoToUnlock",
+                "terminalEvidence",
+                "error",
+                "occurredAt",
+            }
+        }
+        if any(delivery.get(key) != value for key, value in immutable_result_fields.items()):
+            raise ValueError("Menu-control reconciliation changed immutable delivery identity")
+        terminal_heads = self._terminal_receipt_chain_heads(result)
+        acknowledged_heads = delivery.get("acknowledgedProgressReceiptChainHeads")
+        if (
+            not isinstance(acknowledged_heads, Sequence)
+            or isinstance(acknowledged_heads, (str, bytes))
+            or list(acknowledged_heads) != terminal_heads[: len(acknowledged_heads)]
+        ):
+            raise ValueError(
+                "Menu-control reconciliation receipt prefix differs from the terminal outbox"
+            )
+        terminal = result["terminalEvidence"]
+        if result.get("status") == "succeeded":
+            expected_live = terminal["nativeUndoCheckpoint"][
+                "finalSceneFingerprintSha256"
+            ]
+            if entry.checkpoint_kind != "success" or entry.cursor != 8:
+                raise RuntimeError("Menu-control success checkpoint is not at its locked stage")
+        elif result.get("status") == "failed_checkpointed":
+            expected_live = terminal["checkpoint"]["currentSceneFingerprintSha256"]
+            if entry.checkpoint_kind != "failure" or entry.cursor is not None:
+                raise RuntimeError("Menu-control failure checkpoint state changed")
+        else:
+            raise ValueError("Menu-control terminal outbox is not reconcilable")
+        current_fingerprint = _live_scene_fingerprint(scene)
+        if current_fingerprint != expected_live:
+            raise RuntimeError("Menu-control terminal live Scene no longer matches its checkpoint")
+        occurred_at = _utc_now()
+        if datetime.fromisoformat(occurred_at.replace("Z", "+00:00")) < datetime.fromisoformat(
+            str(delivery.get("recoveryRequestedAt")).replace("Z", "+00:00")
+        ):
+            raise RuntimeError("Menu-control reconciliation local clock predates its challenge")
+        return {
+            "kind": "native_terminal_reconcile",
+            "recoveryId": _require_uuid(delivery.get("recoveryId"), "recoveryId"),
+            "result": result,
+            "terminalResultContentSha256": entry.terminal_result_content_sha256,
+            "expectedMarkerContentSha256": marker["terminalMarkerContentSha256"],
+            "currentSceneFingerprintSha256": current_fingerprint,
+            "occurredAt": occurred_at,
+        }
+
+    def acknowledge_terminal_result(
+        self,
+        result_content_sha256: str,
+    ) -> bool:
+        entry = self._current
+        if entry is None:
+            return False
+        digest = _require_sha256(result_content_sha256, "terminal acknowledgement")
+        if digest != entry.terminal_result_content_sha256:
+            return False
+        owner = self._owner_scene(entry)
+        if owner is None or getattr(bpy.context, "scene", None) is not owner:
+            self._lock_recovery("terminal acknowledgement owner Scene is unavailable")
+            return False
+        if entry.acknowledged_terminal_result_content_sha256 is not None:
+            return True
+        updated = replace(
+            entry,
+            acknowledged_terminal_result_content_sha256=digest,
+        )
+        try:
+            self._write_marker(owner, updated)
+        except Exception as error:
+            self._lock_recovery(f"terminal acknowledgement could not persist: {error}")
+            return False
+        self._current = updated
+        self._entries[-1] = updated
+        return True
+
+    def pending_terminal_result(self) -> dict[str, object] | None:
+        entry = self._current
+        if (
+            entry is None
+            or entry.acknowledged_terminal_result_content_sha256 is not None
+        ):
+            return None
+        return deepcopy(entry.terminal_result)
 
     def has_transition_outbox(self) -> bool:
         return bool(self._current and self._current.transition_results) or bool(self._orphan_marker and self._orphan_marker.get("transitionResults"))
@@ -1028,6 +1280,9 @@ class MenuControlHistoryController:
             "stageFingerprints": list(entry.stage_fingerprints),
             "mutationLocked": self._locked,
             "terminalResultContentSha256": entry.terminal_result_content_sha256,
+            "acknowledgedTerminalResultContentSha256": (
+                entry.acknowledged_terminal_result_content_sha256
+            ),
             "transitionResultContentSha256s": list(entry.transition_result_content_sha256s),
             "committedAt": entry.armed_at,
         }

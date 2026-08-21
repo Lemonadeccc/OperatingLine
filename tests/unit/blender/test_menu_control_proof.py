@@ -44,6 +44,23 @@ sys.modules[infrastructure.__name__] = infrastructure
 module = import_module(f"{PACKAGE_NAME}.infrastructure.menu_control_proof")
 
 
+def _stage_snapshot(stage_count: int) -> dict[str, object]:
+    if stage_count == 0:
+        objects = []
+    else:
+        location = [0.0, 0.0, 0.0]
+        scale = [1.0, 1.0, 1.0]
+        values = [1.25, -2.0, 0.75, 1.5, 1.5, 1.5]
+        for index in range(min(max(stage_count - 1, 0), 6)):
+            (location if index < 3 else scale)[index if index < 3 else index - 3] = values[index]
+        objects = [{
+            "name": "OperatingLine.TutorialEye" if stage_count == 8 else "Sphere",
+            "type": "MESH", "location": location, "scale": scale,
+            "mesh": {**dict(module.EXPECTED_TOPOLOGY), "sha256": "a" * 64},
+        }]
+    return {"objects": objects}
+
+
 class MenuControlProofContractTests(unittest.TestCase):
     def setUp(self) -> None:
         fake_bpy.app.timers.callbacks.clear()
@@ -156,6 +173,25 @@ class MenuControlProofContractTests(unittest.TestCase):
         self.assertIn("revoked", failures[0]["error"])
         self.assertEqual(failures[0]["failureStatus"], "failed_no_mutation")
 
+    def test_strict_preflight_and_undo_safe_continuation_are_separate(self) -> None:
+        calls: list[str] = []
+        proof = module.UVSphereMenuControlProof()
+        proof._run_blender_preflight = lambda: None
+        proof._build_fixed_steps = lambda: proof._steps.append(
+            module._Step("first", 0.1, lambda: calls.append("input"))
+        )
+
+        proof.start(
+            preflight_hook=lambda: calls.append("preflight") or True,
+            continuation_guard=lambda: calls.append("continuation") or True,
+            on_complete=lambda _payload: None,
+            on_failure=lambda payload: self.fail(str(payload)),
+        )
+
+        self.assertEqual(calls, ["preflight"])
+        self.assertEqual(proof._timer_callback(), 0.1)
+        self.assertEqual(calls, ["preflight", "continuation", "input"])
+
     def test_cancellation_after_possible_mutation_reports_checkpoint_recovery(self) -> None:
         failures: list[dict[str, object]] = []
         proof = module.UVSphereMenuControlProof()
@@ -171,10 +207,136 @@ class MenuControlProofContractTests(unittest.TestCase):
             module._scene_snapshot = original_snapshot
 
         self.assertTrue(failures[0]["requiresUndoRecovery"])
-        self.assertEqual(failures[0]["failureStatus"], "failed_checkpointed")
+        self.assertEqual(failures[0]["failureStatus"], "recovery_required")
         self.assertEqual(failures[0]["recoveryRequirement"], "native_undo_checkpoint_required")
         self.assertEqual(failures[0]["baselineSceneSnapshot"], {"state": "baseline"})
         self.assertEqual(failures[0]["baselineSceneFingerprintSha256"], "a" * 64)
+
+    def test_failure_evidence_derives_only_exact_observed_mutation_prefixes(self) -> None:
+        self.assertEqual(module._completed_mutation_stages(_stage_snapshot(0)), [])
+        self.assertEqual(
+            module._completed_mutation_stages(_stage_snapshot(4)),
+            list(module.MUTATION_STAGES[:4]),
+        )
+        self.assertEqual(
+            module._completed_mutation_stages(_stage_snapshot(8)),
+            list(module.MUTATION_STAGES),
+        )
+        corrupt = _stage_snapshot(4)
+        corrupt["objects"][0]["location"][1] = 0.5
+        with self.assertRaisesRegex(ValueError, "canonical history stage"):
+            module._completed_mutation_stages(corrupt)
+
+    def test_mid_mutation_failure_preserves_completed_operations_and_stages(self) -> None:
+        failures: list[dict[str, object]] = []
+        proof = module.UVSphereMenuControlProof()
+        proof._on_failure = failures.append
+        proof._mutation_started = True
+        proof._baseline_snapshot = _stage_snapshot(0)
+        proof._baseline_fingerprint = module.compute_scene_fingerprint_sha256(
+            proof._baseline_snapshot
+        )
+        for index in range(5):
+            proof._record_operation(index)
+        original_snapshot = module._scene_snapshot
+        module._scene_snapshot = lambda: _stage_snapshot(5)
+        try:
+            proof._fail(RuntimeError("mid-control failure"))
+        finally:
+            module._scene_snapshot = original_snapshot
+
+        failure = failures[0]
+        self.assertEqual(failure["failureStatus"], "failed_checkpointed")
+        self.assertEqual(len(failure["operationSummaries"]), 5)
+        self.assertEqual(
+            failure["completedMutationStages"], list(module.MUTATION_STAGES[:5])
+        )
+        self.assertEqual(failure["nativeHistoryCursor"], 5)
+
+    def test_post_mutation_failure_preserves_full_observed_prefix(self) -> None:
+        failures: list[dict[str, object]] = []
+        proof = module.UVSphereMenuControlProof()
+        proof._on_failure = failures.append
+        proof._mutation_started = True
+        proof._baseline_snapshot = _stage_snapshot(0)
+        proof._baseline_fingerprint = module.compute_scene_fingerprint_sha256(
+            proof._baseline_snapshot
+        )
+        for index in range(7):
+            proof._record_operation(index)
+        original_snapshot = module._scene_snapshot
+        module._scene_snapshot = lambda: _stage_snapshot(8)
+        try:
+            proof._fail(RuntimeError("post-control failure"))
+        finally:
+            module._scene_snapshot = original_snapshot
+
+        self.assertEqual(len(failures[0]["operationSummaries"]), 7)
+        self.assertEqual(
+            failures[0]["completedMutationStages"], list(module.MUTATION_STAGES)
+        )
+        self.assertEqual(failures[0]["nativeHistoryCursor"], 8)
+
+    def test_mid_execution_restoration_keeps_cumulative_completed_stage_lower_bound(
+        self,
+    ) -> None:
+        failures: list[dict[str, object]] = []
+        proof = module.UVSphereMenuControlProof()
+        proof._on_failure = failures.append
+        proof._mutation_started = True
+        proof._baseline_snapshot = _stage_snapshot(0)
+        proof._baseline_fingerprint = module.compute_scene_fingerprint_sha256(
+            proof._baseline_snapshot
+        )
+        for operation_index in range(4):
+            proof._record_operation(operation_index)
+        original_snapshot = module._scene_snapshot
+        module._scene_snapshot = lambda: _stage_snapshot(0)
+        try:
+            proof._fail(RuntimeError("mid-execution restoration"))
+        finally:
+            module._scene_snapshot = original_snapshot
+
+        failure = failures[0]
+        self.assertEqual(failure["failureStatus"], "failed_restored")
+        self.assertEqual(failure["completedMutationStages"], [module.MUTATION_STAGES[0]])
+        self.assertEqual(failure["nativeHistoryCursor"], 0)
+
+    def test_history_probe_failures_separate_completed_stages_from_current_cursor(self) -> None:
+        cases = [
+            (f"undo-{index}", 8 - index) for index in range(1, 9)
+        ] + [(f"redo-{index}", index) for index in range(1, 9)]
+        original_snapshot = module._scene_snapshot
+        try:
+            for label, cursor in cases:
+                with self.subTest(label=label):
+                    failures: list[dict[str, object]] = []
+                    proof = module.UVSphereMenuControlProof()
+                    proof._on_failure = failures.append
+                    proof._mutation_started = True
+                    proof._current_label = f"record {label.replace('-', ' ')}"
+                    proof._baseline_snapshot = _stage_snapshot(0)
+                    proof._baseline_fingerprint = module.compute_scene_fingerprint_sha256(
+                        proof._baseline_snapshot
+                    )
+                    proof._final_snapshot = _stage_snapshot(8)
+                    for operation_index in range(7):
+                        proof._record_operation(operation_index)
+                    module._scene_snapshot = lambda cursor=cursor: _stage_snapshot(cursor)
+
+                    proof._fail(RuntimeError(f"injected {label} failure"))
+
+                    failure = failures[0]
+                    self.assertEqual(
+                        failure["completedMutationStages"], list(module.MUTATION_STAGES)
+                    )
+                    self.assertEqual(failure["nativeHistoryCursor"], cursor)
+                    self.assertEqual(
+                        failure["failureStatus"],
+                        "failed_restored" if label == "undo-8" else "recovery_required",
+                    )
+        finally:
+            module._scene_snapshot = original_snapshot
 
     def test_fixed_sequence_has_observations_then_strong_observation_then_exact_history(self) -> None:
         proof = module.UVSphereMenuControlProof()
