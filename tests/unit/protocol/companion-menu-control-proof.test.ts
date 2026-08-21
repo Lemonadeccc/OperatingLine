@@ -9,9 +9,14 @@ import {
   companionMenuControlProofProgressSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusSchema,
+  companionMenuControlProofTerminalReconciliationAckMatchesDelivery,
+  companionMenuControlProofTerminalReconciliationAckSchema,
+  companionMenuControlProofTerminalReconciliationDeliverySchema,
+  companionMenuControlProofTerminalMarkerIdentity,
   computeCompanionMenuControlProofFailureCheckpointContentSha256,
   computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeCompanionMenuControlProofResultContentSha256,
+  computeCompanionMenuControlProofTerminalMarkerContentSha256,
   computeProcedureMenuControlProofBindingContentSha256,
   computeProtocolCanonicalJsonSha256,
   protocolJsonValueCanonicalization,
@@ -363,6 +368,77 @@ function recoveryPendingStatus(priorStatus: 'dispatched' | 'in_progress' = 'disp
 }
 
 describe('companion menu-control proof protocol', () => {
+  it('binds terminal reconciliation to the original delivery and a distinct live replacement lease', () => {
+    const terminal = result();
+    const challenge = companionMenuControlProofTerminalReconciliationDeliverySchema.parse({
+      ...delivery(),
+      kind: 'native_terminal_reconcile',
+      recoveryId: '13572468-1357-4357-8357-135724681357',
+      replacementLease: {
+        ...delivery().lease,
+        leaseId: '24681357-2468-4468-8468-246813572468',
+        expiresAt: '2026-08-22T10:10:00+08:00',
+      },
+      acknowledgedProgressReceiptChainHeads: receipts()
+        .slice(0, 3)
+        .map((receipt) => receipt.contentSha256),
+      recoveryRequestedAt: '2026-08-22T10:06:00+08:00',
+    });
+    const ack = companionMenuControlProofTerminalReconciliationAckSchema.parse({
+      kind: 'native_terminal_reconcile',
+      recoveryId: challenge.recoveryId,
+      result: terminal,
+      terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(terminal),
+      expectedMarkerContentSha256:
+        computeCompanionMenuControlProofTerminalMarkerContentSha256(terminal),
+      currentSceneFingerprintSha256:
+        terminal.terminalEvidence.nativeUndoCheckpoint.finalSceneFingerprintSha256,
+      occurredAt: '2026-08-22T10:06:01+08:00',
+    });
+    expect(companionMenuControlProofTerminalMarkerIdentity(terminal)).toEqual({
+      formatVersion: '1.0.0',
+      executorId: terminal.executorId,
+      checkpointId: terminal.terminalEvidence.nativeUndoCheckpoint.checkpointId,
+      undoLockId: terminal.terminalEvidence.nativeUndoCheckpoint.undoLockId,
+      proofId: terminal.proofId,
+      replayId: terminal.replayId,
+      targetId: 'proof.uv_sphere.eye',
+      checkpointKind: 'success',
+      baselineSceneFingerprintSha256:
+        terminal.terminalEvidence.nativeUndoCheckpoint.baselineSceneFingerprintSha256,
+      lockedSceneFingerprintSha256:
+        terminal.terminalEvidence.nativeUndoCheckpoint.finalSceneFingerprintSha256,
+      terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(terminal),
+    });
+    expect(companionMenuControlProofTerminalReconciliationAckMatchesDelivery(ack, challenge)).toBe(
+      true,
+    );
+    expect(
+      companionMenuControlProofTerminalReconciliationDeliverySchema.safeParse({
+        ...challenge,
+        replacementLease: challenge.lease,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofTerminalReconciliationAckSchema.safeParse({
+        ...ack,
+        terminalResultContentSha256: hash('f'),
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofTerminalReconciliationAckSchema.safeParse({
+        ...ack,
+        currentSceneFingerprintSha256: hash('f'),
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofTerminalReconciliationAckSchema.safeParse({
+        ...ack,
+        expectedMarkerContentSha256: hash('f'),
+      }).success,
+    ).toBe(false);
+  });
+
   it('keeps the caller request opaque and rejects native input injection', () => {
     const request = {
       formatVersion: '1.0.0',
@@ -423,6 +499,17 @@ describe('companion menu-control proof protocol', () => {
       );
     earlyReceipt.receiptChainHeadSha256 = earlyReceipt.operationReceipts[0]!.contentSha256;
     expect(companionMenuControlProofProgressSchema.safeParse(earlyReceipt).success).toBe(false);
+
+    const renewedSessionProgress = structuredClone(progress(1));
+    renewedSessionProgress.lease.expiresAt = '2026-08-22T10:00:05+08:00';
+    expect(companionMenuControlProofProgressSchema.parse(renewedSessionProgress)).toEqual(
+      renewedSessionProgress,
+    );
+    const outsideExecutionWindow = structuredClone(progress(1));
+    outsideExecutionWindow.occurredAt = '2026-08-22T10:02:05+08:00';
+    expect(companionMenuControlProofProgressSchema.safeParse(outsideExecutionWindow).success).toBe(
+      false,
+    );
   });
 
   it('requires seven summaries and receipts plus strong observation and depth-eight checkpoint', () => {
@@ -447,6 +534,17 @@ describe('companion menu-control proof protocol', () => {
     const foreignLease = structuredClone(value);
     foreignLease.lease.target.instanceId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
     expect(companionMenuControlProofResultSchema.safeParse(foreignLease).success).toBe(false);
+
+    const renewedSessionResult = structuredClone(value);
+    renewedSessionResult.lease.expiresAt = '2026-08-22T10:00:05+08:00';
+    expect(companionMenuControlProofResultSchema.parse(renewedSessionResult)).toEqual(
+      renewedSessionResult,
+    );
+    const outsideExecutionWindow = structuredClone(value);
+    outsideExecutionWindow.occurredAt = '2026-08-22T10:02:05+08:00';
+    expect(companionMenuControlProofResultSchema.safeParse(outsideExecutionWindow).success).toBe(
+      false,
+    );
   });
 
   it('models no-mutation and recovery-required failures without automatic replay', () => {
@@ -485,6 +583,19 @@ describe('companion menu-control proof protocol', () => {
       },
     } as const;
     expect(companionMenuControlProofResultSchema.parse(recovery)).toEqual(recovery);
+    for (const nativeHistoryCursor of [0, 1, 2, 3, 4, 5, 6, 7, 8]) {
+      const probeFailure = {
+        ...recovery,
+        terminalEvidence: {
+          ...recovery.terminalEvidence,
+          receiptPrefix: receipts(),
+          lastCompletedOperationId: operationIds[6],
+          internalHistoryCursor: nativeHistoryCursor,
+          completedMutationStages: mutationStages,
+        },
+      } as const;
+      expect(companionMenuControlProofResultSchema.parse(probeFailure)).toEqual(probeFailure);
+    }
     expect(
       companionMenuControlProofResultSchema.safeParse({
         ...recovery,
@@ -503,6 +614,11 @@ describe('companion menu-control proof protocol', () => {
     impossibleRecovery.terminalEvidence.internalHistoryCursor = 2;
     impossibleRecovery.terminalEvidence.completedMutationStages = mutationStages.slice(0, 2);
     expect(companionMenuControlProofResultSchema.safeParse(impossibleRecovery).success).toBe(false);
+    const nonProbeCursorMismatch = structuredClone(recovery);
+    nonProbeCursorMismatch.terminalEvidence.internalHistoryCursor = 0;
+    expect(companionMenuControlProofResultSchema.safeParse(nonProbeCursorMismatch).success).toBe(
+      false,
+    );
 
     const prefix = receipts().slice(0, 4);
     const checkpointContent = {
@@ -549,21 +665,32 @@ describe('companion menu-control proof protocol', () => {
     forgedCheckpoint.terminalEvidence.checkpoint.currentSceneFingerprintSha256 = hash('d');
     expect(companionMenuControlProofResultSchema.safeParse(forgedCheckpoint).success).toBe(false);
 
+    const restoredReceipts = receipts();
     const restored = {
       ...noMutation,
       status: 'failed_restored',
       terminalEvidence: {
         kind: 'failed_restored',
-        receiptPrefix: prefix,
-        lastCompletedOperationId: operationIds[3],
+        receiptPrefix: restoredReceipts,
+        lastCompletedOperationId: operationIds[6],
         internalHistoryCursor: 0,
-        completedMutationStages: mutationStages.slice(0, 1),
+        completedMutationStages: mutationStages,
         baselineSceneFingerprintSha256: hash('b'),
         currentSceneFingerprintSha256: hash('b'),
         automaticReplay: false,
       },
     } as const;
     expect(companionMenuControlProofResultSchema.parse(restored)).toEqual(restored);
+    const ordinaryRestored = {
+      ...restored,
+      terminalEvidence: {
+        ...restored.terminalEvidence,
+        receiptPrefix: prefix,
+        lastCompletedOperationId: operationIds[3],
+        completedMutationStages: mutationStages.slice(0, 1),
+      },
+    } as const;
+    expect(companionMenuControlProofResultSchema.parse(ordinaryRestored)).toEqual(ordinaryRestored);
     const badCheckpoint = {
       ...recovery,
       status: 'failed_checkpointed',
@@ -832,6 +959,37 @@ describe('companion menu-control proof protocol', () => {
       ['companion-menu-control-proof-status.schema.json', recoveryPendingStatus()],
       ['companion-menu-control-proof-progress-ack.schema.json', { result: 'accepted' }],
       ['companion-menu-control-proof-result-ack.schema.json', { result: 'accepted' }],
+      [
+        'companion-menu-control-proof-terminal-reconciliation-delivery.schema.json',
+        companionMenuControlProofTerminalReconciliationDeliverySchema.parse({
+          ...delivery(),
+          kind: 'native_terminal_reconcile',
+          recoveryId: '13572468-1357-4357-8357-135724681357',
+          replacementLease: {
+            ...delivery().lease,
+            leaseId: '24681357-2468-4468-8468-246813572468',
+            expiresAt: '2026-08-22T10:10:00+08:00',
+          },
+          acknowledgedProgressReceiptChainHeads: [],
+          recoveryRequestedAt: '2026-08-22T10:06:00+08:00',
+        }),
+      ],
+      [
+        'companion-menu-control-proof-terminal-reconciliation-ack.schema.json',
+        {
+          kind: 'native_terminal_reconcile',
+          recoveryId: '13572468-1357-4357-8357-135724681357',
+          result: result(),
+          terminalResultContentSha256:
+            computeCompanionMenuControlProofResultContentSha256(result()),
+          expectedMarkerContentSha256:
+            computeCompanionMenuControlProofTerminalMarkerContentSha256(result()),
+          currentSceneFingerprintSha256:
+            result().terminalEvidence.nativeUndoCheckpoint.finalSceneFingerprintSha256,
+          occurredAt: '2026-08-22T10:06:01+08:00',
+        },
+      ],
+      ['companion-menu-control-proof-recovery-ack-response.schema.json', { result: 'accepted' }],
     ] as const;
     for (const [filename, valid] of cases) {
       const schema = JSON.parse(

@@ -10,6 +10,7 @@ import {
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
+export const companionMenuControlProofExecutionWindowMs = 120_000;
 const targetSchema = z.strictObject({ adapterId: z.literal('blender'), instanceId: z.uuid() });
 const expectedStateSchema = z.strictObject({
   reportId: z.uuid(),
@@ -148,6 +149,14 @@ function deliverySemanticsMatch(value: DeliveredIdentity): boolean {
     Date.parse(value.requestedAt) <= Date.parse(value.dispatchedAt) &&
     Date.parse(value.dispatchedAt) < Date.parse(value.lease.expiresAt)
   );
+}
+
+function occursWithinExecutionWindow(value: {
+  readonly dispatchedAt: string;
+  readonly occurredAt: string;
+}): boolean {
+  const elapsedMs = Date.parse(value.occurredAt) - Date.parse(value.dispatchedAt);
+  return elapsedMs >= 0 && elapsedMs <= companionMenuControlProofExecutionWindowMs;
 }
 
 export const companionMenuControlProofDeliverySchema = z
@@ -339,8 +348,7 @@ export const companionMenuControlProofProgressSchema = z
       progress.completedMutationStages.length !== expectedMutationCount ||
       Date.parse(progress.operationReceipts.at(-1)?.occurredAt ?? '') >
         Date.parse(progress.occurredAt) ||
-      Date.parse(progress.occurredAt) < Date.parse(progress.dispatchedAt) ||
-      Date.parse(progress.occurredAt) >= Date.parse(progress.lease.expiresAt)
+      !occursWithinExecutionWindow(progress)
     ) {
       context.addIssue({
         code: 'custom',
@@ -572,7 +580,10 @@ export const companionMenuControlProofResultSchema = z
             Date.parse(evidence.checkpoint.committedAt) <
               Date.parse(receipts.at(-1)?.occurredAt ?? result.dispatchedAt) ||
             Date.parse(evidence.checkpoint.committedAt) > Date.parse(result.occurredAt))) ||
-        (evidence.kind === 'recovery_required' && evidence.internalHistoryCursor > stageCount)
+        (evidence.kind === 'recovery_required' &&
+          (evidence.internalHistoryCursor > stageCount ||
+            (evidence.internalHistoryCursor !== stageCount &&
+              (receipts.length !== 7 || stageCount !== mutationStageValues.length))))
       ) {
         context.addIssue({
           code: 'custom',
@@ -581,14 +592,11 @@ export const companionMenuControlProofResultSchema = z
         });
       }
     }
-    if (
-      Date.parse(result.occurredAt) < Date.parse(result.dispatchedAt) ||
-      Date.parse(result.occurredAt) >= Date.parse(result.lease.expiresAt)
-    ) {
+    if (!occursWithinExecutionWindow(result)) {
       context.addIssue({
         code: 'custom',
         path: ['occurredAt'],
-        message: 'Result predates delivery',
+        message: 'Result falls outside the bounded menu-control proof execution window',
       });
     }
   });
@@ -600,12 +608,216 @@ export function computeCompanionMenuControlProofResultContentSha256(
   return computeProtocolCanonicalJsonSha256(companionMenuControlProofResultSchema.parse(result));
 }
 
+function lockedMenuControlProofSceneFingerprint(
+  result: CompanionMenuControlProofResult,
+): string | null {
+  if (result.status === 'succeeded' && result.terminalEvidence.kind === 'succeeded_locked') {
+    return result.terminalEvidence.nativeUndoCheckpoint.finalSceneFingerprintSha256;
+  }
+  if (
+    result.status === 'failed_checkpointed' &&
+    result.terminalEvidence.kind === 'failed_checkpointed'
+  ) {
+    return result.terminalEvidence.checkpoint.currentSceneFingerprintSha256;
+  }
+  return null;
+}
+
+export function companionMenuControlProofTerminalMarkerIdentity(
+  result: CompanionMenuControlProofResult,
+) {
+  const parsed = companionMenuControlProofResultSchema.parse(result);
+  const terminalResultContentSha256 = computeCompanionMenuControlProofResultContentSha256(parsed);
+  if (parsed.status === 'succeeded' && parsed.terminalEvidence.kind === 'succeeded_locked') {
+    const checkpoint = parsed.terminalEvidence.nativeUndoCheckpoint;
+    return {
+      formatVersion: '1.0.0' as const,
+      executorId: parsed.executorId,
+      checkpointId: checkpoint.checkpointId,
+      undoLockId: checkpoint.undoLockId,
+      proofId: parsed.proofId,
+      replayId: parsed.replayId,
+      targetId: parsed.binding.acceptedAction.arguments.resourceId,
+      checkpointKind: 'success' as const,
+      baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+      lockedSceneFingerprintSha256: checkpoint.finalSceneFingerprintSha256,
+      terminalResultContentSha256,
+    };
+  }
+  if (
+    parsed.status === 'failed_checkpointed' &&
+    parsed.terminalEvidence.kind === 'failed_checkpointed'
+  ) {
+    const checkpoint = parsed.terminalEvidence.checkpoint;
+    return {
+      formatVersion: '1.0.0' as const,
+      executorId: parsed.executorId,
+      checkpointId: checkpoint.checkpointId,
+      undoLockId: checkpoint.undoLockId,
+      proofId: parsed.proofId,
+      replayId: parsed.replayId,
+      targetId: parsed.binding.acceptedAction.arguments.resourceId,
+      checkpointKind: 'failure' as const,
+      baselineSceneFingerprintSha256: checkpoint.baselineSceneFingerprintSha256,
+      lockedSceneFingerprintSha256: checkpoint.currentSceneFingerprintSha256,
+      terminalResultContentSha256,
+    };
+  }
+  throw new Error('Menu-control terminal marker requires a locked terminal result');
+}
+
+export function computeCompanionMenuControlProofTerminalMarkerContentSha256(
+  result: CompanionMenuControlProofResult,
+): string {
+  return computeProtocolCanonicalJsonSha256(
+    companionMenuControlProofTerminalMarkerIdentity(result),
+  );
+}
+
+export const companionMenuControlProofTerminalReconciliationDeliverySchema = z
+  .strictObject({
+    ...deliveryIdentityShape,
+    kind: z.literal('native_terminal_reconcile'),
+    recoveryId: z.uuid(),
+    replacementLease: leaseSchema,
+    acknowledgedProgressReceiptChainHeads: z.array(sha256Schema).max(7),
+    recoveryRequestedAt: timestampSchema,
+  })
+  .superRefine((delivery, context) => {
+    if (!deliverySemanticsMatch(delivery)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['binding'],
+        message:
+          'Menu-control terminal reconciliation must preserve the original immutable delivery',
+      });
+    }
+    if (
+      delivery.replacementLease.leaseId === delivery.lease.leaseId ||
+      delivery.replacementLease.sessionId !== delivery.lease.sessionId ||
+      delivery.replacementLease.target.adapterId !== delivery.target.adapterId ||
+      delivery.replacementLease.target.instanceId !== delivery.target.instanceId ||
+      delivery.replacementLease.documentIncarnationId !== delivery.lease.documentIncarnationId ||
+      Date.parse(delivery.recoveryRequestedAt) < Date.parse(delivery.dispatchedAt) ||
+      Date.parse(delivery.recoveryRequestedAt) >= Date.parse(delivery.replacementLease.expiresAt) ||
+      new Set(delivery.acknowledgedProgressReceiptChainHeads).size !==
+        delivery.acknowledgedProgressReceiptChainHeads.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['replacementLease'],
+        message:
+          'Terminal reconciliation requires a distinct current lease for the same live document and an ordered server receipt prefix',
+      });
+    }
+  });
+export type CompanionMenuControlProofTerminalReconciliationDelivery = z.infer<
+  typeof companionMenuControlProofTerminalReconciliationDeliverySchema
+>;
+
+export const companionMenuControlProofTerminalReconciliationAckSchema = z
+  .strictObject({
+    kind: z.literal('native_terminal_reconcile'),
+    recoveryId: z.uuid(),
+    result: companionMenuControlProofResultSchema,
+    terminalResultContentSha256: sha256Schema,
+    expectedMarkerContentSha256: sha256Schema,
+    currentSceneFingerprintSha256: sha256Schema,
+    occurredAt: timestampSchema,
+  })
+  .superRefine((ack, context) => {
+    const sceneFingerprint = lockedMenuControlProofSceneFingerprint(ack.result);
+    if (sceneFingerprint === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['result'],
+        message:
+          'Terminal reconciliation accepts only a persisted locked success or checkpointed failure',
+      });
+      return;
+    }
+    if (
+      ack.terminalResultContentSha256 !==
+      computeCompanionMenuControlProofResultContentSha256(ack.result)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['terminalResultContentSha256'],
+        message: 'Terminal reconciliation result hash must bind the complete persisted result',
+      });
+    }
+    if (ack.currentSceneFingerprintSha256 !== sceneFingerprint) {
+      context.addIssue({
+        code: 'custom',
+        path: ['currentSceneFingerprintSha256'],
+        message: 'Terminal reconciliation must prove the locked current Scene fingerprint',
+      });
+    }
+    if (
+      ack.expectedMarkerContentSha256 !==
+      computeCompanionMenuControlProofTerminalMarkerContentSha256(ack.result)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['expectedMarkerContentSha256'],
+        message: 'Terminal reconciliation marker hash must bind the locked terminal identity',
+      });
+    }
+    if (Date.parse(ack.occurredAt) < Date.parse(ack.result.occurredAt)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['occurredAt'],
+        message: 'Terminal reconciliation acknowledgement must follow its terminal result',
+      });
+    }
+  });
+export type CompanionMenuControlProofTerminalReconciliationAck = z.infer<
+  typeof companionMenuControlProofTerminalReconciliationAckSchema
+>;
+
+export function companionMenuControlProofTerminalReconciliationAckMatchesDelivery(
+  ack: CompanionMenuControlProofTerminalReconciliationAck,
+  delivery: CompanionMenuControlProofTerminalReconciliationDelivery,
+): boolean {
+  return (
+    ack.recoveryId === delivery.recoveryId &&
+    isDeepStrictDeliveryIdentity(ack.result, delivery) &&
+    Date.parse(ack.occurredAt) >= Date.parse(delivery.recoveryRequestedAt)
+  );
+}
+
+function isDeepStrictDeliveryIdentity(
+  result: CompanionMenuControlProofResult,
+  delivery: CompanionMenuControlProofTerminalReconciliationDelivery,
+): boolean {
+  return (
+    computeProtocolCanonicalJsonSha256(
+      Object.fromEntries(
+        Object.keys(deliveryIdentityShape).map((key) => [key, result[key as keyof typeof result]]),
+      ),
+    ) ===
+    computeProtocolCanonicalJsonSha256(
+      Object.fromEntries(
+        Object.keys(deliveryIdentityShape).map((key) => [
+          key,
+          delivery[key as keyof typeof delivery],
+        ]),
+      ),
+    )
+  );
+}
+
 export const companionMenuControlProofPollRequestSchema = targetSchema;
 export type CompanionMenuControlProofPollRequest = z.infer<
   typeof companionMenuControlProofPollRequestSchema
 >;
 export const companionMenuControlProofPollDeliverySchema = z.strictObject({
-  request: companionMenuControlProofDeliverySchema.nullable(),
+  request: z
+    .union([
+      companionMenuControlProofDeliverySchema,
+      companionMenuControlProofTerminalReconciliationDeliverySchema,
+    ])
+    .nullable(),
 });
 export type CompanionMenuControlProofPollDelivery = z.infer<
   typeof companionMenuControlProofPollDeliverySchema
@@ -614,6 +826,7 @@ export type CompanionMenuControlProofPollDelivery = z.infer<
 const ackSchema = z.strictObject({ result: z.enum(['accepted', 'duplicate']) });
 export const companionMenuControlProofProgressAckSchema = ackSchema;
 export const companionMenuControlProofResultAckSchema = ackSchema;
+export const companionMenuControlProofRecoveryAckResponseSchema = ackSchema;
 
 const statusValueSchema = z.enum([
   'queued',

@@ -5,148 +5,13 @@
     "request": {
       "anyOf": [
         {
-          "type": "object",
-          "properties": {
-            "formatVersion": {
-              "type": "string",
-              "const": "1.0.0"
-            },
-            "requestId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "replayId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "proofId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "target": {
-              "type": "object",
-              "properties": {
-                "adapterId": {
-                  "type": "string",
-                  "const": "blender"
-                },
-                "instanceId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                }
-              },
-              "required": [
-                "adapterId",
-                "instanceId"
-              ],
-              "additionalProperties": false
-            },
-            "targetProfile": {
-              "type": "string",
-              "const": "factory_layout_three_object_ui_scale_2"
-            },
-            "proposalId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "proposalRecordContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "proposalContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "plan": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "revision": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "contentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                }
-              },
-              "required": [
-                "id",
-                "revision",
-                "contentSha256"
-              ],
-              "additionalProperties": false
-            },
-            "executionId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "leafId": {
-              "type": "string",
-              "minLength": 1
-            },
-            "packetContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "inputTreeContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "outputTreeContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "materializationContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "interactionCatalogVersion": {
-              "type": "string",
-              "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
-            },
-            "interactionCatalogContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "menuTrackContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "bindingContentSha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            },
-            "binding": {
+          "anyOf": [
+            {
               "type": "object",
               "properties": {
                 "formatVersion": {
                   "type": "string",
                   "const": "1.0.0"
-                },
-                "bindingId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "proposalRecordContentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "proofId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 },
                 "requestId": {
                   "type": "string",
@@ -154,6 +19,11 @@
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 },
                 "replayId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "proofId": {
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
@@ -177,24 +47,16 @@
                   ],
                   "additionalProperties": false
                 },
+                "targetProfile": {
+                  "type": "string",
+                  "const": "factory_layout_three_object_ui_scale_2"
+                },
                 "proposalId": {
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 },
-                "packetContentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "inputTreeContentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "outputTreeContentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "materializationContentSha256": {
+                "proposalRecordContentSha256": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
                 },
@@ -233,126 +95,786 @@
                 },
                 "leafId": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  "minLength": 1
                 },
-                "recipeId": {
+                "packetContentSha256": {
                   "type": "string",
-                  "const": "blender.mesh.create_uv_sphere.native"
+                  "pattern": "^[a-f0-9]{64}$"
                 },
-                "actionName": {
+                "inputTreeContentSha256": {
                   "type": "string",
-                  "const": "blender.mesh.create_uv_sphere"
+                  "pattern": "^[a-f0-9]{64}$"
                 },
-                "acceptedAction": {
+                "outputTreeContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "materializationContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "interactionCatalogVersion": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+                },
+                "interactionCatalogContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "menuTrackContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "bindingContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "binding": {
                   "type": "object",
                   "properties": {
-                    "adapterId": {
+                    "formatVersion": {
                       "type": "string",
-                      "const": "blender"
+                      "const": "1.0.0"
                     },
-                    "name": {
-                      "type": "string",
-                      "const": "blender.mesh.create_uv_sphere"
-                    },
-                    "arguments": {
-                      "type": "object",
-                      "properties": {
-                        "resourceId": {
-                          "type": "string",
-                          "const": "proof.uv_sphere.eye"
-                        },
-                        "objectName": {
-                          "type": "string",
-                          "const": "OperatingLine.TutorialEye"
-                        },
-                        "radius": {
-                          "type": "number",
-                          "const": 1.5
-                        },
-                        "location": {
-                          "type": "array",
-                          "items": [
-                            {
-                              "type": "number",
-                              "const": 1.25
-                            },
-                            {
-                              "type": "number",
-                              "const": -2
-                            },
-                            {
-                              "type": "number",
-                              "const": 0.75
-                            }
-                          ],
-                          "additionalItems": false,
-                          "minItems": 3,
-                          "maxItems": 3
-                        }
-                      },
-                      "required": [
-                        "resourceId",
-                        "objectName",
-                        "radius",
-                        "location"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "adapterId",
-                    "name",
-                    "arguments"
-                  ],
-                  "additionalProperties": false
-                },
-                "targetProfile": {
-                  "type": "string",
-                  "const": "factory_layout_three_object_ui_scale_2"
-                },
-                "acceptedDecision": {
-                  "type": "object",
-                  "properties": {
-                    "decisionId": {
+                    "bindingId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "proposalRecordContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "proofId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
                     },
                     "proposalId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "instanceId": {
+                    "packetContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "inputTreeContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "outputTreeContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "materializationContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "proposalContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "executionId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "adapterId": {
+                    "leafId": {
                       "type": "string",
-                      "const": "blender"
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                     },
-                    "decision": {
+                    "recipeId": {
                       "type": "string",
-                      "const": "accepted"
+                      "const": "blender.mesh.create_uv_sphere.native"
                     },
-                    "decidedAt": {
+                    "actionName": {
+                      "type": "string",
+                      "const": "blender.mesh.create_uv_sphere"
+                    },
+                    "acceptedAction": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "name": {
+                          "type": "string",
+                          "const": "blender.mesh.create_uv_sphere"
+                        },
+                        "arguments": {
+                          "type": "object",
+                          "properties": {
+                            "resourceId": {
+                              "type": "string",
+                              "const": "proof.uv_sphere.eye"
+                            },
+                            "objectName": {
+                              "type": "string",
+                              "const": "OperatingLine.TutorialEye"
+                            },
+                            "radius": {
+                              "type": "number",
+                              "const": 1.5
+                            },
+                            "location": {
+                              "type": "array",
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "const": 1.25
+                                },
+                                {
+                                  "type": "number",
+                                  "const": -2
+                                },
+                                {
+                                  "type": "number",
+                                  "const": 0.75
+                                }
+                              ],
+                              "additionalItems": false,
+                              "minItems": 3,
+                              "maxItems": 3
+                            }
+                          },
+                          "required": [
+                            "resourceId",
+                            "objectName",
+                            "radius",
+                            "location"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "name",
+                        "arguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "targetProfile": {
+                      "type": "string",
+                      "const": "factory_layout_three_object_ui_scale_2"
+                    },
+                    "acceptedDecision": {
+                      "type": "object",
+                      "properties": {
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "proposalId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "decision": {
+                          "type": "string",
+                          "const": "accepted"
+                        },
+                        "decidedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "decisionId",
+                        "proposalId",
+                        "instanceId",
+                        "adapterId",
+                        "decision",
+                        "decidedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "startState": {
+                      "type": "object",
+                      "properties": {
+                        "reportId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "planContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "executionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "phase": {
+                          "type": "string",
+                          "const": "running"
+                        },
+                        "activeStepId": {
+                          "type": "null"
+                        },
+                        "completedStepIds": {
+                          "type": "array",
+                          "items": {},
+                          "minItems": 0,
+                          "maxItems": 0
+                        },
+                        "transition": {
+                          "type": "string",
+                          "const": "walkthrough_started"
+                        },
+                        "stepId": {
+                          "type": "null"
+                        },
+                        "observationCount": {
+                          "type": "number",
+                          "const": 0
+                        },
+                        "nativeUndoCheckpoint": {
+                          "type": "object",
+                          "properties": {
+                            "formatVersion": {
+                              "type": "string",
+                              "const": "1.0.0"
+                            },
+                            "evidenceClass": {
+                              "type": "string",
+                              "const": "companion_reported_native_undo_checkpoint"
+                            },
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "marker": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string",
+                                  "const": "_operating_line_native_history_v1"
+                                },
+                                "matched": {
+                                  "type": "boolean",
+                                  "const": true
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "matched"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "journal": {
+                              "type": "object",
+                              "properties": {
+                                "entryPresent": {
+                                  "type": "boolean",
+                                  "const": true
+                                },
+                                "snapshotMatchesSession": {
+                                  "type": "boolean",
+                                  "const": true
+                                },
+                                "artifactsBackedUp": {
+                                  "type": "boolean",
+                                  "const": true
+                                }
+                              },
+                              "required": [
+                                "entryPresent",
+                                "snapshotMatchesSession",
+                                "artifactsBackedUp"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "session": {
+                              "type": "object",
+                              "properties": {
+                                "plan": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "revision"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "planContentSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "executionId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "activeStepId": {
+                                  "type": "null"
+                                },
+                                "completedStepIds": {
+                                  "type": "array",
+                                  "items": {},
+                                  "minItems": 0,
+                                  "maxItems": 0
+                                },
+                                "receiptStepIds": {
+                                  "type": "array",
+                                  "items": {},
+                                  "minItems": 0,
+                                  "maxItems": 0
+                                }
+                              },
+                              "required": [
+                                "plan",
+                                "planContentSha256",
+                                "executionId",
+                                "activeStepId",
+                                "completedStepIds",
+                                "receiptStepIds"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "formatVersion",
+                            "evidenceClass",
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "committedAt",
+                            "marker",
+                            "journal",
+                            "session"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "occurredAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "reportId",
+                        "sequence",
+                        "adapterId",
+                        "instanceId",
+                        "plan",
+                        "planContentSha256",
+                        "executionId",
+                        "phase",
+                        "activeStepId",
+                        "completedStepIds",
+                        "transition",
+                        "stepId",
+                        "observationCount",
+                        "nativeUndoCheckpoint",
+                        "occurredAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proofScope": {
+                      "type": "object",
+                      "properties": {
+                        "managedActionResult": {
+                          "type": "string",
+                          "const": "not_executed"
+                        },
+                        "managedIdentityVerified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "managedReceiptCreated": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "omittedAcceptedArguments": {
+                          "type": "array",
+                          "items": [
+                            {
+                              "type": "string",
+                              "const": "resourceId"
+                            }
+                          ],
+                          "additionalItems": false,
+                          "minItems": 1,
+                          "maxItems": 1
+                        }
+                      },
+                      "required": [
+                        "managedActionResult",
+                        "managedIdentityVerified",
+                        "managedReceiptCreated",
+                        "omittedAcceptedArguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "materialization": {
+                      "type": "object",
+                      "properties": {
+                        "actionCatalogVersion": {
+                          "type": "string",
+                          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                        },
+                        "interactionCatalogVersion": {
+                          "type": "string",
+                          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                        },
+                        "interactionCatalogContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "packetContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "inputTreeContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "outputTreeContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "materializationContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "menuTrackContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "actionCatalogVersion",
+                        "interactionCatalogVersion",
+                        "interactionCatalogContentSha256",
+                        "packetContentSha256",
+                        "inputTreeContentSha256",
+                        "outputTreeContentSha256",
+                        "materializationContentSha256",
+                        "menuTrackContentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "executorId": {
+                      "type": "string",
+                      "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
+                    },
+                    "executionBoundary": {
+                      "type": "string",
+                      "const": "blender_window_event_simulate"
+                    },
+                    "authorization": {
+                      "type": "string",
+                      "const": "accepted_replay_next_step"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "const": "event_simulate"
+                    },
+                    "operationIds": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.add"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.uv_sphere"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.location"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.scale"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.object_name"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 7,
+                      "maxItems": 7
+                    },
+                    "nativeUndoDepth": {
+                      "type": "number",
+                      "const": 8
+                    },
+                    "createdAt": {
                       "type": "string",
                       "format": "date-time",
                       "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "integrity": {
+                      "type": "object",
+                      "properties": {
+                        "algorithm": {
+                          "type": "string",
+                          "const": "sha256"
+                        },
+                        "canonicalization": {
+                          "type": "string",
+                          "const": "operatingline-json-value-v1"
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "algorithm",
+                        "canonicalization",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
-                    "decisionId",
+                    "formatVersion",
+                    "bindingId",
+                    "proposalRecordContentSha256",
+                    "proofId",
+                    "requestId",
+                    "replayId",
+                    "target",
                     "proposalId",
-                    "instanceId",
-                    "adapterId",
-                    "decision",
-                    "decidedAt"
+                    "packetContentSha256",
+                    "inputTreeContentSha256",
+                    "outputTreeContentSha256",
+                    "materializationContentSha256",
+                    "proposalContentSha256",
+                    "plan",
+                    "executionId",
+                    "leafId",
+                    "recipeId",
+                    "actionName",
+                    "acceptedAction",
+                    "targetProfile",
+                    "acceptedDecision",
+                    "startState",
+                    "proofScope",
+                    "materialization",
+                    "executorId",
+                    "executionBoundary",
+                    "authorization",
+                    "transport",
+                    "operationIds",
+                    "nativeUndoDepth",
+                    "createdAt",
+                    "integrity"
                   ],
                   "additionalProperties": false
                 },
-                "startState": {
+                "executorId": {
+                  "type": "string",
+                  "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
+                },
+                "executionBoundary": {
+                  "type": "string",
+                  "const": "blender_window_event_simulate"
+                },
+                "authorization": {
+                  "type": "string",
+                  "const": "accepted_replay_next_step"
+                },
+                "transport": {
+                  "type": "string",
+                  "const": "event_simulate"
+                },
+                "operationIds": {
+                  "type": "array",
+                  "items": [
+                    {
+                      "type": "string",
+                      "const": "workspace.layout"
+                    },
+                    {
+                      "type": "string",
+                      "const": "menu.add"
+                    },
+                    {
+                      "type": "string",
+                      "const": "menu.mesh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "operator.uv_sphere"
+                    },
+                    {
+                      "type": "string",
+                      "const": "control.location"
+                    },
+                    {
+                      "type": "string",
+                      "const": "control.scale"
+                    },
+                    {
+                      "type": "string",
+                      "const": "control.object_name"
+                    }
+                  ],
+                  "additionalItems": false,
+                  "minItems": 7,
+                  "maxItems": 7
+                },
+                "nativeUndoDepth": {
+                  "type": "number",
+                  "const": 8
+                },
+                "expectedState": {
+                  "type": "object",
+                  "properties": {
+                    "reportId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "reportId",
+                    "sequence"
+                  ],
+                  "additionalProperties": false
+                },
+                "startCheckpoint": {
                   "type": "object",
                   "properties": {
                     "reportId": {
@@ -591,56 +1113,288 @@
                   ],
                   "additionalProperties": false
                 },
-                "proofScope": {
+                "requestedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "deliveryId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "lease": {
                   "type": "object",
                   "properties": {
-                    "managedActionResult": {
+                    "leaseId": {
                       "type": "string",
-                      "const": "not_executed"
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "managedIdentityVerified": {
-                      "type": "boolean",
-                      "const": false
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "managedReceiptCreated": {
-                      "type": "boolean",
-                      "const": false
-                    },
-                    "omittedAcceptedArguments": {
-                      "type": "array",
-                      "items": [
-                        {
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
                           "type": "string",
-                          "const": "resourceId"
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                         }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
                       ],
-                      "additionalItems": false,
-                      "minItems": 1,
-                      "maxItems": 1
+                      "additionalProperties": false
+                    },
+                    "documentIncarnationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                     }
                   },
                   "required": [
-                    "managedActionResult",
-                    "managedIdentityVerified",
-                    "managedReceiptCreated",
-                    "omittedAcceptedArguments"
+                    "leaseId",
+                    "sessionId",
+                    "target",
+                    "documentIncarnationId",
+                    "expiresAt"
                   ],
                   "additionalProperties": false
                 },
-                "materialization": {
+                "dispatchedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                }
+              },
+              "required": [
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "proofId",
+                "target",
+                "targetProfile",
+                "proposalId",
+                "proposalRecordContentSha256",
+                "proposalContentSha256",
+                "plan",
+                "executionId",
+                "leafId",
+                "packetContentSha256",
+                "inputTreeContentSha256",
+                "outputTreeContentSha256",
+                "materializationContentSha256",
+                "interactionCatalogVersion",
+                "interactionCatalogContentSha256",
+                "menuTrackContentSha256",
+                "bindingContentSha256",
+                "binding",
+                "executorId",
+                "executionBoundary",
+                "authorization",
+                "transport",
+                "operationIds",
+                "nativeUndoDepth",
+                "expectedState",
+                "startCheckpoint",
+                "requestedAt",
+                "deliveryId",
+                "lease",
+                "dispatchedAt"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "formatVersion": {
+                  "type": "string",
+                  "const": "1.0.0"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "replayId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "proofId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "target": {
                   "type": "object",
                   "properties": {
-                    "actionCatalogVersion": {
+                    "adapterId": {
                       "type": "string",
-                      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                      "const": "blender"
                     },
-                    "interactionCatalogVersion": {
+                    "instanceId": {
                       "type": "string",
-                      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    }
+                  },
+                  "required": [
+                    "adapterId",
+                    "instanceId"
+                  ],
+                  "additionalProperties": false
+                },
+                "targetProfile": {
+                  "type": "string",
+                  "const": "factory_layout_three_object_ui_scale_2"
+                },
+                "proposalId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "proposalRecordContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "proposalContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "plan": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
                     },
-                    "interactionCatalogContentSha256": {
+                    "revision": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "contentSha256": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "revision",
+                    "contentSha256"
+                  ],
+                  "additionalProperties": false
+                },
+                "executionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "leafId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "packetContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "inputTreeContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "outputTreeContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "materializationContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "interactionCatalogVersion": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)$"
+                },
+                "interactionCatalogContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "menuTrackContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "bindingContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "binding": {
+                  "type": "object",
+                  "properties": {
+                    "formatVersion": {
+                      "type": "string",
+                      "const": "1.0.0"
+                    },
+                    "bindingId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "proposalRecordContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "proofId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "replayId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proposalId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
                     "packetContentSha256": {
                       "type": "string",
@@ -658,20 +1412,601 @@
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
                     },
-                    "menuTrackContentSha256": {
+                    "proposalContentSha256": {
                       "type": "string",
                       "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "leafId": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "recipeId": {
+                      "type": "string",
+                      "const": "blender.mesh.create_uv_sphere.native"
+                    },
+                    "actionName": {
+                      "type": "string",
+                      "const": "blender.mesh.create_uv_sphere"
+                    },
+                    "acceptedAction": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "name": {
+                          "type": "string",
+                          "const": "blender.mesh.create_uv_sphere"
+                        },
+                        "arguments": {
+                          "type": "object",
+                          "properties": {
+                            "resourceId": {
+                              "type": "string",
+                              "const": "proof.uv_sphere.eye"
+                            },
+                            "objectName": {
+                              "type": "string",
+                              "const": "OperatingLine.TutorialEye"
+                            },
+                            "radius": {
+                              "type": "number",
+                              "const": 1.5
+                            },
+                            "location": {
+                              "type": "array",
+                              "items": [
+                                {
+                                  "type": "number",
+                                  "const": 1.25
+                                },
+                                {
+                                  "type": "number",
+                                  "const": -2
+                                },
+                                {
+                                  "type": "number",
+                                  "const": 0.75
+                                }
+                              ],
+                              "additionalItems": false,
+                              "minItems": 3,
+                              "maxItems": 3
+                            }
+                          },
+                          "required": [
+                            "resourceId",
+                            "objectName",
+                            "radius",
+                            "location"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "name",
+                        "arguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "targetProfile": {
+                      "type": "string",
+                      "const": "factory_layout_three_object_ui_scale_2"
+                    },
+                    "acceptedDecision": {
+                      "type": "object",
+                      "properties": {
+                        "decisionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "proposalId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "decision": {
+                          "type": "string",
+                          "const": "accepted"
+                        },
+                        "decidedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "decisionId",
+                        "proposalId",
+                        "instanceId",
+                        "adapterId",
+                        "decision",
+                        "decidedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "startState": {
+                      "type": "object",
+                      "properties": {
+                        "reportId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "sequence": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "plan": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "revision": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "revision"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "planContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "executionId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "phase": {
+                          "type": "string",
+                          "const": "running"
+                        },
+                        "activeStepId": {
+                          "type": "null"
+                        },
+                        "completedStepIds": {
+                          "type": "array",
+                          "items": {},
+                          "minItems": 0,
+                          "maxItems": 0
+                        },
+                        "transition": {
+                          "type": "string",
+                          "const": "walkthrough_started"
+                        },
+                        "stepId": {
+                          "type": "null"
+                        },
+                        "observationCount": {
+                          "type": "number",
+                          "const": 0
+                        },
+                        "nativeUndoCheckpoint": {
+                          "type": "object",
+                          "properties": {
+                            "formatVersion": {
+                              "type": "string",
+                              "const": "1.0.0"
+                            },
+                            "evidenceClass": {
+                              "type": "string",
+                              "const": "companion_reported_native_undo_checkpoint"
+                            },
+                            "checkpointId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "previousCheckpointId": {
+                              "type": "null"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "const": "start"
+                            },
+                            "committedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                            },
+                            "marker": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string",
+                                  "const": "_operating_line_native_history_v1"
+                                },
+                                "matched": {
+                                  "type": "boolean",
+                                  "const": true
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "matched"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "journal": {
+                              "type": "object",
+                              "properties": {
+                                "entryPresent": {
+                                  "type": "boolean",
+                                  "const": true
+                                },
+                                "snapshotMatchesSession": {
+                                  "type": "boolean",
+                                  "const": true
+                                },
+                                "artifactsBackedUp": {
+                                  "type": "boolean",
+                                  "const": true
+                                }
+                              },
+                              "required": [
+                                "entryPresent",
+                                "snapshotMatchesSession",
+                                "artifactsBackedUp"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "session": {
+                              "type": "object",
+                              "properties": {
+                                "plan": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "revision": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "revision"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "planContentSha256": {
+                                  "type": "string",
+                                  "pattern": "^[a-f0-9]{64}$"
+                                },
+                                "executionId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "activeStepId": {
+                                  "type": "null"
+                                },
+                                "completedStepIds": {
+                                  "type": "array",
+                                  "items": {},
+                                  "minItems": 0,
+                                  "maxItems": 0
+                                },
+                                "receiptStepIds": {
+                                  "type": "array",
+                                  "items": {},
+                                  "minItems": 0,
+                                  "maxItems": 0
+                                }
+                              },
+                              "required": [
+                                "plan",
+                                "planContentSha256",
+                                "executionId",
+                                "activeStepId",
+                                "completedStepIds",
+                                "receiptStepIds"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "formatVersion",
+                            "evidenceClass",
+                            "checkpointId",
+                            "previousCheckpointId",
+                            "operation",
+                            "committedAt",
+                            "marker",
+                            "journal",
+                            "session"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "occurredAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      },
+                      "required": [
+                        "reportId",
+                        "sequence",
+                        "adapterId",
+                        "instanceId",
+                        "plan",
+                        "planContentSha256",
+                        "executionId",
+                        "phase",
+                        "activeStepId",
+                        "completedStepIds",
+                        "transition",
+                        "stepId",
+                        "observationCount",
+                        "nativeUndoCheckpoint",
+                        "occurredAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "proofScope": {
+                      "type": "object",
+                      "properties": {
+                        "managedActionResult": {
+                          "type": "string",
+                          "const": "not_executed"
+                        },
+                        "managedIdentityVerified": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "managedReceiptCreated": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "omittedAcceptedArguments": {
+                          "type": "array",
+                          "items": [
+                            {
+                              "type": "string",
+                              "const": "resourceId"
+                            }
+                          ],
+                          "additionalItems": false,
+                          "minItems": 1,
+                          "maxItems": 1
+                        }
+                      },
+                      "required": [
+                        "managedActionResult",
+                        "managedIdentityVerified",
+                        "managedReceiptCreated",
+                        "omittedAcceptedArguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "materialization": {
+                      "type": "object",
+                      "properties": {
+                        "actionCatalogVersion": {
+                          "type": "string",
+                          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                        },
+                        "interactionCatalogVersion": {
+                          "type": "string",
+                          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+                        },
+                        "interactionCatalogContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "packetContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "inputTreeContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "outputTreeContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "materializationContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "menuTrackContentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "actionCatalogVersion",
+                        "interactionCatalogVersion",
+                        "interactionCatalogContentSha256",
+                        "packetContentSha256",
+                        "inputTreeContentSha256",
+                        "outputTreeContentSha256",
+                        "materializationContentSha256",
+                        "menuTrackContentSha256"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "executorId": {
+                      "type": "string",
+                      "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
+                    },
+                    "executionBoundary": {
+                      "type": "string",
+                      "const": "blender_window_event_simulate"
+                    },
+                    "authorization": {
+                      "type": "string",
+                      "const": "accepted_replay_next_step"
+                    },
+                    "transport": {
+                      "type": "string",
+                      "const": "event_simulate"
+                    },
+                    "operationIds": {
+                      "type": "array",
+                      "items": [
+                        {
+                          "type": "string",
+                          "const": "workspace.layout"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.add"
+                        },
+                        {
+                          "type": "string",
+                          "const": "menu.mesh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "operator.uv_sphere"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.location"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.scale"
+                        },
+                        {
+                          "type": "string",
+                          "const": "control.object_name"
+                        }
+                      ],
+                      "additionalItems": false,
+                      "minItems": 7,
+                      "maxItems": 7
+                    },
+                    "nativeUndoDepth": {
+                      "type": "number",
+                      "const": 8
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "integrity": {
+                      "type": "object",
+                      "properties": {
+                        "algorithm": {
+                          "type": "string",
+                          "const": "sha256"
+                        },
+                        "canonicalization": {
+                          "type": "string",
+                          "const": "operatingline-json-value-v1"
+                        },
+                        "contentSha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "algorithm",
+                        "canonicalization",
+                        "contentSha256"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
-                    "actionCatalogVersion",
-                    "interactionCatalogVersion",
-                    "interactionCatalogContentSha256",
+                    "formatVersion",
+                    "bindingId",
+                    "proposalRecordContentSha256",
+                    "proofId",
+                    "requestId",
+                    "replayId",
+                    "target",
+                    "proposalId",
                     "packetContentSha256",
                     "inputTreeContentSha256",
                     "outputTreeContentSha256",
                     "materializationContentSha256",
-                    "menuTrackContentSha256"
+                    "proposalContentSha256",
+                    "plan",
+                    "executionId",
+                    "leafId",
+                    "recipeId",
+                    "actionName",
+                    "acceptedAction",
+                    "targetProfile",
+                    "acceptedDecision",
+                    "startState",
+                    "proofScope",
+                    "materialization",
+                    "executorId",
+                    "executionBoundary",
+                    "authorization",
+                    "transport",
+                    "operationIds",
+                    "nativeUndoDepth",
+                    "createdAt",
+                    "integrity"
                   ],
                   "additionalProperties": false
                 },
@@ -731,412 +2066,39 @@
                   "type": "number",
                   "const": 8
                 },
-                "createdAt": {
-                  "type": "string",
-                  "format": "date-time",
-                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                },
-                "integrity": {
+                "expectedState": {
                   "type": "object",
                   "properties": {
-                    "algorithm": {
+                    "reportId": {
                       "type": "string",
-                      "const": "sha256"
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "canonicalization": {
-                      "type": "string",
-                      "const": "operatingline-json-value-v1"
-                    },
-                    "contentSha256": {
-                      "type": "string",
-                      "pattern": "^[a-f0-9]{64}$"
-                    }
-                  },
-                  "required": [
-                    "algorithm",
-                    "canonicalization",
-                    "contentSha256"
-                  ],
-                  "additionalProperties": false
-                }
-              },
-              "required": [
-                "formatVersion",
-                "bindingId",
-                "proposalRecordContentSha256",
-                "proofId",
-                "requestId",
-                "replayId",
-                "target",
-                "proposalId",
-                "packetContentSha256",
-                "inputTreeContentSha256",
-                "outputTreeContentSha256",
-                "materializationContentSha256",
-                "proposalContentSha256",
-                "plan",
-                "executionId",
-                "leafId",
-                "recipeId",
-                "actionName",
-                "acceptedAction",
-                "targetProfile",
-                "acceptedDecision",
-                "startState",
-                "proofScope",
-                "materialization",
-                "executorId",
-                "executionBoundary",
-                "authorization",
-                "transport",
-                "operationIds",
-                "nativeUndoDepth",
-                "createdAt",
-                "integrity"
-              ],
-              "additionalProperties": false
-            },
-            "executorId": {
-              "type": "string",
-              "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
-            },
-            "executionBoundary": {
-              "type": "string",
-              "const": "blender_window_event_simulate"
-            },
-            "authorization": {
-              "type": "string",
-              "const": "accepted_replay_next_step"
-            },
-            "transport": {
-              "type": "string",
-              "const": "event_simulate"
-            },
-            "operationIds": {
-              "type": "array",
-              "items": [
-                {
-                  "type": "string",
-                  "const": "workspace.layout"
-                },
-                {
-                  "type": "string",
-                  "const": "menu.add"
-                },
-                {
-                  "type": "string",
-                  "const": "menu.mesh"
-                },
-                {
-                  "type": "string",
-                  "const": "operator.uv_sphere"
-                },
-                {
-                  "type": "string",
-                  "const": "control.location"
-                },
-                {
-                  "type": "string",
-                  "const": "control.scale"
-                },
-                {
-                  "type": "string",
-                  "const": "control.object_name"
-                }
-              ],
-              "additionalItems": false,
-              "minItems": 7,
-              "maxItems": 7
-            },
-            "nativeUndoDepth": {
-              "type": "number",
-              "const": 8
-            },
-            "expectedState": {
-              "type": "object",
-              "properties": {
-                "reportId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "sequence": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "reportId",
-                "sequence"
-              ],
-              "additionalProperties": false
-            },
-            "startCheckpoint": {
-              "type": "object",
-              "properties": {
-                "reportId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "sequence": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "adapterId": {
-                  "type": "string",
-                  "const": "blender"
-                },
-                "instanceId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "plan": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "revision": {
+                    "sequence": {
                       "type": "integer",
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991
                     }
                   },
                   "required": [
-                    "id",
-                    "revision"
+                    "reportId",
+                    "sequence"
                   ],
                   "additionalProperties": false
                 },
-                "planContentSha256": {
-                  "type": "string",
-                  "pattern": "^[a-f0-9]{64}$"
-                },
-                "executionId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "phase": {
-                  "type": "string",
-                  "const": "running"
-                },
-                "activeStepId": {
-                  "type": "null"
-                },
-                "completedStepIds": {
-                  "type": "array",
-                  "items": {},
-                  "minItems": 0,
-                  "maxItems": 0
-                },
-                "transition": {
-                  "type": "string",
-                  "const": "walkthrough_started"
-                },
-                "stepId": {
-                  "type": "null"
-                },
-                "observationCount": {
-                  "type": "number",
-                  "const": 0
-                },
-                "nativeUndoCheckpoint": {
+                "startCheckpoint": {
                   "type": "object",
                   "properties": {
-                    "formatVersion": {
-                      "type": "string",
-                      "const": "1.0.0"
-                    },
-                    "evidenceClass": {
-                      "type": "string",
-                      "const": "companion_reported_native_undo_checkpoint"
-                    },
-                    "checkpointId": {
+                    "reportId": {
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                     },
-                    "previousCheckpointId": {
-                      "type": "null"
+                    "sequence": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     },
-                    "operation": {
-                      "type": "string",
-                      "const": "start"
-                    },
-                    "committedAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                    },
-                    "marker": {
-                      "type": "object",
-                      "properties": {
-                        "key": {
-                          "type": "string",
-                          "const": "_operating_line_native_history_v1"
-                        },
-                        "matched": {
-                          "type": "boolean",
-                          "const": true
-                        }
-                      },
-                      "required": [
-                        "key",
-                        "matched"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "journal": {
-                      "type": "object",
-                      "properties": {
-                        "entryPresent": {
-                          "type": "boolean",
-                          "const": true
-                        },
-                        "snapshotMatchesSession": {
-                          "type": "boolean",
-                          "const": true
-                        },
-                        "artifactsBackedUp": {
-                          "type": "boolean",
-                          "const": true
-                        }
-                      },
-                      "required": [
-                        "entryPresent",
-                        "snapshotMatchesSession",
-                        "artifactsBackedUp"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "session": {
-                      "type": "object",
-                      "properties": {
-                        "plan": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "revision": {
-                              "type": "integer",
-                              "exclusiveMinimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "revision"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "planContentSha256": {
-                          "type": "string",
-                          "pattern": "^[a-f0-9]{64}$"
-                        },
-                        "executionId": {
-                          "type": "string",
-                          "format": "uuid",
-                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                        },
-                        "activeStepId": {
-                          "type": "null"
-                        },
-                        "completedStepIds": {
-                          "type": "array",
-                          "items": {},
-                          "minItems": 0,
-                          "maxItems": 0
-                        },
-                        "receiptStepIds": {
-                          "type": "array",
-                          "items": {},
-                          "minItems": 0,
-                          "maxItems": 0
-                        }
-                      },
-                      "required": [
-                        "plan",
-                        "planContentSha256",
-                        "executionId",
-                        "activeStepId",
-                        "completedStepIds",
-                        "receiptStepIds"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "formatVersion",
-                    "evidenceClass",
-                    "checkpointId",
-                    "previousCheckpointId",
-                    "operation",
-                    "committedAt",
-                    "marker",
-                    "journal",
-                    "session"
-                  ],
-                  "additionalProperties": false
-                },
-                "occurredAt": {
-                  "type": "string",
-                  "format": "date-time",
-                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-                }
-              },
-              "required": [
-                "reportId",
-                "sequence",
-                "adapterId",
-                "instanceId",
-                "plan",
-                "planContentSha256",
-                "executionId",
-                "phase",
-                "activeStepId",
-                "completedStepIds",
-                "transition",
-                "stepId",
-                "observationCount",
-                "nativeUndoCheckpoint",
-                "occurredAt"
-              ],
-              "additionalProperties": false
-            },
-            "requestedAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
-            },
-            "deliveryId": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-            },
-            "lease": {
-              "type": "object",
-              "properties": {
-                "leaseId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "sessionId": {
-                  "type": "string",
-                  "format": "uuid",
-                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                },
-                "target": {
-                  "type": "object",
-                  "properties": {
                     "adapterId": {
                       "type": "string",
                       "const": "blender"
@@ -1145,76 +2107,409 @@
                       "type": "string",
                       "format": "uuid",
                       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "plan": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "revision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "revision"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "planContentSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "phase": {
+                      "type": "string",
+                      "const": "running"
+                    },
+                    "activeStepId": {
+                      "type": "null"
+                    },
+                    "completedStepIds": {
+                      "type": "array",
+                      "items": {},
+                      "minItems": 0,
+                      "maxItems": 0
+                    },
+                    "transition": {
+                      "type": "string",
+                      "const": "walkthrough_started"
+                    },
+                    "stepId": {
+                      "type": "null"
+                    },
+                    "observationCount": {
+                      "type": "number",
+                      "const": 0
+                    },
+                    "nativeUndoCheckpoint": {
+                      "type": "object",
+                      "properties": {
+                        "formatVersion": {
+                          "type": "string",
+                          "const": "1.0.0"
+                        },
+                        "evidenceClass": {
+                          "type": "string",
+                          "const": "companion_reported_native_undo_checkpoint"
+                        },
+                        "checkpointId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "previousCheckpointId": {
+                          "type": "null"
+                        },
+                        "operation": {
+                          "type": "string",
+                          "const": "start"
+                        },
+                        "committedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        },
+                        "marker": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "const": "_operating_line_native_history_v1"
+                            },
+                            "matched": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "matched"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "journal": {
+                          "type": "object",
+                          "properties": {
+                            "entryPresent": {
+                              "type": "boolean",
+                              "const": true
+                            },
+                            "snapshotMatchesSession": {
+                              "type": "boolean",
+                              "const": true
+                            },
+                            "artifactsBackedUp": {
+                              "type": "boolean",
+                              "const": true
+                            }
+                          },
+                          "required": [
+                            "entryPresent",
+                            "snapshotMatchesSession",
+                            "artifactsBackedUp"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "session": {
+                          "type": "object",
+                          "properties": {
+                            "plan": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "revision": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "revision"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "planContentSha256": {
+                              "type": "string",
+                              "pattern": "^[a-f0-9]{64}$"
+                            },
+                            "executionId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "activeStepId": {
+                              "type": "null"
+                            },
+                            "completedStepIds": {
+                              "type": "array",
+                              "items": {},
+                              "minItems": 0,
+                              "maxItems": 0
+                            },
+                            "receiptStepIds": {
+                              "type": "array",
+                              "items": {},
+                              "minItems": 0,
+                              "maxItems": 0
+                            }
+                          },
+                          "required": [
+                            "plan",
+                            "planContentSha256",
+                            "executionId",
+                            "activeStepId",
+                            "completedStepIds",
+                            "receiptStepIds"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "formatVersion",
+                        "evidenceClass",
+                        "checkpointId",
+                        "previousCheckpointId",
+                        "operation",
+                        "committedAt",
+                        "marker",
+                        "journal",
+                        "session"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                     }
                   },
                   "required": [
+                    "reportId",
+                    "sequence",
                     "adapterId",
-                    "instanceId"
+                    "instanceId",
+                    "plan",
+                    "planContentSha256",
+                    "executionId",
+                    "phase",
+                    "activeStepId",
+                    "completedStepIds",
+                    "transition",
+                    "stepId",
+                    "observationCount",
+                    "nativeUndoCheckpoint",
+                    "occurredAt"
                   ],
                   "additionalProperties": false
                 },
-                "documentIncarnationId": {
+                "requestedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "deliveryId": {
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 },
-                "expiresAt": {
+                "lease": {
+                  "type": "object",
+                  "properties": {
+                    "leaseId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "documentIncarnationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "leaseId",
+                    "sessionId",
+                    "target",
+                    "documentIncarnationId",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "dispatchedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "native_terminal_reconcile"
+                },
+                "recoveryId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "replacementLease": {
+                  "type": "object",
+                  "properties": {
+                    "leaseId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "adapterId": {
+                          "type": "string",
+                          "const": "blender"
+                        },
+                        "instanceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "required": [
+                        "adapterId",
+                        "instanceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "documentIncarnationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    }
+                  },
+                  "required": [
+                    "leaseId",
+                    "sessionId",
+                    "target",
+                    "documentIncarnationId",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "acknowledgedProgressReceiptChainHeads": {
+                  "maxItems": 7,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "recoveryRequestedAt": {
                   "type": "string",
                   "format": "date-time",
                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                 }
               },
               "required": [
-                "leaseId",
-                "sessionId",
+                "formatVersion",
+                "requestId",
+                "replayId",
+                "proofId",
                 "target",
-                "documentIncarnationId",
-                "expiresAt"
+                "targetProfile",
+                "proposalId",
+                "proposalRecordContentSha256",
+                "proposalContentSha256",
+                "plan",
+                "executionId",
+                "leafId",
+                "packetContentSha256",
+                "inputTreeContentSha256",
+                "outputTreeContentSha256",
+                "materializationContentSha256",
+                "interactionCatalogVersion",
+                "interactionCatalogContentSha256",
+                "menuTrackContentSha256",
+                "bindingContentSha256",
+                "binding",
+                "executorId",
+                "executionBoundary",
+                "authorization",
+                "transport",
+                "operationIds",
+                "nativeUndoDepth",
+                "expectedState",
+                "startCheckpoint",
+                "requestedAt",
+                "deliveryId",
+                "lease",
+                "dispatchedAt",
+                "kind",
+                "recoveryId",
+                "replacementLease",
+                "acknowledgedProgressReceiptChainHeads",
+                "recoveryRequestedAt"
               ],
               "additionalProperties": false
-            },
-            "dispatchedAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
             }
-          },
-          "required": [
-            "formatVersion",
-            "requestId",
-            "replayId",
-            "proofId",
-            "target",
-            "targetProfile",
-            "proposalId",
-            "proposalRecordContentSha256",
-            "proposalContentSha256",
-            "plan",
-            "executionId",
-            "leafId",
-            "packetContentSha256",
-            "inputTreeContentSha256",
-            "outputTreeContentSha256",
-            "materializationContentSha256",
-            "interactionCatalogVersion",
-            "interactionCatalogContentSha256",
-            "menuTrackContentSha256",
-            "bindingContentSha256",
-            "binding",
-            "executorId",
-            "executionBoundary",
-            "authorization",
-            "transport",
-            "operationIds",
-            "nativeUndoDepth",
-            "expectedState",
-            "startCheckpoint",
-            "requestedAt",
-            "deliveryId",
-            "lease",
-            "dispatchedAt"
-          ],
-          "additionalProperties": false
+          ]
         },
         {
           "type": "null"
