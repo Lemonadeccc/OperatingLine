@@ -6,22 +6,22 @@ plain JSON-compatible messages with the main-thread companion controller.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import datetime, timezone
-import ipaddress
 import hashlib
+import ipaddress
 import json
 import re
-from http.client import HTTPConnection, HTTPException, HTTPResponse
-from queue import Empty, Queue
 import socket
 import struct
 import threading
 import time
+import uuid
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
+from http.client import HTTPConnection, HTTPException, HTTPResponse
+from queue import Empty, Queue
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
-import uuid
 
 from ..domain import (
     BLENDER_ACTION_CATALOG_VERSION,
@@ -83,6 +83,27 @@ BLENDER_ADAPTER_CAPABILITIES = {
         "persistentProjectState": "native",
     },
 }
+MENU_CONTROL_PROOF_EXECUTOR_ID = "blender.uv_sphere_menu_controls.event_simulate.v1"
+MENU_CONTROL_PROOF_TARGET_PROFILE = "factory_layout_three_object_ui_scale_2"
+MENU_CONTROL_PROOF_OPERATION_IDS = (
+    "workspace.layout",
+    "menu.add",
+    "menu.mesh",
+    "operator.uv_sphere",
+    "control.location",
+    "control.scale",
+    "control.object_name",
+)
+MENU_CONTROL_PROOF_MUTATION_STAGES = (
+    "uv_sphere_created",
+    "location_x_set",
+    "location_y_set",
+    "location_z_set",
+    "scale_x_set",
+    "scale_y_set",
+    "scale_z_set",
+    "object_name_set",
+)
 
 
 @dataclass(frozen=True)
@@ -191,6 +212,9 @@ class CompanionTransport:
         self.shortcut_proof_progress: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_results: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
+        self.menu_control_proof_progress: Queue[dict[str, Any]] = Queue()
+        self.menu_control_proof_results: Queue[dict[str, Any]] = Queue()
+        self.menu_control_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.control: Queue[dict[str, Any]] = Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -202,6 +226,10 @@ class CompanionTransport:
         self._seen_action_request_ids: set[str] = set()
         self._seen_shortcut_proof_request_ids: set[str] = set()
         self._seen_shortcut_proof_recovery_ids: set[str] = set()
+        self._seen_menu_control_proof_request_ids: set[str] = set()
+        self._seen_menu_control_proof_recovery_ids: set[str] = set()
+        self._menu_control_proof_reconciliations: dict[str, dict[str, Any]] = {}
+        self._menu_control_proof_inflight_request_id: str | None = None
         known_plan_fields = (
             known_plan_id,
             known_revision,
@@ -302,6 +330,21 @@ class CompanionTransport:
         """Queue proof that a persisted native-history marker was rebound."""
         validated = self._validate_shortcut_proof_recovery_ack(ack)
         self.shortcut_proof_recovery_acks.put(dict(validated))
+
+    def submit_menu_control_proof_progress(self, progress: dict[str, Any]) -> None:
+        """Queue one strictly validated logical operation prefix."""
+        validated = self._validate_menu_control_proof_progress(progress)
+        self.menu_control_proof_progress.put(dict(validated))
+
+    def submit_menu_control_proof_result(self, result: dict[str, Any]) -> None:
+        """Queue one strictly validated terminal fixed-executor result."""
+        validated = self._validate_menu_control_proof_result(result)
+        self.menu_control_proof_results.put(dict(validated))
+
+    def submit_menu_control_proof_recovery_ack(self, ack: dict[str, Any]) -> None:
+        """Queue proof that a persisted terminal marker matches a recovery challenge."""
+        validated = self._validate_menu_control_terminal_reconciliation_ack(ack)
+        self.menu_control_proof_recovery_acks.put(dict(validated))
 
     def accept_plan(
         self,
@@ -504,6 +547,10 @@ class CompanionTransport:
             or path == "/api/v1/companion/shortcut-proof-progress"
             or path == "/api/v1/companion/shortcut-proof-result"
             or path == "/api/v1/companion/shortcut-proof-recovery"
+            or path.startswith("/api/v1/companion/menu-control-proof?")
+            or path == "/api/v1/companion/menu-control-proof-progress"
+            or path == "/api/v1/companion/menu-control-proof-result"
+            or path == "/api/v1/companion/menu-control-proof-recovery"
         ):
             session = self._session_snapshot
             if session is None:
@@ -865,6 +912,7 @@ class CompanionTransport:
         self._poll_revision_branches()
         if session.negotiated_guide_protocol_version == "1.5.0":
             self._poll_action_request()
+            self._poll_menu_control_proof_request()
             self._poll_shortcut_proof_request()
 
     @staticmethod
@@ -1083,6 +1131,830 @@ class CompanionTransport:
     @staticmethod
     def _canonical_sha256(value: dict[str, Any]) -> str:
         return hashlib.sha256(CompanionTransport._canonical_protocol_bytes(value)).hexdigest()
+
+    @staticmethod
+    def _menu_control_proof_operation_ids() -> list[str]:
+        return list(MENU_CONTROL_PROOF_OPERATION_IDS)
+
+    @staticmethod
+    def _menu_control_proof_timestamp(value: Any, label: str) -> datetime:
+        CompanionTransport._validate_expiry(value, label)
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    def _validate_menu_control_proof_binding(self, binding: Any) -> dict[str, Any]:
+        if not isinstance(binding, dict):
+            raise ValueError("Menu-control proof binding must be an object")
+        self._validate_exact_keys(
+            binding,
+            {
+                "formatVersion", "bindingId", "proposalRecordContentSha256",
+                "proofId", "requestId", "replayId", "target", "proposalId",
+                "packetContentSha256", "inputTreeContentSha256",
+                "outputTreeContentSha256", "materializationContentSha256",
+                "proposalContentSha256", "plan", "executionId", "leafId",
+                "recipeId", "actionName", "acceptedAction", "targetProfile",
+                "acceptedDecision", "startState", "proofScope", "materialization",
+                "executorId", "executionBoundary", "authorization", "transport",
+                "operationIds", "nativeUndoDepth", "createdAt", "integrity",
+            },
+            "Menu-control proof binding",
+        )
+        if binding["formatVersion"] != "1.0.0":
+            raise ValueError("Unsupported menu-control proof binding version")
+        for field in (
+            "bindingId", "proofId", "requestId", "replayId", "proposalId", "executionId"
+        ):
+            self._validated_required_uuid(binding[field], f"Menu-control proof binding {field}")
+        target = binding["target"]
+        if target != {"adapterId": "blender", "instanceId": self._instance_id}:
+            raise ValueError("Menu-control proof binding targets another Companion")
+        self._validate_exact_keys(target, {"adapterId", "instanceId"}, "Menu-control proof target")
+        self._validated_required_uuid(target["instanceId"], "Menu-control proof instance id")
+        hashes = (
+            "proposalRecordContentSha256", "packetContentSha256",
+            "inputTreeContentSha256", "outputTreeContentSha256",
+            "materializationContentSha256", "proposalContentSha256",
+        )
+        if any(
+            not isinstance(binding[field], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(binding[field]) is None
+            for field in hashes
+        ):
+            raise ValueError("Menu-control proof binding contains an invalid content hash")
+        plan = binding["plan"]
+        if not isinstance(plan, dict):
+            raise ValueError("Menu-control proof plan must be an object")
+        self._validate_exact_keys(plan, {"id", "revision", "contentSha256"}, "Menu-control proof plan")
+        if (
+            not isinstance(plan["id"], str) or not plan["id"]
+            or isinstance(plan["revision"], bool) or not isinstance(plan["revision"], int)
+            or plan["revision"] <= 0
+            or not isinstance(plan["contentSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(plan["contentSha256"]) is None
+        ):
+            raise ValueError("Menu-control proof plan identity is invalid")
+        if not isinstance(binding["leafId"], str) or not binding["leafId"]:
+            raise ValueError("Menu-control proof leaf id must be non-empty text")
+        accepted_action = binding["acceptedAction"]
+        expected_action = {
+            "adapterId": "blender",
+            "name": "blender.mesh.create_uv_sphere",
+            "arguments": {
+                "resourceId": "proof.uv_sphere.eye",
+                "objectName": "OperatingLine.TutorialEye",
+                "radius": 1.5,
+                "location": [1.25, -2, 0.75],
+            },
+        }
+        if accepted_action != expected_action:
+            raise ValueError("Menu-control proof accepted action is not the fixed UV Sphere action")
+        if (
+            binding["recipeId"] != "blender.mesh.create_uv_sphere.native"
+            or binding["actionName"] != "blender.mesh.create_uv_sphere"
+            or binding["targetProfile"] != MENU_CONTROL_PROOF_TARGET_PROFILE
+            or binding["executorId"] != MENU_CONTROL_PROOF_EXECUTOR_ID
+            or binding["executionBoundary"] != "blender_window_event_simulate"
+            or binding["authorization"] != "accepted_replay_next_step"
+            or binding["transport"] != "event_simulate"
+            or binding["operationIds"] != list(MENU_CONTROL_PROOF_OPERATION_IDS)
+            or binding["nativeUndoDepth"] != 8
+        ):
+            raise ValueError("Menu-control proof fixed executor declaration is invalid")
+        proof_scope = binding["proofScope"]
+        if proof_scope != {
+            "managedActionResult": "not_executed",
+            "managedIdentityVerified": False,
+            "managedReceiptCreated": False,
+            "omittedAcceptedArguments": ["resourceId"],
+        }:
+            raise ValueError("Menu-control proof scope is invalid")
+        materialization = binding["materialization"]
+        if not isinstance(materialization, dict):
+            raise ValueError("Menu-control proof materialization must be an object")
+        self._validate_exact_keys(
+            materialization,
+            {
+                "actionCatalogVersion", "interactionCatalogVersion",
+                "interactionCatalogContentSha256", "packetContentSha256",
+                "inputTreeContentSha256", "outputTreeContentSha256",
+                "materializationContentSha256", "menuTrackContentSha256",
+            },
+            "Menu-control proof materialization",
+        )
+        for field in (
+            "interactionCatalogContentSha256", "packetContentSha256",
+            "inputTreeContentSha256", "outputTreeContentSha256",
+            "materializationContentSha256", "menuTrackContentSha256",
+        ):
+            if not isinstance(materialization[field], str) or CONTENT_SHA256_PATTERN.fullmatch(materialization[field]) is None:
+                raise ValueError("Menu-control proof materialization hash is invalid")
+        semver = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
+        if (
+            materialization["actionCatalogVersion"] != BLENDER_ACTION_CATALOG_VERSION
+            or not isinstance(materialization["interactionCatalogVersion"], str)
+            or semver.fullmatch(materialization["interactionCatalogVersion"]) is None
+        ):
+            raise ValueError("Menu-control proof catalog authority is invalid")
+        for field in (
+            "packetContentSha256", "inputTreeContentSha256",
+            "outputTreeContentSha256", "materializationContentSha256",
+        ):
+            if binding[field] != materialization[field]:
+                raise ValueError("Menu-control proof binding materialization identity changed")
+        start = binding["startState"]
+        if not isinstance(start, dict):
+            raise ValueError("Menu-control proof start state must be an object")
+        self._validate_exact_keys(
+            start,
+            {
+                "reportId", "sequence", "adapterId", "instanceId", "plan",
+                "planContentSha256", "executionId", "phase", "activeStepId",
+                "completedStepIds", "transition", "stepId", "observationCount",
+                "nativeUndoCheckpoint", "occurredAt",
+            },
+            "Menu-control proof start state",
+        )
+        self._validated_required_uuid(start["reportId"], "Menu-control proof start report id")
+        if (
+            start["adapterId"] != "blender" or start["instanceId"] != self._instance_id
+            or start["plan"] != {"id": plan["id"], "revision": plan["revision"]}
+            or start["planContentSha256"] != plan["contentSha256"]
+            or start["executionId"] != binding["executionId"]
+            or start["phase"] != "running" or start["activeStepId"] is not None
+            or start["completedStepIds"] != [] or start["transition"] != "walkthrough_started"
+            or start["stepId"] is not None or start["observationCount"] != 0
+            or isinstance(start["sequence"], bool) or not isinstance(start["sequence"], int)
+            or start["sequence"] <= 0 or not isinstance(start["nativeUndoCheckpoint"], dict)
+        ):
+            raise ValueError("Menu-control proof start state is invalid")
+        checkpoint = start["nativeUndoCheckpoint"]
+        self._validate_exact_keys(
+            checkpoint,
+            {
+                "formatVersion", "evidenceClass", "checkpointId",
+                "previousCheckpointId", "operation", "committedAt", "marker",
+                "journal", "session",
+            },
+            "Menu-control proof pristine start checkpoint",
+        )
+        self._validated_required_uuid(checkpoint["checkpointId"], "Menu-control proof start checkpoint id")
+        if (
+            checkpoint["formatVersion"] != "1.0.0"
+            or checkpoint["evidenceClass"] != "companion_reported_native_undo_checkpoint"
+            or checkpoint["previousCheckpointId"] is not None
+            or checkpoint["operation"] != "start"
+            or checkpoint["marker"] != {"key": "_operating_line_native_history_v1", "matched": True}
+            or checkpoint["journal"] != {
+                "entryPresent": True,
+                "snapshotMatchesSession": True,
+                "artifactsBackedUp": True,
+            }
+        ):
+            raise ValueError("Menu-control proof pristine start checkpoint is invalid")
+        checkpoint_session = checkpoint["session"]
+        if not isinstance(checkpoint_session, dict):
+            raise ValueError("Menu-control proof checkpoint session must be an object")
+        self._validate_exact_keys(
+            checkpoint_session,
+            {
+                "plan", "planContentSha256", "executionId", "activeStepId",
+                "completedStepIds", "receiptStepIds",
+            },
+            "Menu-control proof checkpoint session",
+        )
+        if checkpoint_session != {
+            "plan": {"id": plan["id"], "revision": plan["revision"]},
+            "planContentSha256": plan["contentSha256"],
+            "executionId": binding["executionId"],
+            "activeStepId": None,
+            "completedStepIds": [],
+            "receiptStepIds": [],
+        }:
+            raise ValueError("Menu-control proof checkpoint session identity is invalid")
+        decision = binding["acceptedDecision"]
+        if not isinstance(decision, dict):
+            raise ValueError("Menu-control proof accepted decision must be an object")
+        self._validate_exact_keys(
+            decision,
+            {"decisionId", "proposalId", "instanceId", "adapterId", "decision", "decidedAt"},
+            "Menu-control proof accepted decision",
+        )
+        self._validated_required_uuid(decision["decisionId"], "Menu-control proof decision id")
+        if (
+            decision["proposalId"] != binding["proposalId"]
+            or decision["instanceId"] != self._instance_id
+            or decision["adapterId"] != "blender" or decision["decision"] != "accepted"
+        ):
+            raise ValueError("Menu-control proof accepted decision identity is invalid")
+        created_at = self._menu_control_proof_timestamp(binding["createdAt"], "Menu-control proof binding creation time")
+        decision_at = self._menu_control_proof_timestamp(decision["decidedAt"], "Menu-control proof decision time")
+        checkpoint_at = self._menu_control_proof_timestamp(checkpoint["committedAt"], "Menu-control proof start checkpoint time")
+        start_at = self._menu_control_proof_timestamp(start["occurredAt"], "Menu-control proof start report time")
+        if not decision_at <= checkpoint_at <= start_at <= created_at:
+            raise ValueError("Menu-control proof binding predates acceptance")
+        integrity = binding["integrity"]
+        if not isinstance(integrity, dict):
+            raise ValueError("Menu-control proof binding integrity must be an object")
+        self._validate_exact_keys(integrity, {"algorithm", "canonicalization", "contentSha256"}, "Menu-control proof binding integrity")
+        content = {key: value for key, value in binding.items() if key != "integrity"}
+        if integrity != {
+            "algorithm": "sha256",
+            "canonicalization": "operatingline-json-value-v1",
+            "contentSha256": self._canonical_sha256(content),
+        }:
+            raise ValueError("Menu-control proof binding content hash is invalid")
+        return binding
+
+    def _validate_menu_control_proof_identity(self, payload: Any, label: str) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{label} must be an object")
+        base_keys = {
+            "formatVersion", "requestId", "replayId", "proofId", "target",
+            "targetProfile", "proposalId", "proposalRecordContentSha256",
+            "proposalContentSha256", "plan", "executionId", "leafId",
+            "packetContentSha256", "inputTreeContentSha256", "outputTreeContentSha256",
+            "materializationContentSha256", "interactionCatalogVersion",
+            "interactionCatalogContentSha256", "menuTrackContentSha256",
+            "bindingContentSha256", "binding", "executorId", "executionBoundary",
+            "authorization", "transport", "operationIds", "nativeUndoDepth",
+            "expectedState", "startCheckpoint", "requestedAt", "deliveryId",
+            "lease", "dispatchedAt",
+        }
+        if not base_keys.issubset(payload):
+            raise ValueError(f"{label} is missing delivery identity fields")
+        if payload["formatVersion"] != "1.0.0":
+            raise ValueError(f"{label} version is unsupported")
+        for field in ("requestId", "replayId", "proofId", "proposalId", "executionId", "deliveryId"):
+            self._validated_required_uuid(payload[field], f"{label} {field}")
+        binding = self._validate_menu_control_proof_binding(payload["binding"])
+        if payload["bindingContentSha256"] != binding["integrity"]["contentSha256"]:
+            raise ValueError(f"{label} binding content hash changed")
+        direct_fields = (
+            "requestId", "replayId", "proofId", "target", "targetProfile", "proposalId",
+            "proposalRecordContentSha256", "proposalContentSha256", "plan", "executionId",
+            "leafId", "packetContentSha256", "inputTreeContentSha256",
+            "outputTreeContentSha256", "materializationContentSha256", "executorId",
+            "executionBoundary", "authorization", "transport", "operationIds", "nativeUndoDepth",
+        )
+        if any(payload[field] != binding[field] for field in direct_fields):
+            raise ValueError(f"{label} immutable binding identity changed")
+        materialization = binding["materialization"]
+        for field in ("interactionCatalogVersion", "interactionCatalogContentSha256", "menuTrackContentSha256"):
+            if payload[field] != materialization[field]:
+                raise ValueError(f"{label} catalog identity changed")
+        expected_state = payload["expectedState"]
+        if expected_state != {"reportId": binding["startState"]["reportId"], "sequence": binding["startState"]["sequence"]}:
+            raise ValueError(f"{label} expected start report changed")
+        if payload["startCheckpoint"] != binding["startState"]:
+            raise ValueError(f"{label} start checkpoint changed")
+        lease = payload["lease"]
+        if not isinstance(lease, dict):
+            raise ValueError(f"{label} lease must be an object")
+        self._validate_exact_keys(
+            lease, {"leaseId", "sessionId", "target", "documentIncarnationId", "expiresAt"},
+            f"{label} lease",
+        )
+        for field in ("leaseId", "sessionId", "documentIncarnationId"):
+            self._validated_required_uuid(lease[field], f"{label} lease {field}")
+        if (
+            lease["sessionId"] != self._session_id
+            or lease["documentIncarnationId"] != self._document_incarnation_id
+            or lease["target"] != payload["target"]
+        ):
+            raise ValueError(f"{label} lease session or document identity changed")
+        created = self._menu_control_proof_timestamp(binding["createdAt"], f"{label} binding time")
+        requested = self._menu_control_proof_timestamp(payload["requestedAt"], f"{label} request time")
+        dispatched = self._menu_control_proof_timestamp(payload["dispatchedAt"], f"{label} dispatch time")
+        expires = self._menu_control_proof_timestamp(lease["expiresAt"], f"{label} lease expiry")
+        if not created <= requested <= dispatched < expires:
+            raise ValueError(f"{label} delivery chronology is invalid")
+        return payload
+
+    def _validate_menu_control_proof_delivery(self, delivery: Any) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(delivery, "Menu-control proof delivery")
+        expected = {
+            "formatVersion", "requestId", "replayId", "proofId", "target",
+            "targetProfile", "proposalId", "proposalRecordContentSha256",
+            "proposalContentSha256", "plan", "executionId", "leafId",
+            "packetContentSha256", "inputTreeContentSha256", "outputTreeContentSha256",
+            "materializationContentSha256", "interactionCatalogVersion",
+            "interactionCatalogContentSha256", "menuTrackContentSha256",
+            "bindingContentSha256", "binding", "executorId", "executionBoundary",
+            "authorization", "transport", "operationIds", "nativeUndoDepth",
+            "expectedState", "startCheckpoint", "requestedAt", "deliveryId", "lease", "dispatchedAt",
+        }
+        self._validate_exact_keys(validated, expected, "Menu-control proof delivery")
+        session = self._session_snapshot
+        if (
+            session is None
+            or (
+                validated["lease"]["leaseId"] != session.lease_id
+                and validated["requestId"]
+                not in self._seen_menu_control_proof_request_ids
+            )
+            or validated["lease"]["sessionId"] != session.session_id
+            or validated["lease"]["documentIncarnationId"]
+            != session.document_incarnation_id
+        ):
+            raise ValueError("Menu-control proof delivery does not use the current document lease")
+        return validated
+
+    def _validate_menu_control_proof_receipts(
+        self, receipts: Any, identity: dict[str, Any], *, complete: bool
+    ) -> list[dict[str, Any]]:
+        if not isinstance(receipts, list) or not (1 <= len(receipts) <= 7) or (complete and len(receipts) != 7):
+            raise ValueError("Menu-control proof receipt chain length is invalid")
+        summaries = (
+            {"status": "precondition_verified", "path": ["Layout"]},
+            {"status": "control_executed", "path": ["Layout", "Add"]},
+            {"status": "control_executed", "path": ["Layout", "Add", "Mesh"]},
+            {"status": "control_executed", "path": ["Layout", "Add", "Mesh", "UV Sphere"], "radius": 1},
+            {"status": "control_executed", "path": ["Sidebar", "Item", "Transform", "Location"], "value": [1.25, -2, 0.75]},
+            {"status": "control_executed", "path": ["Sidebar", "Item", "Transform", "Scale"], "value": [1.5, 1.5, 1.5]},
+            {"status": "control_executed", "path": ["Properties", "Object", "Name"], "value": "OperatingLine.TutorialEye"},
+        )
+        previous: str | None = None
+        previous_time = self._menu_control_proof_timestamp(identity["dispatchedAt"], "Menu-control proof dispatch time")
+        occurred_at = self._menu_control_proof_timestamp(identity["occurredAt"], "Menu-control proof evidence time")
+        for index, receipt in enumerate(receipts):
+            if not isinstance(receipt, dict):
+                raise ValueError("Menu-control proof receipt must be an object")
+            self._validate_exact_keys(
+                receipt,
+                {"receiptId", "proofId", "requestId", "deliveryId", "bindingContentSha256", "order", "previousReceiptContentSha256", "outcome", "occurredAt", "contentSha256", "operationId", "summary"},
+                "Menu-control proof receipt",
+            )
+            self._validated_required_uuid(receipt["receiptId"], "Menu-control proof receipt id")
+            if (
+                receipt["proofId"] != identity["proofId"]
+                or receipt["requestId"] != identity["requestId"]
+                or receipt["deliveryId"] != identity["deliveryId"]
+                or receipt["bindingContentSha256"] != identity["bindingContentSha256"]
+                or receipt["operationId"] != MENU_CONTROL_PROOF_OPERATION_IDS[index]
+                or receipt["order"] != index + 1 or receipt["outcome"] != "succeeded"
+                or receipt["summary"] != summaries[index]
+                or receipt["previousReceiptContentSha256"] != previous
+            ):
+                raise ValueError("Menu-control proof receipt identity, order, or summary is invalid")
+            receipt_time = self._menu_control_proof_timestamp(receipt["occurredAt"], "Menu-control proof receipt time")
+            if not previous_time <= receipt_time <= occurred_at:
+                raise ValueError("Menu-control proof receipt chronology is invalid")
+            content = {key: value for key, value in receipt.items() if key != "contentSha256"}
+            if receipt["contentSha256"] != self._canonical_sha256(content):
+                raise ValueError("Menu-control proof receipt content hash is invalid")
+            previous = receipt["contentSha256"]
+            previous_time = receipt_time
+        return receipts
+
+    def _validate_menu_control_proof_progress(self, progress: Any) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(progress, "Menu-control proof progress")
+        delivery_keys = set(self._validate_menu_control_proof_delivery_keys())
+        self._validate_exact_keys(
+            validated,
+            delivery_keys | {"status", "completedOperationIds", "operationReceipts", "receiptChainHeadSha256", "nativeHistoryCursor", "completedMutationStages", "occurredAt"},
+            "Menu-control proof progress",
+        )
+        receipts = self._validate_menu_control_proof_receipts(validated["operationReceipts"], validated, complete=False)
+        count = len(receipts)
+        mutation_count = (0, 0, 0, 1, 4, 7, 8)[count - 1]
+        occurred_at = self._menu_control_proof_timestamp(validated["occurredAt"], "Menu-control proof progress time")
+        execution_deadline = (
+            self._menu_control_proof_timestamp(
+                validated["dispatchedAt"], "Menu-control proof dispatch time"
+            )
+            + timedelta(seconds=120)
+        )
+        if (
+            validated["status"] != "in_progress"
+            or validated["completedOperationIds"] != list(MENU_CONTROL_PROOF_OPERATION_IDS[:count])
+            or validated["receiptChainHeadSha256"] != receipts[-1]["contentSha256"]
+            or validated["nativeHistoryCursor"] != mutation_count
+            or validated["completedMutationStages"] != list(MENU_CONTROL_PROOF_MUTATION_STAGES[:mutation_count])
+            or not self._menu_control_proof_timestamp(validated["dispatchedAt"], "Menu-control proof dispatch time") <= occurred_at <= execution_deadline
+        ):
+            raise ValueError("Menu-control proof progress is not an exact logical prefix")
+        return validated
+
+    @staticmethod
+    def _validate_menu_control_proof_delivery_keys() -> tuple[str, ...]:
+        return (
+            "formatVersion", "requestId", "replayId", "proofId", "target", "targetProfile",
+            "proposalId", "proposalRecordContentSha256", "proposalContentSha256", "plan",
+            "executionId", "leafId", "packetContentSha256", "inputTreeContentSha256",
+            "outputTreeContentSha256", "materializationContentSha256", "interactionCatalogVersion",
+            "interactionCatalogContentSha256", "menuTrackContentSha256", "bindingContentSha256",
+            "binding", "executorId", "executionBoundary", "authorization", "transport",
+            "operationIds", "nativeUndoDepth", "expectedState", "startCheckpoint", "requestedAt",
+            "deliveryId", "lease", "dispatchedAt",
+        )
+
+    def _validate_menu_control_proof_result(self, result: Any) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(result, "Menu-control proof result")
+        self._validate_exact_keys(
+            validated,
+            set(self._validate_menu_control_proof_delivery_keys()) | {
+                "status", "managedActionResult", "managedIdentityVerified",
+                "managedReceiptCreated", "requiresUndoToUnlock", "terminalEvidence",
+                "error", "occurredAt",
+            },
+            "Menu-control proof result",
+        )
+        statuses = {"succeeded", "failed_no_mutation", "failed_restored", "failed_checkpointed", "recovery_required"}
+        status = validated["status"]
+        if (
+            status not in statuses or validated["managedActionResult"] != "not_executed"
+            or validated["managedIdentityVerified"] is not False
+            or validated["managedReceiptCreated"] is not False
+            or validated["requiresUndoToUnlock"] is not (status in {"succeeded", "failed_checkpointed", "recovery_required"})
+            or (status == "succeeded") is not (validated["error"] is None)
+            or (validated["error"] is not None and (not isinstance(validated["error"], str) or not validated["error"]))
+        ):
+            raise ValueError("Menu-control proof result status claims are invalid")
+        occurred_at = self._menu_control_proof_timestamp(validated["occurredAt"], "Menu-control proof result time")
+        dispatched_at = self._menu_control_proof_timestamp(
+            validated["dispatchedAt"], "Menu-control proof dispatch time"
+        )
+        if not dispatched_at <= occurred_at <= dispatched_at + timedelta(seconds=120):
+            raise ValueError("Menu-control proof result chronology is invalid")
+        evidence = validated["terminalEvidence"]
+        if not isinstance(evidence, dict):
+            raise ValueError("Menu-control proof terminal evidence must be an object")
+        expected_kind = "succeeded_locked" if status == "succeeded" else status
+        if evidence.get("kind") != expected_kind:
+            raise ValueError("Menu-control proof terminal evidence kind disagrees with status")
+        if status == "succeeded":
+            self._validate_exact_keys(evidence, {"kind", "operationSummaries", "operationReceipts", "strongObservation", "nativeUndoCheckpoint"}, "Menu-control proof success evidence")
+            receipts = self._validate_menu_control_proof_receipts(evidence["operationReceipts"], validated, complete=True)
+            summaries = evidence["operationSummaries"]
+            if not isinstance(summaries, list) or summaries != [
+                {"operationId": receipt["operationId"], "summaryContentSha256": self._canonical_sha256(receipt["summary"])}
+                for receipt in receipts
+            ]:
+                raise ValueError("Menu-control proof operation summaries are invalid")
+            observation = evidence["strongObservation"]
+            if not isinstance(observation, dict):
+                raise ValueError("Menu-control proof strong observation must be an object")
+            self._validate_exact_keys(observation, {"kind", "satisfied", "observationId", "objectName", "objectType", "location", "scale", "meshTopology", "meshSha256", "sceneFingerprintSha256", "observedAt", "contentSha256"}, "Menu-control proof strong observation")
+            self._validated_required_uuid(observation["observationId"], "Menu-control proof observation id")
+            if (
+                observation["kind"] != "uv_sphere_menu_controls_ready" or observation["satisfied"] is not True
+                or observation["objectName"] != "OperatingLine.TutorialEye" or observation["objectType"] != "MESH"
+                or observation["location"] != [1.25, -2, 0.75] or observation["scale"] != [1.5, 1.5, 1.5]
+                or observation["meshTopology"] != {"vertices": 482, "edges": 992, "polygons": 512}
+                or observation["contentSha256"] != self._canonical_sha256({key: value for key, value in observation.items() if key != "contentSha256"})
+            ):
+                raise ValueError("Menu-control proof strong observation is invalid")
+            for field in ("meshSha256", "sceneFingerprintSha256"):
+                if not isinstance(observation[field], str) or CONTENT_SHA256_PATTERN.fullmatch(observation[field]) is None:
+                    raise ValueError("Menu-control proof observation hash is invalid")
+            checkpoint = evidence["nativeUndoCheckpoint"]
+            if not isinstance(checkpoint, dict):
+                raise ValueError("Menu-control proof checkpoint must be an object")
+            self._validate_exact_keys(checkpoint, {"checkpointId", "undoLockId", "nativeUndoDepth", "nativeHistoryCursor", "mutationStages", "baselineSceneFingerprintSha256", "finalSceneFingerprintSha256", "restoredSceneFingerprintSha256", "reappliedSceneFingerprintSha256", "receiptChainRootSha256", "receiptChainHeadSha256", "strongObservationContentSha256", "committedAt"}, "Menu-control proof checkpoint")
+            self._validated_required_uuid(checkpoint["checkpointId"], "Menu-control proof checkpoint id")
+            self._validated_required_uuid(checkpoint["undoLockId"], "Menu-control proof undo lock id")
+            for field in (
+                "baselineSceneFingerprintSha256",
+                "finalSceneFingerprintSha256",
+                "restoredSceneFingerprintSha256",
+                "reappliedSceneFingerprintSha256",
+                "receiptChainRootSha256",
+                "receiptChainHeadSha256",
+                "strongObservationContentSha256",
+            ):
+                if (
+                    not isinstance(checkpoint[field], str)
+                    or CONTENT_SHA256_PATTERN.fullmatch(checkpoint[field]) is None
+                ):
+                    raise ValueError("Menu-control proof checkpoint hash is invalid")
+            if (
+                checkpoint["nativeUndoDepth"] != 8 or checkpoint["nativeHistoryCursor"] != 8
+                or checkpoint["mutationStages"] != list(MENU_CONTROL_PROOF_MUTATION_STAGES)
+                or checkpoint["receiptChainRootSha256"] != receipts[0]["contentSha256"]
+                or checkpoint["receiptChainHeadSha256"] != receipts[-1]["contentSha256"]
+                or checkpoint["strongObservationContentSha256"] != observation["contentSha256"]
+                or checkpoint["finalSceneFingerprintSha256"] != observation["sceneFingerprintSha256"]
+                or checkpoint["baselineSceneFingerprintSha256"] == checkpoint["finalSceneFingerprintSha256"]
+                or checkpoint["restoredSceneFingerprintSha256"] != checkpoint["baselineSceneFingerprintSha256"]
+                or checkpoint["reappliedSceneFingerprintSha256"] != checkpoint["finalSceneFingerprintSha256"]
+            ):
+                raise ValueError("Menu-control proof checkpoint is invalid")
+            if not (
+                self._menu_control_proof_timestamp(receipts[-1]["occurredAt"], "Menu-control proof last receipt time")
+                <= self._menu_control_proof_timestamp(observation["observedAt"], "Menu-control proof observation time")
+                <= self._menu_control_proof_timestamp(checkpoint["committedAt"], "Menu-control proof checkpoint time")
+                <= occurred_at
+            ):
+                raise ValueError("Menu-control proof success evidence chronology is invalid")
+        else:
+            common = {"kind", "receiptPrefix", "lastCompletedOperationId", "internalHistoryCursor", "completedMutationStages", "automaticReplay"}
+            if status != "failed_no_mutation":
+                common |= {"baselineSceneFingerprintSha256", "currentSceneFingerprintSha256"}
+            if status == "failed_checkpointed":
+                common.add("checkpoint")
+            self._validate_exact_keys(evidence, common, "Menu-control proof failure evidence")
+            receipts = evidence["receiptPrefix"]
+            if status == "failed_no_mutation":
+                if receipts != [] or evidence["lastCompletedOperationId"] is not None or evidence["internalHistoryCursor"] != 0 or evidence["completedMutationStages"] != [] or evidence["automaticReplay"] is not False:
+                    raise ValueError("Menu-control proof no-mutation evidence is invalid")
+            else:
+                if not isinstance(receipts, list):
+                    raise ValueError("Menu-control proof failure receipt prefix is invalid")
+                if receipts:
+                    self._validate_menu_control_proof_receipts(receipts, validated, complete=False)
+                if (
+                    evidence["lastCompletedOperationId"] != (receipts[-1]["operationId"] if receipts else None)
+                    or evidence["automaticReplay"] is not False
+                    or not isinstance(evidence["internalHistoryCursor"], int)
+                    or isinstance(evidence["internalHistoryCursor"], bool)
+                    or not 0 <= evidence["internalHistoryCursor"] <= 8
+                    or evidence["completedMutationStages"] != list(MENU_CONTROL_PROOF_MUTATION_STAGES[:len(evidence["completedMutationStages"])])
+                ):
+                    raise ValueError("Menu-control proof failure prefix is invalid")
+                minimum_stages, maximum_stages = (
+                    (0, 0), (0, 0), (0, 0), (0, 1),
+                    (1, 4), (4, 7), (7, 8), (8, 8),
+                )[len(receipts)]
+                stage_count = len(evidence["completedMutationStages"])
+                if not minimum_stages <= stage_count <= maximum_stages:
+                    raise ValueError("Menu-control proof failure mutation-stage count is invalid")
+                for field in ("baselineSceneFingerprintSha256", "currentSceneFingerprintSha256"):
+                    if not isinstance(evidence[field], str) or CONTENT_SHA256_PATTERN.fullmatch(evidence[field]) is None:
+                        raise ValueError("Menu-control proof failure scene hash is invalid")
+                if status == "failed_restored" and (
+                    evidence["internalHistoryCursor"] != 0
+                    or evidence["currentSceneFingerprintSha256"] != evidence["baselineSceneFingerprintSha256"]
+                ):
+                    raise ValueError("Menu-control proof restored evidence is invalid")
+                if status == "recovery_required" and (
+                    evidence["internalHistoryCursor"] > stage_count
+                    or (
+                        evidence["internalHistoryCursor"] != stage_count
+                        and (
+                            len(receipts) != 7
+                            or stage_count != len(MENU_CONTROL_PROOF_MUTATION_STAGES)
+                        )
+                    )
+                ):
+                    raise ValueError("Menu-control proof recovery evidence is invalid")
+                if status == "failed_checkpointed":
+                    checkpoint = evidence["checkpoint"]
+                    if not receipts or stage_count < 1 or not isinstance(checkpoint, dict):
+                        raise ValueError("Menu-control proof failure checkpoint must be an object")
+                    self._validate_exact_keys(checkpoint, {"formatVersion", "checkpointId", "undoLockId", "proofId", "replayId", "target", "internalHistoryCursor", "completedMutationStages", "baselineSceneFingerprintSha256", "currentSceneFingerprintSha256", "receiptChainRootSha256", "receiptChainHeadSha256", "committedAt", "contentSha256"}, "Menu-control proof failure checkpoint")
+                    content = {key: value for key, value in checkpoint.items() if key != "contentSha256"}
+                    self._validated_required_uuid(checkpoint["checkpointId"], "Menu-control proof failure checkpoint id")
+                    self._validated_required_uuid(checkpoint["undoLockId"], "Menu-control proof failure undo lock id")
+                    committed_at = self._menu_control_proof_timestamp(
+                        checkpoint["committedAt"], "Menu-control proof failure checkpoint time"
+                    )
+                    last_receipt_at = (
+                        self._menu_control_proof_timestamp(
+                            receipts[-1]["occurredAt"], "Menu-control proof last failure receipt time"
+                        )
+                        if receipts
+                        else self._menu_control_proof_timestamp(
+                            validated["dispatchedAt"], "Menu-control proof dispatch time"
+                        )
+                    )
+                    if (
+                        checkpoint["formatVersion"] != "1.0.0" or checkpoint["proofId"] != validated["proofId"]
+                        or checkpoint["replayId"] != validated["replayId"]
+                        or checkpoint["target"] != {**validated["target"], "resourceId": "proof.uv_sphere.eye"}
+                        or checkpoint["internalHistoryCursor"] != evidence["internalHistoryCursor"]
+                        or evidence["internalHistoryCursor"] != stage_count
+                        or checkpoint["completedMutationStages"] != evidence["completedMutationStages"]
+                        or checkpoint["baselineSceneFingerprintSha256"] != evidence["baselineSceneFingerprintSha256"]
+                        or checkpoint["currentSceneFingerprintSha256"] != evidence["currentSceneFingerprintSha256"]
+                        or checkpoint["currentSceneFingerprintSha256"]
+                        == checkpoint["baselineSceneFingerprintSha256"]
+                        or checkpoint["receiptChainRootSha256"] != receipts[0]["contentSha256"]
+                        or checkpoint["receiptChainHeadSha256"] != receipts[-1]["contentSha256"]
+                        or not last_receipt_at <= committed_at <= occurred_at
+                        or checkpoint["contentSha256"] != self._canonical_sha256(content)
+                    ):
+                        raise ValueError("Menu-control proof failure checkpoint is invalid")
+        return validated
+
+    def _validate_menu_control_terminal_reconciliation_delivery(
+        self, delivery: Any
+    ) -> dict[str, Any]:
+        validated = self._validate_menu_control_proof_identity(
+            delivery, "Menu-control terminal reconciliation"
+        )
+        self._validate_exact_keys(
+            validated,
+            set(self._validate_menu_control_proof_delivery_keys())
+            | {
+                "kind",
+                "recoveryId",
+                "replacementLease",
+                "acknowledgedProgressReceiptChainHeads",
+                "recoveryRequestedAt",
+            },
+            "Menu-control terminal reconciliation",
+        )
+        if validated["kind"] != "native_terminal_reconcile":
+            raise ValueError("Menu-control reconciliation kind is invalid")
+        self._validated_required_uuid(
+            validated["recoveryId"], "Menu-control reconciliation recovery id"
+        )
+        heads = validated["acknowledgedProgressReceiptChainHeads"]
+        if (
+            not isinstance(heads, list)
+            or len(heads) > 7
+            or len(set(heads)) != len(heads)
+            or any(
+                not isinstance(value, str)
+                or CONTENT_SHA256_PATTERN.fullmatch(value) is None
+                for value in heads
+            )
+        ):
+            raise ValueError("Menu-control reconciliation receipt prefix is invalid")
+        replacement = validated["replacementLease"]
+        if not isinstance(replacement, dict):
+            raise ValueError("Menu-control reconciliation replacement lease is invalid")
+        self._validate_exact_keys(
+            replacement,
+            {"leaseId", "sessionId", "target", "documentIncarnationId", "expiresAt"},
+            "Menu-control reconciliation replacement lease",
+        )
+        for field in ("leaseId", "sessionId", "documentIncarnationId"):
+            self._validated_required_uuid(
+                replacement[field], f"Menu-control reconciliation replacement {field}"
+            )
+        session = self._session_snapshot
+        replacement_identity = {
+            key: replacement[key]
+            for key in (
+                "leaseId",
+                "sessionId",
+                "target",
+                "documentIncarnationId",
+            )
+        }
+        expected_replacement_identity = (
+            None
+            if session is None
+            else {
+                "leaseId": session.lease_id,
+                "sessionId": session.session_id,
+                "target": {"adapterId": "blender", "instanceId": self._instance_id},
+                "documentIncarnationId": session.document_incarnation_id,
+            }
+        )
+        requested_at = self._menu_control_proof_timestamp(
+            validated["recoveryRequestedAt"],
+            "Menu-control reconciliation request time",
+        )
+        if (
+            replacement_identity != expected_replacement_identity
+            or replacement["leaseId"] == validated["lease"]["leaseId"]
+            or not self._menu_control_proof_timestamp(
+                validated["dispatchedAt"], "Menu-control proof dispatch time"
+            )
+            <= requested_at
+            < self._menu_control_proof_timestamp(
+                replacement["expiresAt"], "Menu-control replacement lease expiry"
+            )
+        ):
+            raise ValueError(
+                "Menu-control reconciliation does not use the current replacement lease"
+            )
+        return validated
+
+    def _validate_menu_control_terminal_reconciliation_ack(
+        self, ack: Any
+    ) -> dict[str, Any]:
+        if not isinstance(ack, dict):
+            raise ValueError("Menu-control reconciliation acknowledgement must be an object")
+        self._validate_exact_keys(
+            ack,
+            {
+                "kind",
+                "recoveryId",
+                "result",
+                "terminalResultContentSha256",
+                "expectedMarkerContentSha256",
+                "currentSceneFingerprintSha256",
+                "occurredAt",
+            },
+            "Menu-control reconciliation acknowledgement",
+        )
+        if ack["kind"] != "native_terminal_reconcile":
+            raise ValueError("Menu-control reconciliation acknowledgement kind is invalid")
+        self._validated_required_uuid(
+            ack["recoveryId"], "Menu-control reconciliation acknowledgement recovery id"
+        )
+        challenge = self._menu_control_proof_reconciliations.get(ack["recoveryId"])
+        if challenge is None:
+            raise ValueError("Menu-control reconciliation challenge is not active")
+        result = self._validate_menu_control_proof_result(ack["result"])
+        if result["status"] not in {"succeeded", "failed_checkpointed"}:
+            raise ValueError("Menu-control reconciliation requires a locked terminal result")
+        if any(
+            result[key] != challenge[key]
+            for key in self._validate_menu_control_proof_delivery_keys()
+        ):
+            raise ValueError("Menu-control reconciliation changed immutable delivery identity")
+        terminal = result["terminalEvidence"]
+        receipts = (
+            terminal["operationReceipts"]
+            if result["status"] == "succeeded"
+            else terminal["receiptPrefix"]
+        )
+        terminal_heads = [receipt["contentSha256"] for receipt in receipts]
+        acknowledged_heads = challenge["acknowledgedProgressReceiptChainHeads"]
+        expected_fingerprint = (
+            terminal["nativeUndoCheckpoint"]["finalSceneFingerprintSha256"]
+            if result["status"] == "succeeded"
+            else terminal["checkpoint"]["currentSceneFingerprintSha256"]
+        )
+        checkpoint = (
+            terminal["nativeUndoCheckpoint"]
+            if result["status"] == "succeeded"
+            else terminal["checkpoint"]
+        )
+        terminal_marker_identity = {
+            "formatVersion": "1.0.0",
+            "executorId": result["executorId"],
+            "checkpointId": checkpoint["checkpointId"],
+            "undoLockId": checkpoint["undoLockId"],
+            "proofId": result["proofId"],
+            "replayId": result["replayId"],
+            "targetId": result["binding"]["acceptedAction"]["arguments"][
+                "resourceId"
+            ],
+            "checkpointKind": (
+                "success" if result["status"] == "succeeded" else "failure"
+            ),
+            "baselineSceneFingerprintSha256": checkpoint[
+                "baselineSceneFingerprintSha256"
+            ],
+            "lockedSceneFingerprintSha256": expected_fingerprint,
+            "terminalResultContentSha256": self._canonical_sha256(result),
+        }
+        occurred_at = self._menu_control_proof_timestamp(
+            ack["occurredAt"], "Menu-control reconciliation acknowledgement time"
+        )
+        if (
+            terminal_heads[: len(acknowledged_heads)] != acknowledged_heads
+            or ack["terminalResultContentSha256"] != self._canonical_sha256(result)
+            or ack["expectedMarkerContentSha256"]
+            != self._canonical_sha256(terminal_marker_identity)
+            or ack["currentSceneFingerprintSha256"] != expected_fingerprint
+            or occurred_at
+            < self._menu_control_proof_timestamp(
+                challenge["recoveryRequestedAt"],
+                "Menu-control reconciliation request time",
+            )
+        ):
+            raise ValueError("Menu-control reconciliation acknowledgement evidence is invalid")
+        return ack
+
+    def _poll_menu_control_proof_request(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/menu-control-proof?" + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Menu-control proof poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        if isinstance(delivery, dict) and delivery.get("kind") == "native_terminal_reconcile":
+            validated_recovery = self._validate_menu_control_terminal_reconciliation_delivery(
+                delivery
+            )
+            recovery_id = validated_recovery["recoveryId"]
+            if recovery_id in self._seen_menu_control_proof_recovery_ids:
+                return
+            if len(self._seen_menu_control_proof_recovery_ids) >= 256:
+                expired = self._seen_menu_control_proof_recovery_ids.pop()
+                self._menu_control_proof_reconciliations.pop(expired, None)
+            self._seen_menu_control_proof_recovery_ids.add(recovery_id)
+            self._menu_control_proof_reconciliations[recovery_id] = dict(
+                validated_recovery
+            )
+            self.incoming.put(
+                {
+                    "kind": "menu_control_proof_terminal_reconcile_request",
+                    "request": dict(validated_recovery),
+                }
+            )
+            return
+        validated = self._validate_menu_control_proof_delivery(delivery)
+        request_id = validated["requestId"]
+        if request_id in self._seen_menu_control_proof_request_ids:
+            return
+        if self._menu_control_proof_inflight_request_id not in {None, request_id}:
+            raise ValueError("A different menu-control proof is already in flight")
+        if len(self._seen_menu_control_proof_request_ids) >= 256:
+            self._seen_menu_control_proof_request_ids.pop()
+        self._seen_menu_control_proof_request_ids.add(request_id)
+        self._menu_control_proof_inflight_request_id = request_id
+        message = {"kind": "menu_control_proof_execute_request", "request": dict(validated)}
+        self.incoming.put(message)
 
     def _validate_shortcut_proof_binding(self, binding: Any) -> dict[str, Any]:
         if not isinstance(binding, dict):
@@ -2320,6 +3192,9 @@ class CompanionTransport:
         pending_shortcut_progress: dict[str, Any] | None = None
         pending_shortcut_result: dict[str, Any] | None = None
         pending_shortcut_recovery_ack: dict[str, Any] | None = None
+        pending_menu_control_progress: dict[str, Any] | None = None
+        pending_menu_control_result: dict[str, Any] | None = None
+        pending_menu_control_recovery_ack: dict[str, Any] | None = None
         pending_decision: dict[str, Any] | None = None
         pending_revision_request: dict[str, Any] | None = None
         pending_goal_request: dict[str, Any] | None = None
@@ -2333,6 +3208,7 @@ class CompanionTransport:
         active_initial_plan_run_id: str | None = None
         initial_plan_run_signature: str | None = None
         shortcut_reporting_blocked: set[str] = set()
+        menu_control_reporting_blocked: set[str] = set()
         refresh_replan_providers = True
         refresh_dialogue_providers = False
         refresh_initial_plan_providers = False
@@ -2348,6 +3224,9 @@ class CompanionTransport:
             or pending_shortcut_progress is not None
             or pending_shortcut_result is not None
             or pending_shortcut_recovery_ack is not None
+            or pending_menu_control_progress is not None
+            or pending_menu_control_result is not None
+            or pending_menu_control_recovery_ack is not None
             or pending_decision is not None
             or pending_revision_request is not None
             or pending_goal_request is not None
@@ -2357,6 +3236,9 @@ class CompanionTransport:
             or not self.shortcut_proof_progress.empty()
             or not self.shortcut_proof_results.empty()
             or not self.shortcut_proof_recovery_acks.empty()
+            or not self.menu_control_proof_progress.empty()
+            or not self.menu_control_proof_results.empty()
+            or not self.menu_control_proof_recovery_acks.empty()
             or not self.decisions.empty()
             or not self.revision_requests.empty()
             or not self.goal_requests.empty()
@@ -2922,6 +3804,152 @@ class CompanionTransport:
                             )
                             pending_action_result = None
                             request_succeeded = True
+                if pending_menu_control_progress is None:
+                    try:
+                        pending_menu_control_progress = self.menu_control_proof_progress.get_nowait()
+                    except Empty:
+                        pass
+                if pending_menu_control_progress is not None:
+                    request_id = pending_menu_control_progress.get("requestId")
+                    if request_id in menu_control_reporting_blocked:
+                        pending_menu_control_progress = None
+                        request_succeeded = True
+                        continue
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/menu-control-proof-progress",
+                            pending_menu_control_progress,
+                        )
+                        self._validate_exact_keys(response, {"result"}, "Menu-control proof progress ack")
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge menu-control proof progress")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put({
+                            "kind": "menu_control_proof_progress_rejected",
+                            "requestId": request_id,
+                            "message": f"Runtime permanently rejected menu-control proof progress (HTTP {error.code})",
+                        })
+                        pending_menu_control_progress = None
+                        if isinstance(request_id, str):
+                            menu_control_reporting_blocked.add(request_id)
+                        request_succeeded = True
+                    else:
+                        self.incoming.put({
+                            "kind": "menu_control_proof_progress_acknowledged",
+                            "requestId": request_id,
+                            "receiptChainHeadSha256": pending_menu_control_progress.get("receiptChainHeadSha256"),
+                        })
+                        pending_menu_control_progress = None
+                        request_succeeded = True
+                menu_control_progress_backlog = (
+                    pending_menu_control_progress is not None
+                    or not self.menu_control_proof_progress.empty()
+                )
+                if pending_menu_control_result is None and not menu_control_progress_backlog:
+                    try:
+                        pending_menu_control_result = self.menu_control_proof_results.get_nowait()
+                    except Empty:
+                        pass
+                if pending_menu_control_result is not None and not menu_control_progress_backlog:
+                    request_id = pending_menu_control_result.get("requestId")
+                    if request_id in menu_control_reporting_blocked:
+                        pending_menu_control_result = None
+                        self._menu_control_proof_inflight_request_id = None
+                        request_succeeded = True
+                        continue
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/menu-control-proof-result",
+                            pending_menu_control_result,
+                        )
+                        self._validate_exact_keys(response, {"result"}, "Menu-control proof result ack")
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge menu-control proof result")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put({
+                            "kind": "menu_control_proof_result_rejected",
+                            "requestId": request_id,
+                            "message": f"Runtime permanently rejected menu-control proof result (HTTP {error.code})",
+                        })
+                        pending_menu_control_result = None
+                        if isinstance(request_id, str):
+                            menu_control_reporting_blocked.add(request_id)
+                        self._menu_control_proof_inflight_request_id = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put({
+                            "kind": "menu_control_proof_result_acknowledged",
+                            "requestId": request_id,
+                            "resultContentSha256": self._canonical_sha256(pending_menu_control_result),
+                        })
+                        pending_menu_control_result = None
+                        self._menu_control_proof_inflight_request_id = None
+                        request_succeeded = True
+                if pending_menu_control_recovery_ack is None:
+                    try:
+                        pending_menu_control_recovery_ack = (
+                            self.menu_control_proof_recovery_acks.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_menu_control_recovery_ack is not None:
+                    result = pending_menu_control_recovery_ack.get("result")
+                    request_id = result.get("requestId") if isinstance(result, dict) else None
+                    recovery_id = pending_menu_control_recovery_ack.get("recoveryId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/menu-control-proof-recovery",
+                            pending_menu_control_recovery_ack,
+                        )
+                        self._validate_exact_keys(
+                            response,
+                            {"result"},
+                            "Menu-control proof recovery acknowledgement",
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError(
+                                "Runtime did not acknowledge menu-control proof recovery"
+                            )
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        self.incoming.put(
+                            {
+                                "kind": "menu_control_proof_recovery_rejected",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "message": (
+                                    "Runtime permanently rejected menu-control proof recovery "
+                                    f"(HTTP {error.code})"
+                                ),
+                            }
+                        )
+                        pending_menu_control_recovery_ack = None
+                        request_succeeded = True
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "menu_control_proof_recovery_acknowledged",
+                                "requestId": request_id,
+                                "recoveryId": recovery_id,
+                                "resultContentSha256": pending_menu_control_recovery_ack.get(
+                                    "terminalResultContentSha256"
+                                ),
+                            }
+                        )
+                        if isinstance(recovery_id, str):
+                            self._menu_control_proof_reconciliations.pop(
+                                recovery_id, None
+                            )
+                        pending_menu_control_recovery_ack = None
+                        request_succeeded = True
                 if pending_shortcut_progress is None:
                     try:
                         pending_shortcut_progress = self.shortcut_proof_progress.get_nowait()

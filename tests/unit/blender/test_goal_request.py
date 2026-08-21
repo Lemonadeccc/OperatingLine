@@ -425,6 +425,8 @@ class GoalRequestTransportTests(unittest.TestCase):
                 }
             if path.startswith("/api/v1/companion/action?"):
                 return {"request": None}
+            if path.startswith("/api/v1/companion/menu-control-proof?"):
+                return {"request": None}
             if path.startswith("/api/v1/companion/shortcut-proof?"):
                 return {"request": None}
             raise AssertionError(f"Unexpected request: {path}")
