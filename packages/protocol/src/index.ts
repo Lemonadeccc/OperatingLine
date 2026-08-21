@@ -10,6 +10,7 @@ export * from './companion-initial-plan-run.js';
 export * from './companion-replan-run.js';
 export * from './companion-session.js';
 export * from './companion-shortcut-proof.js';
+export * from './companion-menu-control-proof.js';
 export * from './diff.js';
 export * from './execution-decision.js';
 export * from './eval.js';

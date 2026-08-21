@@ -48,6 +48,16 @@ import {
   companionShortcutProofStatusSchema,
   companionShortcutProofTerminalReconciliationAckSchema,
   companionShortcutProofTerminalReconciliationDeliverySchema,
+  companionMenuControlProofCreateRequestSchema,
+  companionMenuControlProofDeliverySchema,
+  companionMenuControlProofPollDeliverySchema,
+  companionMenuControlProofPollRequestSchema,
+  companionMenuControlProofProgressAckSchema,
+  companionMenuControlProofProgressSchema,
+  companionMenuControlProofResultAckSchema,
+  companionMenuControlProofResultSchema,
+  companionMenuControlProofStatusRequestSchema,
+  companionMenuControlProofStatusSchema,
   companionStateReportSchema,
   blenderExecutionDecisionReceiptSchema,
   blenderHistoryTransitionDecisionReceiptSchema,
@@ -332,6 +342,56 @@ const schemas = [
     'procedure-compound-replay.schema.json',
     'https://operatingline.dev/schema/v1/procedure-compound-replay.json',
     procedureCompoundReplaySchema,
+  ],
+  [
+    'companion-menu-control-proof-create-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-create-request.json',
+    companionMenuControlProofCreateRequestSchema,
+  ],
+  [
+    'companion-menu-control-proof-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-delivery.json',
+    companionMenuControlProofDeliverySchema,
+  ],
+  [
+    'companion-menu-control-proof-progress.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-progress.json',
+    companionMenuControlProofProgressSchema,
+  ],
+  [
+    'companion-menu-control-proof-result.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-result.json',
+    companionMenuControlProofResultSchema,
+  ],
+  [
+    'companion-menu-control-proof-status-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-status-request.json',
+    companionMenuControlProofStatusRequestSchema,
+  ],
+  [
+    'companion-menu-control-proof-status.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-status.json',
+    companionMenuControlProofStatusSchema,
+  ],
+  [
+    'companion-menu-control-proof-poll-request.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-poll-request.json',
+    companionMenuControlProofPollRequestSchema,
+  ],
+  [
+    'companion-menu-control-proof-poll-delivery.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-poll-delivery.json',
+    companionMenuControlProofPollDeliverySchema,
+  ],
+  [
+    'companion-menu-control-proof-progress-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-progress-ack.json',
+    companionMenuControlProofProgressAckSchema,
+  ],
+  [
+    'companion-menu-control-proof-result-ack.schema.json',
+    'https://operatingline.dev/schema/v1/companion-menu-control-proof-result-ack.json',
+    companionMenuControlProofResultAckSchema,
   ],
   [
     'companion-shortcut-proof-create-request.schema.json',
@@ -1682,6 +1742,14 @@ function documentMenuControlProofSemanticGate(
   ) {
     schema['$comment'] =
       'Canonical content integrity, exact materialization/proposal hash relationships, accepted-decision identity, and temporal ordering require the exported Zod/service semantic validation gate; standard JSON Schema covers the strict structural contract.';
+  } else if (
+    filename.startsWith('companion-menu-control-proof-') &&
+    ['delivery', 'progress', 'result', 'status'].some((kind) =>
+      filename.includes(`-${kind}.schema.json`),
+    )
+  ) {
+    schema['$comment'] =
+      'Immutable binding and lease identity, canonical receipt chains and prefixes, independent native-history cursor and mutation-stage prefixes, chronology, evidence hashes, and status/evidence agreement require the exported Zod semantic validation gate; standard JSON Schema covers the strict structural contract.';
   }
 }
 
