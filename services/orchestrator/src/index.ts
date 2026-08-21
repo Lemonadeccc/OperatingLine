@@ -1742,6 +1742,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         appendEvent: (event) => database.appendEvent(event),
         maximumAnalysisWindowMs: tutorialMediaRuntime.capabilities.limits.maxAnalysisWindowMs,
         maximumConcurrentJobs: tutorialMediaRuntime.maximumConcurrentJobs,
+        sourceProfile: tutorialMediaRuntime.sourceProfile,
         supportedLocales: tutorialMediaRuntime.capabilities.supportedLocales,
       });
       tutorialMediaPipelineForCleanup = undefined;
@@ -3629,7 +3630,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.tutorial.media.capabilities',
         {
           description:
-            'Report whether the server-side authorized YouTube media analysis pipeline is configured, including its deterministic stages, supported locales, limits, and evidence features. This performs no download or analysis.',
+            'Report whether a trusted server-side tutorial media analysis pipeline is configured, including its exact source-specific profile and stages, supported locales, limits, and evidence features. This performs no import, download, or analysis.',
           inputSchema: z.strictObject({}),
           outputSchema: procedureTutorialMediaCapabilitiesSchema,
         },
@@ -3648,7 +3649,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.tutorial.media.jobs.create',
         {
           description:
-            'Start the complete authorized YouTube tutorial media evidence pipeline. Authorization references must already exist in the trusted server-side registry; this request never accepts credentials, executable paths, model paths, or arbitrary download URLs.',
+            'Start the complete tutorial media evidence pipeline for a source supported by the configured runtime. Current local-file requests are bound to prior import and rights-validation receipts and perform no network fetch; unsupported sources fail before job persistence. The request never accepts credentials, executable paths, model paths, or arbitrary download URLs.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaAnalysisStartRequestSchema),
           outputSchema: procedureTutorialMediaCurrentJobStatusSchema,
         },
@@ -3714,7 +3715,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.procedure.tutorial.media.jobs.restart',
         {
           description:
-            'Explicitly restart a recoverable tutorial media job from the download stage using the exact server recovery receipt and renewed network, download, and retention approvals. Partial artifact reuse is forbidden.',
+            'Explicitly restart a recoverable tutorial media job from its source acquisition stage (import for a local file, download for a legacy authorized source) using the exact source-bound recovery receipt and approvals. Partial artifact reuse is forbidden.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaResumeRequestSchema),
           outputSchema: procedureTutorialMediaCurrentJobStatusSchema,
         },
@@ -8408,6 +8409,19 @@ export {
   type ProcedureTutorialMediaRuntimeConfiguration,
   type ProcedureTutorialMediaRuntimeEnvironment,
 } from './procedure-tutorial-media-runtime.js';
+export {
+  computeTutorialLocalMediaReceiptContentSha256,
+  computeTutorialLocalMediaSourceIdentitySha256,
+  createTutorialLocalMediaSource,
+  TutorialLocalMediaSourceError,
+  type TutorialLocalCaptionInput,
+  type TutorialLocalMediaAuthorityVerifier,
+  type TutorialLocalMediaImport,
+  type TutorialLocalMediaRegistration,
+  type TutorialLocalMediaSource,
+  type TutorialLocalMediaSourceErrorCode,
+  type TutorialLocalMediaSourceOptions,
+} from './tutorial-local-media-source.js';
 export {
   buildProcedureTutorialYoutubePromptPacket,
   createProcedureTutorialYoutubeImportCoordinator,

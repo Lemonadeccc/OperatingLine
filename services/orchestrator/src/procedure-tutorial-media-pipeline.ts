@@ -4,14 +4,13 @@ import { join } from 'node:path';
 
 import {
   canonicalizeProtocolJsonValue,
+  procedureTutorialMediaAnalysisRequestSchema,
   procedureTutorialMediaAnalysisResultSchema,
-  procedureTutorialMediaLegacyAnalysisRequestSchema,
-  procedureTutorialMediaLegacyAnalysisResultSchema,
   procedureTutorialMediaAsrSegmentMaxCount,
   procedureTutorialMediaFrameMaxCount,
   procedureTutorialMediaSemanticSegmentMaxCount,
   procedureTutorialMediaVisualCandidateMaxCount,
-  type ProcedureTutorialMediaLegacyAnalysisRequest,
+  type ProcedureTutorialMediaAnalysisRequest,
   type ProcedureTutorialMediaLegacyAnalysisResult,
   type ProcedureTutorialMediaAnalysisResult,
   type ProcedureTutorialMediaArtifactRef,
@@ -20,6 +19,7 @@ import {
 
 import type { TutorialMediaArtifactStore } from './tutorial-media-artifact-store.js';
 import type { TutorialMediaAsr } from './tutorial-media-asr.js';
+import type { TutorialLocalMediaSource } from './tutorial-local-media-source.js';
 import type { TutorialMediaOcr } from './tutorial-media-ocr.js';
 import type { TutorialMediaProbe } from './tutorial-media-probe.js';
 import {
@@ -27,10 +27,20 @@ import {
   segmentTutorialTimeline,
 } from './tutorial-media-timeline.js';
 import type { TutorialMediaTranscoder } from './tutorial-media-transcoder.js';
+import { parseProcedureTutorialCaptionDocument } from './procedure-tutorial-transcript-import.js';
 import type { YouTubeMediaSource } from './youtube-media-source.js';
 
 const canonicalStages = [
   'download',
+  'probe',
+  'audio',
+  'asr',
+  'frames',
+  'ocr',
+  'segmentation',
+] as const satisfies readonly ProcedureTutorialMediaStage[];
+const canonicalLocalStages = [
+  'import',
   'probe',
   'audio',
   'asr',
@@ -43,8 +53,8 @@ const defaultMaximumJobRuntimeMs = 2 * 60 * 60 * 1_000;
 const defaultMaximumStagingBytes = 8 * 1_024 * 1_024 * 1_024;
 const maximumStagingEntries = 20_000;
 const stagingPollIntervalMs = 25;
-type LegacyProcedureTutorialMediaStage = Exclude<ProcedureTutorialMediaStage, 'import'>;
-const defaultStageTimeoutsMs: Readonly<Record<LegacyProcedureTutorialMediaStage, number>> = {
+const defaultStageTimeoutsMs: Readonly<Record<ProcedureTutorialMediaStage, number>> = {
+  import: 30 * 60 * 1_000,
   download: 30 * 60 * 1_000,
   probe: 2 * 60 * 1_000,
   audio: 15 * 60 * 1_000,
@@ -55,14 +65,28 @@ const defaultStageTimeoutsMs: Readonly<Record<LegacyProcedureTutorialMediaStage,
 };
 
 type ToolProvenance = ProcedureTutorialMediaLegacyAnalysisResult['tools'][number];
+type WithoutManifest<T> = T extends unknown ? Omit<T, 'manifestIntegrity'> : never;
+type AnalysisManifestProjectionInput = WithoutManifest<ProcedureTutorialMediaAnalysisResult>;
+type LocalAnalysisRequest = Extract<
+  ProcedureTutorialMediaAnalysisRequest,
+  {
+    readonly formatVersion: '1.1.0';
+    readonly source: { readonly kind: 'user_supplied_local_file' };
+  }
+>;
 
 export interface ProcedureTutorialMediaAdapters {
-  readonly source: YouTubeMediaSource;
+  readonly source?: YouTubeMediaSource | undefined;
+  readonly localSource?: TutorialLocalMediaSource | undefined;
   readonly probe: TutorialMediaProbe;
   readonly transcoder: TutorialMediaTranscoder;
   readonly asr: TutorialMediaAsr;
   readonly ocr: TutorialMediaOcr;
-  readonly toolProvenance?: (() => Promise<readonly ToolProvenance[]>) | undefined;
+  readonly toolProvenance?:
+    | ((input: {
+        readonly sourceKind: 'authorized_youtube_download' | 'user_supplied_local_file';
+      }) => Promise<readonly ToolProvenance[]>)
+    | undefined;
   readonly close?: (() => Promise<void>) | undefined;
 }
 
@@ -75,7 +99,7 @@ export interface ProcedureTutorialMediaPipelineOptions {
   readonly maximumJobRuntimeMs?: number | undefined;
   readonly maximumStagingBytes?: number | undefined;
   readonly stageTimeoutsMs?:
-    Partial<Readonly<Record<LegacyProcedureTutorialMediaStage, number>>> | undefined;
+    Partial<Readonly<Record<ProcedureTutorialMediaStage, number>>> | undefined;
   readonly supportedLocales?: readonly string[] | undefined;
   readonly frameIntervalMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
@@ -93,10 +117,10 @@ export interface ProcedureTutorialMediaPipelineRunOptions {
 
 export interface ProcedureTutorialMediaPipeline {
   analyze(
-    request: ProcedureTutorialMediaLegacyAnalysisRequest,
+    request: ProcedureTutorialMediaAnalysisRequest,
     jobId: string,
     options?: ProcedureTutorialMediaPipelineRunOptions,
-  ): Promise<ProcedureTutorialMediaLegacyAnalysisResult>;
+  ): Promise<ProcedureTutorialMediaAnalysisResult>;
   verify(
     result: ProcedureTutorialMediaAnalysisResult,
   ): Promise<ProcedureTutorialMediaAnalysisResult>;
@@ -243,7 +267,11 @@ function publicPipelineError(
 ): ProcedureTutorialMediaPipelineError {
   if (error instanceof ProcedureTutorialMediaPipelineError) return error;
   if (error instanceof Error && error.name === 'AbortError') return abortError(stage);
-  if (error instanceof Error && 'code' in error && error.code === 'authorization_required') {
+  if (
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'authorization_required' || error.code === 'unsupported_retention')
+  ) {
     return new ProcedureTutorialMediaPipelineError('authorization_required', stage, {
       cause: error,
     });
@@ -257,6 +285,7 @@ function publicPipelineError(
     error instanceof Error &&
     'code' in error &&
     (error.code === 'quota_exceeded' ||
+      error.code === 'source_too_large' ||
       error.code === 'artifact_too_large' ||
       error.code === 'artifact_read_too_large')
   ) {
@@ -267,7 +296,10 @@ function publicPipelineError(
     'code' in error &&
     (error.code === 'artifact_integrity_failed' ||
       error.code === 'unsafe_storage' ||
-      error.code === 'invalid_download')
+      error.code === 'invalid_download' ||
+      error.code === 'unsafe_source' ||
+      error.code === 'content_changed' ||
+      error.code === 'caption_hash_mismatch')
   ) {
     return new ProcedureTutorialMediaPipelineError('integrity_failed', stage, { cause: error });
   }
@@ -278,9 +310,7 @@ function publicPipelineError(
   return new ProcedureTutorialMediaPipelineError(code, stage, { cause: error });
 }
 
-function manifestProjection(
-  result: Omit<ProcedureTutorialMediaAnalysisResult, 'manifestIntegrity'>,
-) {
+function manifestProjection(result: AnalysisManifestProjectionInput) {
   return {
     analysisProfile: result.analysisProfile,
     analysisWindow: result.analysisWindow,
@@ -332,7 +362,7 @@ export function createProcedureTutorialMediaPipeline(
     supportedLocales.length === 0 ||
     new Set(supportedLocales).size !== supportedLocales.length ||
     supportedLocales.some((locale) => !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(locale)) ||
-    canonicalStages.some(
+    [...canonicalStages, 'import' as const].some(
       (stage) => !Number.isSafeInteger(stageTimeoutsMs[stage]) || stageTimeoutsMs[stage] <= 0,
     ) ||
     !Number.isSafeInteger(frameIntervalMs) ||
@@ -401,8 +431,7 @@ export function createProcedureTutorialMediaPipeline(
   return {
     async analyze(requestInput, jobId, runOptions = {}) {
       if (closing) throw abortError(null);
-      const requestResult =
-        procedureTutorialMediaLegacyAnalysisRequestSchema.safeParse(requestInput);
+      const requestResult = procedureTutorialMediaAnalysisRequestSchema.safeParse(requestInput);
       if (
         !requestResult.success ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
@@ -413,6 +442,15 @@ export function createProcedureTutorialMediaPipeline(
         throw new ProcedureTutorialMediaPipelineError('invalid_input', null);
       }
       const request = requestResult.data;
+      const localAnalysisRequest =
+        request.formatVersion === '1.1.0' && request.source.kind === 'user_supplied_local_file'
+          ? (request as LocalAnalysisRequest)
+          : null;
+      const legacyRequest = request.formatVersion === '1.0.0' ? request : null;
+      const localRequest = localAnalysisRequest !== null;
+      if (legacyRequest === null && localAnalysisRequest === null) {
+        throw new ProcedureTutorialMediaPipelineError('invalid_input', null);
+      }
       const normalizedLocale = request.locale.toLowerCase();
       const primaryLocale = normalizedLocale.split('-')[0]!;
       if (
@@ -449,7 +487,7 @@ export function createProcedureTutorialMediaPipeline(
           : publicPipelineError(error, null);
       }
       if (closing) controller.abort();
-      let currentStage: ProcedureTutorialMediaStage | null = 'download';
+      let currentStage: ProcedureTutorialMediaStage | null = localRequest ? 'import' : 'download';
       let deadlineStage: ProcedureTutorialMediaStage | null = null;
       let monitorError: ProcedureTutorialMediaPipelineError | undefined;
       let stopMonitor!: () => void;
@@ -485,10 +523,10 @@ export function createProcedureTutorialMediaPipeline(
       })();
       let stageTimer: NodeJS.Timeout | undefined;
       const jobTimer = setTimeout(() => {
-        deadlineStage ??= currentStage ?? 'download';
+        deadlineStage ??= currentStage ?? (localRequest ? 'import' : 'download');
         controller.abort();
       }, maximumJobRuntimeMs);
-      const startStageDeadline = (name: LegacyProcedureTutorialMediaStage) => {
+      const startStageDeadline = (name: ProcedureTutorialMediaStage) => {
         clearTimeout(stageTimer);
         stageTimer = setTimeout(() => {
           deadlineStage ??= name;
@@ -500,7 +538,7 @@ export function createProcedureTutorialMediaPipeline(
         stageTimer = undefined;
       };
       const stage = async <Value>(
-        name: LegacyProcedureTutorialMediaStage,
+        name: ProcedureTutorialMediaStage,
         operation: () => Promise<Value>,
       ): Promise<Value> => {
         currentStage = name;
@@ -518,20 +556,61 @@ export function createProcedureTutorialMediaPipeline(
         }
       };
       let primaryError: ProcedureTutorialMediaPipelineError | undefined;
-      let completedResult: ProcedureTutorialMediaLegacyAnalysisResult | undefined;
+      let completedResult: ProcedureTutorialMediaAnalysisResult | undefined;
       let adapters: ProcedureTutorialMediaAdapters | undefined;
+      let verifiedLocalCaption:
+        Awaited<ReturnType<TutorialLocalMediaSource['import']>>['caption'] | null = null;
       try {
         const jobAdapters = options.createAdapters(staging.path);
         adapters = jobAdapters;
-        const source = await stage('download', async () => {
-          const downloaded = await jobAdapters.source.download({
-            request,
-            signal: controller.signal,
-          });
-          await enforceStagingQuota('download');
-          const stored = await options.store.putFile(downloaded.mediaPath, { removeSource: true });
-          return artifactRef(stored, 'source_video', 'video/mp4', now());
-        });
+        const source = localRequest
+          ? await stage('import', async () => {
+              if (jobAdapters.localSource === undefined) {
+                throw Object.assign(new Error('Local media source is not configured.'), {
+                  code: 'authorization_required',
+                });
+              }
+              const imported = await jobAdapters.localSource.import({
+                request: localAnalysisRequest!,
+                jobDirectory: staging.path,
+                signal: controller.signal,
+              });
+              if (
+                imported.contentSha256 !== localAnalysisRequest!.source.contentSha256 ||
+                imported.sourceIdentitySha256 !== localAnalysisRequest!.source.sourceIdentitySha256
+              ) {
+                throw Object.assign(new Error('Local import identity drifted.'), {
+                  code: 'content_changed',
+                });
+              }
+              await enforceStagingQuota('import');
+              const stored = await options.store.putFile(imported.mediaPath, {
+                removeSource: true,
+              });
+              if (stored.sha256 !== localAnalysisRequest!.source.contentSha256) {
+                throw Object.assign(new Error('Local CAS identity drifted.'), {
+                  code: 'content_changed',
+                });
+              }
+              verifiedLocalCaption = imported.caption;
+              return artifactRef(stored, 'source_video', 'video/mp4', now());
+            })
+          : await stage('download', async () => {
+              if (jobAdapters.source === undefined) {
+                throw Object.assign(new Error('YouTube media source is not configured.'), {
+                  code: 'authorization_required',
+                });
+              }
+              const downloaded = await jobAdapters.source.download({
+                request: legacyRequest!,
+                signal: controller.signal,
+              });
+              await enforceStagingQuota('download');
+              const stored = await options.store.putFile(downloaded.mediaPath, {
+                removeSource: true,
+              });
+              return artifactRef(stored, 'source_video', 'video/mp4', now());
+            });
         const probe = await stage('probe', async () => {
           const probed = await options.store.use(source.uri, (sourcePath) =>
             jobAdapters.probe.probe(sourcePath, controller.signal),
@@ -558,10 +637,40 @@ export function createProcedureTutorialMediaPipeline(
           const all = await options.store.use(audio.uri, (audioPath) =>
             jobAdapters.asr.transcribe(audioPath, request.locale, controller.signal),
           );
-          const withinWindow = all
+          const parsedCaption =
+            verifiedLocalCaption === null
+              ? null
+              : parseProcedureTutorialCaptionDocument(verifiedLocalCaption);
+          const transcriptCandidates =
+            parsedCaption === null
+              ? all.map((segment) => ({
+                  ...segment,
+                  endMs: segment.endMs + request.analysisWindow.startMs,
+                  startMs: segment.startMs + request.analysisWindow.startMs,
+                }))
+              : parsedCaption.segments.map((segment, index) => ({
+                  confidence: segment.confidence,
+                  endMs: segment.endMs,
+                  locale: verifiedLocalCaption!.locale,
+                  metrics: {
+                    averageLogProbability: null,
+                    compressionRatio: null,
+                    noSpeechProbability: null,
+                  },
+                  order: index + 1,
+                  segmentId: stableUuid([
+                    verifiedLocalCaption!.contentSha256,
+                    segment.startMs,
+                    segment.endMs,
+                    segment.text,
+                  ]),
+                  startMs: segment.startMs,
+                  text: segment.text,
+                }));
+          const withinWindow = transcriptCandidates
             .map((segment) => {
-              const startMs = segment.startMs + request.analysisWindow.startMs;
-              const endMs = segment.endMs + request.analysisWindow.startMs;
+              const startMs = segment.startMs;
+              const endMs = segment.endMs;
               return {
                 ...segment,
                 endMs,
@@ -582,7 +691,20 @@ export function createProcedureTutorialMediaPipeline(
             order: index + 1,
           }));
           const stored = await options.store.put(
-            oneChunk(Buffer.from(JSON.stringify({ asrSegments }), 'utf8')),
+            oneChunk(
+              Buffer.from(
+                JSON.stringify({
+                  asrSegments,
+                  ...(parsedCaption === null
+                    ? {}
+                    : {
+                        captionDocument: parsedCaption.document,
+                        captionOrigin: 'verified_local_import',
+                      }),
+                }),
+                'utf8',
+              ),
+            ),
           );
           return {
             asrSegments,
@@ -708,13 +830,13 @@ export function createProcedureTutorialMediaPipeline(
           ...frames.map((frame) => frame.artifact),
           ocrArtifact,
         ];
-        const draft = {
+        const draftCommon = {
           analysisProfile: request.analysisProfile,
           analysisWindow: request.analysisWindow,
           artifacts: nonManifestArtifacts,
           asrSegments,
           completedAt,
-          completedStages: [...canonicalStages],
+          completedStages: [...(localRequest ? canonicalLocalStages : canonicalStages)],
           formatVersion: request.formatVersion,
           frames,
           jobId,
@@ -730,26 +852,56 @@ export function createProcedureTutorialMediaPipeline(
           },
           semanticSegments,
           shortcutCandidates: observations.shortcutCandidates,
-          sideEffects: {
-            audioDerived: true,
-            framesDerived: true,
-            hostExecutionStarted: false,
-            localAsrModelRun: true,
-            localOcrRun: true,
-            mediaDownloaded: true,
-            networkFetched: true,
-            procedureStored: false,
-            proposalCreated: false,
-            providerCalled: false,
-          },
           tools: [
             ...(jobAdapters.toolProvenance === undefined
               ? options.tools
-              : await jobAdapters.toolProvenance()),
+              : await jobAdapters.toolProvenance({
+                  sourceKind: localRequest
+                    ? 'user_supplied_local_file'
+                    : 'authorized_youtube_download',
+                })),
           ],
           uiCandidates: [],
-          videoId: request.videoId,
-        } satisfies Omit<ProcedureTutorialMediaLegacyAnalysisResult, 'manifestIntegrity'>;
+        };
+        const draft: AnalysisManifestProjectionInput = localRequest
+          ? {
+              ...draftCommon,
+              analysisProfile: 'local_tutorial_evidence_v1',
+              completedStages: [...canonicalLocalStages],
+              formatVersion: '1.1.0',
+              source: localAnalysisRequest!.source,
+              sideEffects: {
+                audioDerived: true,
+                framesDerived: true,
+                hostExecutionStarted: false,
+                localAsrModelRun: true,
+                localOcrRun: true,
+                mediaDownloaded: false,
+                networkFetched: false,
+                procedureStored: false,
+                proposalCreated: false,
+                providerCalled: false,
+              },
+            }
+          : {
+              ...draftCommon,
+              analysisProfile: 'youtube_tutorial_evidence_v1',
+              completedStages: [...canonicalStages],
+              formatVersion: '1.0.0',
+              videoId: legacyRequest!.videoId,
+              sideEffects: {
+                audioDerived: true,
+                framesDerived: true,
+                hostExecutionStarted: false,
+                localAsrModelRun: true,
+                localOcrRun: true,
+                mediaDownloaded: true,
+                networkFetched: true,
+                procedureStored: false,
+                proposalCreated: false,
+                providerCalled: false,
+              },
+            };
         const rootSha256 = sha256(canonicalizeProtocolJsonValue(manifestProjection(draft)));
         const manifestBytes = Buffer.from(
           JSON.stringify({
@@ -769,7 +921,7 @@ export function createProcedureTutorialMediaPipeline(
           completedAt,
           source.sha256,
         );
-        const result = procedureTutorialMediaLegacyAnalysisResultSchema.parse({
+        const result = procedureTutorialMediaAnalysisResultSchema.parse({
           ...draft,
           artifacts: [...nonManifestArtifacts, manifest],
           manifestIntegrity: {
@@ -778,6 +930,7 @@ export function createProcedureTutorialMediaPipeline(
             manifestArtifactUri: manifest.uri,
             manifestSha256: manifest.sha256,
             rootSha256,
+            ...(localRequest ? { source: localAnalysisRequest!.source } : {}),
           },
         });
         const verified = await verify(result);
@@ -785,7 +938,7 @@ export function createProcedureTutorialMediaPipeline(
         await enforceStagingQuota('segmentation');
         await runOptions.onStage?.({ stage: 'segmentation', state: 'completed' });
         clearStageDeadline();
-        completedResult = procedureTutorialMediaLegacyAnalysisResultSchema.parse(verified);
+        completedResult = procedureTutorialMediaAnalysisResultSchema.parse(verified);
       } catch (error) {
         primaryError =
           deadlineStage === null

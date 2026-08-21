@@ -1,18 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
 import {
   procedureTutorialMediaAnalysisRequestSchema,
+  procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaJobStatusSchema,
   procedureTutorialMediaLegacyAnalysisRequestSchema,
-  procedureTutorialMediaLegacyAnalysisResultSchema,
-  procedureTutorialMediaLegacyJobStatusSchema,
   procedureTutorialMediaLegacyResumeRequestSchema,
   procedureTutorialMediaResumeRequestSchema,
   type ProcedureTutorialMediaAnalysisRequest,
   type ProcedureTutorialMediaAnalysisResult,
   type ProcedureTutorialMediaJobStatus,
-  type ProcedureTutorialMediaLegacyAnalysisRequest,
-  type ProcedureTutorialMediaLegacyJobStatus,
   type ProcedureTutorialMediaResumeRequest,
   type ProcedureTutorialMediaStage,
 } from '@operatingline/protocol';
@@ -26,6 +25,15 @@ import {
 
 const canonicalStages = [
   'download',
+  'probe',
+  'audio',
+  'asr',
+  'frames',
+  'ocr',
+  'segmentation',
+] as const satisfies readonly ProcedureTutorialMediaStage[];
+const canonicalLocalStages = [
+  'import',
   'probe',
   'audio',
   'asr',
@@ -49,37 +57,40 @@ const requestedPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
   jobId: z.uuid(),
-  request: procedureTutorialMediaLegacyAnalysisRequestSchema,
+  request: procedureTutorialMediaAnalysisRequestSchema,
 });
 const stagePayloadSchema = z.strictObject({
   attemptId: z.uuid(),
-  completedStages: z.array(z.enum(canonicalStages)).max(canonicalStages.length),
+  completedStages: z.array(z.enum([...canonicalStages, 'import'])).max(canonicalLocalStages.length),
   fingerprint: fingerprintSchema,
   jobId: z.uuid(),
   occurredAt: z.iso.datetime({ offset: true }),
   requestId: z.uuid(),
-  stage: z.enum(canonicalStages),
+  stage: z.enum([...canonicalStages, 'import']),
   state: z.enum(['started', 'completed']),
 });
 const terminalPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
-  status: procedureTutorialMediaLegacyJobStatusSchema,
+  status: procedureTutorialMediaJobStatusSchema,
 });
 const resumedPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
   occurredAt: z.iso.datetime({ offset: true }),
-  request: procedureTutorialMediaLegacyResumeRequestSchema,
+  request: z.union([
+    procedureTutorialMediaLegacyResumeRequestSchema,
+    procedureTutorialMediaResumeRequestSchema,
+  ]),
 });
 
 interface JobState {
-  readonly request: ProcedureTutorialMediaLegacyAnalysisRequest;
+  readonly request: ProcedureTutorialMediaAnalysisRequest;
   readonly fingerprint: string;
   readonly jobId: string;
   readonly acceptedAt: string;
   attemptId: string;
-  status: ProcedureTutorialMediaLegacyJobStatus;
+  status: ProcedureTutorialMediaJobStatus;
   completedStages: ProcedureTutorialMediaStage[];
   currentStage: ProcedureTutorialMediaStage;
   controller: AbortController | undefined;
@@ -131,7 +142,7 @@ export class ProcedureTutorialMediaCoordinatorError extends Error {
                     : code === 'analysis_window_exceeded'
                       ? 'The tutorial media analysis window exceeds the configured limit.'
                       : code === 'source_not_supported'
-                        ? 'The current media source contract is not executable in this Phase 0 runtime.'
+                        ? 'The current media source contract is not executable by this runtime.'
                         : code === 'integrity_failed'
                           ? 'Restored tutorial media completion evidence failed integrity verification.'
                           : 'Tutorial media job evidence could not be persisted.',
@@ -188,6 +199,7 @@ export function procedureTutorialMediaCoordinatorErrorResponse(
 
 export interface ProcedureTutorialMediaCoordinatorOptions {
   readonly pipeline: ProcedureTutorialMediaPipeline;
+  readonly sourceProfile: ProcedureTutorialMediaSourceProfile;
   readonly existingEvents: readonly StoredExecutionEvent[];
   readonly appendEvent: (event: ExecutionEventInput) => void;
   readonly maximumConcurrentJobs?: number | undefined;
@@ -195,6 +207,18 @@ export interface ProcedureTutorialMediaCoordinatorOptions {
   readonly supportedLocales?: readonly string[] | undefined;
   readonly now?: (() => Date) | undefined;
 }
+
+export type ProcedureTutorialMediaSourceProfile =
+  | {
+      readonly formatVersion: '1.0.0';
+      readonly analysisProfile: 'youtube_tutorial_evidence_v1';
+      readonly sourceKind: 'authorized_youtube_download';
+    }
+  | {
+      readonly formatVersion: '1.1.0';
+      readonly analysisProfile: 'local_tutorial_evidence_v1';
+      readonly sourceKind: 'user_supplied_local_file';
+    };
 
 export interface ProcedureTutorialMediaCoordinator {
   ready(): Promise<void>;
@@ -207,7 +231,11 @@ export interface ProcedureTutorialMediaCoordinator {
     readonly request: ProcedureTutorialMediaAnalysisRequest;
     readonly result: ProcedureTutorialMediaAnalysisResult;
   } | null;
-  resume(request: ProcedureTutorialMediaResumeRequest): ProcedureTutorialMediaJobStatus;
+  resume(
+    request:
+      | ProcedureTutorialMediaResumeRequest
+      | z.infer<typeof procedureTutorialMediaLegacyResumeRequestSchema>,
+  ): ProcedureTutorialMediaJobStatus;
   beginClose(): void;
   close(): Promise<void>;
 }
@@ -217,6 +245,57 @@ function sameStages(
   right: readonly ProcedureTutorialMediaStage[],
 ): boolean {
   return left.length === right.length && left.every((stage, index) => stage === right[index]);
+}
+
+function stagesFor(
+  request: ProcedureTutorialMediaAnalysisRequest,
+): readonly ProcedureTutorialMediaStage[] {
+  return request.formatVersion === '1.1.0' && request.source.kind === 'user_supplied_local_file'
+    ? canonicalLocalStages
+    : canonicalStages;
+}
+
+function acquisitionStage(request: ProcedureTutorialMediaAnalysisRequest): 'download' | 'import' {
+  return stagesFor(request)[0] as 'download' | 'import';
+}
+
+function requestMatchesSourceProfile(
+  request: ProcedureTutorialMediaAnalysisRequest,
+  profile: ProcedureTutorialMediaSourceProfile,
+): boolean {
+  if (
+    request.formatVersion !== profile.formatVersion ||
+    request.analysisProfile !== profile.analysisProfile
+  ) {
+    return false;
+  }
+  return request.formatVersion === '1.0.0'
+    ? profile.sourceKind === 'authorized_youtube_download'
+    : request.source.kind === profile.sourceKind;
+}
+
+function parseStatusForRequest(
+  request: ProcedureTutorialMediaAnalysisRequest,
+  value: Record<string, unknown>,
+): ProcedureTutorialMediaJobStatus {
+  return procedureTutorialMediaJobStatusSchema.parse({
+    ...value,
+    formatVersion: request.formatVersion,
+    ...(request.formatVersion === '1.1.0' ? { source: request.source } : {}),
+  });
+}
+
+function resumeSourceMatches(
+  request: ProcedureTutorialMediaAnalysisRequest,
+  resume:
+    | ProcedureTutorialMediaResumeRequest
+    | z.infer<typeof procedureTutorialMediaLegacyResumeRequestSchema>,
+): boolean {
+  return (
+    request.formatVersion === resume.formatVersion &&
+    (request.formatVersion === '1.0.0' ||
+      (resume.formatVersion === '1.1.0' && isDeepStrictEqual(request.source, resume.source)))
+  );
 }
 
 function terminalStatus(status: ProcedureTutorialMediaJobStatus): boolean {
@@ -272,8 +351,8 @@ function safeError(
       code: pipelineError.code,
       message:
         pipelineError.code === 'authorization_expired'
-          ? 'Tutorial media download authorization has expired.'
-          : 'Tutorial media download authorization is required.',
+          ? 'Tutorial media source authorization has expired.'
+          : 'Tutorial media source authorization is required.',
       retryable: false,
       stage,
     };
@@ -305,7 +384,7 @@ function safeError(
   const code =
     pipelineError.code === 'cancelled'
       ? 'cancelled'
-      : stage === 'download'
+      : stage === 'download' || stage === 'import'
         ? 'source_unavailable'
         : stage === 'probe'
           ? 'probe_failed'
@@ -344,9 +423,8 @@ function restoreJobs(
       ) {
         throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
       }
-      const accepted = procedureTutorialMediaLegacyJobStatusSchema.parse({
+      const accepted = parseStatusForRequest(payload.request, {
         acceptedAt: payload.acceptedAt,
-        formatVersion: payload.request.formatVersion,
         jobId: payload.jobId,
         requestId: payload.request.requestId,
         status: 'accepted',
@@ -356,7 +434,7 @@ function restoreJobs(
         acceptedAt: payload.acceptedAt,
         attemptId: payload.attemptId,
         completedStages: [],
-        currentStage: 'download',
+        currentStage: acquisitionStage(payload.request),
         fingerprint: payload.fingerprint,
         jobId: payload.jobId,
         request: payload.request,
@@ -379,7 +457,8 @@ function restoreJobs(
         terminalStatus(job.status)
       )
         throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
-      const expectedStage = canonicalStages[job.completedStages.length];
+      const jobStages = stagesFor(job.request);
+      const expectedStage = jobStages[job.completedStages.length];
       if (payload.state === 'started') {
         if (
           expectedStage !== payload.stage ||
@@ -389,12 +468,11 @@ function restoreJobs(
           throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
         }
         job.currentStage = payload.stage;
-        job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+        job.status = parseStatusForRequest(job.request, {
           completedStages: job.completedStages,
           currentStage: payload.stage,
-          formatVersion: job.request.formatVersion,
           jobId: job.jobId,
-          progress: job.completedStages.length / canonicalStages.length,
+          progress: job.completedStages.length / jobStages.length,
           requestId: job.request.requestId,
           startedAt: job.acceptedAt,
           status: 'running',
@@ -422,6 +500,7 @@ function restoreJobs(
     ) {
       const payload = terminalPayloadSchema.parse(event.payload);
       const job = jobs.get(payload.status.requestId);
+      const jobStages = job === undefined ? canonicalStages : stagesFor(job.request);
       const expectedStatus =
         event.eventType === 'procedure.tutorial.media.completed'
           ? 'completed'
@@ -435,8 +514,11 @@ function restoreJobs(
         job.attemptId !== payload.attemptId ||
         terminalStatus(job.status) ||
         payload.status.status !== expectedStatus ||
+        (job.request.formatVersion === '1.1.0' &&
+          (payload.status.formatVersion !== '1.1.0' ||
+            !isDeepStrictEqual(payload.status.source, job.request.source))) ||
         (payload.status.status === 'completed' &&
-          (!sameStages(job.completedStages, canonicalStages) ||
+          (!sameStages(job.completedStages, jobStages) ||
             job.lastStageEvent?.stage !== 'segmentation' ||
             job.lastStageEvent.state !== 'completed')) ||
         (payload.status.status === 'failed' &&
@@ -458,16 +540,16 @@ function restoreJobs(
       job.status.status !== 'recovery_required' ||
       job.status.recoveryId !== resumed.request.recoveryId ||
       job.status.retryFromStage !== resumed.request.retryFromStage ||
+      !resumeSourceMatches(job.request, resumed.request) ||
       job.attemptId === resumed.attemptId ||
       Date.parse(resumed.occurredAt) < Date.parse(job.status.updatedAt)
     )
       throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
     job.attemptId = resumed.attemptId;
     job.completedStages = [];
-    job.currentStage = 'download';
-    job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+    job.currentStage = acquisitionStage(job.request);
+    job.status = parseStatusForRequest(job.request, {
       acceptedAt: job.acceptedAt,
-      formatVersion: job.request.formatVersion,
       jobId: job.jobId,
       requestId: job.request.requestId,
       status: 'accepted',
@@ -479,9 +561,9 @@ function restoreJobs(
   for (const job of jobs.values()) {
     if (job.status.status === 'accepted' || job.status.status === 'running') {
       const occurredAt = now();
-      const stage = 'download';
+      const stage = acquisitionStage(job.request);
       job.completedStages = [];
-      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+      job.status = parseStatusForRequest(job.request, {
         completedStages: job.completedStages,
         error: {
           code: 'cancelled',
@@ -490,7 +572,6 @@ function restoreJobs(
           retryable: true,
           stage,
         },
-        formatVersion: job.request.formatVersion,
         jobId: job.jobId,
         recoveryId: randomUUID(),
         requestId: job.request.requestId,
@@ -525,6 +606,13 @@ export function createProcedureTutorialMediaCoordinator(
     throw new ProcedureTutorialMediaCoordinatorError('capacity_exceeded');
   }
   const jobs = restoreJobs(options.existingEvents, now);
+  if (
+    [...jobs.values()].some(
+      (job) => !requestMatchesSourceProfile(job.request, options.sourceProfile),
+    )
+  ) {
+    throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
+  }
   let closing = false;
   const restoredCompletedResults = [...jobs.values()].flatMap((job) =>
     job.status.status === 'completed' ? [job.status.result] : [],
@@ -548,7 +636,7 @@ export function createProcedureTutorialMediaCoordinator(
     }
   }
 
-  function publishTerminal(job: JobState, status: ProcedureTutorialMediaLegacyJobStatus): void {
+  function publishTerminal(job: JobState, status: ProcedureTutorialMediaJobStatus): void {
     const suffix =
       status.status === 'completed'
         ? 'completed'
@@ -566,7 +654,7 @@ export function createProcedureTutorialMediaCoordinator(
     } catch {
       const failedAt = now();
       job.completedStages = [];
-      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+      job.status = parseStatusForRequest(job.request, {
         completedStages: job.completedStages,
         error: {
           code: 'internal_error',
@@ -575,7 +663,6 @@ export function createProcedureTutorialMediaCoordinator(
           stage: null,
         },
         failedAt,
-        formatVersion: job.request.formatVersion,
         jobId: job.jobId,
         requestId: job.request.requestId,
         status: 'failed',
@@ -595,13 +682,13 @@ export function createProcedureTutorialMediaCoordinator(
           onStage(update) {
             const occurredAt = now();
             if (update.state === 'started') {
+              const jobStages = stagesFor(job.request);
               job.currentStage = update.stage;
-              job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+              job.status = parseStatusForRequest(job.request, {
                 completedStages: job.completedStages,
                 currentStage: update.stage,
-                formatVersion: job.request.formatVersion,
                 jobId: job.jobId,
-                progress: job.completedStages.length / canonicalStages.length,
+                progress: job.completedStages.length / jobStages.length,
                 requestId: job.request.requestId,
                 startedAt: job.acceptedAt,
                 status: 'running',
@@ -629,11 +716,10 @@ export function createProcedureTutorialMediaCoordinator(
         const occurredAt = now();
         publishTerminal(
           job,
-          procedureTutorialMediaLegacyJobStatusSchema.parse({
-            formatVersion: job.request.formatVersion,
+          parseStatusForRequest(job.request, {
             jobId: job.jobId,
             requestId: job.request.requestId,
-            result: procedureTutorialMediaLegacyAnalysisResultSchema.parse(result),
+            result: procedureTutorialMediaAnalysisResultSchema.parse(result),
             status: 'completed',
             updatedAt: occurredAt,
           }),
@@ -646,14 +732,13 @@ export function createProcedureTutorialMediaCoordinator(
           job.completedStages = [];
           publishTerminal(
             job,
-            procedureTutorialMediaLegacyJobStatusSchema.parse({
+            parseStatusForRequest(job.request, {
               completedStages: job.completedStages,
               error: failure,
-              formatVersion: job.request.formatVersion,
               jobId: job.jobId,
               recoveryId: randomUUID(),
               requestId: job.request.requestId,
-              retryFromStage: 'download',
+              retryFromStage: acquisitionStage(job.request),
               status: 'recovery_required',
               updatedAt: occurredAt,
             }),
@@ -661,11 +746,10 @@ export function createProcedureTutorialMediaCoordinator(
         } else {
           publishTerminal(
             job,
-            procedureTutorialMediaLegacyJobStatusSchema.parse({
+            parseStatusForRequest(job.request, {
               completedStages: job.completedStages,
               error: failure,
               failedAt: occurredAt,
-              formatVersion: job.request.formatVersion,
               jobId: job.jobId,
               requestId: job.request.requestId,
               status: 'failed',
@@ -705,10 +789,13 @@ export function createProcedureTutorialMediaCoordinator(
     create(requestInput) {
       requireReady();
       const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.parse(requestInput);
-      if (parsedRequest.formatVersion !== '1.0.0') {
+      if (!requestMatchesSourceProfile(parsedRequest, options.sourceProfile)) {
         throw new ProcedureTutorialMediaCoordinatorError('source_not_supported');
       }
-      const request = procedureTutorialMediaLegacyAnalysisRequestSchema.parse(parsedRequest);
+      const request =
+        parsedRequest.formatVersion === '1.0.0'
+          ? procedureTutorialMediaLegacyAnalysisRequestSchema.parse(parsedRequest)
+          : parsedRequest;
       if (request.analysisWindow.endMs - request.analysisWindow.startMs > maximumAnalysisWindowMs) {
         throw new ProcedureTutorialMediaCoordinatorError('analysis_window_exceeded');
       }
@@ -730,9 +817,8 @@ export function createProcedureTutorialMediaCoordinator(
       let jobId = randomUUID();
       while (jobId === request.requestId) jobId = randomUUID();
       const acceptedAt = now();
-      const status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+      const status = parseStatusForRequest(request, {
         acceptedAt,
-        formatVersion: request.formatVersion,
         jobId,
         requestId: request.requestId,
         status: 'accepted',
@@ -742,7 +828,7 @@ export function createProcedureTutorialMediaCoordinator(
         acceptedAt,
         attemptId: randomUUID(),
         completedStages: [],
-        currentStage: 'download',
+        currentStage: acquisitionStage(request),
         fingerprint,
         jobId,
         request,
@@ -778,21 +864,18 @@ export function createProcedureTutorialMediaCoordinator(
     },
     resume(requestInput) {
       requireReady();
-      if (requestInput.formatVersion === '1.1.0') {
-        const currentRequest = procedureTutorialMediaResumeRequestSchema.parse(requestInput);
-        const currentJob = jobs.get(currentRequest.requestId);
-        if (currentJob === undefined || currentJob.jobId !== currentRequest.jobId)
-          throw new ProcedureTutorialMediaCoordinatorError('not_found');
-        throw new ProcedureTutorialMediaCoordinatorError('source_not_supported');
-      }
-      const request = procedureTutorialMediaLegacyResumeRequestSchema.parse(requestInput);
+      const request =
+        requestInput.formatVersion === '1.1.0'
+          ? procedureTutorialMediaResumeRequestSchema.parse(requestInput)
+          : procedureTutorialMediaLegacyResumeRequestSchema.parse(requestInput);
       const job = jobs.get(request.requestId);
       if (job === undefined || job.jobId !== request.jobId)
         throw new ProcedureTutorialMediaCoordinatorError('not_found');
       if (
         job.status.status !== 'recovery_required' ||
         job.status.recoveryId !== request.recoveryId ||
-        job.status.retryFromStage !== request.retryFromStage
+        job.status.retryFromStage !== request.retryFromStage ||
+        !resumeSourceMatches(job.request, request)
       ) {
         throw new ProcedureTutorialMediaCoordinatorError('recovery_mismatch');
       }
@@ -808,10 +891,9 @@ export function createProcedureTutorialMediaCoordinator(
       });
       job.attemptId = attemptId;
       job.completedStages = [];
-      job.currentStage = 'download';
-      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
+      job.currentStage = acquisitionStage(job.request);
+      job.status = parseStatusForRequest(job.request, {
         acceptedAt: job.acceptedAt,
-        formatVersion: job.request.formatVersion,
         jobId: job.jobId,
         requestId: job.request.requestId,
         status: 'accepted',

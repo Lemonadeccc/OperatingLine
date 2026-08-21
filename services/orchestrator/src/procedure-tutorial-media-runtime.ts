@@ -15,6 +15,7 @@ import {
   createProcedureTutorialMediaPipeline,
   type ProcedureTutorialMediaPipeline,
 } from './procedure-tutorial-media-pipeline.js';
+import type { ProcedureTutorialMediaSourceProfile } from './procedure-tutorial-media-coordinator.js';
 import { createTutorialMediaArtifactStore } from './tutorial-media-artifact-store.js';
 import { createTutorialMediaAsr } from './tutorial-media-asr.js';
 import { createTutorialMediaOcr, resolveTesseractLanguageCode } from './tutorial-media-ocr.js';
@@ -24,6 +25,7 @@ import {
 } from './tutorial-media-process.js';
 import { createTutorialMediaProbe } from './tutorial-media-probe.js';
 import { createTutorialMediaTranscoder } from './tutorial-media-transcoder.js';
+import type { TutorialLocalMediaSource } from './tutorial-local-media-source.js';
 import {
   createYouTubeMediaAuthorizationVerifier,
   youtubeMediaAuthorizationRegistrySchema,
@@ -125,6 +127,7 @@ export interface ProcedureTutorialMediaRuntimeConfiguration {
   readonly supportedLocales?: readonly string[] | undefined;
   readonly tesseractLanguageCodes?: Readonly<Record<string, string>> | undefined;
   readonly authorizationRegistry?: YouTubeMediaAuthorizationRegistry | undefined;
+  readonly localMediaSource?: TutorialLocalMediaSource | undefined;
   readonly maximumFrames?: number | undefined;
   readonly maximumConcurrentJobs?: number | undefined;
   readonly maximumAnalysisWindowMs?: number | undefined;
@@ -151,6 +154,7 @@ export type ProcedureTutorialMediaRuntime =
       >;
       readonly pipeline: ProcedureTutorialMediaPipeline;
       readonly maximumConcurrentJobs: number;
+      readonly sourceProfile: ProcedureTutorialMediaSourceProfile;
     };
 
 function unavailable(
@@ -158,11 +162,12 @@ function unavailable(
     ProcedureTutorialMediaCapabilities,
     { readonly availability: 'unavailable' }
   >['unavailableReasons'],
+  formatVersion: '1.0.0' | '1.1.0' = '1.0.0',
 ): ProcedureTutorialMediaRuntime {
   return {
     capabilities: procedureTutorialMediaCapabilitiesSchema.parse({
       availability: 'unavailable',
-      formatVersion: '1.0.0',
+      formatVersion,
       serviceId: 'operatingline.youtube_tutorial_media',
       serviceVersion,
       unavailableReasons: [...new Set(reasons)],
@@ -451,7 +456,7 @@ function toolVersion(output: Uint8Array): string {
 }
 
 function toolDefinitions(config: {
-  readonly ytDlpExecutable: string;
+  readonly ytDlpExecutable?: string | undefined;
   readonly ffmpegExecutable: string;
   readonly ffprobeExecutable: string;
   readonly whisperExecutable: string;
@@ -461,12 +466,16 @@ function toolDefinitions(config: {
   readonly tesseractLanguages: readonly string[];
 }): readonly ToolDefinition[] {
   return [
-    {
-      environmentPolicy: 'network_download_only',
-      executable: config.ytDlpExecutable,
-      toolId: 'yt-dlp',
-      versionArguments: ['--version'],
-    },
+    ...(config.ytDlpExecutable === undefined
+      ? []
+      : [
+          {
+            environmentPolicy: 'network_download_only' as const,
+            executable: config.ytDlpExecutable,
+            toolId: 'yt-dlp' as const,
+            versionArguments: ['--version'],
+          },
+        ]),
     {
       environmentPolicy: 'local_media_processing_no_network',
       executable: config.ffprobeExecutable,
@@ -610,7 +619,7 @@ function configurationSha256(
     readonly maximumJobRuntimeMs: number;
     readonly frameIntervalMs: number;
     readonly maximumDownloadBytes: number;
-    readonly authorizationRegistrySha256: string;
+    readonly authorizationRegistrySha256: string | null;
   },
 ): string {
   return sha256(
@@ -620,7 +629,7 @@ function configurationSha256(
         tool.toolId === 'yt-dlp' ? config.authorizationRegistrySha256 : null,
       invocationContractVersion,
       maximumAnalysisWindowMs: config.maximumAnalysisWindowMs,
-      maximumDownloadBytes: config.maximumDownloadBytes,
+      maximumDownloadBytes: tool.toolId === 'yt-dlp' ? config.maximumDownloadBytes : null,
       maximumFrames: config.maximumFrames,
       maximumJobRuntimeMs: config.maximumJobRuntimeMs,
       frameIntervalMs: config.frameIntervalMs,
@@ -663,44 +672,65 @@ function createJobProvenance(
     };
     invocations.set(tool.toolId, [...(invocations.get(tool.toolId) ?? []), normalized]);
   };
-  const provenance = (): readonly ToolProvenance[] =>
-    tools.map((tool) => {
-      const actualInvocations = invocations.get(tool.toolId) ?? [];
-      if (actualInvocations.length === 0) throw new Error('required media tool was not invoked');
-      return {
-        configurationSha256: configurationSha256(tool, config),
-        environmentPolicy: tool.environmentPolicy,
-        executableSha256: tool.executableSha256,
-        invocationContractVersion,
-        ...(tool.modelSha256 === undefined ? {} : { modelSha256: tool.modelSha256 }),
-        normalizedInvocationSha256: sha256(canonicalizeProtocolJsonValue(actualInvocations)),
-        toolId: tool.toolId,
-        toolVersion: tool.toolVersion,
-        versionOutputSha256: tool.versionOutputSha256,
-      };
-    });
+  const provenance = (input: {
+    readonly sourceKind: 'authorized_youtube_download' | 'user_supplied_local_file';
+  }): readonly ToolProvenance[] =>
+    tools
+      .filter(
+        (tool) => input.sourceKind === 'authorized_youtube_download' || tool.toolId !== 'yt-dlp',
+      )
+      .map((tool) => {
+        const actualInvocations = invocations.get(tool.toolId) ?? [];
+        if (actualInvocations.length === 0) throw new Error('required media tool was not invoked');
+        return {
+          configurationSha256: configurationSha256(tool, config),
+          environmentPolicy: tool.environmentPolicy,
+          executableSha256: tool.executableSha256,
+          invocationContractVersion,
+          ...(tool.modelSha256 === undefined ? {} : { modelSha256: tool.modelSha256 }),
+          normalizedInvocationSha256: sha256(canonicalizeProtocolJsonValue(actualInvocations)),
+          toolId: tool.toolId,
+          toolVersion: tool.toolVersion,
+          versionOutputSha256: tool.versionOutputSha256,
+        };
+      });
   return { observe, provenance };
 }
 
 export async function createProcedureTutorialMediaRuntime(
   input: ProcedureTutorialMediaRuntimeConfiguration,
 ): Promise<ProcedureTutorialMediaRuntime> {
-  if (input.authorizationRegistry === undefined) {
-    return unavailable(['authorization_registry_missing']);
+  const localMediaEnabled = input.localMediaSource !== undefined;
+  const youtubeConfigurationPresent =
+    input.authorizationRegistry !== undefined || input.ytDlpExecutable !== undefined;
+  const youtubeMediaEnabled =
+    input.authorizationRegistry !== undefined && input.ytDlpExecutable !== undefined;
+  const unavailableForMode = (
+    reasons: Extract<
+      ProcedureTutorialMediaCapabilities,
+      { readonly availability: 'unavailable' }
+    >['unavailableReasons'],
+  ) => unavailable(reasons, localMediaEnabled ? '1.1.0' : '1.0.0');
+  if (!localMediaEnabled && input.authorizationRegistry === undefined) {
+    return unavailableForMode(['authorization_registry_missing']);
   }
-  if (process.platform === 'win32') return unavailable(['unsupported_platform']);
+  if (localMediaEnabled && youtubeConfigurationPresent)
+    return unavailableForMode(['not_configured']);
+  if (youtubeConfigurationPresent && !youtubeMediaEnabled)
+    return unavailableForMode(['not_configured']);
+  if (process.platform === 'win32') return unavailableForMode(['unsupported_platform']);
   const pathValues = [
     input.artifactBaseDirectory,
-    input.ytDlpExecutable,
     input.ffmpegExecutable,
     input.ffprobeExecutable,
     input.whisperExecutable,
     input.whisperModelPath,
     input.tesseractExecutable,
     input.tesseractDataDirectory,
+    ...(youtubeMediaEnabled ? [input.ytDlpExecutable] : []),
   ];
   if (pathValues.some((value) => !normalizedAbsolutePath(value))) {
-    return unavailable(['not_configured']);
+    return unavailableForMode(['not_configured']);
   }
   const supportedLocales = input.supportedLocales?.map((locale) => locale.toLowerCase());
   const maximumFrames = input.maximumFrames ?? defaultMaximumFrames;
@@ -728,7 +758,7 @@ export async function createProcedureTutorialMediaRuntime(
     !positiveSafeInteger(frameIntervalMs, maximumVideoDurationMs) ||
     !positiveSafeInteger(maximumDownloadBytes, 100_000_000_000)
   ) {
-    return unavailable(['not_configured']);
+    return unavailableForMode(['not_configured']);
   }
   const configuredPaths = {
     artifactBaseDirectory: input.artifactBaseDirectory!,
@@ -738,18 +768,20 @@ export async function createProcedureTutorialMediaRuntime(
     tesseractExecutable: input.tesseractExecutable!,
     whisperExecutable: input.whisperExecutable!,
     whisperModelPath: input.whisperModelPath!,
-    ytDlpExecutable: input.ytDlpExecutable!,
+    ...(youtubeMediaEnabled ? { ytDlpExecutable: input.ytDlpExecutable! } : {}),
   };
-  let authorizationVerifier;
-  try {
-    authorizationVerifier = createYouTubeMediaAuthorizationVerifier(input.authorizationRegistry);
-  } catch {
-    return unavailable(['authorization_registry_missing']);
+  let authorizationVerifier: ReturnType<typeof createYouTubeMediaAuthorizationVerifier> | undefined;
+  if (youtubeMediaEnabled) {
+    try {
+      authorizationVerifier = createYouTubeMediaAuthorizationVerifier(input.authorizationRegistry!);
+    } catch {
+      return unavailableForMode(['authorization_registry_missing']);
+    }
   }
   try {
     await prepareArtifactBaseDirectory(configuredPaths.artifactBaseDirectory);
   } catch {
-    return unavailable(['preflight_failed']);
+    return unavailableForMode(['preflight_failed']);
   }
   const tesseractLanguageCodes = input.tesseractLanguageCodes ?? {};
   const resolvedTesseractLanguages = supportedLocales.map((locale) => ({
@@ -762,7 +794,7 @@ export async function createProcedureTutorialMediaRuntime(
         language === undefined || !/^[a-z]{2,3}$/u.test(language) || tesseract === undefined,
     )
   ) {
-    return unavailable(['preflight_failed']);
+    return unavailableForMode(['preflight_failed']);
   }
   const tesseractLanguages = [
     ...new Set(resolvedTesseractLanguages.map(({ tesseract }) => tesseract!)),
@@ -790,11 +822,11 @@ export async function createProcedureTutorialMediaRuntime(
       ...(definition.trainedDataPaths ?? []),
     ]);
     const models = await Promise.all(modelPaths.map((path) => lstat(path).catch(() => undefined)));
-    if (missingTool.some((info) => info === undefined)) return unavailable(['tool_missing']);
-    if (models.some((info) => info === undefined)) return unavailable(['model_missing']);
-    return unavailable(['preflight_failed']);
+    if (missingTool.some((info) => info === undefined)) return unavailableForMode(['tool_missing']);
+    if (models.some((info) => info === undefined)) return unavailableForMode(['model_missing']);
+    return unavailableForMode(['preflight_failed']);
   }
-  if (snapshots === undefined) return unavailable(['preflight_failed']);
+  if (snapshots === undefined) return unavailableForMode(['preflight_failed']);
   const runtimeSnapshots = snapshots;
   let initializedPipeline: ProcedureTutorialMediaPipeline | undefined;
   try {
@@ -809,16 +841,19 @@ export async function createProcedureTutorialMediaRuntime(
       tesseractExecutable: snapshotByToolId.get('tesseract')!.executable,
       whisperExecutable: snapshotByToolId.get('whisper.cpp')!.executable,
       whisperModelPath: snapshotByToolId.get('whisper.cpp')!.modelPath!,
-      ytDlpExecutable: snapshotByToolId.get('yt-dlp')!.executable,
+      ...(youtubeMediaEnabled
+        ? { ytDlpExecutable: snapshotByToolId.get('yt-dlp')!.executable }
+        : {}),
     };
     if (tesseractLanguages.some((language) => !preflight.tesseractLanguages.has(language))) {
       await cleanupFailedRuntimeInitialization(runtimeSnapshots);
-      return unavailable(['preflight_failed']);
+      return unavailableForMode(['preflight_failed']);
     }
     const runtimeConfig = {
-      authorizationRegistrySha256: sha256(
-        canonicalizeProtocolJsonValue(input.authorizationRegistry),
-      ),
+      authorizationRegistrySha256:
+        input.authorizationRegistry === undefined
+          ? null
+          : sha256(canonicalizeProtocolJsonValue(input.authorizationRegistry)),
       frameIntervalMs,
       maximumAnalysisWindowMs,
       maximumDownloadBytes,
@@ -868,15 +903,20 @@ export async function createProcedureTutorialMediaRuntime(
             jobDirectory,
             runner,
           }),
-          source: createYouTubeMediaSource({
-            authorizationVerifier,
-            executable: paths.ytDlpExecutable,
-            ffmpegExecutable: paths.ffmpegExecutable,
-            jobDirectory,
-            maximumDownloadBytes,
-            runner,
-          }),
-          toolProvenance: async () => jobProvenance.provenance(),
+          ...(input.localMediaSource === undefined ? {} : { localSource: input.localMediaSource }),
+          ...(authorizationVerifier === undefined || paths.ytDlpExecutable === undefined
+            ? {}
+            : {
+                source: createYouTubeMediaSource({
+                  authorizationVerifier,
+                  executable: paths.ytDlpExecutable,
+                  ffmpegExecutable: paths.ffmpegExecutable,
+                  jobDirectory,
+                  maximumDownloadBytes,
+                  runner,
+                }),
+              }),
+          toolProvenance: async (provenanceInput) => jobProvenance.provenance(provenanceInput),
           transcoder: createTutorialMediaTranscoder({
             executable: paths.ffmpegExecutable,
             jobDirectory,
@@ -936,7 +976,9 @@ export async function createProcedureTutorialMediaRuntime(
       verify: (...arguments_) => basePipeline.verify(...arguments_),
     };
     const capabilities = procedureTutorialMediaCapabilitiesSchema.parse({
-      analysisProfiles: ['youtube_tutorial_evidence_v1'],
+      analysisProfiles: localMediaEnabled
+        ? ['local_tutorial_evidence_v1']
+        : ['youtube_tutorial_evidence_v1'],
       artifactMediaTypes: ['video/mp4', 'audio/wav', 'image/png', 'application/json'],
       availability: 'available',
       features: {
@@ -949,7 +991,7 @@ export async function createProcedureTutorialMediaRuntime(
         shortcutCandidates: true,
         uiElementRecognition: false,
       },
-      formatVersion: '1.0.0',
+      formatVersion: localMediaEnabled ? '1.1.0' : '1.0.0',
       limits: {
         maxAnalysisWindowMs: maximumAnalysisWindowMs,
         maxConcurrentJobs: maximumConcurrentJobs,
@@ -959,14 +1001,27 @@ export async function createProcedureTutorialMediaRuntime(
       },
       serviceId: 'operatingline.youtube_tutorial_media',
       serviceVersion,
-      stages: ['download', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+      stages: localMediaEnabled
+        ? ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation']
+        : ['download', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
       supportedLocales,
     }) as Extract<ProcedureTutorialMediaCapabilities, { readonly availability: 'available' }>;
-    return { capabilities, maximumConcurrentJobs, pipeline };
+    const sourceProfile: ProcedureTutorialMediaSourceProfile = localMediaEnabled
+      ? {
+          analysisProfile: 'local_tutorial_evidence_v1',
+          formatVersion: '1.1.0',
+          sourceKind: 'user_supplied_local_file',
+        }
+      : {
+          analysisProfile: 'youtube_tutorial_evidence_v1',
+          formatVersion: '1.0.0',
+          sourceKind: 'authorized_youtube_download',
+        };
+    return { capabilities, maximumConcurrentJobs, pipeline, sourceProfile };
   } catch (error) {
     if (error instanceof ProcedureTutorialMediaRuntimeCleanupError) throw error;
     await cleanupFailedRuntimeInitialization(runtimeSnapshots, initializedPipeline);
-    return unavailable(['preflight_failed']);
+    return unavailableForMode(['preflight_failed']);
   }
 }
 

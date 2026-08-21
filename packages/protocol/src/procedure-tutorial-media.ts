@@ -1517,10 +1517,6 @@ export type ProcedureTutorialMediaResumeRequest = z.infer<
 >;
 
 const procedureTutorialMediaCapabilitiesCommonShape = {
-  formatVersion: z.union([
-    procedureTutorialMediaLegacyFormatVersionSchema,
-    procedureTutorialMediaFormatVersionSchema,
-  ]),
   serviceId: z.literal('operatingline.youtube_tutorial_media'),
   serviceVersion: z
     .string()
@@ -1529,10 +1525,40 @@ const procedureTutorialMediaCapabilitiesCommonShape = {
     .regex(/^[A-Za-z0-9][A-Za-z0-9.+_-]*$/),
 } as const;
 
+const procedureTutorialMediaAvailableCapabilitiesCommonShape = {
+  ...procedureTutorialMediaCapabilitiesCommonShape,
+  availability: z.literal('available'),
+  supportedLocales: z.array(localeSchema).min(1).max(1_000),
+  artifactMediaTypes: z
+    .array(procedureTutorialMediaTypeSchema)
+    .length(procedureTutorialMediaTypeSchema.options.length),
+  limits: z.strictObject({
+    maxVideoDurationMs: millisecondsSchema.positive(),
+    maxAnalysisWindowMs: millisecondsSchema.positive(),
+    maxJobRuntimeMs: millisecondsSchema.positive(),
+    maxFrames: z.number().int().positive().max(procedureTutorialMediaFrameMaxCount),
+    maxConcurrentJobs: z.number().int().positive().max(1_000),
+  }),
+  features: z.strictObject({
+    contentAddressedArtifacts: z.literal(true),
+    resumableJobs: z.literal(false),
+    explicitFullRestartAfterFailure: z.literal(true),
+    deterministicSegmentation: z.literal(true),
+    credentialFreePublicProtocol: z.literal(true),
+    ocrTextCandidates: z.literal(true),
+    shortcutCandidates: z.literal(true),
+    uiElementRecognition: z.literal(false),
+  }),
+} as const;
+
 export const procedureTutorialMediaCapabilitiesSchema = z
-  .discriminatedUnion('availability', [
+  .union([
     z.strictObject({
       ...procedureTutorialMediaCapabilitiesCommonShape,
+      formatVersion: z.union([
+        procedureTutorialMediaLegacyFormatVersionSchema,
+        procedureTutorialMediaFormatVersionSchema,
+      ]),
       availability: z.literal('unavailable'),
       unavailableReasons: z
         .array(
@@ -1549,42 +1575,20 @@ export const procedureTutorialMediaCapabilitiesSchema = z
         .max(6),
     }),
     z.strictObject({
-      ...procedureTutorialMediaCapabilitiesCommonShape,
-      availability: z.literal('available'),
-      analysisProfiles: z.array(z.literal('youtube_tutorial_evidence_v1')).length(1),
-      supportedLocales: z.array(localeSchema).min(1).max(1_000),
+      ...procedureTutorialMediaAvailableCapabilitiesCommonShape,
+      formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
+      analysisProfiles: z.tuple([z.literal('youtube_tutorial_evidence_v1')]),
       stages: completeStageListSchema,
-      artifactMediaTypes: z
-        .array(procedureTutorialMediaTypeSchema)
-        .length(procedureTutorialMediaTypeSchema.options.length),
-      limits: z.strictObject({
-        maxVideoDurationMs: millisecondsSchema.positive(),
-        maxAnalysisWindowMs: millisecondsSchema.positive(),
-        maxJobRuntimeMs: millisecondsSchema.positive(),
-        maxFrames: z.number().int().positive().max(procedureTutorialMediaFrameMaxCount),
-        maxConcurrentJobs: z.number().int().positive().max(1_000),
-      }),
-      features: z.strictObject({
-        contentAddressedArtifacts: z.literal(true),
-        resumableJobs: z.literal(false),
-        explicitFullRestartAfterFailure: z.literal(true),
-        deterministicSegmentation: z.literal(true),
-        credentialFreePublicProtocol: z.literal(true),
-        ocrTextCandidates: z.literal(true),
-        shortcutCandidates: z.literal(true),
-        uiElementRecognition: z.literal(false),
-      }),
+    }),
+    z.strictObject({
+      ...procedureTutorialMediaAvailableCapabilitiesCommonShape,
+      formatVersion: procedureTutorialMediaFormatVersionSchema,
+      analysisProfiles: z.tuple([z.literal('local_tutorial_evidence_v1')]),
+      stages: completeLocalStageListSchema,
     }),
   ])
   .superRefine((capabilities, context) => {
     if (capabilities.availability === 'unavailable') return;
-    if (capabilities.stages.some((stage, index) => stage !== stages[index])) {
-      context.addIssue({
-        code: 'custom',
-        path: ['stages'],
-        message: 'Capability stages must use the complete canonical order',
-      });
-    }
     if (
       capabilities.artifactMediaTypes.some(
         (mediaType, index) => mediaType !== procedureTutorialMediaTypeSchema.options[index],

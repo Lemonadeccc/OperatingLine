@@ -214,6 +214,13 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
   任一 registry、绝对路径、工具、模型、locale 或预检配置缺失/不安全时，capabilities 会明确返回
   `unavailable`。分析 manifest 不会调用 Provider、生成或保存 ProcedureTree、创建 Proposal 或执行宿主。
   见 [ADR 0084](docs/adr/0084-authorized-youtube-media-analysis.md)。
+- **用户提供的本地教程媒体分析**：独立 `local_tutorial_evidence_v1` profile 只接受 composition root
+  预登记的规范绝对路径、内容哈希、source identity、媒体权利证据，以及分别消费过的 import/rights
+  authority receipt。当前只接受可由私有 CAS 落实的 `private_cas_indefinite` retention；source 与 staging
+  必须满足当前 UID、普通文件、无符号链接/硬链接及私有权限门。完整阶段为
+  `import → probe → audio → asr → frames → ocr → segmentation`，公开请求明确拒绝 network/download
+  approval。恢复会凭 source-bound receipt 从 `import` 全量重跑，不复用部分产物，也不能切换到另一 source
+  profile。
 - **媒体分析到完整 ProcedureTree**：MCP `operatingline.procedure.tutorial.media.authoring.prepare` 与对应 HTTP
   入口会重新校验 completed media manifest、私有 CAS 内容及工具/模型 provenance，并把 ASR、OCR、UI、快捷键候选、
   证据帧与确定性 semantic segments 绑定成 `1.5.0` authoring packet；无可靠 grounding 时返回 blocked。

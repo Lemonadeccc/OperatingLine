@@ -2,14 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
+import { procedureTutorialMediaAnalysisResultSchema } from '@operatingline/protocol';
 import type {
   ProcedureTutorialMediaAnalysisRequest,
   ProcedureTutorialMediaAnalysisResult,
   ProcedureTutorialMediaStage,
 } from '@operatingline/protocol';
 import {
-  createProcedureTutorialMediaCoordinator,
+  createProcedureTutorialMediaCoordinator as createCoordinatorWithProfile,
   ProcedureTutorialMediaCoordinatorError,
+  type ProcedureTutorialMediaCoordinatorOptions,
+  type ProcedureTutorialMediaSourceProfile,
 } from '../../../services/orchestrator/src/procedure-tutorial-media-coordinator.js';
 import {
   ProcedureTutorialMediaPipelineError,
@@ -25,9 +28,39 @@ const stages = [
   'ocr',
   'segmentation',
 ] as const satisfies readonly ProcedureTutorialMediaStage[];
+const localStages = [
+  'import',
+  'probe',
+  'audio',
+  'asr',
+  'frames',
+  'ocr',
+  'segmentation',
+] as const satisfies readonly ProcedureTutorialMediaStage[];
 const timestamp = '2026-08-18T00:00:00.000Z';
 const hash = (digit: string) => digit.repeat(64);
 const uri = (digit: string) => `operatingline-media://sha256/${hash(digit)}` as const;
+const youtubeSourceProfile = {
+  analysisProfile: 'youtube_tutorial_evidence_v1',
+  formatVersion: '1.0.0',
+  sourceKind: 'authorized_youtube_download',
+} as const satisfies ProcedureTutorialMediaSourceProfile;
+const localSourceProfile = {
+  analysisProfile: 'local_tutorial_evidence_v1',
+  formatVersion: '1.1.0',
+  sourceKind: 'user_supplied_local_file',
+} as const satisfies ProcedureTutorialMediaSourceProfile;
+
+function createProcedureTutorialMediaCoordinator(
+  options: Omit<ProcedureTutorialMediaCoordinatorOptions, 'sourceProfile'> & {
+    readonly sourceProfile?: ProcedureTutorialMediaSourceProfile;
+  },
+) {
+  return createCoordinatorWithProfile({
+    ...options,
+    sourceProfile: options.sourceProfile ?? youtubeSourceProfile,
+  });
+}
 
 const currentYoutubeSource = {
   kind: 'authorized_youtube_download' as const,
@@ -98,17 +131,37 @@ function analysisRequest(requestId = randomUUID()): ProcedureTutorialMediaAnalys
   };
 }
 
+function localAnalysisRequest(requestId = randomUUID()): ProcedureTutorialMediaAnalysisRequest {
+  return {
+    formatVersion: '1.1.0',
+    requestId,
+    source: currentLocalSource,
+    analysisProfile: 'local_tutorial_evidence_v1',
+    locale: 'en',
+    analysisWindow: { startMs: 0, endMs: 1_000 },
+    requestedStages: [...localStages],
+    approvals: {
+      networkAccessApproved: false,
+      mediaDownloadApproved: false,
+      retentionApproved: true,
+    },
+  };
+}
+
 function completedResult(
   request: ProcedureTutorialMediaAnalysisRequest,
   jobId: string,
 ): ProcedureTutorialMediaAnalysisResult {
+  const localRequest =
+    request.formatVersion === '1.1.0' && request.source.kind === 'user_supplied_local_file';
+  const sourceSha256 = localRequest ? request.source.contentSha256 : hash('1');
   const source = {
     bytes: 5,
     createdAt: timestamp,
     mediaType: 'video/mp4' as const,
     role: 'source_video' as const,
-    sha256: hash('1'),
-    uri: uri('1'),
+    sha256: sourceSha256,
+    uri: `operatingline-media://sha256/${sourceSha256}` as const,
   };
   const derived = (
     digit: string,
@@ -133,24 +186,17 @@ function completedResult(
   const transcript = derived('4', 'asr_transcript', 'application/json');
   const ocr = derived('5', 'ocr_observations', 'application/json');
   const manifest = derived('6', 'analysis_manifest', 'application/json');
-  return {
+  const common = {
     analysisProfile: request.analysisProfile,
     analysisWindow: request.analysisWindow,
     artifacts: [source, audio, transcript, frameArtifact, ocr, manifest],
     asrSegments: [],
     completedAt: timestamp,
-    completedStages: [...stages],
+    completedStages: [...(localRequest ? localStages : stages)],
     formatVersion: request.formatVersion,
     frames: [{ artifact: frameArtifact, frameId: randomUUID(), order: 1, timestampMs: 0 }],
     jobId,
     locale: request.locale,
-    manifestIntegrity: {
-      artifactCount: 6,
-      generatedAt: timestamp,
-      manifestArtifactUri: manifest.uri,
-      manifestSha256: manifest.sha256,
-      rootSha256: hash('7'),
-    },
     ocrCandidates: [],
     probe: {
       audio: { channels: 2, codec: 'aac', sampleRateHz: 48_000 },
@@ -174,8 +220,8 @@ function completedResult(
       hostExecutionStarted: false,
       localAsrModelRun: true,
       localOcrRun: true,
-      mediaDownloaded: true,
-      networkFetched: true,
+      mediaDownloaded: !localRequest,
+      networkFetched: !localRequest,
       procedureStored: false,
       proposalCreated: false,
       providerCalled: false,
@@ -194,8 +240,40 @@ function completedResult(
       },
     ],
     uiCandidates: [],
-    videoId: request.videoId,
   };
+  return procedureTutorialMediaAnalysisResultSchema.parse(
+    localRequest
+      ? {
+          ...common,
+          analysisProfile: 'local_tutorial_evidence_v1',
+          completedStages: [...localStages],
+          formatVersion: '1.1.0',
+          source: request.source,
+          sideEffects: { ...common.sideEffects, mediaDownloaded: false, networkFetched: false },
+          manifestIntegrity: {
+            artifactCount: 6,
+            generatedAt: timestamp,
+            manifestArtifactUri: manifest.uri,
+            manifestSha256: manifest.sha256,
+            rootSha256: hash('7'),
+            source: request.source,
+          },
+        }
+      : {
+          ...common,
+          analysisProfile: 'youtube_tutorial_evidence_v1',
+          completedStages: [...stages],
+          formatVersion: '1.0.0',
+          manifestIntegrity: {
+            artifactCount: 6,
+            generatedAt: timestamp,
+            manifestArtifactUri: manifest.uri,
+            manifestSha256: manifest.sha256,
+            rootSha256: hash('7'),
+          },
+          videoId: request.videoId,
+        },
+  );
 }
 
 function stored(events: readonly ExecutionEventInput[]): StoredExecutionEvent[] {
@@ -229,7 +307,11 @@ async function terminalStatus(
 function successfulPipeline(): ProcedureTutorialMediaPipeline {
   return {
     async analyze(request, jobId, options) {
-      for (const stage of stages) {
+      const requestStages =
+        request.formatVersion === '1.1.0' && request.source.kind === 'user_supplied_local_file'
+          ? localStages
+          : stages;
+      for (const stage of requestStages) {
         await options?.onStage?.({ stage, state: 'started' });
         await options?.onStage?.({ stage, state: 'completed' });
       }
@@ -243,22 +325,24 @@ function successfulPipeline(): ProcedureTutorialMediaPipeline {
 }
 
 describe('procedure tutorial media coordinator', () => {
-  it('fails closed for both current source kinds before persistence or pipeline work', () => {
+  it('rejects current YouTube but persists and completes a source-bound local import', async () => {
     const events: ExecutionEventInput[] = [];
     let analyzeCount = 0;
+    const pipeline = successfulPipeline();
     const coordinator = createProcedureTutorialMediaCoordinator({
       appendEvent: (event) => events.push(event),
       existingEvents: [],
       pipeline: {
-        async analyze() {
+        async analyze(...input) {
           analyzeCount += 1;
-          throw new Error('current sources must not reach the legacy pipeline');
+          return pipeline.analyze(...input);
         },
         async close() {},
         async verify(result) {
           return result;
         },
       },
+      sourceProfile: localSourceProfile,
     });
     const common = {
       formatVersion: '1.1.0' as const,
@@ -277,36 +361,39 @@ describe('procedure tutorial media coordinator', () => {
       analysisProfile: 'youtube_tutorial_evidence_v1' as const,
       requestedStages: [...stages],
     };
-    const localRequest = {
-      ...common,
-      requestId: randomUUID(),
-      source: currentLocalSource,
-      analysisProfile: 'local_tutorial_evidence_v1' as const,
-      requestedStages: [
-        'import',
-        'probe',
-        'audio',
-        'asr',
-        'frames',
-        'ocr',
-        'segmentation',
-      ] as const,
-      approvals: {
-        networkAccessApproved: false as const,
-        mediaDownloadApproved: false as const,
-        retentionApproved: true as const,
-      },
-    };
-    for (const request of [youtubeRequest, localRequest]) {
-      expect(() => coordinator.create(request)).toThrowError(
-        expect.objectContaining({ code: 'source_not_supported' }),
-      );
-      expect(() => coordinator.status(request.requestId, randomUUID())).toThrowError(
-        expect.objectContaining({ code: 'not_found' }),
-      );
-    }
+    expect(() => coordinator.create(youtubeRequest)).toThrowError(
+      expect.objectContaining({ code: 'source_not_supported' }),
+    );
     expect(analyzeCount).toBe(0);
     expect(events).toEqual([]);
+
+    expect(() => coordinator.create(analysisRequest())).toThrowError(
+      expect.objectContaining({ code: 'source_not_supported' }),
+    );
+    expect(events).toEqual([]);
+
+    const localRequest = localAnalysisRequest();
+    const accepted = coordinator.create(localRequest);
+    expect(accepted).toMatchObject({
+      formatVersion: '1.1.0',
+      source: currentLocalSource,
+      status: 'accepted',
+    });
+    const completed = await terminalStatus(coordinator, localRequest.requestId, accepted.jobId);
+    expect(completed).toMatchObject({
+      formatVersion: '1.1.0',
+      source: currentLocalSource,
+      status: 'completed',
+      result: {
+        completedStages: localStages,
+        sideEffects: { mediaDownloaded: false, networkFetched: false },
+        source: currentLocalSource,
+      },
+    });
+    expect(analyzeCount).toBe(1);
+    expect(
+      events.find((event) => event.eventType === 'procedure.tutorial.media.stage')?.payload,
+    ).toMatchObject({ stage: 'import', state: 'started' });
   });
 
   it('returns immediately, completes asynchronously, and is idempotent for identical input', async () => {
@@ -317,6 +404,10 @@ describe('procedure tutorial media coordinator', () => {
       existingEvents: [],
       pipeline: successfulPipeline(),
     });
+    expect(() => coordinator.create(localAnalysisRequest())).toThrowError(
+      expect.objectContaining({ code: 'source_not_supported' }),
+    );
+    expect(events).toEqual([]);
     const accepted = coordinator.create(request);
     expect(accepted.status).toBe('accepted');
     expect(coordinator.create(request)).toEqual(accepted);
@@ -409,6 +500,121 @@ describe('procedure tutorial media coordinator', () => {
     await restarted.ready();
     expect(restarted.status(request.requestId, accepted.jobId)).toEqual(completed);
     expect(replayed).toBe(false);
+  });
+
+  it('restarts local media only from import and binds recovery to the exact source', async () => {
+    const events: ExecutionEventInput[] = [];
+    let attempts = 0;
+    const success = successfulPipeline();
+    const pipeline: ProcedureTutorialMediaPipeline = {
+      async analyze(request, jobId, options) {
+        attempts += 1;
+        if (attempts === 1) {
+          await options?.onStage?.({ stage: 'import', state: 'started' });
+          throw new ProcedureTutorialMediaPipelineError('pipeline_failed', 'import');
+        }
+        return success.analyze(request, jobId, options);
+      },
+      async close() {},
+      async verify(result) {
+        return result;
+      },
+    };
+    const request = localAnalysisRequest();
+    const coordinator = createProcedureTutorialMediaCoordinator({
+      appendEvent: (event) => events.push(event),
+      existingEvents: [],
+      pipeline,
+      sourceProfile: localSourceProfile,
+    });
+    const accepted = coordinator.create(request);
+    const recovery = await terminalStatus(coordinator, request.requestId, accepted.jobId);
+    expect(recovery).toMatchObject({
+      completedStages: [],
+      retryFromStage: 'import',
+      source: request.source,
+      status: 'recovery_required',
+    });
+    if (recovery.status !== 'recovery_required' || request.formatVersion !== '1.1.0') {
+      throw new Error('expected current local recovery');
+    }
+    expect(() =>
+      coordinator.resume({
+        approvals: request.approvals,
+        formatVersion: request.formatVersion,
+        jobId: accepted.jobId,
+        recoveryId: recovery.recoveryId,
+        requestId: request.requestId,
+        retryFromStage: 'import',
+        source: { ...request.source, contentSha256: hash('c') },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'recovery_mismatch' }));
+
+    coordinator.resume({
+      approvals: request.approvals,
+      formatVersion: request.formatVersion,
+      jobId: accepted.jobId,
+      recoveryId: recovery.recoveryId,
+      requestId: request.requestId,
+      retryFromStage: 'import',
+      source: request.source,
+    });
+    const completed = await terminalStatus(coordinator, request.requestId, accepted.jobId);
+    expect(completed).toMatchObject({ status: 'completed', source: request.source });
+    expect(attempts).toBe(2);
+
+    const restored = createProcedureTutorialMediaCoordinator({
+      appendEvent: () => undefined,
+      existingEvents: stored(events),
+      pipeline: successfulPipeline(),
+      sourceProfile: localSourceProfile,
+    });
+    await restored.ready();
+    expect(restored.status(request.requestId, accepted.jobId)).toEqual(completed);
+  });
+
+  it('rejects a restored local terminal receipt whose source drifted', async () => {
+    const events: ExecutionEventInput[] = [];
+    const request = localAnalysisRequest();
+    const coordinator = createProcedureTutorialMediaCoordinator({
+      appendEvent: (event) => events.push(event),
+      existingEvents: [],
+      pipeline: {
+        async analyze() {
+          throw new ProcedureTutorialMediaPipelineError('pipeline_failed', 'import');
+        },
+        async close() {},
+        async verify(result) {
+          return result;
+        },
+      },
+      sourceProfile: localSourceProfile,
+    });
+    const accepted = coordinator.create(request);
+    const recovery = await terminalStatus(coordinator, request.requestId, accepted.jobId);
+    expect(recovery.status).toBe('recovery_required');
+    const drifted = events.map((event) =>
+      event.eventType === 'procedure.tutorial.media.recovery-required'
+        ? {
+            ...event,
+            payload: {
+              ...(event.payload as Record<string, unknown>),
+              status: {
+                ...((event.payload as { status: Record<string, unknown> }).status ?? {}),
+                source: { ...request.source, contentSha256: hash('c') },
+              },
+            },
+          }
+        : event,
+    );
+    expect(() =>
+      createProcedureTutorialMediaCoordinator({
+        appendEvent: () => undefined,
+        existingEvents: stored(drifted),
+        pipeline: successfulPipeline(),
+        sourceProfile: localSourceProfile,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'persistence_failed' }));
   });
 
   it('restores an interrupted request as recovery-required without replaying it', () => {

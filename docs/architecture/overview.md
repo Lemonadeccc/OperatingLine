@@ -405,10 +405,13 @@ whisper 模型、Tesseract 和 tessdata 目录都必须由 composition root 配�
 
 MCP `operatingline.procedure.tutorial.media.capabilities` 与 HTTP
 `GET /api/v1/procedure/tutorial/media/capabilities` 可在无副作用下读取可用性、locale、限制和完整阶段。
+下述 download 流程中的 “每个 job” 只指授权 YouTube profile；本地文件使用独立 import profile。
 配置安全且预检通过时，MCP `operatingline.procedure.tutorial.media.jobs.create`、`...jobs.status`、
 `...jobs.restart` 分别对应 HTTP `POST /api/v1/procedure/tutorial/media/jobs`、`.../jobs/status`、
 `.../jobs/restart`。每个 job 固定执行 `download → probe → audio → asr → frames → ocr → segmentation`；
-yt-dlp 是唯一网络下载工具，其余探测、转码、ASR 与 OCR 都使用受限的本地进程合同。产物进入私有内容寻址
+用户本地文件 profile 从已登记且权利证明绑定的
+`import` 开始，再执行相同的六个本地阶段，并明确要求 network/download approval 为 `false`；yt-dlp
+不参与该路径。其余探测、转码、ASR 与 OCR 都使用受限的本地进程合同。产物进入私有内容寻址
 存储，并以 `operatingline-media://sha256/<digest>`、证据帧、ASR/OCR/快捷键候选、确定性 semantic segments
 和工具/模型 provenance 返回。Composition root 先把配置的工具、whisper 模型和当前 locale 精确需要的
 Tesseract `.traineddata` 复制到私有只读运行时快照，再对快照预检；job 通过固定 `--tessdata-dir` 只使用这些
@@ -418,8 +421,9 @@ Tesseract `.traineddata` 复制到私有只读运行时快照，再对快照预�
 不可变证明。下载、音频、帧、ASR 文件和每任务 staging 总量都在进程运行期间受配额监控，公开的最大分析
 窗口不会超过 16 kHz 单声道 PCM 上限。当前不提供 UI element recognition。
 
-Job 不是可续跑的分阶段 checkpoint。可恢复失败只返回 `retryFromStage: download` 和一次精确 recovery receipt；
-`jobs.restart` 要求重新确认网络、下载和保留副作用，清空阶段进度，从下载开始重跑全部七阶段，绝不复用先前
+Job 不是可续跑的分阶段 checkpoint。可恢复失败返回与 source profile 一致的首阶段：YouTube 为
+`retryFromStage: download`，并重新确认网络、下载和保留副作用；本地文件为 `retryFromStage: import`，
+继续拒绝网络/下载，只重新确认保留。`jobs.restart` 会清空阶段进度并从对应首阶段重跑全部七阶段，绝不复用先前
 部分阶段或产物。未配置、路径/权限不安全、工具/模型缺失或预检失败时，capabilities 明确保持 unavailable，
 不会降级成不完整分析。结果是媒体证据 manifest；该 job 本身不会调用 Provider、生成或存储 ProcedureTree、创建
 Proposal 或执行宿主。

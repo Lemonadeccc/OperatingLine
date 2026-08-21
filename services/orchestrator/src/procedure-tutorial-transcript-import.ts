@@ -21,6 +21,24 @@ interface ParsedCaptionCue {
   readonly text: string;
 }
 
+export interface ProcedureTutorialCaptionDocumentInput {
+  readonly origin: 'user_supplied';
+  readonly format: 'webvtt' | 'srt';
+  readonly content: string;
+  readonly locale?: string | undefined;
+  readonly defaultConfidence: number;
+}
+
+export interface ParsedProcedureTutorialCaptionDocument {
+  readonly document: ProcedureAuthoringTutorialTranscriptDocument;
+  readonly segments: readonly {
+    readonly startMs: number;
+    readonly endMs: number;
+    readonly text: string;
+    readonly confidence: number;
+  }[];
+}
+
 function hasInvalidCaptionControlCharacter(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -216,40 +234,54 @@ function parseWebVtt(content: string): ParsedCaptionCue[] {
   return cues;
 }
 
-export function parseProcedureTutorialTranscriptImport(
-  requestInput: ProcedureTutorialTranscriptImportRequest,
-): ParsedProcedureTutorialTranscriptImport {
-  const importRequest = procedureTutorialTranscriptImportRequestSchema.parse(requestInput);
-  const contentBytes = Buffer.byteLength(importRequest.tutorial.captionDocument.content, 'utf8');
-  if (contentBytes > procedureTutorialTranscriptDocumentMaxBytes) {
+export function parseProcedureTutorialCaptionDocument(
+  input: ProcedureTutorialCaptionDocumentInput,
+): ParsedProcedureTutorialCaptionDocument {
+  const contentBytes = Buffer.byteLength(input.content, 'utf8');
+  if (contentBytes === 0 || contentBytes > procedureTutorialTranscriptDocumentMaxBytes) {
     throw new Error(
       `Tutorial transcript document exceeds ${procedureTutorialTranscriptDocumentMaxBytes} UTF-8 bytes`,
     );
   }
-  const normalizedSource = normalizedCaptionSource(importRequest.tutorial.captionDocument.content);
+  if (
+    !Number.isFinite(input.defaultConfidence) ||
+    input.defaultConfidence < 0 ||
+    input.defaultConfidence > 1
+  ) {
+    throw new Error('Tutorial transcript default confidence must be between zero and one');
+  }
+  const normalizedSource = normalizedCaptionSource(input.content);
   if (hasInvalidCaptionControlCharacter(normalizedSource)) {
     throw new Error('Tutorial transcript document contains an unsupported control character');
   }
-  const cues =
-    importRequest.tutorial.captionDocument.format === 'srt'
-      ? parseSrt(normalizedSource)
-      : parseWebVtt(normalizedSource);
+  const cues = input.format === 'srt' ? parseSrt(normalizedSource) : parseWebVtt(normalizedSource);
   if (cues.length === 0) {
     throw new Error('Tutorial transcript document contains no caption cues');
   }
   const document = procedureAuthoringTutorialTranscriptDocumentSchema.parse({
-    format: importRequest.tutorial.captionDocument.format,
-    contentSha256: createHash('sha256')
-      .update(importRequest.tutorial.captionDocument.content, 'utf8')
-      .digest('hex'),
+    format: input.format,
+    contentSha256: createHash('sha256').update(input.content, 'utf8').digest('hex'),
     contentBytes,
     cueCount: cues.length,
     normalization: 'operatingline-caption-cues-v1',
     confidence: {
       origin: 'user_declared_default',
-      value: importRequest.tutorial.captionDocument.defaultConfidence,
+      value: input.defaultConfidence,
     },
   });
+  return {
+    document,
+    segments: cues.map((cue) => ({ ...cue, confidence: input.defaultConfidence })),
+  };
+}
+
+export function parseProcedureTutorialTranscriptImport(
+  requestInput: ProcedureTutorialTranscriptImportRequest,
+): ParsedProcedureTutorialTranscriptImport {
+  const importRequest = procedureTutorialTranscriptImportRequestSchema.parse(requestInput);
+  const { document, segments } = parseProcedureTutorialCaptionDocument(
+    importRequest.tutorial.captionDocument,
+  );
   const request = procedureAuthoringPromptRequestSchema.parse({
     targetAdapterId: importRequest.targetAdapterId,
     ...(importRequest.actionCatalogVersion === undefined
@@ -269,10 +301,7 @@ export function parseProcedureTutorialTranscriptImport(
         ...(importRequest.tutorial.captionDocument.locale === undefined
           ? {}
           : { locale: importRequest.tutorial.captionDocument.locale }),
-        segments: cues.map((cue) => ({
-          ...cue,
-          confidence: importRequest.tutorial.captionDocument.defaultConfidence,
-        })),
+        segments,
       },
     },
   });

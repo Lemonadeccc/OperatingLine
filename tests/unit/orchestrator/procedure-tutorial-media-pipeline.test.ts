@@ -72,6 +72,7 @@ async function fixture(
     readonly downloadErrorCode?: string;
     readonly maximumJobRuntimeMs?: number;
     readonly maximumStagingBytes?: number;
+    readonly omitSource?: boolean;
     readonly unsafeStagingEntry?: boolean;
   } = {},
 ) {
@@ -124,38 +125,42 @@ async function fixture(
         };
       },
     },
-    source: {
-      async download(input) {
-        if (options.downloadErrorCode !== undefined) {
-          throw Object.assign(new Error('private source failure'), {
-            code: options.downloadErrorCode,
-          });
-        }
-        if (options.blockDownload) {
-          await new Promise<never>((_resolve, reject) => {
-            const abort = () => reject(new DOMException('aborted', 'AbortError'));
-            if (input.signal?.aborted) abort();
-            else input.signal?.addEventListener('abort', abort, { once: true });
-          });
-        }
-        const mediaPath = join(jobDirectory, 'source.mp4');
-        await writeFile(mediaPath, options.downloadContents ?? 'video');
-        if (options.unsafeStagingEntry) {
-          await symlink(mediaPath, join(jobDirectory, 'unsafe-link'));
-        }
-        if (options.blockDownloadAfterWrite) {
-          await new Promise<never>((_resolve, reject) => {
-            const abort = () => reject(new DOMException('aborted', 'AbortError'));
-            if (input.signal?.aborted) abort();
-            else input.signal?.addEventListener('abort', abort, { once: true });
-          });
-        }
-        if (options.downloadDelayMs !== undefined) {
-          await new Promise<void>((resolve) => setTimeout(resolve, options.downloadDelayMs));
-        }
-        return { durationMs: 1_000, mediaPath, title: 'fixture', videoId: request.videoId };
-      },
-    },
+    ...(options.omitSource
+      ? {}
+      : {
+          source: {
+            async download(input) {
+              if (options.downloadErrorCode !== undefined) {
+                throw Object.assign(new Error('private source failure'), {
+                  code: options.downloadErrorCode,
+                });
+              }
+              if (options.blockDownload) {
+                await new Promise<never>((_resolve, reject) => {
+                  const abort = () => reject(new DOMException('aborted', 'AbortError'));
+                  if (input.signal?.aborted) abort();
+                  else input.signal?.addEventListener('abort', abort, { once: true });
+                });
+              }
+              const mediaPath = join(jobDirectory, 'source.mp4');
+              await writeFile(mediaPath, options.downloadContents ?? 'video');
+              if (options.unsafeStagingEntry) {
+                await symlink(mediaPath, join(jobDirectory, 'unsafe-link'));
+              }
+              if (options.blockDownloadAfterWrite) {
+                await new Promise<never>((_resolve, reject) => {
+                  const abort = () => reject(new DOMException('aborted', 'AbortError'));
+                  if (input.signal?.aborted) abort();
+                  else input.signal?.addEventListener('abort', abort, { once: true });
+                });
+              }
+              if (options.downloadDelayMs !== undefined) {
+                await new Promise<void>((resolve) => setTimeout(resolve, options.downloadDelayMs));
+              }
+              return { durationMs: 1_000, mediaPath, title: 'fixture', videoId: request.videoId };
+            },
+          },
+        }),
     transcoder: {
       async extractAudio() {
         const path = join(jobDirectory, 'audio.wav');
@@ -237,6 +242,15 @@ async function fixture(
 }
 
 describe('procedure tutorial media pipeline', () => {
+  it('fails closed when the legacy YouTube adapter is not configured', async () => {
+    const { pipeline } = await fixture({ omitSource: true });
+
+    await expect(pipeline.analyze(request, randomUUID())).rejects.toMatchObject({
+      code: 'authorization_required',
+      stage: 'download',
+    });
+  });
+
   it('runs all seven stages, creates a verifiable manifest, and exposes candidate evidence only', async () => {
     const { pipeline, putFileOptions, store } = await fixture();
     const updates: string[] = [];

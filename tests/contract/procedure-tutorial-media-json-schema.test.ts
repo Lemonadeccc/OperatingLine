@@ -328,6 +328,14 @@ const capabilities = {
   },
 } as const;
 
+const localCapabilities = {
+  ...capabilities,
+  formatVersion: '1.1.0',
+  analysisProfiles: ['local_tutorial_evidence_v1'],
+  stages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+} as const;
+
+
 describe('public tutorial media analysis JSON Schemas', () => {
   it('round-trips exact YouTube and local sources and rejects loss or simultaneous claims', () => {
     expect(
@@ -726,6 +734,15 @@ describe('public tutorial media analysis JSON Schemas', () => {
     ] as const;
     const capabilityCases = [
       { value: capabilities, accepted: true },
+      { value: localCapabilities, accepted: true },
+      {
+        value: { ...localCapabilities, stages: capabilities.stages },
+        accepted: false,
+      },
+      {
+        value: { ...capabilities, analysisProfiles: localCapabilities.analysisProfiles },
+        accepted: false,
+      },
       {
         value: {
           formatVersion: '1.0.0',

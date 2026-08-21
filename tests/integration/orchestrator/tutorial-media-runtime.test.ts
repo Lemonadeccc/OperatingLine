@@ -29,7 +29,7 @@ const unavailableRuntime = {
 
 function availableCapabilities() {
   return procedureTutorialMediaCapabilitiesSchema.parse({
-    analysisProfiles: ['youtube_tutorial_evidence_v1'],
+    analysisProfiles: ['local_tutorial_evidence_v1'],
     artifactMediaTypes: ['video/mp4', 'audio/wav', 'image/png', 'application/json'],
     availability: 'available',
     features: {
@@ -42,7 +42,7 @@ function availableCapabilities() {
       shortcutCandidates: true,
       uiElementRecognition: false,
     },
-    formatVersion: '1.0.0',
+    formatVersion: '1.1.0',
     limits: {
       maxAnalysisWindowMs: 60_000,
       maxConcurrentJobs: 1,
@@ -52,7 +52,7 @@ function availableCapabilities() {
     },
     serviceId: 'operatingline.youtube_tutorial_media',
     serviceVersion: '0.1.0',
-    stages: ['download', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+    stages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
     supportedLocales: ['en'],
   }) as Extract<ProcedureTutorialMediaCapabilities, { readonly availability: 'available' }>;
 }
@@ -78,7 +78,16 @@ function blockingAvailableRuntime(
     },
   };
   const capabilities = availableCapabilities();
-  return { capabilities, maximumConcurrentJobs: 1, pipeline };
+  return {
+    capabilities,
+    maximumConcurrentJobs: 1,
+    pipeline,
+    sourceProfile: {
+      analysisProfile: 'local_tutorial_evidence_v1',
+      formatVersion: '1.1.0',
+      sourceKind: 'user_supplied_local_file',
+    },
+  };
 }
 
 const analysisRequest = procedureTutorialMediaAnalysisRequestSchema.parse({
@@ -338,7 +347,7 @@ describe('tutorial media runtime integration', () => {
     }
   });
 
-  it('rejects legacy starts and fails closed for current sources before the legacy pipeline', async () => {
+  it('rejects legacy and current YouTube starts while accepting current local analysis', async () => {
     let closeCount = 0;
     let analyzeCount = 0;
     const runtime = await startRuntime({
@@ -377,38 +386,39 @@ describe('tutorial media runtime integration', () => {
         error: 'procedure_tutorial_media_source_not_supported',
         requestId: currentAnalysisRequest.requestId,
       });
-      const unsupportedLocal = await fetch(
-        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`,
-        { method: 'POST', headers, body: JSON.stringify(currentLocalAnalysisRequest) },
-      );
-      expect(unsupportedLocal.status).toBe(422);
-      await expect(unsupportedLocal.json()).resolves.toMatchObject({
-        error: 'procedure_tutorial_media_source_not_supported',
-        requestId: currentLocalAnalysisRequest.requestId,
+      const acceptedLocal = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(currentLocalAnalysisRequest),
       });
-      for (const currentRequest of [currentAnalysisRequest, currentLocalAnalysisRequest]) {
-        const mcpResponse = await mcpJson<{
-          result?: { isError?: boolean; content?: Array<{ text?: string }> };
-        }>(runtime.mcpEndpoint, accessToken, {
-          jsonrpc: '2.0',
-          id: currentRequest.requestId,
-          method: 'tools/call',
-          params: {
-            name: 'operatingline.procedure.tutorial.media.jobs.create',
-            arguments: currentRequest,
-          },
-        });
-        expect(mcpResponse.payload.result?.isError).toBe(true);
-        expect(JSON.parse(mcpResponse.payload.result?.content?.[0]?.text ?? '{}')).toMatchObject({
-          error: 'procedure_tutorial_media_source_not_supported',
-          requestId: currentRequest.requestId,
-        });
-      }
+      expect(acceptedLocal.status).toBe(202);
+      await expect(acceptedLocal.json()).resolves.toMatchObject({
+        formatVersion: '1.1.0',
+        requestId: currentLocalAnalysisRequest.requestId,
+        source: currentLocalAnalysisRequest.source,
+        status: 'accepted',
+      });
+      const mcpResponse = await mcpJson<{
+        result?: { isError?: boolean; content?: Array<{ text?: string }> };
+      }>(runtime.mcpEndpoint, accessToken, {
+        jsonrpc: '2.0',
+        id: currentAnalysisRequest.requestId,
+        method: 'tools/call',
+        params: {
+          name: 'operatingline.procedure.tutorial.media.jobs.create',
+          arguments: currentAnalysisRequest,
+        },
+      });
+      expect(mcpResponse.payload.result?.isError).toBe(true);
+      expect(JSON.parse(mcpResponse.payload.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        error: 'procedure_tutorial_media_source_not_supported',
+        requestId: currentAnalysisRequest.requestId,
+      });
     } finally {
       await runtime.stop();
     }
     expect(closeCount).toBe(1);
-    expect(analyzeCount).toBe(0);
+    expect(analyzeCount).toBe(1);
   });
 
   it('blocks YouTube authoring preparation when Phase 0 cannot complete a current analysis job', async () => {
@@ -499,10 +509,12 @@ describe('tutorial media runtime integration', () => {
         headers,
         body: JSON.stringify(currentLocalAnalysisRequest),
       });
-      expect(created.status).toBe(422);
+      expect(created.status).toBe(202);
       await expect(created.json()).resolves.toMatchObject({
-        error: 'procedure_tutorial_media_source_not_supported',
+        formatVersion: '1.1.0',
         requestId: currentLocalAnalysisRequest.requestId,
+        source: currentLocalAnalysisRequest.source,
+        status: 'accepted',
       });
 
       const prepareRequest = {
@@ -540,7 +552,7 @@ describe('tutorial media runtime integration', () => {
         error: 'procedure_tutorial_media_not_found',
         requestId: currentLocalAnalysisRequest.requestId,
       });
-      expect(analyzeCount).toBe(0);
+      expect(analyzeCount).toBe(1);
     } finally {
       await runtime.stop();
     }

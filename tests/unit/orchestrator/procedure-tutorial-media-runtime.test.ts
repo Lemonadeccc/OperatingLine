@@ -10,6 +10,7 @@ import {
   createProcedureTutorialMediaRuntime,
   createProcedureTutorialMediaRuntimeFromEnvironment,
 } from '../../../services/orchestrator/src/procedure-tutorial-media-runtime.js';
+import type { TutorialLocalMediaSource } from '../../../services/orchestrator/src/tutorial-local-media-source.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -216,7 +217,123 @@ function request(confirmedAt: string, startMs: number): ProcedureTutorialMediaAn
   };
 }
 
+function localRequest(contentSha256: string): ProcedureTutorialMediaAnalysisRequest {
+  return {
+    analysisProfile: 'local_tutorial_evidence_v1',
+    analysisWindow: { endMs: 1_000, startMs: 0 },
+    approvals: {
+      mediaDownloadApproved: false,
+      networkAccessApproved: false,
+      retentionApproved: true,
+    },
+    formatVersion: '1.1.0',
+    locale: 'en',
+    requestId: randomUUID(),
+    requestedStages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+    source: {
+      contentSha256,
+      importValidation: {
+        authorityContentSha256: '1'.repeat(64),
+        authorityId: 'local-import-authority-fixture',
+        authorityKind: 'local_import_authority',
+        receiptContentSha256: '2'.repeat(64),
+        sideEffect: 'local_media_import',
+      },
+      kind: 'user_supplied_local_file',
+      rightsBasis: 'rights_holder_permission',
+      rightsValidation: {
+        authorityContentSha256: '3'.repeat(64),
+        authorityId: 'local-rights-authority-fixture',
+        authorityKind: 'media_rights_authority',
+        receiptContentSha256: '4'.repeat(64),
+        sideEffect: 'rights_validation',
+      },
+      sourceIdentitySha256: '5'.repeat(64),
+    },
+  };
+}
+
 describe('procedure tutorial media runtime', () => {
+  it('reports current local capabilities when a local runtime configuration fails closed', async () => {
+    const localMediaSource: TutorialLocalMediaSource = {
+      async import() {
+        throw new Error('must not import');
+      },
+    };
+    const runtime = await createProcedureTutorialMediaRuntime({
+      localMediaSource,
+      ytDlpExecutable: `/private/sensitive/${randomUUID()}/yt-dlp`,
+    });
+    expect(runtime.capabilities).toMatchObject({
+      availability: 'unavailable',
+      formatVersion: '1.1.0',
+      unavailableReasons: ['not_configured'],
+    });
+  });
+
+  it('runs a trusted local-only pipeline without configuring or invoking yt-dlp', async () => {
+    const { config } = await fixture();
+    const media = Buffer.from('fixture-local-video');
+    const contentSha256 = createHash('sha256').update(media).digest('hex');
+    let importCount = 0;
+    const localMediaSource: TutorialLocalMediaSource = {
+      async import({ jobDirectory, request: analysisRequest }) {
+        importCount += 1;
+        const mediaPath = join(jobDirectory, 'trusted-local.mp4');
+        await writeFile(mediaPath, media, { mode: 0o600 });
+        return {
+          byteLength: media.byteLength,
+          caption: null,
+          contentSha256,
+          historicalValidationReceipts: [] as never,
+          liveValidationReceipts: [] as never,
+          mediaPath,
+          sourceIdentitySha256: analysisRequest.source.sourceIdentitySha256,
+        };
+      },
+    };
+    const runtime = await createProcedureTutorialMediaRuntime({
+      artifactBaseDirectory: config.artifactBaseDirectory,
+      ffmpegExecutable: config.ffmpegExecutable,
+      ffprobeExecutable: config.ffprobeExecutable,
+      localMediaSource,
+      maximumAnalysisWindowMs: config.maximumAnalysisWindowMs,
+      maximumConcurrentJobs: config.maximumConcurrentJobs,
+      maximumFrames: config.maximumFrames,
+      maximumJobRuntimeMs: config.maximumJobRuntimeMs,
+      supportedLocales: config.supportedLocales,
+      tesseractDataDirectory: config.tesseractDataDirectory,
+      tesseractExecutable: config.tesseractExecutable,
+      whisperExecutable: config.whisperExecutable,
+      whisperModelPath: config.whisperModelPath,
+    });
+    expect(runtime.capabilities).toMatchObject({
+      analysisProfiles: ['local_tutorial_evidence_v1'],
+      availability: 'available',
+      formatVersion: '1.1.0',
+      stages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+    });
+    if (runtime.capabilities.availability !== 'available') throw new Error('fixture unavailable');
+
+    try {
+      const result = await runtime.pipeline.analyze(localRequest(contentSha256), randomUUID());
+      expect(importCount).toBe(1);
+      expect(result.tools.map((tool) => tool.toolId)).toEqual([
+        'ffprobe',
+        'ffmpeg',
+        'whisper.cpp',
+        'tesseract',
+      ]);
+      expect(result.tools.some((tool) => tool.toolId === 'yt-dlp')).toBe(false);
+      expect(result).toMatchObject({
+        formatVersion: '1.1.0',
+        sideEffects: { mediaDownloaded: false, networkFetched: false },
+      });
+    } finally {
+      await runtime.pipeline.close();
+    }
+  }, 20_000);
+
   it('preflights trusted tools and reports limits that are used by the pipeline', async () => {
     const { config, confirmedAt } = await fixture();
     const runtime = await createProcedureTutorialMediaRuntime(config);
