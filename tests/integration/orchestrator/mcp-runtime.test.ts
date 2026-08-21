@@ -269,6 +269,15 @@ function companionHello(instanceId: string) {
   };
 }
 
+function companionHelloV11(instanceId: string) {
+  return {
+    ...companionHello(instanceId),
+    contractVersion: '1.1.0',
+    sessionId: randomUUID(),
+    documentIncarnationId: randomUUID(),
+  };
+}
+
 async function callMcpTool(
   runtime: RunningRuntime,
   id: number,
@@ -390,6 +399,8 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.blender.action.status' },
             { name: 'operatingline.blender.shortcut-proof.execute' },
             { name: 'operatingline.blender.shortcut-proof.status' },
+            { name: 'operatingline.blender.menu-control-proof.execute' },
+            { name: 'operatingline.blender.menu-control-proof.status' },
             { name: 'operatingline.procedure.tutorial.media.capabilities' },
             { name: 'operatingline.procedure.tutorial.media.jobs.create' },
             { name: 'operatingline.procedure.tutorial.media.jobs.status' },
@@ -422,6 +433,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.authoring.materialize' },
             { name: 'operatingline.procedure.replay.propose' },
             { name: 'operatingline.procedure.shortcut-proof.propose' },
+            { name: 'operatingline.procedure.menu-control-proof.propose' },
             { name: 'operatingline.procedure.replay.finalize' },
             { name: 'operatingline.procedure.replay.failure-recovery.finalize' },
             { name: 'operatingline.procedure.replay.current-state.request' },
@@ -590,7 +602,42 @@ describe('OperatingLine runtime', () => {
       });
       expect(
         toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.menu-control-proof.execute',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['formatVersion', 'requestId', 'replayId', 'expectedState'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.blender.menu-control-proof.status',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: ['requestId'],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
           (tool) => tool.name === 'operatingline.procedure.shortcut-proof.propose',
+        )?.inputSchema,
+      ).toMatchObject({
+        type: 'object',
+        required: [
+          'formatVersion',
+          'replayId',
+          'targetInstanceId',
+          'leafId',
+          'replayMode',
+          'packet',
+          'tree',
+        ],
+        additionalProperties: false,
+      });
+      expect(
+        toolsPayload.result?.tools?.find(
+          (tool) => tool.name === 'operatingline.procedure.menu-control-proof.propose',
         )?.inputSchema,
       ).toMatchObject({
         type: 'object',
@@ -4621,6 +4668,85 @@ describe('OperatingLine runtime', () => {
       });
       expect(downgrade.status).toBe(409);
       await expect(downgrade.json()).resolves.toMatchObject({ error: 'lease_not_current' });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('keeps menu-control proof authority out of MCP input and binds Companion polling to session 1.1 documents', async () => {
+    const runtime = await startRuntime({
+      databasePath: ':memory:',
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+    });
+    const instanceId = randomUUID();
+    const authHeaders = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+    try {
+      const injected = await callMcpTool(
+        runtime,
+        401,
+        'operatingline.blender.menu-control-proof.execute',
+        {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          replayId: randomUUID(),
+          expectedState: { reportId: randomUUID(), sequence: 1 },
+          leaseId: randomUUID(),
+          sessionId: randomUUID(),
+          documentIncarnationId: randomUUID(),
+        },
+      );
+      expect(injected.result?.isError).toBe(true);
+      expect(injected.result?.content?.[0]?.text).toContain('Input validation error');
+
+      const legacySessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(companionHello(instanceId)),
+      });
+      const legacySession = (await legacySessionResponse.json()) as { leaseId: string };
+      const pollUrl = new URL('/api/v1/companion/menu-control-proof', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', instanceId);
+      const legacyPoll = await fetch(pollUrl, {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'x-operatingline-companion-lease': legacySession.leaseId,
+        },
+      });
+      expect(legacyPoll.status).toBe(409);
+      await expect(legacyPoll.json()).resolves.toMatchObject({ error: 'lease_identity_mismatch' });
+
+      const helloV11 = companionHelloV11(instanceId);
+      const currentSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(helloV11),
+      });
+      expect(currentSessionResponse.status).toBe(200);
+      const currentSession = (await currentSessionResponse.json()) as { leaseId: string };
+      const emptyPoll = await fetch(pollUrl, {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'x-operatingline-companion-lease': currentSession.leaseId,
+        },
+      });
+      expect(emptyPoll.status).toBe(200);
+      await expect(emptyPoll.json()).resolves.toEqual({ request: null });
+
+      const forgedPollUrl = new URL(pollUrl);
+      forgedPollUrl.searchParams.set('instanceId', randomUUID());
+      const forgedPoll = await fetch(forgedPollUrl, {
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'x-operatingline-companion-lease': currentSession.leaseId,
+        },
+      });
+      expect(forgedPoll.status).toBe(409);
+      await expect(forgedPoll.json()).resolves.toMatchObject({ error: 'lease_identity_mismatch' });
     } finally {
       await runtime.stop();
     }

@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
   companionHeartbeatRequestSchema,
@@ -54,6 +55,13 @@ export interface ActiveCompanionDocumentSession {
   readonly lease: CompanionSessionHelloResponseV11;
 }
 
+export interface CompanionDocumentSessionIdentity {
+  readonly adapterId: string;
+  readonly instanceId: string;
+  readonly sessionId: string;
+  readonly documentIncarnationId: string;
+}
+
 interface CompanionLeaseRecord {
   readonly hello: CompanionSessionHelloRequest;
   readonly leaseId: string;
@@ -85,6 +93,15 @@ export interface CompanionLeaseManager {
     adapterId: string,
     instanceId: string,
   ): ActiveCompanionDocumentSession;
+  authorizeDocumentSessionForReceiptFingerprint(
+    sessionFingerprintSha256: string,
+    adapterId: string,
+    instanceId: string,
+  ): ActiveCompanionDocumentSession;
+  rememberDocumentSessionFingerprint(
+    sessionFingerprintSha256: string,
+    identity: CompanionDocumentSessionIdentity,
+  ): void;
   authorizeLegacy(adapterId: string, instanceId: string): void;
   observeLegacy(adapterId: string, instanceId: string): void;
   hasActivePresence(adapterId: string, instanceId: string): boolean;
@@ -92,6 +109,10 @@ export interface CompanionLeaseManager {
 
 function identityKey(adapterId: string, instanceId: string): string {
   return `${adapterId}\u0000${instanceId}`;
+}
+
+function leaseFingerprintSha256(leaseId: string): string {
+  return createHash('sha256').update(leaseId).digest('hex');
 }
 
 function positiveInteger(value: number, label: string): number {
@@ -151,6 +172,7 @@ export function createCompanionLeaseManager(
   const currentLeaseIdBySessionId = new Map<string, string>();
   const legacyPresenceExpiryByIdentity = new Map<string, number>();
   const negotiatedIdentityKeys = new Set<string>();
+  const documentSessionByLeaseFingerprint = new Map<string, CompanionDocumentSessionIdentity>();
 
   const removeLease = (leaseId: string): void => {
     const record = leasesById.get(leaseId);
@@ -342,6 +364,12 @@ export function createCompanionLeaseManager(
       currentLeaseIdByTarget.set(key, leaseId);
       if (isCompanionSessionV11(request)) {
         currentLeaseIdBySessionId.set(request.sessionId, leaseId);
+        documentSessionByLeaseFingerprint.set(leaseFingerprintSha256(leaseId), {
+          adapterId: request.adapterId,
+          instanceId: request.instanceId,
+          sessionId: request.sessionId,
+          documentIncarnationId: request.documentIncarnationId,
+        });
       }
       legacyPresenceExpiryByIdentity.delete(key);
       return responseFor(record);
@@ -414,6 +442,58 @@ export function createCompanionLeaseManager(
         throw new Error('Version 1.1 companion lease produced a mismatched response');
       }
       return { hello: record.hello, lease };
+    },
+
+    authorizeDocumentSessionForReceiptFingerprint(sessionFingerprintSha256, adapterId, instanceId) {
+      const remembered = documentSessionByLeaseFingerprint.get(sessionFingerprintSha256);
+      if (
+        remembered === undefined ||
+        remembered.adapterId !== adapterId ||
+        remembered.instanceId !== instanceId
+      ) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'Receipt fingerprint is not bound to a known version 1.1 Companion document session',
+          409,
+        );
+      }
+      pruneExpired();
+      const currentLeaseId = currentLeaseIdByTarget.get(identityKey(adapterId, instanceId));
+      if (currentLeaseId === undefined) {
+        throw new CompanionLeaseError(
+          'lease_not_current',
+          'The receipt-bound Companion document session is not currently connected',
+          409,
+        );
+      }
+      const current = currentRecord(currentLeaseId, adapterId, instanceId);
+      if (
+        !isCompanionSessionV11(current.hello) ||
+        current.hello.sessionId !== remembered.sessionId ||
+        current.hello.documentIncarnationId !== remembered.documentIncarnationId
+      ) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'The current Companion process or document differs from the receipt-bound session',
+          409,
+        );
+      }
+      const lease = responseFor(current);
+      if (!isCompanionSessionV11(lease)) {
+        throw new Error('Version 1.1 companion lease produced a mismatched response');
+      }
+      return { hello: current.hello, lease };
+    },
+
+    rememberDocumentSessionFingerprint(sessionFingerprintSha256, identity) {
+      if (!/^[a-f0-9]{64}$/.test(sessionFingerprintSha256)) {
+        throw new Error('Companion document-session fingerprint must be a SHA-256 digest');
+      }
+      const existing = documentSessionByLeaseFingerprint.get(sessionFingerprintSha256);
+      if (existing !== undefined && !isDeepStrictEqual(existing, identity)) {
+        throw new Error('Companion document-session fingerprint history conflicts');
+      }
+      documentSessionByLeaseFingerprint.set(sessionFingerprintSha256, identity);
     },
 
     authorizeLegacy(adapterId, instanceId) {

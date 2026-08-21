@@ -24,9 +24,13 @@ import {
   canonicalizeProtocolJsonValue,
   companionActionExecutionStatusSchema,
   companionActionPollDeliverySchema,
+  companionMenuControlProofPollDeliverySchema,
+  companionMenuControlProofProgressSchema,
+  companionMenuControlProofStatusSchema,
   companionShortcutProofPollDeliverySchema,
   companionShortcutProofStatusSchema,
   computeCompanionShortcutProofResultContentSha256,
+  computeCompanionMenuControlProofOperationReceiptContentSha256,
   computeCompanionShortcutProofTerminalMarkerContentSha256,
   computeProcedureShortcutProofAttestationContentSha256,
   computeProcedureShortcutProofNativeObservationContentSha256,
@@ -38,6 +42,7 @@ import {
   procedureLeafReplayFailureRecoveryFinalizeResultSchema,
   procedureLeafReplayFinalizeResultSchema,
   procedureLeafReplayProposalResultSchema,
+  procedureMenuControlProofProposalResultSchema,
   procedureShortcutProofProposalResultSchema,
   procedureAuthoringMaterializationResultSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
@@ -81,6 +86,15 @@ function blenderCompanionHello(instanceId: string) {
         persistentProjectState: 'native',
       },
     },
+  };
+}
+
+function blenderDocumentCompanionHello(instanceId: string) {
+  return {
+    ...blenderCompanionHello(instanceId),
+    contractVersion: '1.1.0',
+    sessionId: randomUUID(),
+    documentIncarnationId: randomUUID(),
   };
 }
 
@@ -384,6 +398,8 @@ function replayAuthoringCandidateFixture(
   packet: ProcedureAuthoringPromptPacket,
 ): Record<string, unknown> {
   const tree = authoringCandidateFixture(packet);
+  tree['id'] = packet.context.requestedTreeId;
+  tree['revision'] = packet.context.recommendedRevision;
   const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
     (node) => node['id'] === 'snowman.head.eyes.left',
   );
@@ -401,6 +417,162 @@ function replayAuthoringCandidateFixture(
     },
   ];
   return tree;
+}
+
+function menuControlProofAuthoringCandidateFixture(
+  packet: ProcedureAuthoringPromptPacket,
+): Record<string, unknown> {
+  const tree = authoringCandidateFixture(packet);
+  tree['id'] = packet.context.requestedTreeId;
+  tree['revision'] = packet.context.recommendedRevision;
+  const leaf = (tree['nodes'] as Array<Record<string, unknown>>).find(
+    (node) => node['id'] === 'snowman.head.eyes.left',
+  );
+  if (leaf === undefined) throw new Error('Expected one UV Sphere menu-control proof leaf');
+  leaf['action'] = {
+    adapterId: 'blender',
+    name: 'blender.mesh.create_uv_sphere',
+    arguments: {
+      resourceId: 'proof.uv_sphere.eye',
+      objectName: 'OperatingLine.TutorialEye',
+      radius: 1.5,
+      location: [1.25, -2, 0.75],
+    },
+  };
+  const nodes = tree['nodes'] as Array<Record<string, unknown>>;
+  const retainedIds = new Set<string>([String(leaf['id'])]);
+  let parentId = leaf['parentId'];
+  while (typeof parentId === 'string') {
+    retainedIds.add(parentId);
+    parentId = nodes.find((node) => node['id'] === parentId)?.['parentId'];
+  }
+  tree['nodes'] = nodes.filter((node) => retainedIds.has(String(node['id'])));
+  return tree;
+}
+
+async function preparePublicMenuControlProof(
+  runtime: RunningRuntime,
+  targetInstanceId: string,
+  treeId: string,
+  mcpId: number,
+  helloOverride?: ReturnType<typeof blenderCompanionHello>,
+) {
+  const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      targetAdapterId: 'blender',
+      actionCatalogVersion: blenderActionCatalog.catalogVersion,
+      interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+      goal: 'Create the exact tutorial eye UV sphere through native menu controls.',
+      treeId,
+      revision: 1,
+      locale: 'en',
+    }),
+  });
+  expect(promptResponse.status).toBe(200);
+  const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+  const replayId = randomUUID();
+  const proposedMcp = await callMcpTool(
+    runtime,
+    mcpId,
+    'operatingline.procedure.menu-control-proof.propose',
+    {
+      formatVersion: '1.0.0',
+      replayId,
+      targetInstanceId,
+      leafId: 'snowman.head.eyes.left',
+      replayMode: 'native_menu_control_proof',
+      packet,
+      tree: menuControlProofAuthoringCandidateFixture(packet),
+    },
+  );
+  expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+  const proposal = procedureMenuControlProofProposalResultSchema.parse(
+    proposedMcp.result?.structuredContent,
+  ).record.proposal;
+  const hello = helloOverride ?? blenderDocumentCompanionHello(targetInstanceId);
+  const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(hello),
+  });
+  expect(sessionResponse.status).toBe(200);
+  const session = (await sessionResponse.json()) as { leaseId: string };
+  const leaseHeaders = {
+    ...headers,
+    'x-operatingline-companion-lease': session.leaseId,
+  };
+  const decision = {
+    protocolVersion: guideProtocolVersion,
+    decisionId: randomUUID(),
+    proposalId: proposal.proposalId,
+    adapterId: 'blender',
+    instanceId: targetInstanceId,
+    decision: 'accepted',
+    occurredAt: new Date().toISOString(),
+  } as const;
+  const decisionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+    method: 'POST',
+    headers: leaseHeaders,
+    body: JSON.stringify(decision),
+  });
+  expect(decisionResponse.status).toBe(200);
+  await waitUntilAfter(decision.occurredAt);
+  const planContentSha256 = computePlanContentSha256(proposal.plan);
+  const executionId = randomUUID();
+  const occurredAt = new Date().toISOString();
+  const startReport = {
+    protocolVersion: guideProtocolVersion,
+    reportId: randomUUID(),
+    sequence: 1,
+    adapterId: 'blender',
+    instanceId: targetInstanceId,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3 LTS',
+    plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+    planContentSha256,
+    executionId,
+    phase: 'running',
+    activeStepId: null,
+    completedStepIds: [],
+    transition: 'walkthrough_started',
+    stepId: null,
+    observations: [],
+    observationGate: null,
+    artifactAttestation: null,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: randomUUID(),
+      previousCheckpointId: null,
+      operation: 'start',
+      committedAt: new Date(Date.parse(occurredAt) - 1).toISOString(),
+      marker: { key: '_operating_line_native_history_v1', matched: true },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        activeStepId: null,
+        completedStepIds: [],
+        receiptStepIds: [],
+      },
+    },
+    error: null,
+    occurredAt,
+  } as const;
+  const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+    method: 'POST',
+    headers: leaseHeaders,
+    body: JSON.stringify(startReport),
+  });
+  expect(stateResponse.status).toBe(200);
+  return { hello, leaseHeaders, replayId, startReport };
 }
 
 function icosphereAuthoringCandidateFixture(
@@ -7566,6 +7738,835 @@ describe('procedure compilation runtime', () => {
       }
     },
   );
+
+  it('runs the accepted UV Sphere menu-control proof through document-bound delivery and terminal evidence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-proof-'));
+    const databasePath = join(directory, 'state.db');
+    let runtime = await startRuntime({
+      databasePath,
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const promptResponse = await fetch(`${runtime.baseUrl}/api/v1/procedure/prompt`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Create the exact tutorial eye UV sphere through native menu controls.',
+          treeId: 'snowman.eye.left.procedure',
+          revision: 1,
+          locale: 'en',
+        }),
+      });
+      expect(promptResponse.status).toBe(200);
+      const packet = procedureAuthoringPromptPacketSchema.parse(await promptResponse.json());
+      const replayRequest = {
+        formatVersion: '1.0.0',
+        replayId: randomUUID(),
+        targetInstanceId,
+        leafId: 'snowman.head.eyes.left',
+        replayMode: 'native_menu_control_proof',
+        packet,
+        tree: menuControlProofAuthoringCandidateFixture(packet),
+      } as const;
+      const proposedMcp = await callMcpTool(
+        runtime,
+        9_050,
+        'operatingline.procedure.menu-control-proof.propose',
+        replayRequest,
+      );
+      expect(proposedMcp.result?.isError, proposedMcp.result?.content?.[0]?.text).not.toBe(true);
+      const proposed = procedureMenuControlProofProposalResultSchema.parse(
+        proposedMcp.result?.structuredContent,
+      );
+      expect(proposed).toMatchObject({
+        status: 'accepted',
+        record: {
+          replayId: replayRequest.replayId,
+          claims: {
+            approval: 'pending',
+            hostExecutionStarted: false,
+            managedActionResult: 'not_executed',
+            managedIdentityVerified: false,
+            managedReceiptCreated: false,
+          },
+          proofExecution: {
+            executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+            targetProfile: 'factory_layout_three_object_ui_scale_2',
+          },
+        },
+      });
+      const proposal = proposed.record.proposal;
+
+      const hello = blenderDocumentCompanionHello(targetInstanceId);
+      const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hello),
+      });
+      expect(sessionResponse.status).toBe(200);
+      let session = (await sessionResponse.json()) as { leaseId: string };
+      let leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+      const decision = {
+        protocolVersion: guideProtocolVersion,
+        decisionId: randomUUID(),
+        proposalId: proposal.proposalId,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        decision: 'accepted',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const decisionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        { method: 'POST', headers: leaseHeaders, body: JSON.stringify(decision) },
+      );
+      expect(decisionResponse.status).toBe(200);
+      await waitUntilAfter(decision.occurredAt);
+
+      const planContentSha256 = computePlanContentSha256(proposal.plan);
+      const executionId = randomUUID();
+      const startOccurredAt = new Date().toISOString();
+      const startReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: 1,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: new Date(Date.parse(startOccurredAt) - 1).toISOString(),
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+            planContentSha256,
+            executionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: startOccurredAt,
+      } as const;
+      const startStateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: leaseHeaders,
+        body: JSON.stringify(startReport),
+      });
+      expect(startStateResponse.status).toBe(200);
+
+      const preExecuteRotation = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hello),
+      });
+      expect(preExecuteRotation.status).toBe(200);
+      session = (await preExecuteRotation.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+
+      const executionRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: replayRequest.replayId,
+        expectedState: { reportId: startReport.reportId, sequence: startReport.sequence },
+      } as const;
+      const queuedMcp = await callMcpTool(
+        runtime,
+        9_051,
+        'operatingline.blender.menu-control-proof.execute',
+        executionRequest,
+      );
+      expect(queuedMcp.result?.isError, queuedMcp.result?.content?.[0]?.text).not.toBe(true);
+      expect(
+        companionMenuControlProofStatusSchema.parse(queuedMcp.result?.structuredContent),
+      ).toMatchObject({
+        requestId: executionRequest.requestId,
+        replayId: replayRequest.replayId,
+        status: 'queued',
+        targetProfile: 'factory_layout_three_object_ui_scale_2',
+        binding: {
+          acceptedDecision: { decisionId: decision.decisionId },
+          startState: executionRequest.expectedState,
+        },
+      });
+
+      const preDispatchRotation = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hello),
+      });
+      expect(preDispatchRotation.status).toBe(200);
+      session = (await preDispatchRotation.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+
+      const pollUrl = new URL('/api/v1/companion/menu-control-proof', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', targetInstanceId);
+      const deliveryResponse = await fetch(pollUrl, { headers: leaseHeaders });
+      expect(deliveryResponse.status).toBe(200);
+      const delivery = companionMenuControlProofPollDeliverySchema.parse(
+        await deliveryResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('Expected one menu-control proof delivery');
+      expect(delivery.lease).toMatchObject({
+        leaseId: session.leaseId,
+        sessionId: hello.sessionId,
+        documentIncarnationId: hello.documentIncarnationId,
+        target: { adapterId: 'blender', instanceId: targetInstanceId },
+      });
+
+      const postDispatchRotation = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hello),
+      });
+      expect(postDispatchRotation.status).toBe(200);
+      session = (await postDispatchRotation.json()) as { leaseId: string };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': session.leaseId,
+      };
+
+      const otherInstanceId = randomUUID();
+      const otherSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(blenderDocumentCompanionHello(otherInstanceId)),
+      });
+      const otherSession = (await otherSessionResponse.json()) as { leaseId: string };
+      const receiptContent = {
+        receiptId: randomUUID(),
+        proofId: delivery.proofId,
+        requestId: delivery.requestId,
+        deliveryId: delivery.deliveryId,
+        bindingContentSha256: delivery.bindingContentSha256,
+        operationId: 'workspace.layout',
+        order: 1,
+        previousReceiptContentSha256: null,
+        outcome: 'succeeded',
+        summary: { status: 'precondition_verified', path: ['Layout'] },
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const receipt = {
+        ...receiptContent,
+        contentSha256:
+          computeCompanionMenuControlProofOperationReceiptContentSha256(receiptContent),
+      };
+      const progress = {
+        ...delivery,
+        status: 'in_progress',
+        completedOperationIds: ['workspace.layout'],
+        operationReceipts: [receipt],
+        receiptChainHeadSha256: receipt.contentSha256,
+        nativeHistoryCursor: 0,
+        completedMutationStages: [],
+        occurredAt: new Date().toISOString(),
+      } as const;
+      companionMenuControlProofProgressSchema.parse(progress);
+      const progressResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-progress`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(progress),
+        },
+      );
+      const progressResponseBody = await progressResponse.json();
+      expect(progressResponse.status, JSON.stringify(progressResponseBody)).toBe(200);
+      expect(progressResponseBody).toEqual({ result: 'accepted' });
+
+      const baselineSceneFingerprintSha256 = createHash('sha256')
+        .update('menu-proof-baseline')
+        .digest('hex');
+      const failedRestored = {
+        ...delivery,
+        status: 'failed_restored',
+        managedActionResult: 'not_executed',
+        managedIdentityVerified: false,
+        managedReceiptCreated: false,
+        requiresUndoToUnlock: false,
+        terminalEvidence: {
+          kind: 'failed_restored',
+          receiptPrefix: [receipt],
+          lastCompletedOperationId: 'workspace.layout',
+          internalHistoryCursor: 0,
+          completedMutationStages: [],
+          baselineSceneFingerprintSha256,
+          currentSceneFingerprintSha256: baselineSceneFingerprintSha256,
+          automaticReplay: false,
+        },
+        error: 'Injected restored control failure.',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const forgedLeaseResult = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-result`,
+        {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'x-operatingline-companion-lease': otherSession.leaseId,
+          },
+          body: JSON.stringify(failedRestored),
+        },
+      );
+      expect(forgedLeaseResult.status).toBe(409);
+      await expect(forgedLeaseResult.json()).resolves.toMatchObject({
+        error: 'lease_identity_mismatch',
+      });
+
+      const resultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-result`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify(failedRestored),
+        },
+      );
+      expect(resultResponse.status).toBe(200);
+      await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      const terminalMcp = await callMcpTool(
+        runtime,
+        9_052,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: executionRequest.requestId },
+      );
+      expect(terminalMcp.result?.isError).not.toBe(true);
+      expect(
+        companionMenuControlProofStatusSchema.parse(terminalMcp.result?.structuredContent),
+      ).toMatchObject({
+        requestId: executionRequest.requestId,
+        status: 'failed_restored',
+        result: { error: 'Injected restored control failure.' },
+      });
+
+      const restartRequest = {
+        ...executionRequest,
+        requestId: randomUUID(),
+      };
+      const restartQueued = await callMcpTool(
+        runtime,
+        9_053,
+        'operatingline.blender.menu-control-proof.execute',
+        restartRequest,
+      );
+      expect(restartQueued.result?.isError, restartQueued.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+
+      const changedDocumentInstanceId = randomUUID();
+      const changedDocumentHello = {
+        ...hello,
+        instanceId: changedDocumentInstanceId,
+        documentIncarnationId: randomUUID(),
+      };
+      const changedDocumentSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(changedDocumentHello) },
+      );
+      const changedDocumentSession = (await changedDocumentSessionResponse.json()) as {
+        leaseId: string;
+      };
+      const changedDocumentPollUrl = new URL(
+        '/api/v1/companion/menu-control-proof',
+        runtime.baseUrl,
+      );
+      changedDocumentPollUrl.searchParams.set('adapterId', 'blender');
+      changedDocumentPollUrl.searchParams.set('instanceId', changedDocumentInstanceId);
+      const changedDocumentPoll = await fetch(changedDocumentPollUrl, {
+        headers: {
+          ...headers,
+          'x-operatingline-companion-lease': changedDocumentSession.leaseId,
+        },
+      });
+      expect(changedDocumentPoll.status).toBe(200);
+      await expect(changedDocumentPoll.json()).resolves.toEqual({ request: null });
+      const rejectedAuthority = await callMcpTool(
+        runtime,
+        9_054,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: restartRequest.requestId },
+      );
+      expect(
+        companionMenuControlProofStatusSchema.parse(rejectedAuthority.result?.structuredContent),
+      ).toMatchObject({
+        status: 'pre_dispatch_authority_expired',
+        preDispatchAuthorityExpiration: {
+          kind: 'document_authority_changed_before_dispatch',
+          priorStatus: 'queued',
+          automaticReplayAllowed: false,
+          retainsTargetLock: false,
+        },
+      });
+
+      const restoredDocumentSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(hello) },
+      );
+      const restoredDocumentSession = (await restoredDocumentSessionResponse.json()) as {
+        leaseId: string;
+      };
+      leaseHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': restoredDocumentSession.leaseId,
+      };
+      const recoveryRequest = { ...executionRequest, requestId: randomUUID() };
+      const recoveryQueued = await callMcpTool(
+        runtime,
+        9_055,
+        'operatingline.blender.menu-control-proof.execute',
+        recoveryRequest,
+      );
+      expect(recoveryQueued.result?.isError, recoveryQueued.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+      const restartDeliveryResponse = await fetch(pollUrl, { headers: leaseHeaders });
+      expect(restartDeliveryResponse.status).toBe(200);
+      expect(
+        companionMenuControlProofPollDeliverySchema.parse(await restartDeliveryResponse.json())
+          .request,
+      ).not.toBeNull();
+
+      const deliveredDocumentChangeResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ...hello, documentIncarnationId: randomUUID() }),
+        },
+      );
+      expect(deliveredDocumentChangeResponse.status).toBe(200);
+      const documentChangedPending = await callMcpTool(
+        runtime,
+        9_056,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: recoveryRequest.requestId },
+      );
+      expect(
+        companionMenuControlProofStatusSchema.parse(
+          documentChangedPending.result?.structuredContent,
+        ),
+      ).toMatchObject({
+        status: 'recovery_pending',
+        recovery: {
+          kind: 'document_authority_changed_after_delivery',
+          priorStatus: 'dispatched',
+          automaticReplayAllowed: false,
+          retainsTargetLock: true,
+        },
+      });
+
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      const recoveryPending = await callMcpTool(
+        runtime,
+        9_057,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: recoveryRequest.requestId },
+      );
+      expect(recoveryPending.result?.isError).not.toBe(true);
+      expect(
+        companionMenuControlProofStatusSchema.parse(recoveryPending.result?.structuredContent),
+      ).toMatchObject({
+        requestId: recoveryRequest.requestId,
+        status: 'recovery_pending',
+        recovery: {
+          kind: 'document_authority_changed_after_delivery',
+          priorStatus: 'dispatched',
+          requiresExplicitRecovery: true,
+          automaticReplayAllowed: false,
+          retainsTargetLock: true,
+        },
+      });
+
+      const restoredAfterRestartResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        { method: 'POST', headers, body: JSON.stringify(hello) },
+      );
+      const restoredAfterRestart = (await restoredAfterRestartResponse.json()) as {
+        leaseId: string;
+      };
+      const lockedExecute = await callMcpTool(
+        runtime,
+        9_058,
+        'operatingline.blender.menu-control-proof.execute',
+        { ...executionRequest, requestId: randomUUID() },
+      );
+      expect(lockedExecute.result?.isError).toBe(true);
+      expect(lockedExecute.result?.content?.[0]?.text).toContain('menu_control_proof_in_progress');
+      const restartedPollUrl = new URL('/api/v1/companion/menu-control-proof', runtime.baseUrl);
+      restartedPollUrl.searchParams.set('adapterId', 'blender');
+      restartedPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const recoveryPoll = await fetch(restartedPollUrl, {
+        headers: {
+          ...headers,
+          'x-operatingline-companion-lease': restoredAfterRestart.leaseId,
+        },
+      });
+      expect(recoveryPoll.status).toBe(200);
+      await expect(recoveryPoll.json()).resolves.toEqual({ request: null });
+
+      const replacementHello = blenderDocumentCompanionHello(targetInstanceId);
+      const replacementSessionResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/session`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(replacementHello),
+        },
+      );
+      expect(replacementSessionResponse.status).toBe(200);
+      const replacementSession = (await replacementSessionResponse.json()) as {
+        leaseId: string;
+      };
+      const crossedDocumentResult = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-result`,
+        {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'x-operatingline-companion-lease': replacementSession.leaseId,
+          },
+          body: JSON.stringify(failedRestored),
+        },
+      );
+      expect(crossedDocumentResult.status).toBe(409);
+      await expect(crossedDocumentResult.json()).resolves.toMatchObject({
+        error: 'menu_control_proof_delivery_lease_not_current',
+      });
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts all seven public menu-control progress prefixes and succeeded_locked evidence', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-success-'));
+    const databasePath = join(directory, 'state.db');
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const prepared = await preparePublicMenuControlProof(
+        runtime,
+        targetInstanceId,
+        `menu-proof-success-${randomUUID()}`,
+        9_100,
+      );
+      const request = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: prepared.replayId,
+        expectedState: {
+          reportId: prepared.startReport.reportId,
+          sequence: prepared.startReport.sequence,
+        },
+      } as const;
+      const queued = await callMcpTool(
+        runtime,
+        9_101,
+        'operatingline.blender.menu-control-proof.execute',
+        request,
+      );
+      expect(queued.result?.isError, queued.result?.content?.[0]?.text).not.toBe(true);
+      const pollUrl = new URL('/api/v1/companion/menu-control-proof', runtime.baseUrl);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', targetInstanceId);
+      const pollResponse = await fetch(pollUrl, { headers: prepared.leaseHeaders });
+      expect(pollResponse.status).toBe(200);
+      const delivery = companionMenuControlProofPollDeliverySchema.parse(
+        await pollResponse.json(),
+      ).request;
+      if (delivery === null) throw new Error('Expected menu-control proof delivery');
+
+      const operationSpecs = [
+        ['workspace.layout', { status: 'precondition_verified', path: ['Layout'] }],
+        ['menu.add', { status: 'control_executed', path: ['Layout', 'Add'] }],
+        ['menu.mesh', { status: 'control_executed', path: ['Layout', 'Add', 'Mesh'] }],
+        [
+          'operator.uv_sphere',
+          {
+            status: 'control_executed',
+            path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+            radius: 1,
+          },
+        ],
+        [
+          'control.location',
+          {
+            status: 'control_executed',
+            path: ['Sidebar', 'Item', 'Transform', 'Location'],
+            value: [1.25, -2, 0.75],
+          },
+        ],
+        [
+          'control.scale',
+          {
+            status: 'control_executed',
+            path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+            value: [1.5, 1.5, 1.5],
+          },
+        ],
+        [
+          'control.object_name',
+          {
+            status: 'control_executed',
+            path: ['Properties', 'Object', 'Name'],
+            value: 'OperatingLine.TutorialEye',
+          },
+        ],
+      ] as const;
+      const mutationStages = [
+        'uv_sphere_created',
+        'location_x_set',
+        'location_y_set',
+        'location_z_set',
+        'scale_x_set',
+        'scale_y_set',
+        'scale_z_set',
+        'object_name_set',
+      ] as const;
+      const mutationCounts = [0, 0, 0, 1, 4, 7, 8] as const;
+      const receipts: Array<Record<string, unknown> & { contentSha256: string }> = [];
+      let previousReceiptContentSha256: string | null = null;
+      await waitUntilAfter(delivery.dispatchedAt);
+      for (const [index, [operationId, summary]] of operationSpecs.entries()) {
+        const occurredAt = new Date().toISOString();
+        const receiptContent = {
+          receiptId: randomUUID(),
+          proofId: delivery.proofId,
+          requestId: delivery.requestId,
+          deliveryId: delivery.deliveryId,
+          bindingContentSha256: delivery.bindingContentSha256,
+          operationId,
+          order: index + 1,
+          previousReceiptContentSha256,
+          outcome: 'succeeded',
+          summary,
+          occurredAt,
+        } as const;
+        const receipt = {
+          ...receiptContent,
+          contentSha256:
+            computeCompanionMenuControlProofOperationReceiptContentSha256(receiptContent),
+        };
+        receipts.push(receipt);
+        previousReceiptContentSha256 = receipt.contentSha256;
+        const mutationCount = mutationCounts[index]!;
+        const progress = {
+          ...delivery,
+          status: 'in_progress',
+          completedOperationIds: operationSpecs
+            .slice(0, index + 1)
+            .map(([completedOperationId]) => completedOperationId),
+          operationReceipts: receipts,
+          receiptChainHeadSha256: receipt.contentSha256,
+          nativeHistoryCursor: mutationCount,
+          completedMutationStages: mutationStages.slice(0, mutationCount),
+          occurredAt,
+        } as const;
+        companionMenuControlProofProgressSchema.parse(progress);
+        const progressResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/menu-control-proof-progress`,
+          {
+            method: 'POST',
+            headers: prepared.leaseHeaders,
+            body: JSON.stringify(progress),
+          },
+        );
+        expect(progressResponse.status).toBe(200);
+        await expect(progressResponse.json()).resolves.toEqual({ result: 'accepted' });
+        await waitUntilAfter(occurredAt);
+      }
+
+      const protocolSha256 = (value: unknown) =>
+        createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
+      const observedAt = new Date().toISOString();
+      await waitUntilAfter(observedAt);
+      const observationContent = {
+        kind: 'uv_sphere_menu_controls_ready',
+        satisfied: true,
+        observationId: randomUUID(),
+        objectName: 'OperatingLine.TutorialEye',
+        objectType: 'MESH',
+        location: [1.25, -2, 0.75],
+        scale: [1.5, 1.5, 1.5],
+        meshTopology: { vertices: 482, edges: 992, polygons: 512 },
+        meshSha256: protocolSha256('menu-proof-mesh'),
+        sceneFingerprintSha256: protocolSha256('menu-proof-final-scene'),
+        observedAt,
+      } as const;
+      const strongObservation = {
+        ...observationContent,
+        contentSha256: protocolSha256(observationContent),
+      } as const;
+      const committedAt = new Date().toISOString();
+      await waitUntilAfter(committedAt);
+      const succeeded = {
+        ...delivery,
+        status: 'succeeded',
+        managedActionResult: 'not_executed',
+        managedIdentityVerified: false,
+        managedReceiptCreated: false,
+        requiresUndoToUnlock: true,
+        terminalEvidence: {
+          kind: 'succeeded_locked',
+          operationSummaries: receipts.map((receipt) => ({
+            operationId: receipt['operationId'],
+            summaryContentSha256: protocolSha256(receipt['summary']),
+          })),
+          operationReceipts: receipts,
+          strongObservation,
+          nativeUndoCheckpoint: {
+            checkpointId: randomUUID(),
+            undoLockId: randomUUID(),
+            nativeUndoDepth: 8,
+            nativeHistoryCursor: 8,
+            mutationStages,
+            baselineSceneFingerprintSha256: protocolSha256('menu-proof-baseline-scene'),
+            finalSceneFingerprintSha256: strongObservation.sceneFingerprintSha256,
+            restoredSceneFingerprintSha256: protocolSha256('menu-proof-baseline-scene'),
+            reappliedSceneFingerprintSha256: strongObservation.sceneFingerprintSha256,
+            receiptChainRootSha256: receipts[0]!.contentSha256,
+            receiptChainHeadSha256: receipts.at(-1)!.contentSha256,
+            strongObservationContentSha256: strongObservation.contentSha256,
+            committedAt,
+          },
+        },
+        error: null,
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const resultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-result`,
+        {
+          method: 'POST',
+          headers: prepared.leaseHeaders,
+          body: JSON.stringify(succeeded),
+        },
+      );
+      const resultBody = await resultResponse.json();
+      expect(resultResponse.status, JSON.stringify(resultBody)).toBe(200);
+      expect(resultBody).toEqual({ result: 'accepted' });
+      const status = await callMcpTool(
+        runtime,
+        9_102,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: request.requestId },
+      );
+      expect(
+        companionMenuControlProofStatusSchema.parse(status.result?.structuredContent),
+      ).toMatchObject({
+        status: 'succeeded',
+        result: { terminalEvidence: { kind: 'succeeded_locked' } },
+      });
+      const competing = await callMcpTool(
+        runtime,
+        9_103,
+        'operatingline.blender.menu-control-proof.execute',
+        { ...request, requestId: randomUUID() },
+      );
+      expect(competing.result?.isError).toBe(true);
+      expect(competing.result?.content?.[0]?.text).toContain('menu_control_proof_in_progress');
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects legacy Companion menu-control execution before it can be queued', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-legacy-'));
+    const runtime = await startRuntime({
+      databasePath: join(directory, 'state.db'),
+      accessToken,
+      actionCatalogs: blenderActionCatalogs,
+      interactionCatalogs: blenderInteractionCatalogs,
+    });
+    try {
+      const targetInstanceId = randomUUID();
+      const prepared = await preparePublicMenuControlProof(
+        runtime,
+        targetInstanceId,
+        `menu-proof-legacy-${randomUUID()}`,
+        9_110,
+        blenderCompanionHello(targetInstanceId),
+      );
+      const request = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        replayId: prepared.replayId,
+        expectedState: {
+          reportId: prepared.startReport.reportId,
+          sequence: prepared.startReport.sequence,
+        },
+      } as const;
+      const rejected = await callMcpTool(
+        runtime,
+        9_111,
+        'operatingline.blender.menu-control-proof.execute',
+        request,
+      );
+      expect(rejected.result?.isError).toBe(true);
+      expect(rejected.result?.content?.[0]?.text).toContain(
+        'menu_control_proof_document_session_not_current',
+      );
+      const status = await callMcpTool(
+        runtime,
+        9_112,
+        'operatingline.blender.menu-control-proof.status',
+        { requestId: request.requestId },
+      );
+      expect(status.result?.isError).toBe(true);
+      expect(status.result?.content?.[0]?.text).toContain('menu_control_proof_not_found');
+    } finally {
+      await runtime.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 
   it('runs the accepted native shortcut proof through receipt progress, Undo, and Redo', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-shortcut-proof-'));

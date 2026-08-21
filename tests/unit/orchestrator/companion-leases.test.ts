@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { blenderActionCatalog } from '@operatingline/blender-action-catalog';
 import { CompanionLeaseError, createCompanionLeaseManager } from '@operatingline/orchestrator';
@@ -71,6 +71,10 @@ function expectConflict(action: () => unknown, code: CompanionLeaseError['code']
     expect(error).toBeInstanceOf(CompanionLeaseError);
     expect(error).toMatchObject({ code, statusCode: 409 });
   }
+}
+
+function fingerprint(leaseId: string): string {
+  return createHash('sha256').update(leaseId).digest('hex');
 }
 
 describe('companion lease manager', () => {
@@ -165,6 +169,66 @@ describe('companion lease manager', () => {
       sessionId: request.sessionId,
       documentIncarnationId: request.documentIncarnationId,
     });
+  });
+
+  it('resolves receipt fingerprints across same-document lease rotation and rejects document drift', () => {
+    const manager = createCompanionLeaseManager();
+    const request = helloV11();
+    const first = manager.establish(request, blenderActionCatalog);
+    const firstFingerprint = fingerprint(first.leaseId);
+    const rotated = manager.establish(request, blenderActionCatalog);
+
+    expect(
+      manager.authorizeDocumentSessionForReceiptFingerprint(
+        firstFingerprint,
+        'blender',
+        request.instanceId,
+      ),
+    ).toMatchObject({
+      hello: {
+        sessionId: request.sessionId,
+        documentIncarnationId: request.documentIncarnationId,
+      },
+      lease: { leaseId: rotated.leaseId },
+    });
+
+    const replacementDocument = helloV11({
+      instanceId: request.instanceId,
+      sessionId: request.sessionId,
+    });
+    manager.establish(replacementDocument, blenderActionCatalog);
+    expectConflict(
+      () =>
+        manager.authorizeDocumentSessionForReceiptFingerprint(
+          firstFingerprint,
+          'blender',
+          request.instanceId,
+        ),
+      'lease_identity_mismatch',
+    );
+  });
+
+  it('restores persisted document-session fingerprint history without restoring a lease', () => {
+    const first = createCompanionLeaseManager();
+    const request = helloV11();
+    const oldLease = first.establish(request, blenderActionCatalog);
+    const receiptFingerprint = fingerprint(oldLease.leaseId);
+
+    const restarted = createCompanionLeaseManager();
+    restarted.rememberDocumentSessionFingerprint(receiptFingerprint, {
+      adapterId: request.adapterId,
+      instanceId: request.instanceId,
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+    });
+    const currentLease = restarted.establish(request, blenderActionCatalog);
+    expect(
+      restarted.authorizeDocumentSessionForReceiptFingerprint(
+        receiptFingerprint,
+        'blender',
+        request.instanceId,
+      ),
+    ).toMatchObject({ lease: { leaseId: currentLease.leaseId }, hello: request });
   });
 
   it('supersedes by session across target and document rotation and cleans both indexes', () => {

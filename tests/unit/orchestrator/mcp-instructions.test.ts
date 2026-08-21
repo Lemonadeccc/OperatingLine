@@ -91,6 +91,19 @@ describe('OperatingLine MCP instructions', () => {
     );
     expect(operatingLineMcpInstructions).toContain('native Redo reports reapplied_locked');
     expect(operatingLineMcpInstructions).toContain(
+      'operatingline.procedure.menu-control-proof.propose',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.blender.menu-control-proof.execute',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'operatingline.blender.menu-control-proof.status',
+    );
+    expect(operatingLineMcpInstructions).toContain(
+      'version 1.1 process session and document incarnation',
+    );
+    expect(operatingLineMcpInstructions).toContain('pre_dispatch_authority_expired');
+    expect(operatingLineMcpInstructions).toContain(
       'a failure checkpoint never becomes success evidence',
     );
     expect(operatingLineMcpInstructions).not.toContain('the MCP track remains unavailable');

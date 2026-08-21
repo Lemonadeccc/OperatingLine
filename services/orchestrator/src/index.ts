@@ -26,6 +26,15 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionMenuControlProofCreateRequestSchema,
+  companionMenuControlProofPollDeliverySchema,
+  companionMenuControlProofPollRequestSchema,
+  companionMenuControlProofProgressAckSchema,
+  companionMenuControlProofProgressSchema,
+  companionMenuControlProofResultAckSchema,
+  companionMenuControlProofResultSchema,
+  companionMenuControlProofStatusRequestSchema,
+  companionMenuControlProofStatusSchema,
   companionShortcutProofCreateRequestSchema,
   companionShortcutProofPollDeliverySchema,
   companionShortcutProofPollRequestSchema,
@@ -54,6 +63,7 @@ import {
   guideProposalSchema,
   guideProposalSubmissionSchema,
   guideProtocolVersion,
+  isCompanionSessionV11,
   guideReplanSubmissionSchema,
   guideRevisionRequestListSchema,
   guideRevisionRequestSchema,
@@ -117,6 +127,9 @@ import {
   procedureOperationSearchHitSchema,
   procedureOperationSearchRequestSchema,
   procedureOperationSearchResultSchema,
+  procedureMenuControlProofProposalRequestSchema,
+  procedureMenuControlProofProposalRecordSchema,
+  procedureMenuControlProofProposalResultSchema,
   procedureSemanticRetrievalProviderDisclosureListSchema,
   procedureSemanticRetrievalRequestSchema,
   procedureSemanticRetrievalResultSchema,
@@ -174,6 +187,8 @@ import {
   type CompanionActionExecutionCreateRequest,
   type CompanionActionExecutionResult,
   type CompanionActionExecutionStatus,
+  type CompanionMenuControlProofCreateRequest,
+  type CompanionMenuControlProofStatus,
   type CompanionShortcutProofCreateRequest,
   type CompanionShortcutProofStatus,
   type CompanionStateReport,
@@ -198,6 +213,10 @@ import {
   createBlenderActionExecutionCoordinator,
 } from './blender-action-execution.js';
 import {
+  BlenderMenuControlProofExecutionError,
+  createBlenderMenuControlProofExecutionCoordinator,
+} from './blender-menu-control-proof-execution.js';
+import {
   BlenderShortcutProofExecutionError,
   createBlenderShortcutProofExecutionCoordinator,
 } from './blender-shortcut-proof-execution.js';
@@ -214,6 +233,7 @@ import { AuthorityVerifier, type AuthorityTrustSource } from './authority-verifi
 import {
   CompanionLeaseError,
   createCompanionLeaseManager,
+  type ActiveCompanionDocumentSession,
   type CompanionLeaseManagerOptions,
 } from './companion-leases.js';
 import { operatingLineMcpInstructions } from './mcp-instructions.js';
@@ -286,6 +306,13 @@ import {
   sameProcedureLeafReplayValue,
   validateStrongProcedureLeafReplayObservation,
 } from './procedure-replay.js';
+import {
+  buildProcedureMenuControlProofBinding,
+  buildProcedureMenuControlProofProposalRecord,
+  prepareProcedureMenuControlProofProposal,
+  ProcedureMenuControlProofError,
+  sameProcedureMenuControlProofValue,
+} from './procedure-menu-control-proof.js';
 import {
   buildProcedureShortcutProofBinding,
   buildProcedureShortcutProofProposalRecord,
@@ -401,6 +428,45 @@ export interface RunningRuntime {
 }
 
 export const runtimeVersion = '0.1.0';
+const companionDocumentSessionFingerprintEventType = 'companion.document-session-fingerprint.bound';
+const companionDocumentSessionFingerprintEventSchema = z.strictObject({
+  formatVersion: z.literal('1.0.0'),
+  leaseFingerprintSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  adapterId: z.literal('blender'),
+  instanceId: z.uuid(),
+  sessionId: z.uuid(),
+  documentIncarnationId: z.uuid(),
+});
+
+function menuDocumentAuthoritySha256(input: {
+  readonly adapterId: 'blender';
+  readonly instanceId: string;
+  readonly sessionId: string;
+  readonly documentIncarnationId: string;
+}): string {
+  return createHash('sha256')
+    .update('operatingline:blender-menu-control-proof-document-authority:v1\0')
+    .update(input.adapterId)
+    .update('\0')
+    .update(input.instanceId)
+    .update('\0')
+    .update(input.sessionId)
+    .update('\0')
+    .update(input.documentIncarnationId)
+    .digest('hex');
+}
+
+function menuSessionAuthoritySha256(input: {
+  readonly adapterId: 'blender';
+  readonly sessionId: string;
+}): string {
+  return createHash('sha256')
+    .update('operatingline:blender-menu-control-proof-session-authority:v1\0')
+    .update(input.adapterId)
+    .update('\0')
+    .update(input.sessionId)
+    .digest('hex');
+}
 
 function requestIdFromUnknown(input: unknown): string | null {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return null;
@@ -607,6 +673,25 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         },
       });
       databaseForCleanup = database;
+      for (const event of database.listExecutionEventsByTypes([
+        companionDocumentSessionFingerprintEventType,
+      ])) {
+        const remembered = companionDocumentSessionFingerprintEventSchema.parse(event.payload);
+        if (
+          event.id !== `companion-document-session-fingerprint:${remembered.leaseFingerprintSha256}`
+        ) {
+          throw new Error('Persisted Companion document-session fingerprint event id conflicts');
+        }
+        companionLeaseManager.rememberDocumentSessionFingerprint(
+          remembered.leaseFingerprintSha256,
+          {
+            adapterId: remembered.adapterId,
+            instanceId: remembered.instanceId,
+            sessionId: remembered.sessionId,
+            documentIncarnationId: remembered.documentIncarnationId,
+          },
+        );
+      }
       retireLegacyCompanionInitialPlanRuns(database);
       retireLegacyCompanionDialogueRuns(database);
       const procedureLeafReplayCurrentStateCoordinator =
@@ -2417,6 +2502,100 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
+    const proposeProcedureMenuControlProof = (
+      request: ReturnType<typeof procedureMenuControlProofProposalRequestSchema.parse>,
+    ) => {
+      const existingPayload = database.getProcedureLeafReplay(request.replayId);
+      if (existingPayload !== null) {
+        const parsedExisting =
+          procedureMenuControlProofProposalRecordSchema.safeParse(existingPayload);
+        if (!parsedExisting.success) {
+          throw new ProcedureMenuControlProofError(
+            `Replay id ${request.replayId} is already bound to a different replay mode`,
+            409,
+          );
+        }
+        const existing = parsedExisting.data;
+        if (!sameProcedureMenuControlProofValue(existing.request, request)) {
+          throw new ProcedureMenuControlProofError(
+            `Replay id ${request.replayId} is already bound to different input`,
+            409,
+          );
+        }
+        return procedureMenuControlProofProposalResultSchema.parse({
+          status: 'duplicate',
+          record: existing,
+        });
+      }
+
+      const materialization = materializeProcedureAuthoring({
+        packet: request.packet,
+        tree: request.tree,
+      });
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: materialization.catalogBinding.adapterId,
+        catalogVersion: materialization.catalogBinding.actionCatalogVersion,
+      });
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: materialization.catalogBinding.adapterId,
+        actionCatalogVersion: materialization.catalogBinding.actionCatalogVersion,
+        interactionCatalogVersion: materialization.catalogBinding.interactionCatalogVersion,
+      });
+      const prepared = prepareProcedureMenuControlProofProposal(
+        request,
+        materialization,
+        actionCatalog,
+        interactionCatalog,
+      );
+      let record: ReturnType<typeof buildProcedureMenuControlProofProposalRecord> | undefined;
+      let persistenceResult: 'accepted' | 'duplicate' | undefined;
+      createProposalCore({
+        targetAdapterId: actionCatalog.adapterId,
+        targetInstanceId: request.targetInstanceId,
+        catalogVersion: actionCatalog.catalogVersion,
+        plan: materialization.compilation.plan,
+        planning: prepared.planning,
+        persistProposal: (proposal) => {
+          const candidateRecord = buildProcedureMenuControlProofProposalRecord({
+            recordId: randomUUID(),
+            request,
+            materialization,
+            proposal,
+            actionCatalog,
+            interactionCatalog,
+            createdAt: proposal.proposedAt,
+          });
+          const result = database.recordProcedureLeafReplayProposal(proposal, {
+            replayId: candidateRecord.replayId,
+            proposalId: candidateRecord.proposal.proposalId,
+            treeId: candidateRecord.materialization.tree.id,
+            treeRevision: candidateRecord.materialization.tree.revision,
+            leafId: candidateRecord.leafId,
+            adapterId: candidateRecord.materialization.tree.adapterId,
+            instanceId: candidateRecord.request.targetInstanceId,
+            bindingContentSha256: candidateRecord.integrity.contentSha256,
+            payload: candidateRecord,
+            createdAt: candidateRecord.createdAt,
+          });
+          if (result === 'conflict') {
+            throw new ProcedureMenuControlProofError(
+              'Menu-control proof proposal conflicts with an existing proposal or replay binding',
+              409,
+            );
+          }
+          record = candidateRecord;
+          persistenceResult = result;
+        },
+      });
+      if (record === undefined || persistenceResult === undefined) {
+        throw new Error('Menu-control proof proposal persistence did not return a record');
+      }
+      return procedureMenuControlProofProposalResultSchema.parse({
+        status: persistenceResult,
+        record,
+      });
+    };
+
     const loadProcedureLeafReplayEvidence = (replayId: string) => {
       const bindingPayload = database.getProcedureLeafReplay(replayId);
       if (bindingPayload === null) {
@@ -2508,6 +2687,61 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       if (proposalReceipt === null || decisionReceipt === null) {
         throw new ProcedureShortcutProofError(
           'Shortcut proof evidence lacks its proposal or decision receipt',
+          409,
+        );
+      }
+      return { record, decision, proposalReceipt, decisionReceipt };
+    };
+
+    const loadProcedureMenuControlProofEvidence = (replayId: string) => {
+      const recordPayload = database.getProcedureLeafReplay(replayId);
+      if (recordPayload === null) {
+        throw new ProcedureMenuControlProofError(
+          `Unknown menu-control proof replay: ${replayId}`,
+          404,
+        );
+      }
+      const parsedRecord = procedureMenuControlProofProposalRecordSchema.safeParse(recordPayload);
+      if (!parsedRecord.success) {
+        throw new ProcedureMenuControlProofError(
+          'Stored replay is not a native menu-control proof proposal record',
+          409,
+        );
+      }
+      const record = parsedRecord.data;
+      const proposalPayload = database.getGuideProposal(record.proposal.proposalId);
+      if (
+        proposalPayload === null ||
+        !sameProcedureMenuControlProofValue(proposalPayload, record.proposal)
+      ) {
+        throw new ProcedureMenuControlProofError(
+          'Stored menu-control proof proposal is missing or differs from its immutable record',
+          409,
+        );
+      }
+      const decisionPayload = database.getGuideProposalDecision(
+        record.proposal.proposalId,
+        record.proposal.targetAdapterId,
+        record.request.targetInstanceId,
+      );
+      if (decisionPayload === null) {
+        throw new ProcedureMenuControlProofError(
+          'Menu-control proof proposal has no persisted decision for the target instance',
+          409,
+        );
+      }
+      const decision = guideProposalDecisionSchema.parse(decisionPayload);
+      const proposalReceipt = database.getManagedReplayReceipt(
+        'replay_proposal',
+        record.proposal.proposalId,
+      );
+      const decisionReceipt = database.getManagedReplayReceipt(
+        'guide_proposal_decision',
+        decision.decisionId,
+      );
+      if (proposalReceipt === null || decisionReceipt === null) {
+        throw new ProcedureMenuControlProofError(
+          'Menu-control proof evidence lacks its proposal or decision receipt',
           409,
         );
       }
@@ -2710,6 +2944,59 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       database,
       externalHistoryLockOwner: compoundHistoryLockOwner,
     });
+    const menuControlProofExecutionCoordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: (adapterId, instanceId) => {
+        const compoundOwner = compoundHistoryLockOwner(adapterId, instanceId);
+        if (compoundOwner !== null) return compoundOwner;
+        if (actionExecutionCoordinator.ownsTarget(adapterId, instanceId)) {
+          return 'blender.action';
+        }
+        if (shortcutProofExecutionCoordinator.ownsTarget(adapterId, instanceId)) {
+          return 'blender.shortcut-proof';
+        }
+        return null;
+      },
+    });
+
+    const menuControlProofExecutionRejected = (
+      message: string,
+      statusCode: number = 409,
+      code = 'menu_control_proof_not_authorized',
+    ): never => {
+      throw new BlenderMenuControlProofExecutionError(code, statusCode, message);
+    };
+
+    const menuDocumentAuthorityFor = (session: ActiveCompanionDocumentSession): string =>
+      menuDocumentAuthoritySha256({
+        adapterId: 'blender',
+        instanceId: session.hello.instanceId,
+        sessionId: session.hello.sessionId,
+        documentIncarnationId: session.hello.documentIncarnationId,
+      });
+
+    const requireExactMenuDeliveryLease = (
+      session: ActiveCompanionDocumentSession,
+      evidenceLease: {
+        readonly leaseId: string;
+        readonly sessionId: string;
+        readonly target: { readonly adapterId: 'blender'; readonly instanceId: string };
+        readonly documentIncarnationId: string;
+      },
+    ): void => {
+      if (
+        evidenceLease.sessionId !== session.hello.sessionId ||
+        evidenceLease.target.adapterId !== session.hello.adapterId ||
+        evidenceLease.target.instanceId !== session.hello.instanceId ||
+        evidenceLease.documentIncarnationId !== session.hello.documentIncarnationId
+      ) {
+        return menuControlProofExecutionRejected(
+          'Menu-control proof evidence lease differs from the current authoritative delivery lease',
+          409,
+          'menu_control_proof_delivery_lease_not_current',
+        );
+      }
+    };
 
     const shortcutProofExecutionRejected = (
       message: string,
@@ -2942,6 +3229,172 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           updatedAt: requestedAt,
         }),
         sessionFingerprintSha256: decisionReceipt.sessionFingerprintSha256,
+      };
+    };
+
+    const authorizeBlenderMenuControlProofExecution = (
+      request: CompanionMenuControlProofCreateRequest,
+    ): {
+      execution: CompanionMenuControlProofStatus;
+      documentAuthoritySha256: string;
+      sessionAuthoritySha256: string;
+    } => {
+      const { record, decision, proposalReceipt, decisionReceipt } =
+        loadProcedureMenuControlProofEvidence(request.replayId);
+      if (decision.decision !== 'accepted') {
+        return menuControlProofExecutionRejected(
+          'The menu-control proof proposal was not accepted by the target user',
+        );
+      }
+      if (
+        record.proposal.targetAdapterId !== 'blender' ||
+        record.proposal.targetInstanceId !== record.request.targetInstanceId ||
+        decision.adapterId !== 'blender' ||
+        decision.instanceId !== record.request.targetInstanceId ||
+        decision.proposalId !== record.proposal.proposalId
+      ) {
+        return menuControlProofExecutionRejected(
+          'Menu-control proof proposal, decision, and target identities differ',
+        );
+      }
+      if (
+        proposalReceipt.subjectType !== 'replay_proposal' ||
+        proposalReceipt.subjectId !== record.proposal.proposalId ||
+        proposalReceipt.authentication !== 'orchestrator_internal' ||
+        proposalReceipt.adapterId !== 'blender' ||
+        proposalReceipt.instanceId !== record.request.targetInstanceId ||
+        proposalReceipt.sessionFingerprintSha256 !== null ||
+        decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+        decisionReceipt.subjectId !== decision.decisionId ||
+        decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+        decisionReceipt.adapterId !== 'blender' ||
+        decisionReceipt.instanceId !== record.request.targetInstanceId ||
+        decisionReceipt.sessionFingerprintSha256 === null
+      ) {
+        return menuControlProofExecutionRejected(
+          'The accepted menu-control proof lacks a negotiated Companion session receipt',
+        );
+      }
+
+      const latest = listCompanionStates().find(
+        (report) =>
+          report.adapterId === 'blender' && report.instanceId === record.request.targetInstanceId,
+      );
+      if (latest === undefined) {
+        return menuControlProofExecutionRejected(
+          'The accepted target Companion is not currently present',
+          409,
+          'menu_control_proof_companion_unavailable',
+        );
+      }
+      if (
+        latest.reportId !== request.expectedState.reportId ||
+        latest.sequence !== request.expectedState.sequence
+      ) {
+        return menuControlProofExecutionRejected(
+          'The expected Companion state is stale; refresh companions and retry with a new requestId',
+          409,
+          'menu_control_proof_execution_state_changed',
+        );
+      }
+      const reportReceipt = database.getManagedReplayReceipt(
+        'companion_state_report',
+        latest.reportId,
+      );
+      if (
+        reportReceipt === null ||
+        reportReceipt.subjectType !== 'companion_state_report' ||
+        reportReceipt.subjectId !== latest.reportId ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== 'blender' ||
+        reportReceipt.instanceId !== record.request.targetInstanceId ||
+        reportReceipt.sessionFingerprintSha256 !== decisionReceipt.sessionFingerprintSha256 ||
+        proposalReceipt.sequence >= decisionReceipt.sequence ||
+        decisionReceipt.sequence >= reportReceipt.sequence ||
+        Date.parse(proposalReceipt.receivedAt) > Date.parse(decisionReceipt.receivedAt) ||
+        Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt) ||
+        Date.parse(decision.occurredAt) > Date.parse(latest.occurredAt)
+      ) {
+        return menuControlProofExecutionRejected(
+          'The expected Companion state is not an ordered receipt after menu-control proof acceptance',
+          409,
+          'menu_control_proof_evidence_order_invalid',
+        );
+      }
+      let currentDocumentSession;
+      try {
+        currentDocumentSession =
+          companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+            decisionReceipt.sessionFingerprintSha256,
+            'blender',
+            record.request.targetInstanceId,
+          );
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return menuControlProofExecutionRejected(
+            'The accepted receipts are not bound to the current version 1.1 Companion process and document',
+            409,
+            'menu_control_proof_document_session_not_current',
+          );
+        }
+        throw error;
+      }
+
+      const requestedAt = new Date().toISOString();
+      const binding = buildProcedureMenuControlProofBinding({
+        bindingId: randomUUID(),
+        proofId: randomUUID(),
+        requestId: request.requestId,
+        record,
+        decision,
+        currentState: latest,
+        createdAt: requestedAt,
+      });
+      return {
+        execution: companionMenuControlProofStatusSchema.parse({
+          formatVersion: request.formatVersion,
+          requestId: request.requestId,
+          replayId: request.replayId,
+          proofId: binding.proofId,
+          target: binding.target,
+          targetProfile: binding.targetProfile,
+          proposalId: binding.proposalId,
+          proposalRecordContentSha256: binding.proposalRecordContentSha256,
+          proposalContentSha256: binding.proposalContentSha256,
+          plan: binding.plan,
+          executionId: binding.executionId,
+          leafId: binding.leafId,
+          packetContentSha256: binding.packetContentSha256,
+          inputTreeContentSha256: binding.inputTreeContentSha256,
+          outputTreeContentSha256: binding.outputTreeContentSha256,
+          materializationContentSha256: binding.materializationContentSha256,
+          interactionCatalogVersion: binding.materialization.interactionCatalogVersion,
+          interactionCatalogContentSha256: binding.materialization.interactionCatalogContentSha256,
+          menuTrackContentSha256: binding.materialization.menuTrackContentSha256,
+          bindingContentSha256: binding.integrity.contentSha256,
+          binding,
+          executorId: binding.executorId,
+          executionBoundary: binding.executionBoundary,
+          authorization: binding.authorization,
+          transport: binding.transport,
+          operationIds: binding.operationIds,
+          nativeUndoDepth: binding.nativeUndoDepth,
+          expectedState: request.expectedState,
+          startCheckpoint: binding.startState,
+          requestedAt,
+          status: 'queued',
+          updatedAt: requestedAt,
+        }),
+        documentAuthoritySha256: menuDocumentAuthoritySha256({
+          adapterId: 'blender',
+          instanceId: currentDocumentSession.hello.instanceId,
+          sessionId: currentDocumentSession.hello.sessionId,
+          documentIncarnationId: currentDocumentSession.hello.documentIncarnationId,
+        }),
+        sessionAuthoritySha256: menuSessionAuthoritySha256({
+          adapterId: 'blender',
+          sessionId: currentDocumentSession.hello.sessionId,
+        }),
       };
     };
 
@@ -3428,6 +3881,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                     'action_execution_shortcut_proof_locked',
                   );
                 }
+                if (
+                  menuControlProofExecutionCoordinator.ownsTarget(
+                    authorization.execution.target.adapterId,
+                    authorization.execution.target.instanceId,
+                  )
+                ) {
+                  return actionExecutionRejected(
+                    'A native menu-control proof still owns the target instance',
+                    409,
+                    'action_execution_menu_control_proof_locked',
+                  );
+                }
                 return actionExecutionCoordinator.queue(
                   authorization.execution,
                   authorization.sessionFingerprintSha256,
@@ -3548,6 +4013,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                     'shortcut_proof_action_execution_locked',
                   );
                 }
+                if (
+                  menuControlProofExecutionCoordinator.ownsTarget(
+                    authorization.execution.target.adapterId,
+                    authorization.execution.target.instanceId,
+                  )
+                ) {
+                  return shortcutProofExecutionRejected(
+                    'A native menu-control proof still owns the target instance',
+                    409,
+                    'shortcut_proof_menu_control_proof_locked',
+                  );
+                }
                 return shortcutProofExecutionCoordinator.queue(
                   authorization.execution,
                   authorization.sessionFingerprintSha256,
@@ -3614,6 +4091,119 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                   text: JSON.stringify({
                     error: 'shortcut_proof_not_found',
                     message: 'The shortcut proof request was not found',
+                  }),
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+            structuredContent: execution,
+          };
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.menu-control-proof.execute',
+        {
+          description:
+            'Queue only the exact accepted tutorial-eye UV Sphere Layout Add-menu and ordered transform/name control proof. Authority and every parameter are derived from immutable accepted replay evidence; this accepts no lease, session, document, coordinates, controls, arbitrary actions, Python, or managed-action claims.',
+          inputSchema: companionMenuControlProofCreateRequestSchema,
+          outputSchema: companionMenuControlProofStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            companionMenuControlProofCreateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_menu_control_proof_request',
+                    message:
+                      'Menu-control proof execution request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const existing = menuControlProofExecutionCoordinator.findForCreate(parsedRequest.data);
+            const execution =
+              existing ??
+              (() => {
+                const authorization = authorizeBlenderMenuControlProofExecution(parsedRequest.data);
+                return menuControlProofExecutionCoordinator.queue(
+                  authorization.execution,
+                  authorization.documentAuthoritySha256,
+                  authorization.sessionAuthoritySha256,
+                );
+              })();
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(execution) }],
+              structuredContent: execution,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error:
+                      error instanceof BlenderMenuControlProofExecutionError
+                        ? error.code
+                        : 'menu_control_proof_execution_failed',
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : 'Menu-control proof could not be safely authorized',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.blender.menu-control-proof.status',
+        {
+          description:
+            'Return the durable exact UV Sphere menu-control proof status, including ordered control receipts, terminal evidence, or a read-only recovery_pending state after an indeterminate Runtime restart. Recovery is never replayed automatically.',
+          inputSchema: companionMenuControlProofStatusRequestSchema,
+          outputSchema: companionMenuControlProofStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            companionMenuControlProofStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_menu_control_proof_status_request',
+                    message:
+                      'Menu-control proof status request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          const execution = menuControlProofExecutionCoordinator.get(parsedRequest.data.requestId);
+          if (execution === null) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'menu_control_proof_not_found',
+                    message: 'The menu-control proof request was not found',
                   }),
                 },
               ],
@@ -4942,6 +5532,55 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
 
       server.registerTool(
+        'operatingline.procedure.menu-control-proof.propose',
+        {
+          description:
+            'Revalidate and materialize exactly one tutorial-eye UV Sphere leaf with the fixed Layout Add-menu and ordered transform/name control proof, create a pending human-reviewable instance-bound GuideProposal, and atomically store its immutable ProposalRecord. This does not accept, start, or execute the proposal and accepts no lease, session, or document identity.',
+          inputSchema: deferMcpInputValidation(procedureMenuControlProofProposalRequestSchema),
+          outputSchema: procedureMenuControlProofProposalResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureMenuControlProofProposalRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_menu_control_proof_proposal_request',
+                    message: 'Menu-control proof proposal violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          try {
+            const result = proposeProcedureMenuControlProof(parsedRequest.data);
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_menu_control_proof_proposal_failed',
+                    message:
+                      error instanceof Error ? error.message : 'Menu-control proof proposal failed',
+                  }),
+                },
+              ],
+            };
+          }
+        },
+      );
+
+      server.registerTool(
         'operatingline.procedure.replay.finalize',
         {
           description:
@@ -6223,7 +6862,42 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           targetAdapterId: parsedRequest.data.adapterId,
           catalogVersion: parsedRequest.data.catalogVersion,
         });
-        return companionLeaseManager.establish(parsedRequest.data, catalog);
+        const established = companionLeaseManager.establish(parsedRequest.data, catalog);
+        if (
+          parsedRequest.data.adapterId === 'blender' &&
+          isCompanionSessionV11(parsedRequest.data) &&
+          isCompanionSessionV11(established)
+        ) {
+          const leaseFingerprintSha256 = createHash('sha256')
+            .update(established.leaseId)
+            .digest('hex');
+          database.appendEvent({
+            id: `companion-document-session-fingerprint:${leaseFingerprintSha256}`,
+            eventType: companionDocumentSessionFingerprintEventType,
+            payload: companionDocumentSessionFingerprintEventSchema.parse({
+              formatVersion: '1.0.0',
+              leaseFingerprintSha256,
+              adapterId: 'blender',
+              instanceId: parsedRequest.data.instanceId,
+              sessionId: parsedRequest.data.sessionId,
+              documentIncarnationId: parsedRequest.data.documentIncarnationId,
+            }),
+            createdAt: new Date().toISOString(),
+          });
+          menuControlProofExecutionCoordinator.reconcileSessionAuthority(
+            menuSessionAuthoritySha256({
+              adapterId: 'blender',
+              sessionId: parsedRequest.data.sessionId,
+            }),
+            menuDocumentAuthoritySha256({
+              adapterId: 'blender',
+              instanceId: parsedRequest.data.instanceId,
+              sessionId: parsedRequest.data.sessionId,
+              documentIncarnationId: parsedRequest.data.documentIncarnationId,
+            }),
+          );
+        }
+        return established;
       } catch (error) {
         if (error instanceof CompanionLeaseError) {
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -7805,6 +8479,146 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
         }
         if (error instanceof BlenderActionExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/menu-control-proof', async (request, reply) => {
+      const parsedRequest = companionMenuControlProofPollRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_menu_control_proof_poll_request',
+          message: 'Menu-control proof poll violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Menu-control proof delivery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'menu_control_proof_protocol_unsupported',
+            message:
+              'Menu-control proof delivery requires Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+          });
+        }
+        const target = {
+          adapterId: 'blender' as const,
+          instanceId: session.hello.instanceId,
+        };
+        const delivery = menuControlProofExecutionCoordinator.poll({
+          target,
+          documentAuthoritySha256: menuDocumentAuthorityFor(session),
+          lease: {
+            leaseId: session.lease.leaseId,
+            sessionId: session.hello.sessionId,
+            target,
+            documentIncarnationId: session.hello.documentIncarnationId,
+            expiresAt: session.lease.expiresAt,
+          },
+        });
+        return companionMenuControlProofPollDeliverySchema.parse({ request: delivery });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderMenuControlProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/menu-control-proof-progress', async (request, reply) => {
+      const parsedProgress = companionMenuControlProofProgressSchema.safeParse(request.body);
+      if (!parsedProgress.success) {
+        return reply.code(400).send({
+          error: 'invalid_menu_control_proof_progress',
+          message: 'Menu-control proof progress violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Menu-control proof progress requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedProgress.data.target.adapterId,
+          parsedProgress.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'menu_control_proof_protocol_unsupported',
+            message: 'Menu-control proof progress requires Companion session 1.1 evidence',
+          });
+        }
+        requireExactMenuDeliveryLease(session, parsedProgress.data.lease);
+        const result = menuControlProofExecutionCoordinator.progress(
+          parsedProgress.data,
+          menuDocumentAuthorityFor(session),
+        );
+        return companionMenuControlProofProgressAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderMenuControlProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/menu-control-proof-result', async (request, reply) => {
+      const parsedResult = companionMenuControlProofResultSchema.safeParse(request.body);
+      if (!parsedResult.success) {
+        return reply.code(400).send({
+          error: 'invalid_menu_control_proof_result',
+          message: 'Menu-control proof result violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Menu-control proof results require a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedResult.data.target.adapterId,
+          parsedResult.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'menu_control_proof_protocol_unsupported',
+            message: 'Menu-control proof results require Companion session 1.1 evidence',
+          });
+        }
+        requireExactMenuDeliveryLease(session, parsedResult.data.lease);
+        const result = menuControlProofExecutionCoordinator.complete(
+          parsedResult.data,
+          menuDocumentAuthorityFor(session),
+        );
+        return companionMenuControlProofResultAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderMenuControlProofExecutionError) {
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
         }
         throw error;
