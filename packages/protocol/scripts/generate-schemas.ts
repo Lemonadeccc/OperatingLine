@@ -161,6 +161,10 @@ import {
   procedureShortcutProofProposalRequestSchema,
   procedureShortcutProofProposalRecordSchema,
   procedureShortcutProofProposalResultSchema,
+  procedureMenuControlProofBindingSchema,
+  procedureMenuControlProofProposalRequestSchema,
+  procedureMenuControlProofProposalRecordSchema,
+  procedureMenuControlProofProposalResultSchema,
   procedureTreeSchema,
   procedureCompilationRequestSchema,
   procedureCompilationResultSchema,
@@ -1105,6 +1109,26 @@ const schemas = [
     procedureLeafReplayBindingSchema,
   ],
   [
+    'procedure-menu-control-proof-binding.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-menu-control-proof-binding.json',
+    procedureMenuControlProofBindingSchema,
+  ],
+  [
+    'procedure-menu-control-proof-proposal-request.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-menu-control-proof-proposal-request.json',
+    procedureMenuControlProofProposalRequestSchema,
+  ],
+  [
+    'procedure-menu-control-proof-proposal-record.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-menu-control-proof-proposal-record.json',
+    procedureMenuControlProofProposalRecordSchema,
+  ],
+  [
+    'procedure-menu-control-proof-proposal-result.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-menu-control-proof-proposal-result.json',
+    procedureMenuControlProofProposalResultSchema,
+  ],
+  [
     'procedure-shortcut-proof-binding.schema.json',
     'https://operatingline.dev/schema/v1/procedure-shortcut-proof-binding.json',
     procedureShortcutProofBindingSchema,
@@ -1647,13 +1671,28 @@ function documentTutorialMediaRecognitionSemanticGate(
   }
 }
 
+function documentMenuControlProofSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (
+    filename === 'procedure-menu-control-proof-proposal-record.schema.json' ||
+    filename === 'procedure-menu-control-proof-proposal-result.schema.json' ||
+    filename === 'procedure-menu-control-proof-binding.schema.json'
+  ) {
+    schema['$comment'] =
+      'Canonical content integrity, exact materialization/proposal hash relationships, accepted-decision identity, and temporal ordering require the exported Zod/service semantic validation gate; standard JSON Schema covers the strict structural contract.';
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
   if (onlyFilename !== undefined && filename !== onlyFilename) continue;
   const draft7TupleSchema =
     filename.startsWith('procedure-tutorial-media-') ||
     filename.startsWith('procedure-tutorial-authoring-') ||
     filename === 'procedure-compound-replay.schema.json' ||
-    filename.includes('shortcut-proof');
+    filename.includes('shortcut-proof') ||
+    filename.includes('menu-control-proof');
   const jsonSchema = z.toJSONSchema(schema, {
     target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
   });
@@ -1662,6 +1701,7 @@ for (const [filename, id, schema] of schemas) {
   hardenCompoundReplaySchema(filename, jsonSchema);
   documentExecutionDecisionSemanticGate(filename, jsonSchema);
   documentTutorialMediaRecognitionSemanticGate(filename, jsonSchema);
+  documentMenuControlProofSemanticGate(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

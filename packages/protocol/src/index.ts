@@ -38,6 +38,7 @@ export * from './procedure-parameter-projection.js';
 export * from './procedure-replay.js';
 export * from './procedure-compound-replay.js';
 export * from './procedure-shortcut-proof.js';
+export * from './procedure-menu-control-proof.js';
 export * from './procedure-refinement.js';
 export * from './procedure-semantic-retrieval.js';
 export * from './procedure-tutorial-authoring-run.js';
