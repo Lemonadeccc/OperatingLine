@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { OperatingLineDatabase } from '@operatingline/persistence';
@@ -27,6 +27,7 @@ const menuProofEventTypes = [
   'blender.menu-control-proof.progress-5',
   'blender.menu-control-proof.progress-6',
   'blender.menu-control-proof.recovery-pending',
+  'blender.menu-control-proof.pre-dispatch-authority-expired',
   'blender.menu-control-proof.succeeded',
   'blender.menu-control-proof.failed-no-mutation',
   'blender.menu-control-proof.failed-restored',
@@ -46,6 +47,7 @@ const phaseSchema = z.enum([
   'progress_5',
   'progress_6',
   'recovery_pending',
+  'pre_dispatch_authority_expired',
   'succeeded',
   'failed_no_mutation',
   'failed_restored',
@@ -55,14 +57,92 @@ const phaseSchema = z.enum([
 const storedMenuProofEventSchema = z.strictObject({
   execution: companionMenuControlProofStatusSchema,
   phase: phaseSchema,
-  sessionFingerprintSha256: contentSha256Schema,
+  sessionAuthoritySha256: contentSha256Schema,
+  documentAuthoritySha256: contentSha256Schema,
   progressReceiptChainHeads: z.array(contentSha256Schema).max(7),
 });
+const legacyPhaseSchema = z.enum([
+  'queued',
+  'dispatched',
+  'progress_0',
+  'progress_1',
+  'progress_2',
+  'progress_3',
+  'progress_4',
+  'progress_5',
+  'progress_6',
+  'recovery_pending',
+  'succeeded',
+  'failed_no_mutation',
+  'failed_restored',
+  'failed_checkpointed',
+  'recovery_required',
+]);
+const legacyStoredMenuProofEventSchema = z
+  .strictObject({
+    execution: companionMenuControlProofStatusSchema,
+    phase: legacyPhaseSchema,
+    sessionFingerprintSha256: contentSha256Schema,
+    progressReceiptChainHeads: z.array(contentSha256Schema).max(7),
+  })
+  .superRefine((stored, context) => {
+    if (
+      stored.execution.recovery !== undefined &&
+      stored.execution.recovery.kind !== 'runtime_restart_after_delivery'
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['execution', 'recovery', 'kind'],
+        message: 'Legacy menu-control proof persistence cannot contain current recovery evidence',
+      });
+    }
+  });
 
 type MenuProofDatabase = Pick<OperatingLineDatabase, 'appendEvent' | 'listExecutionEventsByTypes'>;
 type StoredMenuProof = z.infer<typeof storedMenuProofEventSchema>;
 type MenuProofPhase = StoredMenuProof['phase'];
 type MenuProofEventType = (typeof menuProofEventTypes)[number];
+
+function legacyQuarantineAuthoritySha256(
+  kind: 'session' | 'document',
+  requestId: string,
+  legacySessionFingerprintSha256: string,
+): string {
+  return createHash('sha256')
+    .update(`operatingline:blender-menu-control-proof:legacy-${kind}-authority-quarantine:v1\0`)
+    .update(requestId)
+    .update('\0')
+    .update(legacySessionFingerprintSha256)
+    .digest('hex');
+}
+
+function parseStoredMenuProofEventPayload(payload: unknown): {
+  readonly stored: StoredMenuProof;
+  readonly legacy: boolean;
+} {
+  const current = storedMenuProofEventSchema.safeParse(payload);
+  if (current.success) return { stored: current.data, legacy: false };
+  const legacy = legacyStoredMenuProofEventSchema.parse(payload);
+  const requestId = legacy.execution.requestId;
+  return {
+    stored: storedMenuProofEventSchema.parse({
+      execution: legacy.execution,
+      phase: legacy.phase,
+      sessionAuthoritySha256: legacyQuarantineAuthoritySha256(
+        'session',
+        requestId,
+        legacy.sessionFingerprintSha256,
+      ),
+      documentAuthoritySha256: legacyQuarantineAuthoritySha256(
+        'document',
+        requestId,
+        legacy.sessionFingerprintSha256,
+      ),
+      progressReceiptChainHeads: legacy.progressReceiptChainHeads,
+    }),
+    legacy: true,
+  };
+}
 
 export class BlenderMenuControlProofExecutionError extends Error {
   constructor(
@@ -84,7 +164,7 @@ export interface BlenderMenuControlProofExecutionCoordinatorOptions {
 
 export interface BlenderMenuControlProofPollInput {
   readonly target: CompanionMenuControlProofDelivery['target'];
-  readonly sessionFingerprintSha256: string;
+  readonly documentAuthoritySha256: string;
   readonly lease: CompanionMenuControlProofDelivery['lease'];
 }
 
@@ -179,6 +259,9 @@ function retainsTargetLock(stored: StoredMenuProof): boolean {
 }
 
 function expectedTransition(previous: MenuProofPhase, next: MenuProofPhase): boolean {
+  if (previous === 'queued' && next === 'pre_dispatch_authority_expired') {
+    return true;
+  }
   if (next === 'recovery_pending') {
     return previous === 'dispatched' || previous.startsWith('progress_');
   }
@@ -245,6 +328,21 @@ function assertPhaseEvidence(stored: StoredMenuProof): void {
   if ((phase === 'queued' || phase === 'dispatched') && progressReceiptChainHeads.length !== 0) {
     throw new Error(`Menu-control proof ${execution.requestId} has progress before mutation`);
   }
+  if (phase === 'pre_dispatch_authority_expired') {
+    const expiration = execution.preDispatchAuthorityExpiration;
+    if (
+      expiration?.kind !== 'document_authority_changed_before_dispatch' ||
+      expiration.priorStatus !== 'queued' ||
+      expiration.detectedAt !== execution.updatedAt ||
+      expiration.automaticReplayAllowed !== false ||
+      expiration.retainsTargetLock !== false ||
+      execution.deliveryId !== undefined
+    ) {
+      throw new Error(
+        `Menu-control proof ${execution.requestId} has inconsistent pre-dispatch authority expiration evidence`,
+      );
+    }
+  }
   if (phase === 'succeeded') {
     const receipts = execution.result?.terminalEvidence;
     if (
@@ -303,7 +401,8 @@ function assertStoredTransition(
   }
   if (
     !sameImmutableExecution(previous.execution, next.execution) ||
-    previous.sessionFingerprintSha256 !== next.sessionFingerprintSha256 ||
+    previous.sessionAuthoritySha256 !== next.sessionAuthoritySha256 ||
+    previous.documentAuthoritySha256 !== next.documentAuthoritySha256 ||
     !expectedTransition(previous.phase, next.phase) ||
     Date.parse(next.execution.updatedAt) < Date.parse(previous.execution.updatedAt)
   ) {
@@ -364,9 +463,10 @@ export function createBlenderMenuControlProofExecutionCoordinator(
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? randomUUID;
   const executions = new Map<string, StoredMenuProof>();
+  const latestPayloadWasLegacy = new Map<string, boolean>();
 
   for (const event of options.database.listExecutionEventsByTypes(menuProofEventTypes)) {
-    const parsed = storedMenuProofEventSchema.parse(event.payload);
+    const { stored: parsed, legacy } = parseStoredMenuProofEventPayload(event.payload);
     if (event.id !== eventIdFor(parsed) || event.createdAt !== parsed.execution.updatedAt) {
       throw new Error(
         `Menu-control proof ${parsed.execution.requestId} has inconsistent persisted event metadata`,
@@ -374,6 +474,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     }
     assertStoredTransition(executions.get(parsed.execution.requestId), parsed, event.eventType);
     executions.set(parsed.execution.requestId, parsed);
+    latestPayloadWasLegacy.set(parsed.execution.requestId, legacy);
   }
 
   const append = (eventType: MenuProofEventType, value: StoredMenuProof) => {
@@ -386,8 +487,45 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       createdAt: stored.execution.updatedAt,
     });
     executions.set(stored.execution.requestId, stored);
+    latestPayloadWasLegacy.set(stored.execution.requestId, false);
     return stored.execution;
   };
+
+  const legacyQueuedExpirations = [...executions.values()]
+    .filter(
+      (stored) =>
+        latestPayloadWasLegacy.get(stored.execution.requestId) === true &&
+        stored.phase === 'queued',
+    )
+    .map((stored) => ({ stored, detectedAt: now() }));
+  const queuedTimeRegression = legacyQueuedExpirations.find(
+    ({ stored, detectedAt }) => Date.parse(detectedAt) < Date.parse(stored.execution.updatedAt),
+  );
+  if (queuedTimeRegression !== undefined) {
+    throw new BlenderMenuControlProofExecutionError(
+      'menu_control_proof_restart_time_regression',
+      500,
+      `Restart detection for legacy queued menu-control proof ${queuedTimeRegression.stored.execution.requestId} predates accepted evidence`,
+    );
+  }
+  for (const { stored, detectedAt } of legacyQueuedExpirations) {
+    append('blender.menu-control-proof.pre-dispatch-authority-expired', {
+      ...stored,
+      phase: 'pre_dispatch_authority_expired',
+      execution: companionMenuControlProofStatusSchema.parse({
+        ...stored.execution,
+        status: 'pre_dispatch_authority_expired',
+        preDispatchAuthorityExpiration: {
+          kind: 'document_authority_changed_before_dispatch',
+          priorStatus: 'queued',
+          detectedAt,
+          automaticReplayAllowed: false,
+          retainsTargetLock: false,
+        },
+        updatedAt: detectedAt,
+      }),
+    });
+  }
 
   const restartRecoveries = [...executions.values()]
     .filter(isDeliveredNonterminal)
@@ -449,9 +587,14 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return existing;
   };
 
-  const queue = (input: CompanionMenuControlProofStatus, sessionFingerprintSha256: string) => {
+  const queue = (
+    input: CompanionMenuControlProofStatus,
+    documentAuthoritySha256: string,
+    sessionAuthoritySha256: string = documentAuthoritySha256,
+  ) => {
     const execution = companionMenuControlProofStatusSchema.parse(input);
-    const fingerprint = contentSha256Schema.parse(sessionFingerprintSha256);
+    const documentAuthority = contentSha256Schema.parse(documentAuthoritySha256);
+    const sessionAuthority = contentSha256Schema.parse(sessionAuthoritySha256);
     if (execution.status !== 'queued') {
       throw new BlenderMenuControlProofExecutionError(
         'menu_control_proof_not_queued',
@@ -493,15 +636,85 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return append('blender.menu-control-proof.queued', {
       execution,
       phase: 'queued',
-      sessionFingerprintSha256: fingerprint,
+      sessionAuthoritySha256: sessionAuthority,
+      documentAuthoritySha256: documentAuthority,
       progressReceiptChainHeads: [],
     });
+  };
+
+  const reconcileSessionAuthority = (
+    sessionAuthoritySha256: string,
+    currentDocumentAuthoritySha256: string,
+  ): readonly CompanionMenuControlProofStatus[] => {
+    const sessionAuthority = contentSha256Schema.parse(sessionAuthoritySha256);
+    const currentDocumentAuthority = contentSha256Schema.parse(currentDocumentAuthoritySha256);
+    const detectedAt = now();
+    const candidates = [...executions.values()].filter(
+      (stored) =>
+        stored.sessionAuthoritySha256 === sessionAuthority &&
+        stored.documentAuthoritySha256 !== currentDocumentAuthority &&
+        (stored.phase === 'queued' || isDeliveredNonterminal(stored)),
+    );
+    if (
+      candidates.some((stored) => Date.parse(detectedAt) < Date.parse(stored.execution.updatedAt))
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_reconciliation_time_regression',
+        500,
+        'Document-authority reconciliation predates accepted menu-control proof evidence',
+      );
+    }
+    const reconciled: CompanionMenuControlProofStatus[] = [];
+    for (const stored of candidates) {
+      if (stored.phase === 'queued') {
+        reconciled.push(
+          append('blender.menu-control-proof.pre-dispatch-authority-expired', {
+            ...stored,
+            phase: 'pre_dispatch_authority_expired',
+            execution: companionMenuControlProofStatusSchema.parse({
+              ...stored.execution,
+              status: 'pre_dispatch_authority_expired',
+              preDispatchAuthorityExpiration: {
+                kind: 'document_authority_changed_before_dispatch',
+                priorStatus: 'queued',
+                detectedAt,
+                automaticReplayAllowed: false,
+                retainsTargetLock: false,
+              },
+              updatedAt: detectedAt,
+            }),
+          }),
+        );
+      } else if (isDeliveredNonterminal(stored)) {
+        reconciled.push(
+          append('blender.menu-control-proof.recovery-pending', {
+            ...stored,
+            phase: 'recovery_pending',
+            execution: companionMenuControlProofStatusSchema.parse({
+              ...stored.execution,
+              status: 'recovery_pending',
+              progress: undefined,
+              recovery: {
+                kind: 'document_authority_changed_after_delivery',
+                detectedAt,
+                priorStatus: stored.execution.status,
+                requiresExplicitRecovery: true,
+                automaticReplayAllowed: false,
+                retainsTargetLock: true,
+              },
+              updatedAt: detectedAt,
+            }),
+          }),
+        );
+      }
+    }
+    return reconciled;
   };
 
   const poll = (
     input: BlenderMenuControlProofPollInput,
   ): CompanionMenuControlProofDelivery | null => {
-    const fingerprint = contentSha256Schema.parse(input.sessionFingerprintSha256);
+    const fingerprint = contentSha256Schema.parse(input.documentAuthoritySha256);
     const pending = [...executions.values()]
       .filter(
         ({ phase, execution }) =>
@@ -514,8 +727,30 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       )[0];
     if (pending === undefined) return null;
     const dispatchedAt = now();
+    if (pending.documentAuthoritySha256 !== fingerprint) {
+      append('blender.menu-control-proof.pre-dispatch-authority-expired', {
+        ...pending,
+        phase: 'pre_dispatch_authority_expired',
+        execution: companionMenuControlProofStatusSchema.parse({
+          ...pending.execution,
+          status: 'pre_dispatch_authority_expired',
+          preDispatchAuthorityExpiration: {
+            kind: 'document_authority_changed_before_dispatch',
+            priorStatus: 'queued',
+            detectedAt: dispatchedAt,
+            automaticReplayAllowed: false,
+            retainsTargetLock: false,
+          },
+          updatedAt: dispatchedAt,
+        }),
+      });
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_document_authority_changed',
+        409,
+        'The queued menu-control proof belongs to a different Companion process or document and was rejected without delivery',
+      );
+    }
     if (
-      pending.sessionFingerprintSha256 !== fingerprint ||
       !isDeepStrictEqual(input.lease.target, input.target) ||
       Date.parse(input.lease.expiresAt) <= Date.parse(dispatchedAt)
     ) {
@@ -571,7 +806,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       );
     }
     if (
-      stored.sessionFingerprintSha256 !== fingerprint ||
+      stored.documentAuthoritySha256 !== fingerprint ||
       !sameDeliveryIdentity(stored.execution, evidence)
     ) {
       throw new BlenderMenuControlProofExecutionError(
@@ -596,10 +831,10 @@ export function createBlenderMenuControlProofExecutionCoordinator(
 
   const progress = (
     input: CompanionMenuControlProofProgress,
-    sessionFingerprintSha256: string,
+    documentAuthoritySha256: string,
   ): 'accepted' | 'duplicate' => {
     const evidence = companionMenuControlProofProgressSchema.parse(input);
-    const fingerprint = contentSha256Schema.parse(sessionFingerprintSha256);
+    const fingerprint = contentSha256Schema.parse(documentAuthoritySha256);
     const stored = assertDelivery(evidence, fingerprint);
     const count = evidence.operationReceipts.length;
     if (stored.phase === `progress_${count - 1}`) {
@@ -647,10 +882,10 @@ export function createBlenderMenuControlProofExecutionCoordinator(
 
   const complete = (
     input: CompanionMenuControlProofResult,
-    sessionFingerprintSha256: string,
+    documentAuthoritySha256: string,
   ): 'accepted' | 'duplicate' => {
     const result = companionMenuControlProofResultSchema.parse(input);
-    const fingerprint = contentSha256Schema.parse(sessionFingerprintSha256);
+    const fingerprint = contentSha256Schema.parse(documentAuthoritySha256);
     const stored = assertDelivery(result, fingerprint);
     if (
       stored.phase === 'succeeded' ||
@@ -720,5 +955,14 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return 'accepted';
   };
 
-  return { get, findForCreate, queue, poll, progress, complete, ownsTarget };
+  return {
+    get,
+    findForCreate,
+    queue,
+    reconcileSessionAuthority,
+    poll,
+    progress,
+    complete,
+    ownsTarget,
+  };
 }

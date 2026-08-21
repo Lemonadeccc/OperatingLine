@@ -356,7 +356,7 @@ function dispatch(database = createEventDatabase()) {
   coordinator.queue(queuedStatus(), fingerprint);
   return coordinator.poll({
     target: queuedStatus().target,
-    sessionFingerprintSha256: fingerprint,
+    documentAuthoritySha256: fingerprint,
     lease: lease(),
   })!;
 }
@@ -503,13 +503,29 @@ function activeDatabase(progressCount = 0) {
   coordinator.queue(queuedStatus(), fingerprint);
   const delivery = coordinator.poll({
     target: queuedStatus().target,
-    sessionFingerprintSha256: fingerprint,
+    documentAuthoritySha256: fingerprint,
     lease: lease(),
   })!;
   for (let count = 1; count <= progressCount; count += 1) {
     coordinator.progress(progressFor(delivery, count), fingerprint);
   }
   return database;
+}
+
+function rewriteEventsAsHeadLegacyPayload(database: ReturnType<typeof createEventDatabase>): void {
+  for (const event of database.events) {
+    const current = event.payload as {
+      execution: unknown;
+      phase: unknown;
+      progressReceiptChainHeads: unknown;
+    };
+    event.payload = {
+      execution: current.execution,
+      phase: current.phase,
+      sessionFingerprintSha256: fingerprint,
+      progressReceiptChainHeads: current.progressReceiptChainHeads,
+    };
+  }
 }
 
 describe('Blender menu-control proof execution coordinator', () => {
@@ -523,7 +539,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     coordinator.queue(queuedStatus(), fingerprint);
     const delivery = coordinator.poll({
       target: queuedStatus().target,
-      sessionFingerprintSha256: fingerprint,
+      documentAuthoritySha256: fingerprint,
       lease: lease(),
     })!;
     for (let count = 1; count <= 7; count += 1) {
@@ -556,26 +572,43 @@ describe('Blender menu-control proof execution coordinator', () => {
     expect(() =>
       coordinator.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: hash('e'),
+        documentAuthoritySha256: hash('e'),
         lease: lease(),
       }),
     ).toThrowError(BlenderMenuControlProofExecutionError);
-    const delivery = coordinator.poll({
+    expect(coordinator.get(ids.request)).toMatchObject({
+      status: 'pre_dispatch_authority_expired',
+      preDispatchAuthorityExpiration: {
+        kind: 'document_authority_changed_before_dispatch',
+        priorStatus: 'queued',
+        automaticReplayAllowed: false,
+        retainsTargetLock: false,
+      },
+    });
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+
+    const activeCoordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database: createEventDatabase(),
+      now: () => serverNow,
+      createId: () => ids.delivery,
+    });
+    activeCoordinator.queue(queuedStatus(), fingerprint);
+    const delivery = activeCoordinator.poll({
       target: queuedStatus().target,
-      sessionFingerprintSha256: fingerprint,
+      documentAuthoritySha256: fingerprint,
       lease: lease(),
     })!;
     serverNow = '2026-08-22T10:02:00+08:00';
-    expect(() => coordinator.progress(progressFor(delivery, 1), hash('e'))).toThrowError(
+    expect(() => activeCoordinator.progress(progressFor(delivery, 1), hash('e'))).toThrowError(
       BlenderMenuControlProofExecutionError,
     );
     const foreignLease = structuredClone(progressFor(delivery, 1));
     foreignLease.lease.documentIncarnationId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
-    expect(() => coordinator.progress(foreignLease, fingerprint)).toThrow();
-    coordinator.progress(progressFor(delivery, 1), fingerprint);
+    expect(() => activeCoordinator.progress(foreignLease, fingerprint)).toThrow();
+    activeCoordinator.progress(progressFor(delivery, 1), fingerprint);
     const conflict = structuredClone(progressFor(delivery, 1));
     conflict.occurredAt = '2026-08-22T10:01:02+08:00';
-    expect(() => coordinator.progress(conflict, fingerprint)).toThrowError(
+    expect(() => activeCoordinator.progress(conflict, fingerprint)).toThrowError(
       BlenderMenuControlProofExecutionError,
     );
 
@@ -596,6 +629,61 @@ describe('Blender menu-control proof execution coordinator', () => {
     ).toThrowError(expect.objectContaining({ code: 'menu_control_proof_request_conflict' }));
   });
 
+  it('reconciles queued and delivered work when the same Companion process loads another document', () => {
+    const sessionAuthority = hash('c');
+    const queuedDatabase = createEventDatabase();
+    const queuedCoordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database: queuedDatabase,
+      now: () => '2026-08-22T10:00:05+08:00',
+    });
+    queuedCoordinator.queue(queuedStatus(), fingerprint, sessionAuthority);
+    expect(queuedCoordinator.reconcileSessionAuthority(sessionAuthority, hash('e'))).toHaveLength(
+      1,
+    );
+    expect(queuedCoordinator.get(ids.request)).toMatchObject({
+      status: 'pre_dispatch_authority_expired',
+      preDispatchAuthorityExpiration: {
+        priorStatus: 'queued',
+        automaticReplayAllowed: false,
+        retainsTargetLock: false,
+      },
+    });
+    expect(queuedCoordinator.ownsTarget('blender', ids.instance)).toBe(false);
+
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    const deliveredCoordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database: createEventDatabase(),
+      now: () => serverNow,
+      createId: () => ids.delivery,
+    });
+    deliveredCoordinator.queue(queuedStatus(), fingerprint, sessionAuthority);
+    deliveredCoordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    });
+    serverNow = '2026-08-22T10:00:05+08:00';
+    expect(
+      deliveredCoordinator.reconcileSessionAuthority(sessionAuthority, hash('e')),
+    ).toHaveLength(1);
+    expect(deliveredCoordinator.get(ids.request)).toMatchObject({
+      status: 'recovery_pending',
+      recovery: {
+        kind: 'document_authority_changed_after_delivery',
+        priorStatus: 'dispatched',
+        automaticReplayAllowed: false,
+        retainsTargetLock: true,
+      },
+    });
+    expect(
+      deliveredCoordinator.poll({
+        target: queuedStatus().target,
+        documentAuthoritySha256: hash('e'),
+        lease: lease(),
+      }),
+    ).toBeNull();
+  });
+
   it('rejects future-dated progress and results without mutation and accepts serverNow equality', () => {
     for (const kind of ['progress', 'result'] as const) {
       const database = createEventDatabase();
@@ -608,7 +696,7 @@ describe('Blender menu-control proof execution coordinator', () => {
       coordinator.queue(queuedStatus(), fingerprint);
       const delivery = coordinator.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: fingerprint,
+        documentAuthoritySha256: fingerprint,
         lease: lease(),
       })!;
       if (kind === 'progress') {
@@ -655,7 +743,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     expect(() =>
       coordinator.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: fingerprint,
+        documentAuthoritySha256: fingerprint,
         lease: lease({ expiresAt }),
       }),
     ).toThrowError(
@@ -683,7 +771,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     coordinator.queue(queuedStatus(), fingerprint);
     const delivery = coordinator.poll({
       target: queuedStatus().target,
-      sessionFingerprintSha256: fingerprint,
+      documentAuthoritySha256: fingerprint,
       lease: lease(),
     })!;
     for (let index = 1; index <= count; index += 1) {
@@ -720,7 +808,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     if (phase !== 'queued') {
       delivery = coordinator.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: fingerprint,
+        documentAuthoritySha256: fingerprint,
         lease: lease(),
       });
     }
@@ -774,7 +862,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     expect(
       restartedQueued.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: fingerprint,
+        documentAuthoritySha256: fingerprint,
         lease: lease(),
       }),
     ).not.toBeNull();
@@ -816,7 +904,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     expect(
       restarted.poll({
         target: queuedStatus().target,
-        sessionFingerprintSha256: fingerprint,
+        documentAuthoritySha256: fingerprint,
         lease: lease(),
       }),
     ).toBeNull();
@@ -837,6 +925,179 @@ describe('Blender menu-control proof execution coordinator', () => {
     ).toThrow();
   });
 
+  it('quarantines exact HEAD queued persistence and expires it once without delivery', () => {
+    const database = createEventDatabase();
+    createBlenderMenuControlProofExecutionCoordinator({ database }).queue(
+      queuedStatus(),
+      fingerprint,
+    );
+    rewriteEventsAsHeadLegacyPayload(database);
+
+    const restarted = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-22T10:06:00+08:00',
+    });
+    expect(restarted.get(ids.request)).toMatchObject({
+      status: 'pre_dispatch_authority_expired',
+      preDispatchAuthorityExpiration: {
+        priorStatus: 'queued',
+        automaticReplayAllowed: false,
+        retainsTargetLock: false,
+      },
+    });
+    expect(restarted.ownsTarget('blender', ids.instance)).toBe(false);
+    expect(
+      restarted.poll({
+        target: queuedStatus().target,
+        documentAuthoritySha256: fingerprint,
+        lease: lease(),
+      }),
+    ).toBeNull();
+    expect(database.events).toHaveLength(2);
+    const migratedPayload = database.events[1]!.payload as Record<string, unknown>;
+    expect(migratedPayload).toMatchObject({
+      phase: 'pre_dispatch_authority_expired',
+      sessionAuthoritySha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      documentAuthoritySha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(migratedPayload).not.toMatchObject({
+      sessionAuthoritySha256: fingerprint,
+    });
+    expect(migratedPayload['sessionAuthoritySha256']).not.toBe(
+      migratedPayload['documentAuthoritySha256'],
+    );
+    expect(migratedPayload).not.toHaveProperty('sessionFingerprintSha256');
+
+    const restartedAgain = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-22T10:07:00+08:00',
+    });
+    expect(restartedAgain.get(ids.request)?.status).toBe('pre_dispatch_authority_expired');
+    expect(database.events).toHaveLength(2);
+  });
+
+  it.each([0, 2])(
+    'quarantines exact HEAD delivered persistence with %i progress receipts into recovery once',
+    (progressCount) => {
+      const database = activeDatabase(progressCount);
+      rewriteEventsAsHeadLegacyPayload(database);
+      const expectedEventCount = database.events.length + 1;
+      const restarted = createBlenderMenuControlProofExecutionCoordinator({
+        database,
+        now: () => '2026-08-22T10:06:00+08:00',
+      });
+      expect(restarted.get(ids.request)).toMatchObject({
+        status: 'recovery_pending',
+        progress: undefined,
+        recovery: {
+          kind: 'runtime_restart_after_delivery',
+          priorStatus: progressCount === 0 ? 'dispatched' : 'in_progress',
+          automaticReplayAllowed: false,
+          retainsTargetLock: true,
+        },
+      });
+      expect(restarted.ownsTarget('blender', ids.instance)).toBe(true);
+      expect(database.events).toHaveLength(expectedEventCount);
+      expect(database.events.at(-1)!.payload).not.toMatchObject({
+        documentAuthoritySha256: fingerprint,
+      });
+
+      const restartedAgain = createBlenderMenuControlProofExecutionCoordinator({
+        database,
+        now: () => '2026-08-22T10:07:00+08:00',
+      });
+      expect(restartedAgain.get(ids.request)?.status).toBe('recovery_pending');
+      expect(database.events).toHaveLength(expectedEventCount);
+    },
+  );
+
+  it('replays exact HEAD terminal and recovery-pending payloads without changing semantics', () => {
+    const terminalDatabase = createEventDatabase();
+    const terminalCoordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database: terminalDatabase,
+      now: executionClock(),
+      createId: () => ids.delivery,
+    });
+    terminalCoordinator.queue(queuedStatus(), fingerprint);
+    const terminalDelivery = terminalCoordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    terminalCoordinator.complete(
+      failureResult(terminalDelivery, 'failed_no_mutation'),
+      fingerprint,
+    );
+    rewriteEventsAsHeadLegacyPayload(terminalDatabase);
+    const terminalEventCount = terminalDatabase.events.length;
+    const terminalRestart = createBlenderMenuControlProofExecutionCoordinator({
+      database: terminalDatabase,
+      now: () => '2026-08-22T10:06:00+08:00',
+    });
+    expect(terminalRestart.get(ids.request)?.status).toBe('failed_no_mutation');
+    expect(terminalRestart.ownsTarget('blender', ids.instance)).toBe(false);
+    expect(terminalDatabase.events).toHaveLength(terminalEventCount);
+    expect(
+      createBlenderMenuControlProofExecutionCoordinator({
+        database: terminalDatabase,
+        now: () => '2026-08-22T10:07:00+08:00',
+      }).get(ids.request)?.status,
+    ).toBe('failed_no_mutation');
+    expect(terminalDatabase.events).toHaveLength(terminalEventCount);
+
+    const recoveryDatabase = activeDatabase();
+    createBlenderMenuControlProofExecutionCoordinator({
+      database: recoveryDatabase,
+      now: () => '2026-08-22T10:06:00+08:00',
+    });
+    rewriteEventsAsHeadLegacyPayload(recoveryDatabase);
+    const recoveryEventCount = recoveryDatabase.events.length;
+    const recoveryRestart = createBlenderMenuControlProofExecutionCoordinator({
+      database: recoveryDatabase,
+      now: () => '2026-08-22T10:07:00+08:00',
+    });
+    expect(recoveryRestart.get(ids.request)?.status).toBe('recovery_pending');
+    expect(recoveryRestart.ownsTarget('blender', ids.instance)).toBe(true);
+    expect(recoveryDatabase.events).toHaveLength(recoveryEventCount);
+    expect(
+      createBlenderMenuControlProofExecutionCoordinator({
+        database: recoveryDatabase,
+        now: () => '2026-08-22T10:08:00+08:00',
+      }).get(ids.request)?.status,
+    ).toBe('recovery_pending');
+    expect(recoveryDatabase.events).toHaveLength(recoveryEventCount);
+  });
+
+  it('rejects malformed payloads that match neither strict current nor exact HEAD persistence', () => {
+    const database = createEventDatabase();
+    createBlenderMenuControlProofExecutionCoordinator({ database }).queue(
+      queuedStatus(),
+      fingerprint,
+    );
+    rewriteEventsAsHeadLegacyPayload(database);
+    (database.events[0]!.payload as Record<string, unknown>)['unexpected'] = true;
+    expect(() => createBlenderMenuControlProofExecutionCoordinator({ database })).toThrow();
+  });
+
+  it('rejects legacy top-level persistence mixed with current-only recovery evidence', () => {
+    const database = activeDatabase();
+    createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-22T10:06:00+08:00',
+    });
+    rewriteEventsAsHeadLegacyPayload(database);
+    const recoveryEvent = database.events.at(-1)!;
+    const legacyPayload = recoveryEvent.payload as {
+      execution: { recovery?: { kind?: string } };
+    };
+    if (legacyPayload.execution.recovery === undefined) {
+      throw new Error('Expected legacy recovery fixture');
+    }
+    legacyPayload.execution.recovery.kind = 'document_authority_changed_after_delivery';
+
+    expect(() => createBlenderMenuControlProofExecutionCoordinator({ database })).toThrow();
+  });
+
   it('persists progress-state restart recovery with its receipt heads and no replay', () => {
     const database = createEventDatabase();
     const first = createBlenderMenuControlProofExecutionCoordinator({
@@ -847,7 +1108,7 @@ describe('Blender menu-control proof execution coordinator', () => {
     first.queue(queuedStatus(), fingerprint);
     const delivery = first.poll({
       target: queuedStatus().target,
-      sessionFingerprintSha256: fingerprint,
+      documentAuthoritySha256: fingerprint,
       lease: lease(),
     })!;
     first.progress(progressFor(delivery, 1), fingerprint);

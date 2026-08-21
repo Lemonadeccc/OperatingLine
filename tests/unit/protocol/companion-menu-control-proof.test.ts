@@ -665,6 +665,54 @@ describe('companion menu-control proof protocol', () => {
     expect(companionMenuControlProofStatusSchema.safeParse(foreignRequestedAt).success).toBe(false);
   });
 
+  it('makes pre-dispatch document-authority expiration terminal and strictly undelivered', () => {
+    const expired = {
+      ...queuedStatus(),
+      status: 'pre_dispatch_authority_expired',
+      preDispatchAuthorityExpiration: {
+        kind: 'document_authority_changed_before_dispatch',
+        priorStatus: 'queued',
+        detectedAt: '2026-08-22T10:00:04+08:00',
+        automaticReplayAllowed: false,
+        retainsTargetLock: false,
+      },
+      updatedAt: '2026-08-22T10:00:04+08:00',
+    } as const;
+    expect(companionMenuControlProofStatusSchema.parse(expired)).toEqual(expired);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...expired,
+        deliveryId: ids.delivery,
+        lease: delivery().lease,
+        dispatchedAt: delivery().dispatchedAt,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({ ...expired, progress: progress() }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({ ...expired, result: result() }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...expired,
+        recovery: recoveryPendingStatus().recovery,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...expired,
+        updatedAt: '2026-08-22T10:00:05+08:00',
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...expired,
+        requestedAt: '2026-08-22T10:00:05+08:00',
+      }).success,
+    ).toBe(false);
+  });
+
   it('represents a post-delivery runtime restart without fabricating progress or a result', () => {
     for (const priorStatus of ['dispatched', 'in_progress'] as const) {
       const pending = recoveryPendingStatus(priorStatus);

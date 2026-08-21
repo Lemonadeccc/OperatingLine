@@ -620,6 +620,7 @@ const statusValueSchema = z.enum([
   'dispatched',
   'in_progress',
   'recovery_pending',
+  'pre_dispatch_authority_expired',
   'succeeded',
   'failed_no_mutation',
   'failed_restored',
@@ -636,12 +637,19 @@ const terminalResultStatusValues = [
 const terminalResultStatuses = new Set<string>(terminalResultStatusValues);
 
 export const companionMenuControlProofRecoveryEvidenceSchema = z.strictObject({
-  kind: z.literal('runtime_restart_after_delivery'),
+  kind: z.enum(['runtime_restart_after_delivery', 'document_authority_changed_after_delivery']),
   detectedAt: timestampSchema,
   priorStatus: z.enum(['dispatched', 'in_progress']),
   requiresExplicitRecovery: z.literal(true),
   automaticReplayAllowed: z.literal(false),
   retainsTargetLock: z.literal(true),
+});
+export const companionMenuControlProofPreDispatchAuthorityEvidenceSchema = z.strictObject({
+  kind: z.literal('document_authority_changed_before_dispatch'),
+  priorStatus: z.literal('queued'),
+  detectedAt: timestampSchema,
+  automaticReplayAllowed: z.literal(false),
+  retainsTargetLock: z.literal(false),
 });
 export type CompanionMenuControlProofRecoveryEvidence = z.infer<
   typeof companionMenuControlProofRecoveryEvidenceSchema
@@ -657,6 +665,8 @@ export const companionMenuControlProofStatusSchema = z
     progress: companionMenuControlProofProgressSchema.optional(),
     result: companionMenuControlProofResultSchema.optional(),
     recovery: companionMenuControlProofRecoveryEvidenceSchema.optional(),
+    preDispatchAuthorityExpiration:
+      companionMenuControlProofPreDispatchAuthorityEvidenceSchema.optional(),
     updatedAt: timestampSchema,
   })
   .superRefine((status, context) => {
@@ -675,18 +685,37 @@ export const companionMenuControlProofStatusSchema = z
     ).length;
     const delivered = deliveryFieldCount === 3;
     const terminalResult = terminalResultStatuses.has(status.status);
+    const authorityExpiredBeforeDelivery = status.status === 'pre_dispatch_authority_expired';
     if (
       (deliveryFieldCount !== 0 && !delivered) ||
       (status.status === 'queued' && delivered) ||
-      (status.status !== 'queued' && !delivered) ||
+      (authorityExpiredBeforeDelivery && delivered) ||
+      (status.status !== 'queued' && !authorityExpiredBeforeDelivery && !delivered) ||
       (status.status === 'in_progress') !== (status.progress !== undefined) ||
       terminalResult !== (status.result !== undefined) ||
       (status.status === 'recovery_pending') !== (status.recovery !== undefined) ||
+      authorityExpiredBeforeDelivery !== (status.preDispatchAuthorityExpiration !== undefined) ||
       (status.result !== undefined && status.result.status !== status.status)
     ) {
       context.addIssue({
         code: 'custom',
         message: 'Menu-control proof status evidence is inconsistent',
+      });
+    }
+    if (
+      status.preDispatchAuthorityExpiration !== undefined &&
+      (status.progress !== undefined ||
+        status.result !== undefined ||
+        status.recovery !== undefined ||
+        Date.parse(status.requestedAt) >
+          Date.parse(status.preDispatchAuthorityExpiration.detectedAt) ||
+        status.updatedAt !== status.preDispatchAuthorityExpiration.detectedAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['preDispatchAuthorityExpiration'],
+        message:
+          'Pre-dispatch authority expiration must be terminal, undelivered, and chronologically exact',
       });
     }
     if (
@@ -748,6 +777,7 @@ export const companionMenuControlProofStatusSchema = z
       });
     }
     const latestEvidenceAt =
+      status.preDispatchAuthorityExpiration?.detectedAt ??
       status.recovery?.detectedAt ??
       nested?.occurredAt ??
       status.dispatchedAt ??
