@@ -14,6 +14,7 @@ import {
   canonicalizeProtocolJsonValue,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringMaterializationResultSchema,
+  procedureTreeSchema,
   validateProcedureTree,
   type ActionCatalog,
   type InteractionCatalog,
@@ -26,6 +27,7 @@ import {
   projectProcedureTreeCatalogParameters,
   validateProcedureTreeParameterProjectionCatalog,
 } from '../../../services/orchestrator/src/procedure-authoring-materialization.js';
+import { validatePublicJsonSchemaCases } from '../../../services/orchestrator/test-support/public-json-schema-validator.js';
 
 function candidate(
   interactionCatalog: InteractionCatalog = blenderInteractionCatalog,
@@ -772,6 +774,17 @@ describe('procedure authoring materialization', () => {
     });
     const track = leaf.menuTracks[0];
     if (track?.availability !== 'available') throw new Error('expected available menu track');
+    expect(track.proofExecution).toBeUndefined();
+    const forgedMenuProof = structuredClone(result);
+    const forgedMenuLeaf = forgedMenuProof.tree.nodes.find((node) => node.kind === 'leaf');
+    const forgedMenu = forgedMenuLeaf?.kind === 'leaf' ? forgedMenuLeaf.menuTracks[0] : undefined;
+    if (forgedMenu?.availability !== 'available') {
+      throw new Error('expected forged menu track');
+    }
+    forgedMenu.proofExecution = orderedMenu(blenderInteractionCatalog).proofExecution;
+    expect(procedureAuthoringMaterializationResultSchema.safeParse(forgedMenuProof).success).toBe(
+      false,
+    );
     expect(track.preconditions).toEqual(
       blenderInteractionCatalog.recipes[0]?.guidance.kind === 'native_path'
         ? blenderInteractionCatalog.recipes[0].guidance.preconditions
@@ -809,7 +822,7 @@ describe('procedure authoring materialization', () => {
       {
         id: 'control.object_name',
         order: 7,
-        path: ['Outliner', 'Object Name'],
+        path: ['Properties', 'Object', 'Name'],
         parameters: { value: 'OperatingLine.EyeLeft' },
       },
     ]);
@@ -1112,6 +1125,100 @@ describe('procedure authoring materialization', () => {
         path: [{ kind: 'field', name: 'text' }],
       },
     ]);
+  });
+
+  it('materializes UV Sphere menu proof authority only for its exact proven arguments', async () => {
+    const input = candidate();
+    const inputLeaf = input.nodes.find((node) => node.kind === 'leaf');
+    if (inputLeaf?.kind !== 'leaf' || inputLeaf.action === null) {
+      throw new Error('expected UV Sphere candidate leaf');
+    }
+    inputLeaf.action.arguments = {
+      resourceId: 'proof.uv_sphere.eye',
+      objectName: 'OperatingLine.TutorialEye',
+      radius: 1.5,
+      location: [1.25, -2, 0.75],
+    };
+    const result = materializeProcedureAuthoringCandidate(
+      input,
+      blenderActionCatalog,
+      blenderInteractionCatalog,
+    );
+    const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
+    const menu = leaf?.kind === 'leaf' ? leaf.menuTracks[0] : undefined;
+    if (menu?.availability !== 'available') throw new Error('expected UV Sphere menu track');
+    expect(menu.proofExecution).toEqual(orderedMenu(blenderInteractionCatalog).proofExecution);
+    expect(menu.proofExecution).toMatchObject({
+      executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+      nativeUndoDepth: 8,
+      proofArguments: inputLeaf.action.arguments,
+    });
+
+    const forgedOrder = structuredClone(result.tree);
+    const forgedOrderLeaf = forgedOrder.nodes.find((node) => node.kind === 'leaf');
+    const forgedOrderMenu =
+      forgedOrderLeaf?.kind === 'leaf' ? forgedOrderLeaf.menuTracks[0] : undefined;
+    if (forgedOrderMenu?.availability !== 'available') {
+      throw new Error('expected exact menu proof fixture');
+    }
+    forgedOrderMenu.operations[0]!.order = 4;
+    forgedOrderMenu.operations[3]!.order = 1;
+
+    const forgedIntent = structuredClone(result.tree);
+    const forgedIntentLeaf = forgedIntent.nodes.find((node) => node.kind === 'leaf');
+    const forgedIntentMenu =
+      forgedIntentLeaf?.kind === 'leaf' ? forgedIntentLeaf.menuTracks[0] : undefined;
+    if (forgedIntentMenu?.availability !== 'available') {
+      throw new Error('expected exact menu proof fixture');
+    }
+    forgedIntentMenu.operations[4]!.intent = 'execute';
+
+    const physicallyReordered = structuredClone(result.tree);
+    const physicallyReorderedLeaf = physicallyReordered.nodes.find((node) => node.kind === 'leaf');
+    const physicallyReorderedMenu =
+      physicallyReorderedLeaf?.kind === 'leaf' ? physicallyReorderedLeaf.menuTracks[0] : undefined;
+    if (physicallyReorderedMenu?.availability !== 'available') {
+      throw new Error('expected exact menu proof fixture');
+    }
+    physicallyReorderedMenu.operations.reverse();
+    expect(procedureTreeSchema.safeParse(physicallyReordered).success).toBe(true);
+
+    const foreignTrack = structuredClone(result.tree);
+    const foreignTrackLeaf = foreignTrack.nodes.find((node) => node.kind === 'leaf');
+    const provenTrack =
+      foreignTrackLeaf?.kind === 'leaf' ? foreignTrackLeaf.menuTracks[0] : undefined;
+    if (foreignTrackLeaf?.kind !== 'leaf' || provenTrack?.availability !== 'available') {
+      throw new Error('expected exact menu proof fixture');
+    }
+    const forgedTrack = structuredClone(provenTrack);
+    delete provenTrack.proofExecution;
+    forgedTrack.id = 'foreign.menu.track';
+    foreignTrackLeaf.menuTracks.push(forgedTrack);
+
+    for (const forged of [forgedOrder, forgedIntent, foreignTrack]) {
+      const parsed = procedureTreeSchema.safeParse(forged);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) throw new Error('expected forged menu proof rejection');
+      expect(parsed.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: expect.arrayContaining(['menuTracks', 'proofExecution']),
+          }),
+        ]),
+      );
+    }
+    await validatePublicJsonSchemaCases(
+      JSON.parse(
+        readFileSync(resolve('protocol/schemas/v1/procedure-tree.schema.json'), 'utf8'),
+      ) as object,
+      [
+        { value: result.tree, accepted: true },
+        { value: physicallyReordered, accepted: true },
+        { value: forgedOrder, accepted: false },
+        { value: forgedIntent, accepted: false },
+        { value: foreignTrack, accepted: false },
+      ],
+    );
   });
 
   it('projects edited UV Sphere Action arguments through exact catalog bindings', () => {
@@ -3361,7 +3468,9 @@ describe('procedure authoring materialization', () => {
 
   it('materializes portable names as own parameters without inherited-object collisions', () => {
     const interactionCatalog = structuredClone(blenderInteractionCatalog);
-    orderedMenu(interactionCatalog).operatorParameters[0]!.name = 'toString';
+    const menu = orderedMenu(interactionCatalog);
+    delete menu.proofExecution;
+    menu.operatorParameters[0]!.name = 'toString';
 
     const result = materializeProcedureAuthoringCandidate(
       candidate(interactionCatalog),

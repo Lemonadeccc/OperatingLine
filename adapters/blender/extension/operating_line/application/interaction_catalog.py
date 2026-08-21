@@ -141,7 +141,40 @@ class ProcedureMaterializationChannel:
     tool_name: str | None = None
     authorization: str | None = None
     result_binding: str | None = None
-    proof_execution: "ShortcutProofExecutionDefinition | None" = None
+    proof_execution: (
+        "MenuProofExecutionDefinition | ShortcutProofExecutionDefinition | None"
+    ) = None
+
+
+@dataclass(frozen=True, slots=True)
+class MenuProofArgumentsDefinition:
+    """The exact accepted action arguments covered by one menu proof."""
+
+    resource_id: str
+    object_name: str
+    radius: float
+    location: tuple[float, float, float]
+
+
+@dataclass(frozen=True, slots=True)
+class MenuProofExecutionDefinition:
+    """One catalog-authorized native menu-control proof declaration."""
+
+    executor_id: str
+    target_profile: str
+    execution_boundary: str
+    os_hid_input: bool
+    managed_action_executed: bool
+    managed_receipt_created: bool
+    authorization: str
+    transport: str
+    host_versions: tuple[str, str]
+    operation_ids: tuple[str, ...]
+    strong_observation_kind: str
+    native_undo_checkpoint_required: bool
+    native_undo_depth: int
+    ui_scale: int
+    proof_arguments: MenuProofArgumentsDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -1322,6 +1355,208 @@ def _parse_shortcut_operations(
     return tuple(operations)
 
 
+def _parse_menu_proof_execution(
+    value: Any,
+    recipe_id: str,
+) -> MenuProofExecutionDefinition:
+    label = f"Interaction recipe {recipe_id} procedureMaterialization menu proofExecution"
+    if recipe_id != "blender.mesh.create_uv_sphere.native":
+        raise ValueError(f"{label} is restricted to the exact UV Sphere recipe")
+    proof = _expect_object(value, label)
+    _expect_exact_keys(
+        proof,
+        required={
+            "executorId",
+            "targetProfile",
+            "executionBoundary",
+            "osHidInput",
+            "managedActionExecuted",
+            "managedReceiptCreated",
+            "authorization",
+            "transport",
+            "hostVersions",
+            "operationIds",
+            "strongObservationKind",
+            "nativeUndoCheckpointRequired",
+            "nativeUndoDepth",
+            "uiScale",
+            "proofArguments",
+        },
+        label=label,
+    )
+    expected_scalar = {
+        "executorId": "blender.uv_sphere_menu_controls.event_simulate.v1",
+        "targetProfile": "factory_layout_three_object_ui_scale_2",
+        "executionBoundary": "blender_window_event_simulate",
+        "osHidInput": False,
+        "managedActionExecuted": False,
+        "managedReceiptCreated": False,
+        "authorization": "accepted_replay_next_step",
+        "transport": "event_simulate",
+        "strongObservationKind": "uv_sphere_menu_controls_ready",
+        "nativeUndoCheckpointRequired": True,
+        "nativeUndoDepth": 8,
+        "uiScale": 2,
+    }
+    for key, expected_value in expected_scalar.items():
+        if type(proof[key]) is not type(expected_value) or proof[key] != expected_value:
+            raise ValueError(f"{label} has unsupported {key}")
+    host_versions = (
+        tuple(proof["hostVersions"])
+        if isinstance(proof["hostVersions"], list)
+        else ()
+    )
+    operation_ids = (
+        tuple(proof["operationIds"])
+        if isinstance(proof["operationIds"], list)
+        else ()
+    )
+    expected_operation_ids = (
+        "workspace.layout",
+        "menu.add",
+        "menu.mesh",
+        "operator.uv_sphere",
+        "control.location",
+        "control.scale",
+        "control.object_name",
+    )
+    if host_versions != ("4.5.3", "5.1.1"):
+        raise ValueError(f"{label} has unsupported hostVersions")
+    if operation_ids != expected_operation_ids:
+        raise ValueError(f"{label} must bind exact operationIds")
+    raw_arguments = _expect_object(proof["proofArguments"], f"{label} proofArguments")
+    _expect_exact_keys(
+        raw_arguments,
+        required={"resourceId", "objectName", "radius", "location"},
+        label=f"{label} proofArguments",
+    )
+    expected_arguments = {
+        "resourceId": "proof.uv_sphere.eye",
+        "objectName": "OperatingLine.TutorialEye",
+        "radius": 1.5,
+        "location": [1.25, -2, 0.75],
+    }
+    if raw_arguments != expected_arguments:
+        raise ValueError(f"{label} has unsupported proofArguments")
+    return MenuProofExecutionDefinition(
+        executor_id=expected_scalar["executorId"],
+        target_profile=expected_scalar["targetProfile"],
+        execution_boundary=expected_scalar["executionBoundary"],
+        os_hid_input=False,
+        managed_action_executed=False,
+        managed_receipt_created=False,
+        authorization=expected_scalar["authorization"],
+        transport=expected_scalar["transport"],
+        host_versions=("4.5.3", "5.1.1"),
+        operation_ids=expected_operation_ids,
+        strong_observation_kind=expected_scalar["strongObservationKind"],
+        native_undo_checkpoint_required=True,
+        native_undo_depth=8,
+        ui_scale=2,
+        proof_arguments=MenuProofArgumentsDefinition(
+            resource_id=expected_arguments["resourceId"],
+            object_name=expected_arguments["objectName"],
+            radius=expected_arguments["radius"],
+            location=tuple(expected_arguments["location"]),
+        ),
+    )
+
+
+def _validate_menu_proof_bindings(
+    recipe_id: str,
+    guidance: InteractionPathDefinition,
+    operator_parameters: tuple[ParameterAssignmentDefinition, ...],
+    control_operations: PostExecutionControlOperationsDefinition,
+    omitted_action_arguments: tuple[OmittedActionArgumentDefinition, ...],
+    proof_execution: MenuProofExecutionDefinition,
+) -> None:
+    label = f"Interaction recipe {recipe_id} menu proofExecution"
+    expected_guidance = (
+        ("workspace.layout", "Layout", "workspace", "Layout"),
+        ("menu.add", "Add", "menu", "VIEW3D_MT_add"),
+        ("menu.mesh", "Mesh", "menu", "VIEW3D_MT_mesh_add"),
+        (
+            "operator.uv_sphere",
+            "UV Sphere",
+            "operator",
+            "mesh.primitive_uv_sphere_add",
+        ),
+    )
+    ordered_guidance = tuple(sorted(guidance.steps, key=lambda step: step.order))
+    if (
+        tuple(
+            (step.id, step.label, step.target_kind, step.target_id)
+            for step in ordered_guidance
+        )
+        != expected_guidance
+    ):
+        raise ValueError(f"{label} requires the exact ordered UV Sphere guidance")
+    actual_operation_ids = tuple(step.id for step in ordered_guidance) + tuple(
+        operation.id for operation in control_operations.operations
+    )
+    if actual_operation_ids != proof_execution.operation_ids:
+        raise ValueError(f"{label} must bind every ordered menu operation exactly")
+    if len(operator_parameters) != 1:
+        raise ValueError(f"{label} requires the exact unit-radius operator parameter")
+    radius_parameter = operator_parameters[0]
+    if (
+        radius_parameter.name != "radius"
+        or radius_parameter.source.kind != "literal"
+        or radius_parameter.source.value != 1
+    ):
+        raise ValueError(f"{label} requires the exact unit-radius operator parameter")
+    expected_controls = (
+        (
+            "control.location",
+            "Location",
+            "VIEW3D_PT_item.transform.location",
+            ("Sidebar", "Item", "Transform", "Location"),
+            "location",
+            "identity",
+        ),
+        (
+            "control.scale",
+            "Scale",
+            "VIEW3D_PT_item.transform.scale",
+            ("Sidebar", "Item", "Transform", "Scale"),
+            "radius",
+            "uniform_vector3",
+        ),
+        (
+            "control.object_name",
+            "Object Name",
+            "PROPERTIES.object.name",
+            ("Properties", "Object", "Name"),
+            "objectName",
+            "identity",
+        ),
+    )
+    actual_controls = []
+    for operation in control_operations.operations:
+        if len(operation.parameters) != 1:
+            raise ValueError(f"{label} requires the exact ordered UI controls")
+        parameter = operation.parameters[0]
+        actual_controls.append(
+            (
+                operation.id,
+                operation.label,
+                operation.target_id,
+                operation.path,
+                parameter.source.argument_name if parameter.name == "value" else None,
+                parameter.source.transform,
+            )
+        )
+        if parameter.source.kind != "action_argument":
+            raise ValueError(f"{label} requires the exact ordered UI controls")
+    if tuple(actual_controls) != expected_controls:
+        raise ValueError(f"{label} requires the exact ordered UI controls")
+    if (
+        len(omitted_action_arguments) != 1
+        or omitted_action_arguments[0].argument_name != "resourceId"
+    ):
+        raise ValueError(f"{label} must omit only the logical resourceId")
+
+
 def _parse_shortcut_materialization(
     value: Any,
     recipe_id: str,
@@ -1525,6 +1760,7 @@ def _parse_procedure_materialization(
                     "controlOperations",
                     "omittedActionArguments",
                 },
+                optional={"proofExecution"},
                 label=f"{label} menu",
             )
         else:
@@ -1554,6 +1790,7 @@ def _parse_procedure_materialization(
         operator_parameters = None
         control_operations = None
         omitted_action_arguments = None
+        proof_execution = None
         if parameter_binding == "ordered_parameter_operations":
             raw_control_operations = _expect_object(
                 raw_menu["controlOperations"],
@@ -1586,6 +1823,18 @@ def _parse_procedure_materialization(
             omitted_action_arguments = _parse_omitted_action_arguments(
                 raw_menu["omittedActionArguments"], recipe_id
             )
+            if "proofExecution" in raw_menu:
+                proof_execution = _parse_menu_proof_execution(
+                    raw_menu["proofExecution"], recipe_id
+                )
+                _validate_menu_proof_bindings(
+                    recipe_id,
+                    guidance,
+                    operator_parameters,
+                    control_operations,
+                    omitted_action_arguments,
+                    proof_execution,
+                )
         menu = ProcedureMaterializationChannel(
             availability="available",
             source="guidance.native_path",
@@ -1594,6 +1843,7 @@ def _parse_procedure_materialization(
             operator_parameters=operator_parameters,
             control_operations=control_operations,
             omitted_action_arguments=omitted_action_arguments,
+            proof_execution=proof_execution,
         )
     else:
         raise ValueError(f"{label} menu has unknown availability")
@@ -2050,6 +2300,8 @@ __all__ = (
     "InteractionPathKind",
     "InteractionRecipe",
     "InteractionStepDefinition",
+    "MenuProofArgumentsDefinition",
+    "MenuProofExecutionDefinition",
     "OmittedActionArgumentDefinition",
     "ParameterAssignmentDefinition",
     "ParameterAssignmentSourceDefinition",

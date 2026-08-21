@@ -149,14 +149,161 @@ export const omittedActionArgumentSchema = z.strictObject({
 });
 export type OmittedActionArgument = z.infer<typeof omittedActionArgumentSchema>;
 
-const availableMenuProcedureMaterializationSchema = z.discriminatedUnion('parameterBinding', [
-  z.strictObject({
-    availability: z.literal('available'),
-    source: z.literal('guidance.native_path'),
-    semanticBinding: z.literal('all_leaf_operations'),
-    parameterBinding: z.literal('accepted_action_arguments'),
+const menuProofHostVersions = ['4.5.3', '5.1.1'] as const;
+const menuProofOperationIds = [
+  'workspace.layout',
+  'menu.add',
+  'menu.mesh',
+  'operator.uv_sphere',
+  'control.location',
+  'control.scale',
+  'control.object_name',
+] as const;
+const menuProofLocation = [1.25, -2, 0.75] as const;
+const menuProofGuidanceSteps = [
+  {
+    id: 'workspace.layout',
+    order: 1,
+    label: 'Layout',
+    intent: 'navigate',
+    target: { kind: 'workspace', hostId: 'Layout' },
+  },
+  {
+    id: 'menu.add',
+    order: 2,
+    label: 'Add',
+    intent: 'navigate',
+    target: { kind: 'menu', hostId: 'VIEW3D_MT_add' },
+  },
+  {
+    id: 'menu.mesh',
+    order: 3,
+    label: 'Mesh',
+    intent: 'navigate',
+    target: { kind: 'menu', hostId: 'VIEW3D_MT_mesh_add' },
+  },
+  {
+    id: 'operator.uv_sphere',
+    order: 4,
+    label: 'UV Sphere',
+    intent: 'execute',
+    target: { kind: 'operator', hostId: 'mesh.primitive_uv_sphere_add' },
+  },
+] as const;
+const menuProofOperatorParameters = [
+  { name: 'radius', source: { kind: 'literal', value: 1 } },
+] as const;
+const menuProofControlOperations = {
+  insertAfterStepId: 'operator.uv_sphere',
+  operations: [
+    {
+      id: 'control.location',
+      label: 'Location',
+      target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+      path: ['Sidebar', 'Item', 'Transform', 'Location'],
+      parameters: [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'location',
+            transform: 'identity',
+          },
+        },
+      ],
+    },
+    {
+      id: 'control.scale',
+      label: 'Scale',
+      target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.scale' },
+      path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+      parameters: [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'radius',
+            transform: 'uniform_vector3',
+          },
+        },
+      ],
+    },
+    {
+      id: 'control.object_name',
+      label: 'Object Name',
+      target: { kind: 'control', hostId: 'PROPERTIES.object.name' },
+      path: ['Properties', 'Object', 'Name'],
+      parameters: [
+        {
+          name: 'value',
+          source: {
+            kind: 'action_argument',
+            argumentName: 'objectName',
+            transform: 'identity',
+          },
+        },
+      ],
+    },
+  ],
+} as const;
+
+export const menuProofExecutionSchema = z.strictObject({
+  executorId: z.literal('blender.uv_sphere_menu_controls.event_simulate.v1'),
+  targetProfile: z.literal('factory_layout_three_object_ui_scale_2'),
+  executionBoundary: z.literal('blender_window_event_simulate'),
+  osHidInput: z.literal(false),
+  managedActionExecuted: z.literal(false),
+  managedReceiptCreated: z.literal(false),
+  authorization: z.literal('accepted_replay_next_step'),
+  transport: z.literal('event_simulate'),
+  hostVersions: z
+    .array(z.enum(['4.5.3', '5.1.1']))
+    .length(2)
+    .refine((versions) => versions[0] === '4.5.3' && versions[1] === '5.1.1')
+    .meta({ const: menuProofHostVersions }),
+  operationIds: z
+    .array(
+      z.enum([
+        'workspace.layout',
+        'menu.add',
+        'menu.mesh',
+        'operator.uv_sphere',
+        'control.location',
+        'control.scale',
+        'control.object_name',
+      ]),
+    )
+    .length(7)
+    .refine(
+      (ids) =>
+        ids[0] === 'workspace.layout' &&
+        ids[1] === 'menu.add' &&
+        ids[2] === 'menu.mesh' &&
+        ids[3] === 'operator.uv_sphere' &&
+        ids[4] === 'control.location' &&
+        ids[5] === 'control.scale' &&
+        ids[6] === 'control.object_name',
+    )
+    .meta({ const: menuProofOperationIds }),
+  strongObservationKind: z.literal('uv_sphere_menu_controls_ready'),
+  nativeUndoCheckpointRequired: z.literal(true),
+  nativeUndoDepth: z.literal(8),
+  uiScale: z.literal(2),
+  proofArguments: z.strictObject({
+    resourceId: z.literal('proof.uv_sphere.eye'),
+    objectName: z.literal('OperatingLine.TutorialEye'),
+    radius: z.literal(1.5),
+    location: z
+      .array(z.union([z.literal(1.25), z.literal(-2), z.literal(0.75)]))
+      .length(3)
+      .refine((location) => location[0] === 1.25 && location[1] === -2 && location[2] === 0.75)
+      .meta({ const: menuProofLocation }),
   }),
-  z.strictObject({
+});
+export type MenuProofExecution = z.infer<typeof menuProofExecutionSchema>;
+
+const orderedMenuProcedureMaterializationSchema = z
+  .strictObject({
     availability: z.literal('available'),
     source: z.literal('guidance.native_path'),
     semanticBinding: z.literal('all_leaf_operations'),
@@ -167,7 +314,40 @@ const availableMenuProcedureMaterializationSchema = z.discriminatedUnion('parame
       operations: z.array(postExecutionControlOperationSchema).min(1),
     }),
     omittedActionArguments: z.array(omittedActionArgumentSchema),
+    proofExecution: menuProofExecutionSchema.optional(),
+  })
+  .meta({
+    allOf: [
+      {
+        if: { required: ['proofExecution'] },
+        then: {
+          properties: {
+            operatorParameters: { const: menuProofOperatorParameters },
+            controlOperations: { const: menuProofControlOperations },
+            omittedActionArguments: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 1,
+              contains: {
+                type: 'object',
+                properties: { argumentName: { const: 'resourceId' } },
+                required: ['argumentName'],
+              },
+            },
+          },
+        },
+      },
+    ],
+  });
+
+const availableMenuProcedureMaterializationSchema = z.discriminatedUnion('parameterBinding', [
+  z.strictObject({
+    availability: z.literal('available'),
+    source: z.literal('guidance.native_path'),
+    semanticBinding: z.literal('all_leaf_operations'),
+    parameterBinding: z.literal('accepted_action_arguments'),
   }),
+  orderedMenuProcedureMaterializationSchema,
 ]);
 
 export const menuProcedureMaterializationSchema = z.union([
@@ -380,13 +560,54 @@ function isProcedureParameterPathPrefix(
   );
 }
 
-export const interactionRecipeSchema = z.strictObject({
-  id: guideStepIdSchema,
-  actionName: z.string().min(1),
-  title: z.string().min(1),
-  guidance: interactionPathSchema,
-  procedureMaterialization: procedureMaterializationSchema.optional(),
-});
+export const interactionRecipeSchema = z
+  .strictObject({
+    id: guideStepIdSchema,
+    actionName: z.string().min(1),
+    title: z.string().min(1),
+    guidance: interactionPathSchema,
+    procedureMaterialization: procedureMaterializationSchema.optional(),
+  })
+  .meta({
+    allOf: [
+      {
+        if: {
+          properties: {
+            procedureMaterialization: {
+              type: 'object',
+              properties: {
+                menu: { type: 'object', required: ['proofExecution'] },
+              },
+              required: ['menu'],
+            },
+          },
+          required: ['procedureMaterialization'],
+        },
+        then: {
+          properties: {
+            id: { const: 'blender.mesh.create_uv_sphere.native' },
+            actionName: { const: 'blender.mesh.create_uv_sphere' },
+            guidance: {
+              type: 'object',
+              properties: {
+                kind: { const: 'native_path' },
+                steps: { const: menuProofGuidanceSteps },
+                execution: {
+                  const: {
+                    stepId: 'operator.uv_sphere',
+                    operatorId: 'mesh.primitive_uv_sphere_add',
+                    binding: 'accepted_plan_action',
+                  },
+                },
+              },
+              required: ['kind', 'steps', 'execution'],
+            },
+          },
+          required: ['id', 'actionName', 'guidance'],
+        },
+      },
+    ],
+  });
 export type InteractionRecipe = z.infer<typeof interactionRecipeSchema>;
 
 export const interactionCatalogSchema = z.strictObject({
@@ -771,6 +992,112 @@ function validateRecipe(recipe: InteractionRecipe): void {
         controlIds.add(control.id);
         controlLabels.add(control.label);
         validateParameterNames(recipe, `control ${control.id}`, control.parameters);
+      }
+
+      if (menu.proofExecution !== undefined) {
+        if (
+          recipe.id !== 'blender.mesh.create_uv_sphere.native' ||
+          recipe.actionName !== 'blender.mesh.create_uv_sphere'
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} menu proof execution is restricted to the exact UV Sphere recipe`,
+          );
+        }
+        const expectedGuidance = [
+          ['workspace.layout', 'Layout', 'workspace', 'Layout'],
+          ['menu.add', 'Add', 'menu', 'VIEW3D_MT_add'],
+          ['menu.mesh', 'Mesh', 'menu', 'VIEW3D_MT_mesh_add'],
+          ['operator.uv_sphere', 'UV Sphere', 'operator', 'mesh.primitive_uv_sphere_add'],
+        ] as const;
+        const orderedGuidance = [...recipe.guidance.steps].sort(
+          (left, right) => left.order - right.order,
+        );
+        if (
+          orderedGuidance.length !== expectedGuidance.length ||
+          orderedGuidance.some((step, index) => {
+            const expected = expectedGuidance[index]!;
+            return (
+              step.id !== expected[0] ||
+              step.label !== expected[1] ||
+              step.target.kind !== expected[2] ||
+              step.target.hostId !== expected[3]
+            );
+          })
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} menu proof execution requires the exact ordered UV Sphere guidance`,
+          );
+        }
+        const actualOperationIds = [
+          ...orderedGuidance.map((step) => step.id),
+          ...menu.controlOperations.operations.map((control) => control.id),
+        ];
+        if (
+          actualOperationIds.length !== menu.proofExecution.operationIds.length ||
+          actualOperationIds.some(
+            (operationId, index) => operationId !== menu.proofExecution?.operationIds[index],
+          )
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} menu proof execution must bind every ordered menu operation exactly`,
+          );
+        }
+        const operatorRadius = menu.operatorParameters[0];
+        if (
+          menu.operatorParameters.length !== 1 ||
+          operatorRadius?.name !== 'radius' ||
+          operatorRadius.source.kind !== 'literal' ||
+          operatorRadius.source.value !== 1
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} menu proof execution requires the exact unit-radius operator parameter`,
+          );
+        }
+        const expectedControls = [
+          {
+            id: 'control.location',
+            hostId: 'VIEW3D_PT_item.transform.location',
+            path: ['Sidebar', 'Item', 'Transform', 'Location'],
+            argumentName: 'location',
+            transform: 'identity',
+          },
+          {
+            id: 'control.scale',
+            hostId: 'VIEW3D_PT_item.transform.scale',
+            path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+            argumentName: 'radius',
+            transform: 'uniform_vector3',
+          },
+          {
+            id: 'control.object_name',
+            hostId: 'PROPERTIES.object.name',
+            path: ['Properties', 'Object', 'Name'],
+            argumentName: 'objectName',
+            transform: 'identity',
+          },
+        ] as const;
+        if (
+          menu.controlOperations.operations.length !== expectedControls.length ||
+          menu.controlOperations.operations.some((control, index) => {
+            const expected = expectedControls[index]!;
+            const parameter = control.parameters[0];
+            return (
+              control.id !== expected.id ||
+              control.target.hostId !== expected.hostId ||
+              control.path.length !== expected.path.length ||
+              control.path.some((segment, pathIndex) => segment !== expected.path[pathIndex]) ||
+              control.parameters.length !== 1 ||
+              parameter?.name !== 'value' ||
+              parameter.source.kind !== 'action_argument' ||
+              parameter.source.argumentName !== expected.argumentName ||
+              parameter.source.transform !== expected.transform
+            );
+          })
+        ) {
+          throw new Error(
+            `Interaction recipe ${recipe.id} menu proof execution requires the exact ordered UI controls`,
+          );
+        }
       }
     }
   }

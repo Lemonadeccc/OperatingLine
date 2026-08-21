@@ -1,6 +1,6 @@
 {
   "protocolVersion": "1.1.0",
-  "catalogVersion": "1.40.0",
+  "catalogVersion": "1.41.0",
   "adapterId": "blender",
   "actionCatalogVersion": "1.22.0",
   "adapterVersionRange": ">=0.1.0 <0.2.0",
@@ -174,9 +174,9 @@
                 "label": "Object Name",
                 "target": {
                   "kind": "control",
-                  "hostId": "OUTLINER.object.name"
+                  "hostId": "PROPERTIES.object.name"
                 },
-                "path": ["Outliner", "Object Name"],
+                "path": ["Properties", "Object", "Name"],
                 "parameters": [
                   {
                     "name": "value",
@@ -195,7 +195,37 @@
               "argumentName": "resourceId",
               "reason": "The logical resource identifier has no user-facing Blender control."
             }
-          ]
+          ],
+          "proofExecution": {
+            "executorId": "blender.uv_sphere_menu_controls.event_simulate.v1",
+            "targetProfile": "factory_layout_three_object_ui_scale_2",
+            "executionBoundary": "blender_window_event_simulate",
+            "osHidInput": false,
+            "managedActionExecuted": false,
+            "managedReceiptCreated": false,
+            "authorization": "accepted_replay_next_step",
+            "transport": "event_simulate",
+            "hostVersions": ["4.5.3", "5.1.1"],
+            "operationIds": [
+              "workspace.layout",
+              "menu.add",
+              "menu.mesh",
+              "operator.uv_sphere",
+              "control.location",
+              "control.scale",
+              "control.object_name"
+            ],
+            "strongObservationKind": "uv_sphere_menu_controls_ready",
+            "nativeUndoCheckpointRequired": true,
+            "nativeUndoDepth": 8,
+            "uiScale": 2,
+            "proofArguments": {
+              "resourceId": "proof.uv_sphere.eye",
+              "objectName": "OperatingLine.TutorialEye",
+              "radius": 1.5,
+              "location": [1.25, -2, 0.75]
+            }
+          }
         },
         "shortcut": {
           "availability": "available",

@@ -310,7 +310,32 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.40.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.41.0');
+    const uvSphereMenu = blenderInteractionCatalog.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    )?.procedureMaterialization?.menu;
+    if (
+      uvSphereMenu?.availability !== 'available' ||
+      uvSphereMenu.parameterBinding !== 'ordered_parameter_operations'
+    ) {
+      throw new Error('Expected UV Sphere ordered menu');
+    }
+    expect(uvSphereMenu.proofExecution).toMatchObject({
+      executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+      targetProfile: 'factory_layout_three_object_ui_scale_2',
+      nativeUndoDepth: 8,
+      proofArguments: {
+        resourceId: 'proof.uv_sphere.eye',
+        objectName: 'OperatingLine.TutorialEye',
+        radius: 1.5,
+        location: [1.25, -2, 0.75],
+      },
+    });
+    expect(uvSphereMenu.controlOperations.operations[2]).toMatchObject({
+      id: 'control.object_name',
+      target: { kind: 'control', hostId: 'PROPERTIES.object.name' },
+      path: ['Properties', 'Object', 'Name'],
+    });
     const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
       (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
     );
@@ -1667,7 +1692,9 @@ describe('interaction catalog registry', () => {
       '452b43732706b44795e99fbb029a810dd3c97ee666fc2e28c093f72c361340ab',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.40.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     expect(frozen.catalogVersion).toBe('1.37.0');
     expect(
       frozen.recipes
@@ -1732,7 +1759,9 @@ describe('interaction catalog registry', () => {
       '37517dadb822d18dd9fb9e5d86546f04499531e540d9200507de12e781bc703f',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.40.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     const frozenShortcut = frozen.recipes.find(
       (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
     )?.procedureMaterialization?.shortcut;
@@ -1787,7 +1816,9 @@ describe('interaction catalog registry', () => {
       '52c40792822383da01e9763cbb06b59f4be4a7d6a1724d6a5d42c7107500cfb4',
     );
     const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
-    const active = structuredClone(blenderInteractionCatalog);
+    const active = JSON.parse(
+      readFileSync(resolve('adapters/blender/catalog/v1/interaction-catalog-1.40.0.json'), 'utf8'),
+    ) as typeof blenderInteractionCatalog;
     const frozenMirror = frozen.recipes.find(
       (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
     );
@@ -1816,6 +1847,43 @@ describe('interaction catalog registry', () => {
     });
     active.catalogVersion = frozen.catalogVersion;
     activeMirror.procedureMaterialization.mcp = frozenMirror.procedureMaterialization.mcp;
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.40.0 and adds only the exact UV Sphere menu proof in 1.41.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.40.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      'a880342d7820f75af2de053b64d40ffd752dda09492273ef03510a8e77ac111d',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    const activeMenu = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    )?.procedureMaterialization?.menu;
+    const frozenMenu = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.mesh.create_uv_sphere',
+    )?.procedureMaterialization?.menu;
+    if (
+      activeMenu?.availability !== 'available' ||
+      activeMenu.parameterBinding !== 'ordered_parameter_operations' ||
+      frozenMenu?.availability !== 'available' ||
+      frozenMenu.parameterBinding !== 'ordered_parameter_operations'
+    ) {
+      throw new Error('Expected UV Sphere ordered menu materialization');
+    }
+    expect(frozenMenu.proofExecution).toBeUndefined();
+    expect(activeMenu.proofExecution).toMatchObject({
+      executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+      nativeUndoDepth: 8,
+    });
+    active.catalogVersion = frozen.catalogVersion;
+    delete activeMenu.proofExecution;
+    const activeName = activeMenu.controlOperations.operations[2]!;
+    const frozenName = frozenMenu.controlOperations.operations[2]!;
+    activeName.target = structuredClone(frozenName.target);
+    activeName.path = [...frozenName.path];
     expect(active).toEqual(frozen);
   });
 

@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.40.0")
+        self.assertEqual(catalog.catalog_version, "1.41.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -678,10 +678,45 @@ class InteractionCatalogTests(unittest.TestCase):
             tuple(item.id for item in menu.control_operations.operations),
             ("control.location", "control.scale", "control.object_name"),
         )
+        self.assertEqual(
+            (
+                menu.control_operations.operations[2].target_id,
+                menu.control_operations.operations[2].path,
+            ),
+            ("PROPERTIES.object.name", ("Properties", "Object", "Name")),
+        )
         assert menu.omitted_action_arguments is not None
         self.assertEqual(
             tuple(item.argument_name for item in menu.omitted_action_arguments),
             ("resourceId",),
+        )
+        menu_proof = menu.proof_execution
+        self.assertIsNotNone(menu_proof)
+        assert menu_proof is not None
+        self.assertEqual(
+            menu_proof.executor_id,
+            "blender.uv_sphere_menu_controls.event_simulate.v1",
+        )
+        self.assertEqual(
+            menu_proof.target_profile,
+            "factory_layout_three_object_ui_scale_2",
+        )
+        self.assertEqual(menu_proof.host_versions, ("4.5.3", "5.1.1"))
+        self.assertEqual(menu_proof.native_undo_depth, 8)
+        self.assertEqual(menu_proof.ui_scale, 2)
+        self.assertEqual(
+            (
+                menu_proof.proof_arguments.resource_id,
+                menu_proof.proof_arguments.object_name,
+                menu_proof.proof_arguments.radius,
+                menu_proof.proof_arguments.location,
+            ),
+            (
+                "proof.uv_sphere.eye",
+                "OperatingLine.TutorialEye",
+                1.5,
+                (1.25, -2, 0.75),
+            ),
         )
         shortcut = sphere.procedure_materialization.shortcut
         self.assertEqual(shortcut.availability, "available")
@@ -1654,6 +1689,36 @@ class InteractionCatalogTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_invalid_or_foreign_menu_proof_execution(self) -> None:
+        def menu(raw: dict, action_name: str = "blender.mesh.create_uv_sphere") -> dict:
+            recipe = next(
+                item for item in raw["recipes"] if item["actionName"] == action_name
+            )
+            return recipe["procedureMaterialization"]["menu"]
+
+        wrong_scale = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        menu(wrong_scale)["proofExecution"]["uiScale"] = True
+        with self.assertRaisesRegex(ValueError, "unsupported uiScale"):
+            self._load_raw(wrong_scale)
+
+        wrong_arguments = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        menu(wrong_arguments)["proofExecution"]["proofArguments"]["radius"] = 2
+        with self.assertRaisesRegex(ValueError, "unsupported proofArguments"):
+            self._load_raw(wrong_arguments)
+
+        wrong_control = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        menu(wrong_control)["controlOperations"]["operations"][2]["target"][
+            "hostId"
+        ] = "OUTLINER.object.name"
+        with self.assertRaisesRegex(ValueError, "exact ordered UI controls"):
+            self._load_raw(wrong_control)
+
+        foreign = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
+        declaration = menu(foreign).pop("proofExecution")
+        menu(foreign, "blender.mesh.create_cube")["proofExecution"] = declaration
+        with self.assertRaisesRegex(ValueError, "exact UV Sphere recipe"):
+            self._load_raw(foreign)
+
     def test_rejects_invalid_or_foreign_shortcut_proof_execution(self) -> None:
         def proof(raw: dict) -> dict:
             recipe = next(
@@ -2184,6 +2249,37 @@ class InteractionCatalogTests(unittest.TestCase):
         self.assertEqual(
             mirror.procedure_materialization.mcp.availability,
             "unavailable",
+        )
+
+    def test_loads_byte_frozen_pre_uv_sphere_menu_proof_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.40.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "a880342d7820f75af2de053b64d40ffd752dda09492273ef03510a8e77ac111d",
+        )
+        self.assertEqual(frozen.catalog_version, "1.40.0")
+        sphere = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.mesh.create_uv_sphere"
+        )
+        assert sphere.procedure_materialization is not None
+        menu = sphere.procedure_materialization.menu
+        self.assertIsNone(menu.proof_execution)
+        assert menu.control_operations is not None
+        self.assertEqual(
+            menu.control_operations.operations[2].target_id,
+            "OUTLINER.object.name",
         )
 
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
@@ -3834,6 +3930,7 @@ class InteractionCatalogTests(unittest.TestCase):
             for item in mismatched["recipes"]
             if item["actionName"] == "blender.mesh.create_cube"
         )
+        uv_sphere["procedureMaterialization"]["menu"].pop("proofExecution")
         uv_sphere["id"], cube["id"] = cube["id"], uv_sphere["id"]
         with self.assertRaisesRegex(ValueError, "must bind its exact"):
             self._load_raw(mismatched)

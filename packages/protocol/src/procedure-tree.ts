@@ -14,7 +14,7 @@ import {
   semanticAnchorSchema,
   type GuidePlan,
 } from './guide.js';
-import { shortcutProofExecutionSchema } from './interaction-catalog.js';
+import { menuProofExecutionSchema, shortcutProofExecutionSchema } from './interaction-catalog.js';
 import {
   procedureParameterProjectionSchema,
   projectProcedureParameter,
@@ -214,12 +214,109 @@ const availableTrackShape = {
   preconditions: z.array(procedurePreconditionSchema),
 } as const;
 
-export const menuProcedureTrackSchema = z.discriminatedUnion('availability', [
-  z.strictObject({
+const exactUvSphereMenuProofOperations = [
+  {
+    id: 'workspace.layout',
+    order: 1,
+    intent: 'navigate',
+    target: { kind: 'workspace', hostId: 'Layout' },
+    path: ['Layout'],
+    parameters: {},
+  },
+  {
+    id: 'menu.add',
+    order: 2,
+    intent: 'navigate',
+    target: { kind: 'menu', hostId: 'VIEW3D_MT_add' },
+    path: ['Layout', 'Add'],
+    parameters: {},
+  },
+  {
+    id: 'menu.mesh',
+    order: 3,
+    intent: 'navigate',
+    target: { kind: 'menu', hostId: 'VIEW3D_MT_mesh_add' },
+    path: ['Layout', 'Add', 'Mesh'],
+    parameters: {},
+  },
+  {
+    id: 'operator.uv_sphere',
+    order: 4,
+    intent: 'execute',
+    target: { kind: 'operator', hostId: 'mesh.primitive_uv_sphere_add' },
+    path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+    parameters: { radius: 1 },
+  },
+  {
+    id: 'control.location',
+    order: 5,
+    intent: 'configure',
+    target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.location' },
+    path: ['Sidebar', 'Item', 'Transform', 'Location'],
+    parameters: { value: [1.25, -2, 0.75] },
+  },
+  {
+    id: 'control.scale',
+    order: 6,
+    intent: 'configure',
+    target: { kind: 'control', hostId: 'VIEW3D_PT_item.transform.scale' },
+    path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+    parameters: { value: [1.5, 1.5, 1.5] },
+  },
+  {
+    id: 'control.object_name',
+    order: 7,
+    intent: 'configure',
+    target: { kind: 'control', hostId: 'PROPERTIES.object.name' },
+    path: ['Properties', 'Object', 'Name'],
+    parameters: { value: 'OperatingLine.TutorialEye' },
+  },
+] as const;
+
+const exactUvSphereMenuProofOperationsJsonSchema = {
+  type: 'array',
+  minItems: exactUvSphereMenuProofOperations.length,
+  maxItems: exactUvSphereMenuProofOperations.length,
+  allOf: exactUvSphereMenuProofOperations.map((operation) => ({
+    contains: {
+      type: 'object',
+      properties: {
+        id: { const: operation.id },
+        order: { const: operation.order },
+        intent: { const: operation.intent },
+        target: { const: operation.target },
+        path: { const: operation.path },
+        parameters: { const: operation.parameters },
+      },
+      required: ['id', 'order', 'intent', 'target', 'path', 'parameters'],
+    },
+  })),
+} as const;
+
+const availableMenuProcedureTrackSchema = z
+  .strictObject({
     ...availableTrackShape,
     modality: z.literal('menu'),
     operations: z.array(menuProcedureOperationSchema).min(1),
-  }),
+    proofExecution: menuProofExecutionSchema.optional(),
+  })
+  .meta({
+    allOf: [
+      {
+        if: { required: ['proofExecution'] },
+        then: {
+          properties: {
+            id: { const: 'blender.mesh.create_uv_sphere.native' },
+            operations: exactUvSphereMenuProofOperationsJsonSchema,
+          },
+          required: ['id', 'operations'],
+        },
+      },
+    ],
+  });
+
+export const menuProcedureTrackSchema = z.discriminatedUnion('availability', [
+  availableMenuProcedureTrackSchema,
   z.strictObject({ ...unavailableTrackShape, modality: z.literal('menu') }),
 ]);
 export type MenuProcedureTrack = z.infer<typeof menuProcedureTrackSchema>;
@@ -267,30 +364,100 @@ export const procedureGroupNodeSchema = z.strictObject({
 });
 export type ProcedureGroupNode = z.infer<typeof procedureGroupNodeSchema>;
 
-export const procedureLeafNodeSchema = z.strictObject({
-  ...procedureNodeBaseShape,
-  kind: z.literal('leaf'),
-  action: z
-    .strictObject({
-      adapterId: z.string().min(1),
-      name: z.string().min(1),
-      arguments: z.record(z.string().min(1), z.json()),
-    })
-    .nullable(),
-  semanticOperations: z.array(semanticProcedureOperationSchema).min(1),
-  menuTracks: z.array(menuProcedureTrackSchema).min(1),
-  shortcutTracks: z.array(shortcutProcedureTrackSchema).min(1),
-  mcpTracks: z.array(mcpProcedureTrackSchema).min(1),
-  anchors: z.array(semanticAnchorSchema),
-  expectedObservations: z.array(observationExpectationSchema),
-  observationPolicy: observationPolicySchema.optional(),
-  rollback: z.strictObject({
-    mode: rollbackModeSchema,
-    checkpointRequired: z.boolean(),
-  }),
-  validation: procedureValidationSchema,
-  parameterProjection: procedureParameterProjectionSchema.optional(),
-});
+export const procedureLeafNodeSchema = z
+  .strictObject({
+    ...procedureNodeBaseShape,
+    kind: z.literal('leaf'),
+    action: z
+      .strictObject({
+        adapterId: z.string().min(1),
+        name: z.string().min(1),
+        arguments: z.record(z.string().min(1), z.json()),
+      })
+      .nullable(),
+    semanticOperations: z.array(semanticProcedureOperationSchema).min(1),
+    menuTracks: z.array(menuProcedureTrackSchema).min(1),
+    shortcutTracks: z.array(shortcutProcedureTrackSchema).min(1),
+    mcpTracks: z.array(mcpProcedureTrackSchema).min(1),
+    anchors: z.array(semanticAnchorSchema),
+    expectedObservations: z.array(observationExpectationSchema),
+    observationPolicy: observationPolicySchema.optional(),
+    rollback: z.strictObject({
+      mode: rollbackModeSchema,
+      checkpointRequired: z.boolean(),
+    }),
+    validation: procedureValidationSchema,
+    parameterProjection: procedureParameterProjectionSchema.optional(),
+  })
+  .superRefine((leaf, context) => {
+    for (const [trackIndex, track] of leaf.menuTracks.entries()) {
+      if (track.availability !== 'available' || track.proofExecution === undefined) continue;
+      const proof = track.proofExecution;
+      const proofPath = ['menuTracks', trackIndex, 'proofExecution'] as const;
+      if (
+        track.id !== 'blender.mesh.create_uv_sphere.native' ||
+        leaf.action?.adapterId !== 'blender' ||
+        leaf.action.name !== 'blender.mesh.create_uv_sphere' ||
+        !sameCanonicalJson(leaf.action.arguments, proof.proofArguments)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: [...proofPath],
+          message: 'UV Sphere menu proof must bind its exact accepted leaf action',
+        });
+        continue;
+      }
+      const actualOperations = track.operations
+        .map(({ id, order, intent, target, path, parameters }) => ({
+          id,
+          order,
+          intent,
+          target,
+          path,
+          parameters,
+        }))
+        .sort((left, right) => left.order - right.order);
+      if (!sameCanonicalJson(actualOperations, exactUvSphereMenuProofOperations)) {
+        context.addIssue({
+          code: 'custom',
+          path: [...proofPath],
+          message: 'UV Sphere menu proof must bind its exact ordered materialized controls',
+        });
+      }
+    }
+  })
+  .meta({
+    allOf: [
+      {
+        if: {
+          properties: {
+            menuTracks: {
+              type: 'array',
+              contains: { type: 'object', required: ['proofExecution'] },
+            },
+          },
+          required: ['menuTracks'],
+        },
+        then: {
+          properties: {
+            action: {
+              const: {
+                adapterId: 'blender',
+                name: 'blender.mesh.create_uv_sphere',
+                arguments: {
+                  resourceId: 'proof.uv_sphere.eye',
+                  objectName: 'OperatingLine.TutorialEye',
+                  radius: 1.5,
+                  location: [1.25, -2, 0.75],
+                },
+              },
+            },
+          },
+          required: ['action'],
+        },
+      },
+    ],
+  });
 export type ProcedureLeafNode = z.infer<typeof procedureLeafNodeSchema>;
 
 export const procedureNodeSchema = z.discriminatedUnion('kind', [

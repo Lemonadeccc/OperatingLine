@@ -3178,6 +3178,169 @@
                                               ],
                                               "additionalProperties": false
                                             }
+                                          },
+                                          "proofExecution": {
+                                            "type": "object",
+                                            "properties": {
+                                              "executorId": {
+                                                "type": "string",
+                                                "const": "blender.uv_sphere_menu_controls.event_simulate.v1"
+                                              },
+                                              "targetProfile": {
+                                                "type": "string",
+                                                "const": "factory_layout_three_object_ui_scale_2"
+                                              },
+                                              "executionBoundary": {
+                                                "type": "string",
+                                                "const": "blender_window_event_simulate"
+                                              },
+                                              "osHidInput": {
+                                                "type": "boolean",
+                                                "const": false
+                                              },
+                                              "managedActionExecuted": {
+                                                "type": "boolean",
+                                                "const": false
+                                              },
+                                              "managedReceiptCreated": {
+                                                "type": "boolean",
+                                                "const": false
+                                              },
+                                              "authorization": {
+                                                "type": "string",
+                                                "const": "accepted_replay_next_step"
+                                              },
+                                              "transport": {
+                                                "type": "string",
+                                                "const": "event_simulate"
+                                              },
+                                              "hostVersions": {
+                                                "minItems": 2,
+                                                "maxItems": 2,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "4.5.3",
+                                                    "5.1.1"
+                                                  ]
+                                                },
+                                                "const": [
+                                                  "4.5.3",
+                                                  "5.1.1"
+                                                ]
+                                              },
+                                              "operationIds": {
+                                                "minItems": 7,
+                                                "maxItems": 7,
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "workspace.layout",
+                                                    "menu.add",
+                                                    "menu.mesh",
+                                                    "operator.uv_sphere",
+                                                    "control.location",
+                                                    "control.scale",
+                                                    "control.object_name"
+                                                  ]
+                                                },
+                                                "const": [
+                                                  "workspace.layout",
+                                                  "menu.add",
+                                                  "menu.mesh",
+                                                  "operator.uv_sphere",
+                                                  "control.location",
+                                                  "control.scale",
+                                                  "control.object_name"
+                                                ]
+                                              },
+                                              "strongObservationKind": {
+                                                "type": "string",
+                                                "const": "uv_sphere_menu_controls_ready"
+                                              },
+                                              "nativeUndoCheckpointRequired": {
+                                                "type": "boolean",
+                                                "const": true
+                                              },
+                                              "nativeUndoDepth": {
+                                                "type": "number",
+                                                "const": 8
+                                              },
+                                              "uiScale": {
+                                                "type": "number",
+                                                "const": 2
+                                              },
+                                              "proofArguments": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "resourceId": {
+                                                    "type": "string",
+                                                    "const": "proof.uv_sphere.eye"
+                                                  },
+                                                  "objectName": {
+                                                    "type": "string",
+                                                    "const": "OperatingLine.TutorialEye"
+                                                  },
+                                                  "radius": {
+                                                    "type": "number",
+                                                    "const": 1.5
+                                                  },
+                                                  "location": {
+                                                    "minItems": 3,
+                                                    "maxItems": 3,
+                                                    "type": "array",
+                                                    "items": {
+                                                      "anyOf": [
+                                                        {
+                                                          "type": "number",
+                                                          "const": 1.25
+                                                        },
+                                                        {
+                                                          "type": "number",
+                                                          "const": -2
+                                                        },
+                                                        {
+                                                          "type": "number",
+                                                          "const": 0.75
+                                                        }
+                                                      ]
+                                                    },
+                                                    "const": [
+                                                      1.25,
+                                                      -2,
+                                                      0.75
+                                                    ]
+                                                  }
+                                                },
+                                                "required": [
+                                                  "resourceId",
+                                                  "objectName",
+                                                  "radius",
+                                                  "location"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            },
+                                            "required": [
+                                              "executorId",
+                                              "targetProfile",
+                                              "executionBoundary",
+                                              "osHidInput",
+                                              "managedActionExecuted",
+                                              "managedReceiptCreated",
+                                              "authorization",
+                                              "transport",
+                                              "hostVersions",
+                                              "operationIds",
+                                              "strongObservationKind",
+                                              "nativeUndoCheckpointRequired",
+                                              "nativeUndoDepth",
+                                              "uiScale",
+                                              "proofArguments"
+                                            ],
+                                            "additionalProperties": false
                                           }
                                         },
                                         "required": [
@@ -3189,7 +3352,125 @@
                                           "controlOperations",
                                           "omittedActionArguments"
                                         ],
-                                        "additionalProperties": false
+                                        "additionalProperties": false,
+                                        "allOf": [
+                                          {
+                                            "if": {
+                                              "required": [
+                                                "proofExecution"
+                                              ]
+                                            },
+                                            "then": {
+                                              "properties": {
+                                                "operatorParameters": {
+                                                  "const": [
+                                                    {
+                                                      "name": "radius",
+                                                      "source": {
+                                                        "kind": "literal",
+                                                        "value": 1
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                "controlOperations": {
+                                                  "const": {
+                                                    "insertAfterStepId": "operator.uv_sphere",
+                                                    "operations": [
+                                                      {
+                                                        "id": "control.location",
+                                                        "label": "Location",
+                                                        "target": {
+                                                          "kind": "control",
+                                                          "hostId": "VIEW3D_PT_item.transform.location"
+                                                        },
+                                                        "path": [
+                                                          "Sidebar",
+                                                          "Item",
+                                                          "Transform",
+                                                          "Location"
+                                                        ],
+                                                        "parameters": [
+                                                          {
+                                                            "name": "value",
+                                                            "source": {
+                                                              "kind": "action_argument",
+                                                              "argumentName": "location",
+                                                              "transform": "identity"
+                                                            }
+                                                          }
+                                                        ]
+                                                      },
+                                                      {
+                                                        "id": "control.scale",
+                                                        "label": "Scale",
+                                                        "target": {
+                                                          "kind": "control",
+                                                          "hostId": "VIEW3D_PT_item.transform.scale"
+                                                        },
+                                                        "path": [
+                                                          "Sidebar",
+                                                          "Item",
+                                                          "Transform",
+                                                          "Scale"
+                                                        ],
+                                                        "parameters": [
+                                                          {
+                                                            "name": "value",
+                                                            "source": {
+                                                              "kind": "action_argument",
+                                                              "argumentName": "radius",
+                                                              "transform": "uniform_vector3"
+                                                            }
+                                                          }
+                                                        ]
+                                                      },
+                                                      {
+                                                        "id": "control.object_name",
+                                                        "label": "Object Name",
+                                                        "target": {
+                                                          "kind": "control",
+                                                          "hostId": "PROPERTIES.object.name"
+                                                        },
+                                                        "path": [
+                                                          "Properties",
+                                                          "Object",
+                                                          "Name"
+                                                        ],
+                                                        "parameters": [
+                                                          {
+                                                            "name": "value",
+                                                            "source": {
+                                                              "kind": "action_argument",
+                                                              "argumentName": "objectName",
+                                                              "transform": "identity"
+                                                            }
+                                                          }
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                },
+                                                "omittedActionArguments": {
+                                                  "type": "array",
+                                                  "minItems": 1,
+                                                  "maxItems": 1,
+                                                  "contains": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "argumentName": {
+                                                        "const": "resourceId"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "argumentName"
+                                                    ]
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ]
                                       }
                                     ]
                                   }
@@ -3991,7 +4272,111 @@
                           "title",
                           "guidance"
                         ],
-                        "additionalProperties": false
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "properties": {
+                                "procedureMaterialization": {
+                                  "type": "object",
+                                  "properties": {
+                                    "menu": {
+                                      "type": "object",
+                                      "required": [
+                                        "proofExecution"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "menu"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "procedureMaterialization"
+                              ]
+                            },
+                            "then": {
+                              "properties": {
+                                "id": {
+                                  "const": "blender.mesh.create_uv_sphere.native"
+                                },
+                                "actionName": {
+                                  "const": "blender.mesh.create_uv_sphere"
+                                },
+                                "guidance": {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "const": "native_path"
+                                    },
+                                    "steps": {
+                                      "const": [
+                                        {
+                                          "id": "workspace.layout",
+                                          "order": 1,
+                                          "label": "Layout",
+                                          "intent": "navigate",
+                                          "target": {
+                                            "kind": "workspace",
+                                            "hostId": "Layout"
+                                          }
+                                        },
+                                        {
+                                          "id": "menu.add",
+                                          "order": 2,
+                                          "label": "Add",
+                                          "intent": "navigate",
+                                          "target": {
+                                            "kind": "menu",
+                                            "hostId": "VIEW3D_MT_add"
+                                          }
+                                        },
+                                        {
+                                          "id": "menu.mesh",
+                                          "order": 3,
+                                          "label": "Mesh",
+                                          "intent": "navigate",
+                                          "target": {
+                                            "kind": "menu",
+                                            "hostId": "VIEW3D_MT_mesh_add"
+                                          }
+                                        },
+                                        {
+                                          "id": "operator.uv_sphere",
+                                          "order": 4,
+                                          "label": "UV Sphere",
+                                          "intent": "execute",
+                                          "target": {
+                                            "kind": "operator",
+                                            "hostId": "mesh.primitive_uv_sphere_add"
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "execution": {
+                                      "const": {
+                                        "stepId": "operator.uv_sphere",
+                                        "operatorId": "mesh.primitive_uv_sphere_add",
+                                        "binding": "accepted_plan_action"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "steps",
+                                    "execution"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "actionName",
+                                "guidance"
+                              ]
+                            }
+                          }
+                        ]
                       }
                     }
                   },

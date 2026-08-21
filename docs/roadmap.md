@@ -628,6 +628,13 @@
           Controller 重建，文件加载、复制 `.blend` 与 OS 进程重启不会继承旧 target。该证明明确排除 OS HID、menu 点击、
           managed Action/MCP identity 及其它对象或快捷键。见
           [ADR 0094](adr/0094-native-subdivision-shortcut-proof.md)。
+    - [x] 首个逐控件原生 menu proof：冻结 InteractionCatalog `1.40.0`，由 `1.41.0` 只为精确的 UV Sphere
+          fixture 声明 `Layout → Add → Mesh → UV Sphere → Location → Scale → Properties/Object/Name`。
+          Blender 4.5.3/5.1.1 各自通过 146 个 `Window.event_simulate` 前台事件，验证 `482/992/512`
+          拓扑、具体位置/缩放/名称、八层原生 Undo 与八层 Redo；ProcedureTree 只有在 Action arguments
+          与目录 `proofArguments` 完全一致时才携带声明。当前证明明确排除任意参数、其它 UI scale、OS HID、
+          managed action/receipt 与通用 Companion 请求路径。见
+          [ADR 0100](adr/0100-native-uv-sphere-menu-control-proof.md)。
     - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
           `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
           middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、

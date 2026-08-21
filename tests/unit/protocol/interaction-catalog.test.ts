@@ -28,6 +28,12 @@ function orderedMenu(catalog: InteractionCatalog) {
   return menu;
 }
 
+function mutableOrderedMenu(catalog: InteractionCatalog) {
+  const menu = orderedMenu(catalog);
+  delete menu.proofExecution;
+  return menu;
+}
+
 function recipeFor(catalog: InteractionCatalog, actionName: string) {
   const recipe = catalog.recipes.find((candidate) => candidate.actionName === actionName);
   if (recipe === undefined) throw new Error(`Expected recipe for ${actionName}`);
@@ -222,7 +228,17 @@ function installConeSegmentFrame(catalog: InteractionCatalog) {
 
 describe('interaction catalog protocol', () => {
   it('permits action-level MCP only for the seven managed primitives and exact Mirror recipe', () => {
-    const availableRecipe = recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere');
+    const availableRecipe = structuredClone(
+      recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere'),
+    );
+    const availableMenu = availableRecipe.procedureMaterialization?.menu;
+    if (
+      availableMenu?.availability !== 'available' ||
+      availableMenu.parameterBinding !== 'ordered_parameter_operations'
+    ) {
+      throw new Error('Expected UV Sphere ordered menu');
+    }
+    delete availableMenu.proofExecution;
 
     for (const actionName of managedPrimitiveActionNames) {
       const catalog = structuredClone(blenderInteractionCatalog);
@@ -268,7 +284,7 @@ describe('interaction catalog protocol', () => {
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.40.0');
+    expect(catalog.catalogVersion).toBe('1.41.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -334,6 +350,7 @@ describe('interaction catalog protocol', () => {
       '1.38.0',
       '1.39.0',
       '1.40.0',
+      '1.41.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -449,6 +466,8 @@ describe('interaction catalog protocol', () => {
             },
             {
               id: 'control.object_name',
+              target: { kind: 'control', hostId: 'PROPERTIES.object.name' },
+              path: ['Properties', 'Object', 'Name'],
               parameters: [
                 {
                   name: 'value',
@@ -468,6 +487,33 @@ describe('interaction catalog protocol', () => {
             reason: 'The logical resource identifier has no user-facing Blender control.',
           },
         ],
+        proofExecution: {
+          executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+          targetProfile: 'factory_layout_three_object_ui_scale_2',
+          executionBoundary: 'blender_window_event_simulate',
+          authorization: 'accepted_replay_next_step',
+          transport: 'event_simulate',
+          hostVersions: ['4.5.3', '5.1.1'],
+          operationIds: [
+            'workspace.layout',
+            'menu.add',
+            'menu.mesh',
+            'operator.uv_sphere',
+            'control.location',
+            'control.scale',
+            'control.object_name',
+          ],
+          strongObservationKind: 'uv_sphere_menu_controls_ready',
+          nativeUndoCheckpointRequired: true,
+          nativeUndoDepth: 8,
+          uiScale: 2,
+          proofArguments: {
+            resourceId: 'proof.uv_sphere.eye',
+            objectName: 'OperatingLine.TutorialEye',
+            radius: 1.5,
+            location: [1.25, -2, 0.75],
+          },
+        },
       },
       shortcut: {
         availability: 'available',
@@ -1839,25 +1885,25 @@ describe('interaction catalog protocol', () => {
     );
 
     const wrongInsertion = structuredClone(blenderInteractionCatalog);
-    orderedMenu(wrongInsertion).controlOperations.insertAfterStepId = 'menu.mesh';
+    mutableOrderedMenu(wrongInsertion).controlOperations.insertAfterStepId = 'menu.mesh';
     expect(() => validateInteractionCatalog(wrongInsertion, blenderActionCatalog)).toThrow(
       'must be inserted after its execution step',
     );
 
     const conflictingControlId = structuredClone(blenderInteractionCatalog);
-    orderedMenu(conflictingControlId).controlOperations.operations[0]!.id = 'menu.add';
+    mutableOrderedMenu(conflictingControlId).controlOperations.operations[0]!.id = 'menu.add';
     expect(() => validateInteractionCatalog(conflictingControlId, blenderActionCatalog)).toThrow(
       'control id menu.add conflicts',
     );
 
     const conflictingControlLabel = structuredClone(blenderInteractionCatalog);
-    orderedMenu(conflictingControlLabel).controlOperations.operations[0]!.label = 'Add';
+    mutableOrderedMenu(conflictingControlLabel).controlOperations.operations[0]!.label = 'Add';
     expect(() => validateInteractionCatalog(conflictingControlLabel, blenderActionCatalog)).toThrow(
       'control label Add conflicts',
     );
 
     const duplicateParameter = structuredClone(blenderInteractionCatalog);
-    const duplicateParameterMenu = orderedMenu(duplicateParameter);
+    const duplicateParameterMenu = mutableOrderedMenu(duplicateParameter);
     duplicateParameterMenu.operatorParameters.push(
       structuredClone(duplicateParameterMenu.operatorParameters[0]!),
     );
@@ -1867,7 +1913,7 @@ describe('interaction catalog protocol', () => {
 
     for (const unsafeName of ['__proto__', 'prototype', 'constructor']) {
       const unsafeParameter = structuredClone(blenderInteractionCatalog);
-      orderedMenu(unsafeParameter).operatorParameters[0]!.name = unsafeName;
+      mutableOrderedMenu(unsafeParameter).operatorParameters[0]!.name = unsafeName;
       expect(() => validateInteractionCatalog(unsafeParameter, blenderActionCatalog)).toThrow(
         `unsafe parameter name ${unsafeName}`,
       );
@@ -1875,7 +1921,7 @@ describe('interaction catalog protocol', () => {
 
     const unknownArgument = structuredClone(blenderInteractionCatalog);
     const unknownSource =
-      orderedMenu(unknownArgument).controlOperations.operations[0]!.parameters[0]!.source;
+      mutableOrderedMenu(unknownArgument).controlOperations.operations[0]!.parameters[0]!.source;
     if (unknownSource.kind !== 'action_argument')
       throw new Error('Expected action argument fixture');
     unknownSource.argumentName = 'missing';
@@ -1885,7 +1931,8 @@ describe('interaction catalog protocol', () => {
 
     const invalidUniformVector = structuredClone(blenderInteractionCatalog);
     const invalidUniformSource =
-      orderedMenu(invalidUniformVector).controlOperations.operations[0]!.parameters[0]!.source;
+      mutableOrderedMenu(invalidUniformVector).controlOperations.operations[0]!.parameters[0]!
+        .source;
     if (invalidUniformSource.kind !== 'action_argument')
       throw new Error('Expected action argument fixture');
     invalidUniformSource.transform = 'uniform_vector3';
@@ -1895,7 +1942,7 @@ describe('interaction catalog protocol', () => {
 
     const invalidHalvedValue = structuredClone(blenderInteractionCatalog);
     const invalidHalvedSource =
-      orderedMenu(invalidHalvedValue).controlOperations.operations[0]!.parameters[0]!.source;
+      mutableOrderedMenu(invalidHalvedValue).controlOperations.operations[0]!.parameters[0]!.source;
     if (invalidHalvedSource.kind !== 'action_argument')
       throw new Error('Expected action argument fixture');
     invalidHalvedSource.transform = 'divide_by_two';
@@ -1905,7 +1952,7 @@ describe('interaction catalog protocol', () => {
 
     const duplicateMapping = structuredClone(blenderInteractionCatalog);
     const duplicateMappingSource =
-      orderedMenu(duplicateMapping).controlOperations.operations[2]!.parameters[0]!.source;
+      mutableOrderedMenu(duplicateMapping).controlOperations.operations[2]!.parameters[0]!.source;
     if (duplicateMappingSource.kind !== 'action_argument') {
       throw new Error('Expected action argument fixture');
     }
@@ -1915,19 +1962,19 @@ describe('interaction catalog protocol', () => {
     );
 
     const mappedAndOmitted = structuredClone(blenderInteractionCatalog);
-    orderedMenu(mappedAndOmitted).omittedActionArguments[0]!.argumentName = 'radius';
+    mutableOrderedMenu(mappedAndOmitted).omittedActionArguments[0]!.argumentName = 'radius';
     expect(() => validateInteractionCatalog(mappedAndOmitted, blenderActionCatalog)).toThrow(
       'cannot be both mapped and omitted',
     );
 
     const unknownOmission = structuredClone(blenderInteractionCatalog);
-    orderedMenu(unknownOmission).omittedActionArguments[0]!.argumentName = 'missing';
+    mutableOrderedMenu(unknownOmission).omittedActionArguments[0]!.argumentName = 'missing';
     expect(() => validateInteractionCatalog(unknownOmission, blenderActionCatalog)).toThrow(
       'omits unknown action argument missing',
     );
 
     const duplicateOmission = structuredClone(blenderInteractionCatalog);
-    const duplicateOmissionMenu = orderedMenu(duplicateOmission);
+    const duplicateOmissionMenu = mutableOrderedMenu(duplicateOmission);
     duplicateOmissionMenu.omittedActionArguments.push(
       structuredClone(duplicateOmissionMenu.omittedActionArguments[0]!),
     );
@@ -1936,7 +1983,7 @@ describe('interaction catalog protocol', () => {
     );
 
     const uncoveredArgument = structuredClone(blenderInteractionCatalog);
-    orderedMenu(uncoveredArgument).omittedActionArguments = [];
+    mutableOrderedMenu(uncoveredArgument).omittedActionArguments = [];
     expect(() => validateInteractionCatalog(uncoveredArgument, blenderActionCatalog)).toThrow(
       'leaves action arguments unmapped: resourceId',
     );
@@ -2062,6 +2109,96 @@ describe('interaction catalog protocol', () => {
       readFileSync(resolve('protocol/schemas/v1/interaction-catalog.schema.json'), 'utf8'),
     ) as { additionalProperties?: boolean };
     expect(schema.additionalProperties).toBe(false);
+  });
+
+  it('authorizes native menu-control proof only for the exact UV Sphere recipe and operations', async () => {
+    const menu = orderedMenu(blenderInteractionCatalog);
+    expect(menu.proofExecution?.operationIds).toEqual([
+      'workspace.layout',
+      'menu.add',
+      'menu.mesh',
+      'operator.uv_sphere',
+      ...menu.controlOperations.operations.map(({ id }) => id),
+    ]);
+    expect(menu.proofExecution).toMatchObject({
+      executorId: 'blender.uv_sphere_menu_controls.event_simulate.v1',
+      targetProfile: 'factory_layout_three_object_ui_scale_2',
+      managedActionExecuted: false,
+      managedReceiptCreated: false,
+      osHidInput: false,
+      nativeUndoDepth: 8,
+      uiScale: 2,
+      proofArguments: {
+        resourceId: 'proof.uv_sphere.eye',
+        objectName: 'OperatingLine.TutorialEye',
+        radius: 1.5,
+        location: [1.25, -2, 0.75],
+      },
+    });
+
+    const foreign = structuredClone(blenderInteractionCatalog);
+    const cubeMenu = recipeFor(foreign, 'blender.mesh.create_cube').procedureMaterialization?.menu;
+    if (
+      cubeMenu?.availability !== 'available' ||
+      cubeMenu.parameterBinding !== 'ordered_parameter_operations'
+    ) {
+      throw new Error('Expected Cube ordered menu');
+    }
+    cubeMenu.proofExecution = menu.proofExecution;
+    expect(() => validateInteractionCatalog(foreign, blenderActionCatalog)).toThrow(
+      'restricted to the exact UV Sphere recipe',
+    );
+
+    const mismatched = structuredClone(blenderInteractionCatalog);
+    orderedMenu(mismatched).controlOperations.operations[2]!.target.hostId = 'OUTLINER.object.name';
+    expect(() => validateInteractionCatalog(mismatched, blenderActionCatalog)).toThrow(
+      'requires the exact ordered UI controls',
+    );
+
+    const reversedHosts = structuredClone(blenderInteractionCatalog);
+    orderedMenu(reversedHosts).proofExecution!.hostVersions = ['5.1.1', '4.5.3'];
+    const duplicateHosts = structuredClone(blenderInteractionCatalog);
+    orderedMenu(duplicateHosts).proofExecution!.hostVersions = ['5.1.1', '5.1.1'];
+    const reorderedOperationIds = structuredClone(blenderInteractionCatalog);
+    const reorderedIds = orderedMenu(reorderedOperationIds).proofExecution!.operationIds;
+    [reorderedIds[0], reorderedIds[1]] = [reorderedIds[1]!, reorderedIds[0]!];
+    const duplicateOperationIds = structuredClone(blenderInteractionCatalog);
+    const duplicateIds = orderedMenu(duplicateOperationIds).proofExecution!.operationIds;
+    duplicateIds[1] = duplicateIds[0]!;
+    const reorderedLocation = structuredClone(blenderInteractionCatalog);
+    const reorderedCoordinates =
+      orderedMenu(reorderedLocation).proofExecution!.proofArguments.location;
+    [reorderedCoordinates[0], reorderedCoordinates[1]] = [
+      reorderedCoordinates[1]!,
+      reorderedCoordinates[0]!,
+    ];
+    const duplicateLocation = structuredClone(blenderInteractionCatalog);
+    const duplicateCoordinates =
+      orderedMenu(duplicateLocation).proofExecution!.proofArguments.location;
+    duplicateCoordinates[1] = duplicateCoordinates[0]!;
+
+    const exactArrayForgeries = [
+      reversedHosts,
+      duplicateHosts,
+      reorderedOperationIds,
+      duplicateOperationIds,
+      reorderedLocation,
+      duplicateLocation,
+    ];
+    for (const forged of exactArrayForgeries) {
+      expect(interactionCatalogSchema.safeParse(forged).success).toBe(false);
+    }
+    await validatePublicJsonSchemaCases(
+      JSON.parse(
+        readFileSync(resolve('protocol/schemas/v1/interaction-catalog.schema.json'), 'utf8'),
+      ) as object,
+      [
+        { value: blenderInteractionCatalog, accepted: true },
+        ...exactArrayForgeries.map((value) => ({ value, accepted: false as const })),
+        { value: foreign, accepted: false },
+        { value: mismatched, accepted: false },
+      ],
+    );
   });
 
   it('authorizes native shortcut proof execution only through the exact catalog declaration', () => {
@@ -2293,7 +2430,7 @@ describe('interaction catalog protocol', () => {
         value: (() => {
           const catalog = structuredClone(blenderInteractionCatalog);
           const source =
-            orderedMenu(catalog).controlOperations.operations[0]!.parameters[0]!.source;
+            mutableOrderedMenu(catalog).controlOperations.operations[0]!.parameters[0]!.source;
           if (source.kind !== 'action_argument')
             throw new Error('Expected action argument fixture');
           source.transform = 'divide_by_two';

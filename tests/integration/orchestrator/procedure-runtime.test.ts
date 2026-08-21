@@ -1663,7 +1663,7 @@ describe('procedure compilation runtime', () => {
         ['Layout', 'Add', 'Mesh', 'UV Sphere'],
         ['Sidebar', 'Item', 'Transform', 'Location'],
         ['Sidebar', 'Item', 'Transform', 'Scale'],
-        ['Outliner', 'Object Name'],
+        ['Properties', 'Object', 'Name'],
       ]);
       expect(menuTrack.operations.map((operation) => operation.parameters)).toEqual([
         {},

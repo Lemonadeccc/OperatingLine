@@ -109,7 +109,7 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **快捷键 Operator 参数 surface**：协议可显式记录 `F9` opener、逐控件
   `operator_property_update` 和 `ENTER` closer；每个值绑定具体 operator property、可读路径和数组位置，
   不依赖参数对象键序、像素坐标或不稳定的 `Tab` 焦点。实际使用时输出 ProcedureTree `1.1.0` / Result
-  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.40.0`
+  `1.3.0`；Schema 14 的精确索引可按共享 surface/operator 查询完整链。当前 InteractionCatalog `1.41.0`
   已用该形状声明 Icosphere、Edit Mode Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface Modifier 的 candidate shortcut；
   六条轨迹均有 Blender 4.5.3/5.1.1 前台事件证据，但仍保持 `structural_only`，不冒充 managed action
   等价执行。见 [ADR 0057](docs/adr/0057-shortcut-operator-property-surfaces.md) 与
@@ -233,12 +233,17 @@ Companion/Extension 在软件内呈现；无界面 Orchestrator 负责协议验�
 - **目录绑定的 Procedure 轨迹物化**：供应商无关的 MCP
   `operatingline.procedure.authoring.materialize` 与 HTTP
   `POST /api/v1/procedure/authoring/materialize` 接受上述同一 packet + candidate，并重新执行 packet-bound
-  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.40.0` 为
+  validation。只有 InteractionCatalog 的封闭声明可启用轨迹。Blender InteractionCatalog `1.41.0` 为
   UV Sphere 生成七步菜单，
   以及 `Shift+A`、`G → X/Y/Z`、`S`、`F2` 六步候选快捷键轨迹；`keyMode` 明确区分 chord/sequence，
   `vector3_x/y/z` 把位置值绑定到对应移动步骤。每条替代轨迹都必须独立完整映射或省略 Action 参数，内部
   `resourceId` 不进入 UI operation；同一目录还声明 semantic/menu/shortcut 的 stable 参数投影，供本地编辑器
-  从 Action arguments 权威同步训练轨迹。Icosphere 同版本生成四步原生菜单加 Location、Object Name 两步参数
+  从 Action arguments 权威同步训练轨迹。`1.41.0` 另把 `Layout → Add → Mesh → UV Sphere`、
+  `Location`、`Scale` 与 `Properties → Object → Name` 绑定到一个精确、参数受限的菜单控件证明：仅
+  `proof.uv_sphere.eye`、半径 `1.5`、位置 `[1.25,-2,0.75]` 和名称
+  `OperatingLine.TutorialEye` 会把该证明带入叶节点。Blender 4.5.3/5.1.1 前台分别执行 146 个
+  `Window.event_simulate` 事件，并以八层原生 Undo/Redo 恢复和重放场景指纹；它不代表 OS HID、任意参数、
+  managed Action 收据或通用 Companion 调用。Icosphere 同版本生成四步原生菜单加 Location、Object Name 两步参数
   控件，精确保留 `subdivisions`、`radius`、`location` 和 `objectName`；其九步 candidate shortcut 依次绑定
   `Shift+A → Mesh → Ico Sphere`、`F9`、Subdivisions、Radius、`ENTER`、`G X/Y/Z` 与 `F2`。
   `resourceId` 不进入 UI operation；其 MCP projection 只对已接受、未启动且精确版本绑定的单叶 replay 开放。
@@ -320,7 +325,7 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   精确回放。结果带已安装目录 digest、输入/输出 tree hash 与逐 leaf coverage。leaf 仍为 `candidate` 且
   `validatedHostVersions` 为空，通用 compile 仍是 `structural_only`；
   radius→scale 与相对移动只是教学投影，不是宿主状态等价证明。历史
-  `1.9.0` 至已冻结的 `1.39.0` 保持可回放；只有完整 result 信封保留目录
+  `1.9.0` 至已冻结的 `1.40.0` 保持可回放；只有完整 result 信封保留目录
   grounding 证明；单独抽出或经通用 store 保存的 tree 仍只能
   按 `structural_only` 使用。该入口不调用模型或 Provider、不保存树、不创建 Proposal，也不执行 Blender；
   当前 Icosphere、Cube、Plane、Torus、Cone 与 Cylinder 轨迹都未经过完整 UI operation 的真实
@@ -384,10 +389,10 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   下一 Plan revision；未知动作、
   未知或不符合嵌套 Schema 的参数、未声明 anchor/observation/rollback 会在 AI Proposal 边界失败。
 - **InteractionCatalog**：通用协议把一个已接受 action 映射为版本化、有序的宿主交互步骤，并区分
-  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.40.0` 精确绑定
+  可绑定真实控件的 `native_path` 与只供教学参考的 `semantic_path`。Blender InteractionCatalog `1.41.0` 精确绑定
   ActionCatalog `1.22.0` 的 27 个动作；活动树叶节点按 action 选择配方，而不是信任 AI 写入的
   `menuPath`。Plane/Cube/UV Sphere/Ico Sphere/Cone/Cylinder/Torus 进入真实菜单；其余复合动作显示自己的灰色参考路径和
-  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.39.0` 保持逐字可回放。见
+  `UI target unavailable`，不会复用无关按钮。历史 `1.9.0` 至已冻结的 `1.40.0` 保持逐字可回放。见
   [ADR 0024](docs/adr/0024-versioned-interaction-catalog.md)
   、[ADR 0025](docs/adr/0025-granular-primitive-teaching-steps.md) 与
   [ADR 0026](docs/adr/0026-native-cube-action-slice.md) 与
@@ -401,8 +406,9 @@ Mirror → Managed Mirror Contract`。Blender 4.5.3/5.1.1 的真实前台事件�
   [ADR 0060](docs/adr/0060-bounded-subdivision-surface-modifier.md) 与
   [ADR 0061](docs/adr/0061-bounded-edit-mode-bevel-edges.md) 与
   [ADR 0062](docs/adr/0062-bounded-individual-inset-faces.md) 与
-  [ADR 0063](docs/adr/0063-bounded-edit-mode-poke-faces.md) 与
-  [ADR 0064](docs/adr/0064-bounded-mirror-modifier.md)。
+  [ADR 0063](docs/adr/0063-bounded-edit-mode-poke-faces.md)、
+  [ADR 0064](docs/adr/0064-bounded-mirror-modifier.md) 与
+  [ADR 0100](docs/adr/0100-native-uv-sphere-menu-control-proof.md)。
 - **跨目标规划质量门与需求覆盖证据**：Blender catalog `1.22.0` 把 27 个动作划分为 Geometry、Materials、
   Animation、Render setup 与 Output。`operatingline.planning.evaluate` 对候选完整 Plan 检查阶段树、
   阶段顺序、目标所需阶段、资源创建/依赖、语义锚点和观察；十九项目录语义能力进一步要求 provider

@@ -139,6 +139,15 @@ function sha256(value: unknown): string {
   return createHash('sha256').update(canonicalizeProtocolJsonValue(value)).digest('hex');
 }
 
+function sameCanonicalJsonValue(left: unknown, right: unknown): boolean {
+  const leftBytes = canonicalizeProtocolJsonValue(left);
+  const rightBytes = canonicalizeProtocolJsonValue(right);
+  return (
+    leftBytes.byteLength === rightBytes.byteLength &&
+    leftBytes.every((value, index) => value === rightBytes[index])
+  );
+}
+
 function candidateWithDeterministicPlaceholderTracks(
   candidate: ProcedureAuthoringCandidateTree,
 ): ProcedureTree {
@@ -654,6 +663,14 @@ function materializeLeaf(
           (left, right) => left.order - right.order,
         );
         const actionArguments = leaf.action?.arguments ?? {};
+        const applicableMenuProof =
+          orderedMenuDeclaration?.proofExecution !== undefined &&
+          sameCanonicalJsonValue(
+            actionArguments,
+            orderedMenuDeclaration.proofExecution.proofArguments,
+          )
+            ? orderedMenuDeclaration.proofExecution
+            : undefined;
         const guidanceOperations = orderedGuidanceSteps.map((step, index) => ({
           id: step.id,
           order: step.order,
@@ -689,6 +706,9 @@ function materializeLeaf(
             title: nativeRecipe!.recipe.title,
             preconditions: structuredClone(nativeRecipe!.guidance.preconditions),
             modality: 'menu' as const,
+            ...(applicableMenuProof === undefined
+              ? {}
+              : { proofExecution: structuredClone(applicableMenuProof) }),
             operations: [...guidanceOperations, ...controlOperations],
           },
         ];

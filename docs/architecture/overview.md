@@ -467,11 +467,16 @@ stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.40.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.39.0` 的原生 Subdivision shortcut proof，并为
+`1.41.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.40.0`，保留原生 Subdivision shortcut proof，并为
 UV Sphere、Icosphere、Cube、Plane、Torus、Cone、Cylinder 与 Mirror 的 accepted replay 提供有界
 action-level MCP 权限；旧 binding 不继承新增权限。当前目录为 UV Sphere 声明七步 ordered menu 与六步
 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
+其中菜单轨迹把 Object Name 的真实控件定位修正为 `Properties → Object → Name`；仅当叶节点 Action
+arguments 精确等于目录中的 `proofArguments` 时，物化器才复制
+`blender.uv_sphere_menu_controls.event_simulate.v1` 证明声明。该边界已在 Blender 4.5.3/5.1.1 中完成
+146 个前台 UI 事件与八层原生 Undo/Redo 双向验证，但尚不等同于任意参数执行、OS HID、managed receipt
+或通用 Companion 调用。
 `1.33.0` 另以 `procedureMaterialization.semantic` 明确声明 location、radius 与 objectName 到语义操作的
 stable path 与转换；物化结果把这些声明连同菜单和快捷键绑定汇总为 `parameterProjection 1.0.0`，供编辑器
 在 Action-only 修改后执行目录证明的确定性投影。没有该声明的历史树保持可读但参数只读。
