@@ -292,4 +292,12 @@ describe('ProcedureTree editor UI assets', () => {
     expect(script).toContain('为避免丢失未刷新工作区');
     expect(script).toContain('为避免丢失未覆盖工作区');
   });
+
+  it('opens an explicitly linked stored tree after the fragment token is consumed', () => {
+    const script = procedureTreeEditorUiAssets['/procedure-editor/app.js'].body;
+
+    expect(script).toContain("new URLSearchParams(window.location.search).get('treeId')");
+    expect(script).toContain('elements.treeId.value = requestedTreeId');
+    expect(script).toContain('loadTree(requestedTreeId).catch(handleError)');
+  });
 });

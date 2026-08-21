@@ -1595,7 +1595,7 @@ describe('procedure authoring materialization', () => {
     expect(result.tree).not.toBe(input);
   });
 
-  it('preserves the exact Mirror observation while keeping every host track unavailable', () => {
+  it('materializes only the exact accepted Mirror action through action-level MCP', () => {
     const input = mirrorCandidate();
     const inputSnapshot = structuredClone(input);
     const result = materializeProcedureAuthoringCandidate(
@@ -1606,14 +1606,14 @@ describe('procedure authoring materialization', () => {
     const leaf = result.tree.nodes.find((node) => node.kind === 'leaf');
     if (leaf?.kind !== 'leaf') throw new Error('expected materialized Mirror leaf');
 
-    expect(result.formatVersion).toBe('1.0.0');
+    expect(result.formatVersion).toBe('1.4.0');
     expect(result.coverage).toEqual([
       {
         leafId: leaf.id,
         recipeId: 'blender.modifier.add_mirror.semantic',
         menu: 'unavailable',
         shortcut: 'unavailable',
-        mcp: 'unavailable',
+        mcp: 'materialized',
       },
     ]);
     expect(leaf.expectedObservations).toEqual([
@@ -1635,10 +1635,36 @@ describe('procedure authoring materialization', () => {
       availability: 'unavailable',
       reason: expect.stringContaining('Shift+A'),
     });
-    expect(leaf.mcpTracks[0]).toMatchObject({
-      availability: 'unavailable',
-      reason: 'No approved action-level MCP tool is available.',
-    });
+    expect(leaf.mcpTracks).toEqual([
+      {
+        id: 'blender.modifier.add_mirror.semantic.mcp',
+        availability: 'available',
+        title: 'Add a bounded Mirror modifier action-level MCP projection',
+        preconditions: [],
+        modality: 'mcp',
+        operations: [
+          expect.objectContaining({
+            id: 'blender.modifier.add_mirror.semantic.mcp.execute',
+            serverName: 'operating-line',
+            toolName: 'operatingline.blender.action.execute',
+            arguments: {
+              formatVersion: '1.0.0',
+              requestId: '$runtime.requestId',
+              replayId: '$runtime.replayId',
+              expectedState: '$runtime.expectedState',
+            },
+            argumentSource: 'accepted_leaf_action',
+            actionArguments: {
+              targetId: 'tutorial.cube',
+              modifierId: 'tutorial.cube.mirror',
+              modifierName: 'OperatingLine.Cube.Mirror',
+              axis: 'Y',
+            },
+            resultBinding: `${leaf.id}.companion_state_report`,
+          }),
+        ],
+      },
+    ]);
     expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
     expect(input).toEqual(inputSnapshot);
   });

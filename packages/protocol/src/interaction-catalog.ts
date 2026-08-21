@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import type { ActionCatalog } from './catalog.js';
 import { guideProtocolVersionSchema, guideStepIdSchema } from './guide.js';
-import { managedPrimitiveActionNameSchema } from './managed-primitive-action.js';
+import { actionLevelMcpActionNameSchema } from './managed-primitive-action.js';
 import {
   procedureParameterPathSegmentSchema,
   procedureParameterTransformSchema,
@@ -973,13 +973,17 @@ function validateRecipe(recipe: InteractionRecipe): void {
   }
 
   const mcp = recipe.procedureMaterialization?.mcp;
+  const expectedActionLevelMcpRecipeId =
+    recipe.actionName === 'blender.modifier.add_mirror'
+      ? 'blender.modifier.add_mirror.semantic'
+      : `${recipe.actionName}.native`;
   if (
     mcp?.availability === 'available' &&
-    (!managedPrimitiveActionNameSchema.safeParse(recipe.actionName).success ||
-      recipe.id !== `${recipe.actionName}.native`)
+    (!actionLevelMcpActionNameSchema.safeParse(recipe.actionName).success ||
+      recipe.id !== expectedActionLevelMcpRecipeId)
   ) {
     throw new Error(
-      `Interaction recipe ${recipe.id} action-level MCP is restricted to exact managed Blender primitive native recipes`,
+      `Interaction recipe ${recipe.id} action-level MCP is restricted to exact approved Blender recipes`,
     );
   }
 

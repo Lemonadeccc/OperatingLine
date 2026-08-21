@@ -17,7 +17,7 @@ from ..domain import (
     CATALOG_VERSION_PATTERN,
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
-    is_action_level_mcp_primitive,
+    is_action_level_mcp_action,
     load_task_tree_data,
 )
 from ..infrastructure.blender_actions import action_registry
@@ -2761,10 +2761,10 @@ class CompanionController:
                 not isinstance(action, dict)
                 or set(action) != {"adapterId", "name", "arguments"}
                 or action.get("adapterId") != "blender"
-                or not is_action_level_mcp_primitive(action.get("name"))
+                or not is_action_level_mcp_action(action.get("name"))
             ):
                 raise ValueError(
-                    "Action execution is restricted to approved primitives"
+                    "Action execution is restricted to the exact approved action-level MCP allowlist"
                 )
             if not isinstance(action["arguments"], dict):
                 raise ValueError("Action execution arguments must be an object")

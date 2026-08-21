@@ -80,9 +80,24 @@ import {
   procedureAuthoringGenerationResultSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
+  procedureZeroBaselineGenerateRequestSchema,
+  procedureZeroBaselineResultSchema,
+  procedureZeroBaselineRefinementCreateRequestSchema,
+  procedureZeroBaselineRefinementStartRequestSchema,
+  procedureZeroBaselineRefinementStatusRequestSchema,
+  procedureZeroBaselineRefinementStatusSchema,
+  procedureZeroBaselineReviewRequestSchema,
+  procedureZeroBaselineSemanticStartRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
   procedureTutorialMediaAnalysisRequestSchema,
+  procedureTutorialMediaAuthoringPreparationSchema,
+  procedureTutorialMediaAuthoringPrepareRequestSchema,
+  procedureTutorialMediaAuthoringResumeRequestSchema,
+  procedureTutorialMediaAuthoringReviewRequestSchema,
+  procedureTutorialMediaAuthoringRunCreateRequestSchema,
+  procedureTutorialMediaAuthoringRunStatusRequestSchema,
+  procedureTutorialMediaAuthoringRunStatusSchema,
   procedureTutorialMediaCapabilitiesSchema,
   procedureTutorialMediaJobStatusRequestSchema,
   procedureTutorialMediaJobStatusSchema,
@@ -170,9 +185,11 @@ import {
   type InteractionCatalog,
   type PlanningIntent,
   type PlanningQualityReport,
+  type ProcedureAuthoringVerifiedPromptRequest,
   type ProcedureLeafReplayBinding,
   type ProcedureShortcutProofProposalRecord,
   type ProcedureTutorialAuthoringBinding,
+  type ProcedureTutorialMediaAuthoringBinding,
   type RuntimeStatus,
 } from '@operatingline/protocol';
 import { z } from 'zod';
@@ -231,6 +248,17 @@ import {
   type ProcedureAuthoringGenerationCoordinator,
 } from './procedure-authoring-generation.js';
 import {
+  createProcedureZeroBaselineGenerationCoordinator,
+  procedureZeroBaselineEvidenceEventTypes,
+  type ProcedureZeroBaselineGenerationCoordinator,
+} from './procedure-zero-baseline-generation.js';
+import {
+  createProcedureZeroBaselineRefinementCoordinator,
+  ProcedureZeroBaselinePersistenceFaultError,
+  procedureZeroBaselineRefinementEvidenceEventTypes,
+  type ProcedureZeroBaselineRefinementCoordinator,
+} from './procedure-zero-baseline-refinement.js';
+import {
   createProcedureSemanticRetrievalCoordinator,
   procedureSemanticRetrievalEvidenceEventTypes,
   restoreProcedureSemanticRetrievalInvocations,
@@ -284,8 +312,25 @@ import {
   procedureTutorialMediaCoordinatorErrorResponse,
   procedureTutorialMediaCoordinatorHttpStatus,
   procedureTutorialMediaEvidenceEventTypes,
+  ProcedureTutorialMediaCoordinatorError,
   type ProcedureTutorialMediaCoordinator,
 } from './procedure-tutorial-media-coordinator.js';
+import { prepareProcedureTutorialMediaAuthoring } from './procedure-tutorial-media-authoring.js';
+import {
+  createProcedureTutorialMediaAuthoringPreparationCoordinator,
+  procedureTutorialMediaAuthoringPreparationCoordinatorErrorResponse,
+  procedureTutorialMediaAuthoringPreparationCoordinatorHttpStatus,
+  ProcedureTutorialMediaAuthoringPreparationCoordinatorError,
+  type ProcedureTutorialMediaAuthoringPreparationCoordinator,
+} from './procedure-tutorial-media-authoring-preparation-coordinator.js';
+import {
+  createProcedureTutorialMediaAuthoringRunCoordinator,
+  procedureTutorialMediaAuthoringRunErrorResponse,
+  procedureTutorialMediaAuthoringRunEvidenceEventTypes,
+  procedureTutorialMediaAuthoringRunHttpStatus,
+  type ProcedureTutorialMediaAuthoringRunCoordinator,
+} from './procedure-tutorial-media-authoring-run.js';
+import { resolveProcedureTutorialAuthoringUiAsset } from './procedure-tutorial-authoring-ui.js';
 import type { ProcedureTutorialMediaRuntime } from './procedure-tutorial-media-runtime.js';
 import {
   buildProcedureTutorialYoutubePromptPacket,
@@ -365,6 +410,20 @@ function requestIdFromUnknown(input: unknown): string | null {
   return requestId.success ? requestId.data : null;
 }
 
+function zeroBaselineRefinementHttpStatus(error: unknown): 409 | 500 {
+  return error instanceof ProcedureZeroBaselinePersistenceFaultError ? 500 : 409;
+}
+
+function zeroBaselineRefinementErrorCode(error: unknown, fallback: string): string {
+  return error instanceof ProcedureZeroBaselinePersistenceFaultError ? error.code : fallback;
+}
+
+function tutorialMediaAnalysisRequestIdFromUnknown(input: unknown): string | null {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return null;
+  const requestId = z.uuid().safeParse((input as Record<string, unknown>)['analysisRequestId']);
+  return requestId.success ? requestId.data : null;
+}
+
 function tutorialMediaUnavailableResponse(
   requestId: string | null,
   runtime: ProcedureTutorialMediaRuntime,
@@ -394,6 +453,17 @@ function mcpStructuredResult<Value extends Record<string, unknown>>(value: Value
     content: [{ type: 'text' as const, text: JSON.stringify(value) }],
     structuredContent: value,
   };
+}
+
+class ProcedureTutorialMediaAuthoringPreparationError extends Error {
+  constructor(
+    readonly code: 'analysis_not_completed',
+    readonly statusCode: 409,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ProcedureTutorialMediaAuthoringPreparationError';
+  }
 }
 
 const procedureRuntimeValidation = {
@@ -572,10 +642,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
   let plannerGenerationCoordinator: PlannerGenerationCoordinator | undefined;
   let plannerReplanGenerationCoordinator: PlannerReplanGenerationCoordinator | undefined;
   let procedureAuthoringGenerationCoordinator: ProcedureAuthoringGenerationCoordinator | undefined;
+  let procedureZeroBaselineGenerationCoordinator:
+    ProcedureZeroBaselineGenerationCoordinator | undefined;
+  let procedureZeroBaselineRefinementCoordinator:
+    ProcedureZeroBaselineRefinementCoordinator | undefined;
   let procedureSemanticRetrievalCoordinator: ProcedureSemanticRetrievalCoordinator | undefined;
   let procedureRefinementCoordinator: ProcedureRefinementCoordinator | undefined;
   let procedureTutorialAuthoringRunCoordinator:
     ProcedureTutorialAuthoringRunCoordinator | undefined;
+  let procedureTutorialMediaAuthoringRunCoordinator:
+    ProcedureTutorialMediaAuthoringRunCoordinator | undefined;
+  let tutorialMediaAuthoringPreparationCoordinator:
+    ProcedureTutorialMediaAuthoringPreparationCoordinator | undefined;
   let procedureTutorialYoutubeImportCoordinator:
     ProcedureTutorialYoutubeImportCoordinator | undefined;
   let procedureTutorialYoutubeTrackSelectionCoordinator:
@@ -591,9 +669,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       companionDialogueRunCoordinator?.beginClose();
       procedureRefinementCoordinator?.beginClose();
       procedureTutorialAuthoringRunCoordinator?.beginClose();
+      procedureTutorialMediaAuthoringRunCoordinator?.beginClose();
+      tutorialMediaAuthoringPreparationCoordinator?.beginClose();
       procedureTutorialYoutubeImportCoordinator?.beginClose();
       procedureTutorialMediaCoordinator?.beginClose();
     },
+    () => tutorialMediaAuthoringPreparationCoordinator?.close(),
     async () => {
       if (plannerGenerationCoordinator !== undefined) {
         await plannerGenerationCoordinator.close();
@@ -605,6 +686,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     },
     () => procedureTutorialYoutubeImportCoordinator?.close(),
     () => procedureTutorialAuthoringRunCoordinator?.close(),
+    () => procedureTutorialMediaAuthoringRunCoordinator?.close(),
     () => procedureTutorialMediaCoordinator?.close(),
     () => tutorialMediaPipelineForCleanup?.close(),
     () => companionInitialPlanRunCoordinator?.close(),
@@ -770,7 +852,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     };
 
     const getProcedureAuthoringPrompt = (
-      request: ReturnType<typeof procedureAuthoringPromptRequestSchema.parse>,
+      request: ProcedureAuthoringVerifiedPromptRequest,
       options: ProcedureAuthoringPromptPacketBuildOptions = {},
     ) => {
       const actionCatalog = actionCatalogRegistry.get({
@@ -815,6 +897,73 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         actionCatalog,
         interactionCatalog,
       );
+    };
+
+    const executeTutorialMediaAuthoringPreparation = async (
+      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareRequestSchema.parse>,
+    ) => {
+      if (
+        procedureTutorialMediaCoordinator === undefined ||
+        tutorialMediaRuntime.pipeline === undefined
+      ) {
+        throw new Error('The tutorial media analysis pipeline is unavailable.');
+      }
+      const completed = procedureTutorialMediaCoordinator.completed(
+        request.analysisRequestId,
+        request.analysisJobId,
+      );
+      if (completed === null) {
+        throw new ProcedureTutorialMediaAuthoringPreparationError(
+          'analysis_not_completed',
+          409,
+          'The referenced tutorial media analysis is not completed.',
+        );
+      }
+      const actionCatalog = actionCatalogRegistry.get({
+        targetAdapterId: request.request.targetAdapterId,
+        ...(request.request.actionCatalogVersion === undefined
+          ? {}
+          : { catalogVersion: request.request.actionCatalogVersion }),
+      });
+      const interactionCatalog = interactionCatalogRegistry.get({
+        targetAdapterId: request.request.targetAdapterId,
+        actionCatalogVersion: actionCatalog.catalogVersion,
+        ...(request.request.interactionCatalogVersion === undefined
+          ? {}
+          : { interactionCatalogVersion: request.request.interactionCatalogVersion }),
+      });
+      return prepareProcedureTutorialMediaAuthoring({
+        analysis: completed.result,
+        request: request.request,
+        video: request.video,
+        rightsAuthorization: completed.request.rightsAuthorization,
+        actionCatalog,
+        interactionCatalog,
+        verifyAnalysis: (analysis) => tutorialMediaRuntime.pipeline!.verify(analysis),
+      });
+    };
+    tutorialMediaAuthoringPreparationCoordinator =
+      createProcedureTutorialMediaAuthoringPreparationCoordinator({
+        maximumConcurrentPreparations: tutorialMediaRuntime.maximumConcurrentJobs ?? 1,
+        prepare: executeTutorialMediaAuthoringPreparation,
+      });
+    const retainedTutorialMediaAuthoringPreparations = new Map<
+      string,
+      ReturnType<typeof procedureTutorialMediaAuthoringPreparationSchema.parse>
+    >();
+    const tutorialMediaPreparationKey = (analysisRequestId: string, analysisJobId: string) =>
+      `${analysisRequestId}:${analysisJobId}`;
+    const prepareTutorialMediaAuthoring = async (
+      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareRequestSchema.parse>,
+    ) => {
+      const preparation = await tutorialMediaAuthoringPreparationCoordinator!.prepare(request);
+      if (preparation.status === 'ready') {
+        retainedTutorialMediaAuthoringPreparations.set(
+          tutorialMediaPreparationKey(preparation.analysisRequestId, preparation.analysisJobId),
+          structuredClone(preparation),
+        );
+      }
+      return preparation;
     };
 
     const getGuideGoalRequest = (requestId: string): GuideGoalRequest => {
@@ -1475,6 +1624,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         readonly leafId: string;
         readonly targetProfile: 'factory_cube_8_12_6';
       };
+      readonly managedActionReplayAuthority?: {
+        readonly replayId: string;
+        readonly leafId: string;
+        readonly actionName: 'blender.modifier.add_mirror';
+        readonly targetId: string;
+      };
     };
 
     const getPlanningQuality = (
@@ -1525,6 +1680,11 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           ...(evaluationOptions.shortcutProofAuthority === undefined
             ? {}
             : { shortcutProofAuthority: evaluationOptions.shortcutProofAuthority }),
+          ...(evaluationOptions.managedActionReplayAuthority === undefined
+            ? {}
+            : {
+                managedActionReplayAuthority: evaluationOptions.managedActionReplayAuthority,
+              }),
           ...provenance,
         },
       });
@@ -1540,6 +1700,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     const existingProcedureAuthoringGenerationEvents = database.listExecutionEventsByTypes(
       procedureAuthoringGenerationEvidenceEventTypes,
     );
+    const existingProcedureZeroBaselineEvents = database.listExecutionEventsByTypes(
+      procedureZeroBaselineEvidenceEventTypes,
+    );
+    const existingProcedureZeroBaselineRefinementEvents = database.listExecutionEventsByTypes(
+      procedureZeroBaselineRefinementEvidenceEventTypes,
+    );
     const existingProcedureSemanticRetrievalEvents = database.listExecutionEventsByTypes(
       procedureSemanticRetrievalEvidenceEventTypes,
     );
@@ -1551,6 +1717,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     );
     const existingProcedureTutorialAuthoringRunEvents = database.listExecutionEventsByTypes(
       procedureTutorialAuthoringRunEvidenceEventTypes,
+    );
+    const existingProcedureTutorialMediaAuthoringRunEvents = database.listExecutionEventsByTypes(
+      procedureTutorialMediaAuthoringRunEvidenceEventTypes,
     );
     if (
       tutorialMediaRuntime.capabilities.availability === 'available' &&
@@ -1721,8 +1890,41 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       validateCandidate: (packet, tree) => validateProcedureAuthoring({ packet, tree }),
       appendEvent: (event) => database.appendEvent(event),
     });
+    procedureZeroBaselineGenerationCoordinator = createProcedureZeroBaselineGenerationCoordinator({
+      generation: procedureAuthoringGenerationCoordinator,
+      findProviderDescriptor: (providerId) =>
+        plannerProviderRegistry.findProcedureAuthor(providerId)?.descriptor ?? null,
+      existingEvents: existingProcedureZeroBaselineEvents,
+      appendEvent: (event) => database.appendEvent(event),
+    });
+    procedureZeroBaselineRefinementCoordinator = createProcedureZeroBaselineRefinementCoordinator({
+      generation: procedureZeroBaselineGenerationCoordinator,
+      semanticRetrieval: {
+        search: (request) => procedureSemanticRetrievalCoordinator!.search(request),
+        completedResult: (requestId) =>
+          procedureSemanticRetrievalCoordinator!.completedResult(requestId),
+      },
+      refinement: {
+        create: (request) => procedureRefinementCoordinator!.create(request),
+        get: (runId) => procedureRefinementCoordinator!.get(runId),
+        getSemanticContextReceipt: (requestId) =>
+          procedureRefinementCoordinator!.getSemanticContextReceipt(requestId),
+      },
+      getProcedureTree: (treeId, revision) => getProcedureTree({ treeId, revision }),
+      getLatestProcedureTree: (treeId) => getProcedureTree({ treeId }),
+      storeWithEvidence: ({ tree, evidence }) => {
+        const storage = persistProcedureTree(tree, evidence);
+        const storedEvent = database.getExecutionEvent(evidence.id);
+        if (storedEvent === null) {
+          throw new Error('Atomic zero-baseline review evidence is missing after storage');
+        }
+        return { storedTree: storage.record, storedEvent };
+      },
+      existingEvents: existingProcedureZeroBaselineRefinementEvents,
+      appendEvent: (event) => database.appendEvent(event),
+    });
     const restoreTutorialAuthoringStoredTree = (input: {
-      binding: ProcedureTutorialAuthoringBinding;
+      binding: ProcedureTutorialAuthoringBinding | ProcedureTutorialMediaAuthoringBinding;
       completedEvent: ExecutionEventInput & { readonly createdAt: string };
     }) => {
       const { binding, completedEvent } = input;
@@ -1779,6 +1981,30 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       existingEvents: existingProcedureTutorialAuthoringRunEvents,
       appendEvent: (event) => database.appendEvent(event),
     });
+    procedureTutorialMediaAuthoringRunCoordinator =
+      createProcedureTutorialMediaAuthoringRunCoordinator({
+        currentPreparation: (analysisRequestId, analysisJobId) => {
+          const preparation = retainedTutorialMediaAuthoringPreparations.get(
+            tutorialMediaPreparationKey(analysisRequestId, analysisJobId),
+          );
+          return preparation?.status === 'ready' ? structuredClone(preparation) : null;
+        },
+        generateFromPacket: (input) =>
+          procedureAuthoringGenerationCoordinator!.generateFromPacket(input),
+        completedGenerationEvidence: (requestId) =>
+          procedureAuthoringGenerationCoordinator!.completedEvidence(requestId),
+        materialize: ({ packet, tree }) => materializeProcedureAuthoring({ packet, tree }),
+        storeWithBinding: ({ tree, completedEvent }) => persistProcedureTree(tree, completedEvent),
+        restoreStored: restoreTutorialAuthoringStoredTree,
+        isStorageFailureRetryable: (error) =>
+          !(error instanceof ProcedureTreeRevisionError) &&
+          !(error instanceof ProcedureTreeValidationError),
+        findProcedureAuthor: (providerId) =>
+          plannerProviderRegistry.findProcedureAuthor(providerId)?.descriptor ?? null,
+        existingEvents: existingProcedureTutorialMediaAuthoringRunEvents,
+        appendEvent: (event) => database.appendEvent(event),
+        maximumConcurrentRuns: tutorialMediaRuntime.maximumConcurrentJobs ?? 1,
+      });
     plannerGenerationCoordinator = createPlannerGenerationCoordinator({
       registry: plannerProviderRegistry,
       invocationManager: plannerProviderInvocationManager,
@@ -2011,46 +2237,71 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       const prepared = prepareProcedureLeafReplay(request, materialization, actionCatalog);
       const plan = materialization.compilation.plan;
       const planContentSha256 = computePlanContentSha256(plan);
+      const replayLeaf = materialization.tree.nodes.find((node) => node.id === request.leafId);
+      const replayPlanningOptions: InternalPlanningQualityOptions =
+        prepared.actionName === 'blender.modifier.add_mirror' &&
+        replayLeaf?.kind === 'leaf' &&
+        replayLeaf.action?.name === prepared.actionName &&
+        typeof replayLeaf.action.arguments['targetId'] === 'string'
+          ? {
+              verifiedExternalResourceConsumers: [
+                {
+                  consumerStepId: replayLeaf.id,
+                  resourceId: replayLeaf.action.arguments['targetId'],
+                  resourceType: 'OBJECT',
+                },
+              ],
+              managedActionReplayAuthority: {
+                replayId: request.replayId,
+                leafId: replayLeaf.id,
+                actionName: prepared.actionName,
+                targetId: replayLeaf.action.arguments['targetId'],
+              },
+            }
+          : {};
       let binding: ProcedureLeafReplayBinding | undefined;
       let persistenceResult: 'accepted' | 'duplicate' | undefined;
-      createProposal({
-        targetAdapterId: actionCatalog.adapterId,
-        targetInstanceId: request.targetInstanceId,
-        catalogVersion: actionCatalog.catalogVersion,
-        plan,
-        planning: prepared.planning,
-        persistProposal: (proposal) => {
-          const candidateBinding = buildProcedureLeafReplayBinding({
-            request,
-            materialization,
-            proposal,
-            planContentSha256,
-            recipeId: prepared.recipeId,
-            actionName: prepared.actionName,
-            createdAt: proposal.proposedAt,
-          });
-          const result = database.recordProcedureLeafReplayProposal(proposal, {
-            replayId: candidateBinding.replayId,
-            proposalId: proposal.proposalId,
-            treeId: candidateBinding.materialization.tree.id,
-            treeRevision: candidateBinding.materialization.tree.revision,
-            leafId: candidateBinding.leafId,
-            adapterId: candidateBinding.materialization.tree.adapterId,
-            instanceId: candidateBinding.targetInstanceId,
-            bindingContentSha256: candidateBinding.integrity.contentSha256,
-            payload: candidateBinding,
-            createdAt: candidateBinding.createdAt,
-          });
-          if (result === 'conflict') {
-            throw new ProcedureLeafReplayError(
-              'Replay proposal conflicts with an existing proposal or replay binding',
-              409,
-            );
-          }
-          binding = candidateBinding;
-          persistenceResult = result;
+      createProposalCore(
+        {
+          targetAdapterId: actionCatalog.adapterId,
+          targetInstanceId: request.targetInstanceId,
+          catalogVersion: actionCatalog.catalogVersion,
+          plan,
+          planning: prepared.planning,
+          persistProposal: (proposal) => {
+            const candidateBinding = buildProcedureLeafReplayBinding({
+              request,
+              materialization,
+              proposal,
+              planContentSha256,
+              recipeId: prepared.recipeId,
+              actionName: prepared.actionName,
+              createdAt: proposal.proposedAt,
+            });
+            const result = database.recordProcedureLeafReplayProposal(proposal, {
+              replayId: candidateBinding.replayId,
+              proposalId: proposal.proposalId,
+              treeId: candidateBinding.materialization.tree.id,
+              treeRevision: candidateBinding.materialization.tree.revision,
+              leafId: candidateBinding.leafId,
+              adapterId: candidateBinding.materialization.tree.adapterId,
+              instanceId: candidateBinding.targetInstanceId,
+              bindingContentSha256: candidateBinding.integrity.contentSha256,
+              payload: candidateBinding,
+              createdAt: candidateBinding.createdAt,
+            });
+            if (result === 'conflict') {
+              throw new ProcedureLeafReplayError(
+                'Replay proposal conflicts with an existing proposal or replay binding',
+                409,
+              );
+            }
+            binding = candidateBinding;
+            persistenceResult = result;
+          },
         },
-      });
+        replayPlanningOptions,
+      );
       if (binding === undefined || persistenceResult === undefined) {
         throw new Error('Replay proposal persistence did not return a binding');
       }
@@ -3111,7 +3362,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'operatingline.blender.action.execute',
         {
           description:
-            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, or Cylinder leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
+            'Queue exactly one Catalog-authorized UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, or Mirror Modifier leaf from an already human-accepted, instance-bound Procedure replay. The request is compare-and-set against an authenticated Companion state receipt; the server derives the action and all parameters from the immutable replay binding. This never accepts arbitrary actions, Python, plan ids, step ids, or parameters.',
           inputSchema: companionActionExecutionCreateRequestSchema,
           outputSchema: companionActionExecutionStatusSchema,
         },
@@ -3458,6 +3709,179 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             );
           } catch (error) {
             return mcpError(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.authoring.prepare',
+        {
+          description:
+            'Verify one completed authorized media-analysis manifest against local content-addressed artifacts, bind its ordered semantic, ASR, frame, OCR, UI, and shortcut evidence to a deterministic Procedure authoring packet, and return a quality gate. A blocked result contains no packet. This does not call a Provider, store a tree, create a Proposal, or execute Blender.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringPrepareRequestSchema),
+          outputSchema: procedureTutorialMediaAuthoringPreparationSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureTutorialMediaAuthoringPrepareRequestSchema.safeParse(requestInput);
+          const requestId = parsedRequest.success
+            ? parsedRequest.data.analysisRequestId
+            : tutorialMediaAnalysisRequestIdFromUnknown(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_authoring_prepare_request',
+              requestId,
+              message:
+                'Tutorial media authoring preparation request violates the strict public contract.',
+            });
+          }
+          if (procedureTutorialMediaCoordinator === undefined) {
+            return mcpError(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+          }
+          try {
+            return mcpStructuredResult(await prepareTutorialMediaAuthoring(parsedRequest.data));
+          } catch (error) {
+            if (error instanceof ProcedureTutorialMediaAuthoringPreparationCoordinatorError) {
+              return mcpError(
+                procedureTutorialMediaAuthoringPreparationCoordinatorErrorResponse(
+                  error,
+                  requestId,
+                ),
+              );
+            }
+            if (error instanceof ProcedureTutorialMediaAuthoringPreparationError) {
+              return mcpError({
+                error: `procedure_tutorial_media_authoring_${error.code}`,
+                requestId,
+                message: error.message,
+              });
+            }
+            if (error instanceof ProcedureTutorialMediaCoordinatorError) {
+              return mcpError(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+            }
+            return mcpError({
+              error: 'procedure_tutorial_media_authoring_prepare_failed',
+              requestId,
+              message: 'Tutorial media authoring preparation failed.',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.authoring.runs.create',
+        {
+          description:
+            'Start an asynchronous Provider, materialization, and explicit-review workflow from one exact server-retained ready media preparation. The authorization must match the live available Provider descriptor. No ProcedureTree is stored before a separate exact hash review, and this never creates a Proposal or executes Blender.',
+          inputSchema: deferMcpInputValidation(
+            procedureTutorialMediaAuthoringRunCreateRequestSchema,
+          ),
+          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed =
+            procedureTutorialMediaAuthoringRunCreateRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_authoring_run_create_request',
+              requestId,
+              message: 'Media authoring run request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaAuthoringRunCoordinator!.create(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.authoring.runs.status',
+        {
+          description:
+            'Read one exact media authoring run. Awaiting-review returns the verified preparation and exact Provider candidate/materialized tree hashes; completion means immutable candidate storage only, never Blender execution.',
+          inputSchema: deferMcpInputValidation(
+            procedureTutorialMediaAuthoringRunStatusRequestSchema,
+          ),
+          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed =
+            procedureTutorialMediaAuthoringRunStatusRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_authoring_run_status_request',
+              requestId,
+              message: 'Media authoring run status request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaAuthoringRunCoordinator!.status(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.authoring.runs.review',
+        {
+          description:
+            'Explicitly store or discard one awaiting media authoring result. Store requires the exact preparation, packet, candidate-tree, and materialized-tree hashes plus every confirmation; storage is atomic and never proposes or executes host work.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringReviewRequestSchema),
+          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialMediaAuthoringReviewRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_authoring_review_request',
+              requestId,
+              message: 'Media authoring review request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaAuthoringRunCoordinator!.review(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.tutorial.media.authoring.runs.resume',
+        {
+          description:
+            'Resume only an exact recovery-required deterministic materialization or storage stage. The media pipeline and Provider call are never replayed by this operation.',
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringResumeRequestSchema),
+          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+        },
+        async (requestInput) => {
+          const parsed = procedureTutorialMediaAuthoringResumeRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsed.success) {
+            return mcpError({
+              error: 'invalid_procedure_tutorial_media_authoring_resume_request',
+              requestId,
+              message: 'Media authoring resume request violates the strict public contract.',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureTutorialMediaAuthoringRunCoordinator!.resume(parsed.data),
+            );
+          } catch (error) {
+            return mcpError(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
           }
         },
       );
@@ -4068,6 +4492,221 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
                 },
               ],
             };
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.generate',
+        {
+          description:
+            'Allocate a stable new ProcedureTree identity and explicitly invoke one configured Procedure authoring Provider for a natural-language goal. The request must copy the exact currently available Provider disclosure and confirm context transmission and possible cost. No existing tree or semantic retrieval is used. The returned revision-1 tree remains a validated candidate only: it is not stored, proposed, accepted, or executed.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineGenerateRequestSchema),
+          outputSchema: procedureZeroBaselineResultSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureZeroBaselineGenerateRequestSchema.safeParse(requestInput);
+          const requestId = requestIdFromUnknown(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError(
+              plannerGenerationErrorSchema.parse({
+                error: 'planner_invalid_request',
+                requestId,
+                message:
+                  'Procedure zero-baseline generation request violates the strict public contract',
+                retryMode: 'never',
+              }),
+            );
+          }
+          try {
+            return mcpStructuredResult(
+              await procedureZeroBaselineGenerationCoordinator!.generate(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.refinement.create',
+        {
+          description:
+            'Create the staged zero-baseline workflow: generate one revision-1 candidate under the exact authorized Provider disclosure and stop at an exact human review gate. The candidate is not stored, proposed, or executed.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineRefinementCreateRequestSchema),
+          outputSchema: procedureZeroBaselineRefinementStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureZeroBaselineRefinementCreateRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_zero_baseline_refinement_create_request',
+              requestId: requestIdFromUnknown(requestInput),
+              message: 'Zero-baseline refinement create request violates the strict contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              await procedureZeroBaselineRefinementCoordinator!.create(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError({
+              error: zeroBaselineRefinementErrorCode(
+                error,
+                'procedure_zero_baseline_refinement_create_failed',
+              ),
+              workflowId: parsedRequest.data.workflowId,
+              message:
+                error instanceof Error ? error.message : 'Zero-baseline workflow creation failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.refinement.review',
+        {
+          description:
+            'Store or discard the exact review-bound revision-1 candidate. Store commits the ProcedureTree and review evidence atomically; neither decision creates a Proposal or starts host execution.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineReviewRequestSchema),
+          outputSchema: procedureZeroBaselineRefinementStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest = procedureZeroBaselineReviewRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_zero_baseline_review_request',
+              requestId: requestIdFromUnknown(requestInput),
+              message: 'Zero-baseline review request violates the strict contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureZeroBaselineRefinementCoordinator!.review(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError({
+              error: zeroBaselineRefinementErrorCode(
+                error,
+                'procedure_zero_baseline_review_failed',
+              ),
+              workflowId: parsedRequest.data.workflowId,
+              message: error instanceof Error ? error.message : 'Zero-baseline review failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.refinement.semantic.start',
+        {
+          description:
+            'Run exact authorized semantic retrieval against the reviewed stored baseline and bind a durable nonempty retrieval receipt. No candidate refinement is started by this operation.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineSemanticStartRequestSchema),
+          outputSchema: procedureZeroBaselineRefinementStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureZeroBaselineSemanticStartRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_zero_baseline_semantic_start_request',
+              requestId: requestIdFromUnknown(requestInput),
+              message: 'Zero-baseline semantic start request violates the strict contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              await procedureZeroBaselineRefinementCoordinator!.startSemantic(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError({
+              error: zeroBaselineRefinementErrorCode(
+                error,
+                'procedure_zero_baseline_semantic_start_failed',
+              ),
+              workflowId: parsedRequest.data.workflowId,
+              message:
+                error instanceof Error ? error.message : 'Zero-baseline semantic retrieval failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.refinement.start',
+        {
+          description:
+            'Start the native durable streamed local-scope refinement coordinator from the exact latest stored baseline and exact semantic-context receipt. The resulting candidate remains review-gated.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineRefinementStartRequestSchema),
+          outputSchema: procedureZeroBaselineRefinementStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureZeroBaselineRefinementStartRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_zero_baseline_refinement_start_request',
+              requestId: requestIdFromUnknown(requestInput),
+              message: 'Zero-baseline refinement start request violates the strict contract',
+            });
+          }
+          try {
+            return mcpStructuredResult(
+              procedureZeroBaselineRefinementCoordinator!.startRefinement(parsedRequest.data),
+            );
+          } catch (error) {
+            return mcpError({
+              error: zeroBaselineRefinementErrorCode(
+                error,
+                'procedure_zero_baseline_refinement_start_failed',
+              ),
+              workflowId: parsedRequest.data.workflowId,
+              message:
+                error instanceof Error ? error.message : 'Zero-baseline refinement start failed',
+            });
+          }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.authoring.zero-baseline.refinement.status',
+        {
+          description:
+            'Read the current staged zero-baseline workflow status, including its exact review, storage, semantic retrieval, and native streamed-refinement bindings.',
+          inputSchema: deferMcpInputValidation(procedureZeroBaselineRefinementStatusRequestSchema),
+          outputSchema: procedureZeroBaselineRefinementStatusSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureZeroBaselineRefinementStatusRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return mcpError({
+              error: 'invalid_procedure_zero_baseline_refinement_status_request',
+              message: 'Zero-baseline refinement status request violates the strict contract',
+            });
+          }
+          try {
+            const status = procedureZeroBaselineRefinementCoordinator!.get(
+              parsedRequest.data.workflowId,
+            );
+            return status === null
+              ? mcpError({
+                  error: 'procedure_zero_baseline_refinement_not_found',
+                  workflowId: parsedRequest.data.workflowId,
+                })
+              : mcpStructuredResult(status);
+          } catch (error) {
+            return mcpError({
+              error: zeroBaselineRefinementErrorCode(
+                error,
+                'procedure_zero_baseline_refinement_status_failed',
+              ),
+              workflowId: parsedRequest.data.workflowId,
+              message:
+                error instanceof Error ? error.message : 'Zero-baseline status retrieval failed',
+            });
           }
         },
       );
@@ -5525,6 +6164,19 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     }
 
+    for (const path of [
+      '/procedure-tutorial-authoring',
+      '/procedure-tutorial-authoring/',
+      '/procedure-tutorial-authoring/app.js',
+      '/procedure-tutorial-authoring/styles.css',
+    ]) {
+      runtimeApp.get(path, async (_request, reply) => {
+        const asset = resolveProcedureTutorialAuthoringUiAsset(path);
+        if (asset === undefined) return reply.code(404).send({ error: 'not_found' });
+        return reply.headers(asset.headers).type(asset.contentType).send(asset.body);
+      });
+    }
+
     runtimeApp.get('/health', async () => getStatus());
     runtimeApp.get('/api/v1/guide', async () => ({ plan: activePlan }));
     runtimeApp.post('/api/v1/companion/session', async (request, reply) => {
@@ -5707,6 +6359,155 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
       }
     });
+    runtimeApp.post(
+      '/api/v1/procedure/tutorial/media/authoring/prepare',
+      async (request, reply) => {
+        const parsedRequest = procedureTutorialMediaAuthoringPrepareRequestSchema.safeParse(
+          request.body,
+        );
+        const requestId = parsedRequest.success
+          ? parsedRequest.data.analysisRequestId
+          : tutorialMediaAnalysisRequestIdFromUnknown(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_tutorial_media_authoring_prepare_request',
+            requestId,
+            message:
+              'Tutorial media authoring preparation request violates the strict public contract.',
+          });
+        }
+        if (procedureTutorialMediaCoordinator === undefined) {
+          return reply
+            .code(503)
+            .send(tutorialMediaUnavailableResponse(requestId, tutorialMediaRuntime));
+        }
+        try {
+          return await prepareTutorialMediaAuthoring(parsedRequest.data);
+        } catch (error) {
+          if (error instanceof ProcedureTutorialMediaAuthoringPreparationCoordinatorError) {
+            return reply
+              .code(procedureTutorialMediaAuthoringPreparationCoordinatorHttpStatus(error))
+              .send(
+                procedureTutorialMediaAuthoringPreparationCoordinatorErrorResponse(
+                  error,
+                  requestId,
+                ),
+              );
+          }
+          if (error instanceof ProcedureTutorialMediaAuthoringPreparationError) {
+            return reply.code(error.statusCode).send({
+              error: `procedure_tutorial_media_authoring_${error.code}`,
+              requestId,
+              message: error.message,
+            });
+          }
+          if (error instanceof ProcedureTutorialMediaCoordinatorError) {
+            return reply
+              .code(procedureTutorialMediaCoordinatorHttpStatus(error))
+              .send(procedureTutorialMediaCoordinatorErrorResponse(error, requestId));
+          }
+          return reply.code(422).send({
+            error: 'procedure_tutorial_media_authoring_prepare_failed',
+            requestId,
+            message: 'Tutorial media authoring preparation failed.',
+          });
+        }
+      },
+    );
+    runtimeApp.post('/api/v1/procedure/tutorial/media/authoring/runs', async (request, reply) => {
+      const parsedRequest = procedureTutorialMediaAuthoringRunCreateRequestSchema.safeParse(
+        request.body,
+      );
+      const requestId = requestIdFromUnknown(request.body);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_tutorial_media_authoring_run_create_request',
+          requestId,
+          message: 'Media authoring run request violates the strict public contract.',
+        });
+      }
+      try {
+        const status = procedureTutorialMediaAuthoringRunCoordinator!.create(parsedRequest.data);
+        return reply
+          .code(status.status === 'accepted' || status.status === 'running' ? 202 : 200)
+          .send(status);
+      } catch (error) {
+        return reply
+          .code(procedureTutorialMediaAuthoringRunHttpStatus(error))
+          .send(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+      }
+    });
+    runtimeApp.post(
+      '/api/v1/procedure/tutorial/media/authoring/runs/status',
+      async (request, reply) => {
+        const parsedRequest = procedureTutorialMediaAuthoringRunStatusRequestSchema.safeParse(
+          request.body,
+        );
+        const requestId = requestIdFromUnknown(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_tutorial_media_authoring_run_status_request',
+            requestId,
+            message: 'Media authoring run status request violates the strict public contract.',
+          });
+        }
+        try {
+          return procedureTutorialMediaAuthoringRunCoordinator!.status(parsedRequest.data);
+        } catch (error) {
+          return reply
+            .code(procedureTutorialMediaAuthoringRunHttpStatus(error))
+            .send(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/tutorial/media/authoring/runs/review',
+      async (request, reply) => {
+        const parsedRequest = procedureTutorialMediaAuthoringReviewRequestSchema.safeParse(
+          request.body,
+        );
+        const requestId = requestIdFromUnknown(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_tutorial_media_authoring_review_request',
+            requestId,
+            message: 'Media authoring review request violates the strict public contract.',
+          });
+        }
+        try {
+          const status = procedureTutorialMediaAuthoringRunCoordinator!.review(parsedRequest.data);
+          return reply.code(status.status === 'running' ? 202 : 200).send(status);
+        } catch (error) {
+          return reply
+            .code(procedureTutorialMediaAuthoringRunHttpStatus(error))
+            .send(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/tutorial/media/authoring/runs/resume',
+      async (request, reply) => {
+        const parsedRequest = procedureTutorialMediaAuthoringResumeRequestSchema.safeParse(
+          request.body,
+        );
+        const requestId = requestIdFromUnknown(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_tutorial_media_authoring_resume_request',
+            requestId,
+            message: 'Media authoring resume request violates the strict public contract.',
+          });
+        }
+        try {
+          const status = procedureTutorialMediaAuthoringRunCoordinator!.resume(parsedRequest.data);
+          return reply.code(status.status === 'running' ? 202 : 200).send(status);
+        } catch (error) {
+          return reply
+            .code(procedureTutorialMediaAuthoringRunHttpStatus(error))
+            .send(procedureTutorialMediaAuthoringRunErrorResponse(error, requestId));
+        }
+      },
+    );
     runtimeApp.post('/api/v1/procedure/tutorial/import', async (request, reply) => {
       const parsedRequest = procedureTutorialTranscriptImportRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -5981,6 +6782,177 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
       }
     });
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/generate',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineGenerateRequestSchema.safeParse(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send(
+            plannerGenerationErrorSchema.parse({
+              error: 'planner_invalid_request',
+              requestId: requestIdFromUnknown(request.body),
+              message:
+                'Procedure zero-baseline generation request violates the strict public contract',
+              retryMode: 'never',
+            }),
+          );
+        }
+        try {
+          return await procedureZeroBaselineGenerationCoordinator!.generate(parsedRequest.data);
+        } catch (error) {
+          return reply
+            .code(plannerGenerationHttpStatus(error))
+            .send(plannerGenerationErrorResponse(error, parsedRequest.data.requestId));
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/refinement/runs',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineRefinementCreateRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_zero_baseline_refinement_create_request',
+            requestId: requestIdFromUnknown(request.body),
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          const status = await procedureZeroBaselineRefinementCoordinator!.create(
+            parsedRequest.data,
+          );
+          return reply.code(202).send(status);
+        } catch (error) {
+          return reply.code(zeroBaselineRefinementHttpStatus(error)).send({
+            error: zeroBaselineRefinementErrorCode(
+              error,
+              'procedure_zero_baseline_refinement_create_failed',
+            ),
+            workflowId: parsedRequest.data.workflowId,
+            message:
+              error instanceof Error ? error.message : 'Zero-baseline workflow creation failed',
+          });
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/refinement/runs/review',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineReviewRequestSchema.safeParse(request.body);
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_zero_baseline_review_request',
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          return procedureZeroBaselineRefinementCoordinator!.review(parsedRequest.data);
+        } catch (error) {
+          return reply.code(zeroBaselineRefinementHttpStatus(error)).send({
+            error: zeroBaselineRefinementErrorCode(error, 'procedure_zero_baseline_review_failed'),
+            workflowId: parsedRequest.data.workflowId,
+            message: error instanceof Error ? error.message : 'Zero-baseline review failed',
+          });
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/refinement/runs/semantic',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineSemanticStartRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_zero_baseline_semantic_start_request',
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          const status = await procedureZeroBaselineRefinementCoordinator!.startSemantic(
+            parsedRequest.data,
+          );
+          return reply.code(202).send(status);
+        } catch (error) {
+          return reply.code(zeroBaselineRefinementHttpStatus(error)).send({
+            error: zeroBaselineRefinementErrorCode(
+              error,
+              'procedure_zero_baseline_semantic_start_failed',
+            ),
+            workflowId: parsedRequest.data.workflowId,
+            message:
+              error instanceof Error ? error.message : 'Zero-baseline semantic retrieval failed',
+          });
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/refinement/runs/refinement',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineRefinementStartRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_zero_baseline_refinement_start_request',
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          const status = procedureZeroBaselineRefinementCoordinator!.startRefinement(
+            parsedRequest.data,
+          );
+          return reply.code(202).send(status);
+        } catch (error) {
+          return reply.code(zeroBaselineRefinementHttpStatus(error)).send({
+            error: zeroBaselineRefinementErrorCode(
+              error,
+              'procedure_zero_baseline_refinement_start_failed',
+            ),
+            workflowId: parsedRequest.data.workflowId,
+            message:
+              error instanceof Error ? error.message : 'Zero-baseline refinement start failed',
+          });
+        }
+      },
+    );
+    runtimeApp.post(
+      '/api/v1/procedure/authoring/zero-baseline/refinement/runs/status',
+      async (request, reply) => {
+        const parsedRequest = procedureZeroBaselineRefinementStatusRequestSchema.safeParse(
+          request.body,
+        );
+        if (!parsedRequest.success) {
+          return reply.code(400).send({
+            error: 'invalid_procedure_zero_baseline_refinement_status_request',
+            issues: parsedRequest.error.issues,
+          });
+        }
+        try {
+          const status = procedureZeroBaselineRefinementCoordinator!.get(
+            parsedRequest.data.workflowId,
+          );
+          return status === null
+            ? reply.code(404).send({
+                error: 'procedure_zero_baseline_refinement_not_found',
+                workflowId: parsedRequest.data.workflowId,
+              })
+            : status;
+        } catch (error) {
+          return reply.code(zeroBaselineRefinementHttpStatus(error)).send({
+            error: zeroBaselineRefinementErrorCode(
+              error,
+              'procedure_zero_baseline_refinement_status_failed',
+            ),
+            workflowId: parsedRequest.data.workflowId,
+            message:
+              error instanceof Error ? error.message : 'Zero-baseline status retrieval failed',
+          });
+        }
+      },
+    );
     runtimeApp.post('/api/v1/procedure/authoring/validate', async (request, reply) => {
       const parsedRequest = procedureAuthoringValidationRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {
@@ -7373,6 +8345,22 @@ export {
   type ProcedureAuthoringGenerationCoordinatorOptions,
 } from './procedure-authoring-generation.js';
 export {
+  createProcedureZeroBaselineGenerationCoordinator,
+  procedureZeroBaselineEvidenceEventTypes,
+  type ProcedureZeroBaselineAuthoringGeneration,
+  type ProcedureZeroBaselineGenerationCoordinator,
+  type ProcedureZeroBaselineGenerationCoordinatorOptions,
+} from './procedure-zero-baseline-generation.js';
+export {
+  createProcedureZeroBaselineRefinementCoordinator,
+  ProcedureZeroBaselinePersistenceFaultError,
+  procedureZeroBaselineRefinementEvidenceEventTypes,
+  type ProcedureZeroBaselineAtomicStoreInput,
+  type ProcedureZeroBaselineAtomicStoreResult,
+  type ProcedureZeroBaselineRefinementCoordinator,
+  type ProcedureZeroBaselineRefinementCoordinatorOptions,
+} from './procedure-zero-baseline-refinement.js';
+export {
   createProcedureTutorialAuthoringRunCoordinator,
   procedureTutorialAuthoringRunErrorResponse,
   procedureTutorialAuthoringRunEvidenceEventTypes,
@@ -7406,6 +8394,35 @@ export {
   type ProcedureTutorialMediaCoordinatorErrorCode,
   type ProcedureTutorialMediaCoordinatorOptions,
 } from './procedure-tutorial-media-coordinator.js';
+export {
+  prepareProcedureTutorialMediaAuthoring,
+  type PrepareProcedureTutorialMediaAuthoringInput,
+} from './procedure-tutorial-media-authoring.js';
+export {
+  createProcedureTutorialMediaAuthoringPreparationCoordinator,
+  procedureTutorialMediaAuthoringPreparationCoordinatorErrorResponse,
+  procedureTutorialMediaAuthoringPreparationCoordinatorHttpStatus,
+  ProcedureTutorialMediaAuthoringPreparationCoordinatorError,
+  type ProcedureTutorialMediaAuthoringPreparationCoordinator,
+  type ProcedureTutorialMediaAuthoringPreparationCoordinatorErrorCode,
+  type ProcedureTutorialMediaAuthoringPreparationCoordinatorOptions,
+} from './procedure-tutorial-media-authoring-preparation-coordinator.js';
+export {
+  createProcedureTutorialMediaAuthoringRunCoordinator,
+  procedureTutorialMediaAuthoringRunErrorResponse,
+  procedureTutorialMediaAuthoringRunEvidenceEventTypes,
+  procedureTutorialMediaAuthoringRunHttpStatus,
+  ProcedureTutorialMediaAuthoringRunError,
+  type ProcedureTutorialMediaAuthoringRunCoordinator,
+  type ProcedureTutorialMediaAuthoringRunCoordinatorOptions,
+  type ProcedureTutorialMediaAuthoringRunErrorCode,
+} from './procedure-tutorial-media-authoring-run.js';
+export {
+  procedureTutorialAuthoringUiAssets,
+  resolveProcedureTutorialAuthoringUiAsset,
+  type ProcedureTutorialAuthoringUiAsset,
+  type ProcedureTutorialAuthoringUiAssetPath,
+} from './procedure-tutorial-authoring-ui.js';
 export {
   createProcedureTutorialMediaRuntime,
   createProcedureTutorialMediaRuntimeFromEnvironment,

@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 import { guideStepIdSchema, guideStepSchema } from './guide.js';
 import {
-  managedPrimitiveActionNames,
-  managedPrimitiveActionNameSchema,
+  actionLevelMcpActionNames,
+  actionLevelMcpActionNameSchema,
 } from './managed-primitive-action.js';
 
 export const companionActionExecutionFormatVersion = '1.0.0' as const;
@@ -41,20 +41,21 @@ const deliveryIdentityShape = {
   expectedState: expectedStateSchema,
 } as const;
 
-const managedPrimitiveStepSchema = guideStepSchema.superRefine((step, context) => {
+const managedActionLevelMcpStepSchema = guideStepSchema.superRefine((step, context) => {
   if (
     step.action?.adapterId !== 'blender' ||
-    !managedPrimitiveActionNameSchema.safeParse(step.action.name).success
+    !actionLevelMcpActionNameSchema.safeParse(step.action.name).success
   ) {
     context.addIssue({
       code: 'custom',
       path: ['action'],
-      message: 'Action execution delivery is restricted to managed Blender primitive actions',
+      message:
+        'Action execution delivery is restricted to the exact managed Blender action-level MCP allowlist',
     });
   }
 });
 
-const managedPrimitiveStepJsonSchemaCondition = {
+const managedActionLevelMcpStepJsonSchemaCondition = {
   properties: {
     step: {
       properties: {
@@ -62,7 +63,7 @@ const managedPrimitiveStepJsonSchemaCondition = {
           type: 'object',
           properties: {
             adapterId: { const: 'blender' },
-            name: { enum: [...managedPrimitiveActionNames] },
+            name: { enum: [...actionLevelMcpActionNames] },
           },
           required: ['adapterId', 'name'],
         },
@@ -94,12 +95,12 @@ export const companionActionExecutionDeliverySchema = z
   .strictObject({
     ...deliveryIdentityShape,
     deliveryId: z.uuid(),
-    step: managedPrimitiveStepSchema,
+    step: managedActionLevelMcpStepSchema,
     requestedAt: timestampSchema,
     dispatchedAt: timestampSchema,
   })
   .meta({
-    allOf: [managedPrimitiveStepJsonSchemaCondition],
+    allOf: [managedActionLevelMcpStepJsonSchemaCondition],
   });
 export type CompanionActionExecutionDelivery = z.infer<
   typeof companionActionExecutionDeliverySchema
@@ -174,7 +175,7 @@ export const companionActionExecutionStatusSchema = z
   .strictObject({
     ...deliveryIdentityShape,
     deliveryId: z.uuid().optional(),
-    step: managedPrimitiveStepSchema,
+    step: managedActionLevelMcpStepSchema,
     requestedAt: timestampSchema,
     dispatchedAt: timestampSchema.optional(),
     status: actionExecutionStatusValueSchema,
@@ -247,7 +248,7 @@ export const companionActionExecutionStatusSchema = z
   })
   .meta({
     allOf: [
-      managedPrimitiveStepJsonSchemaCondition,
+      managedActionLevelMcpStepJsonSchemaCondition,
       {
         if: { properties: { status: { const: 'queued' } }, required: ['status'] },
         then: {

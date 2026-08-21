@@ -319,7 +319,7 @@ class InteractionCatalogTests(unittest.TestCase):
     def test_binds_all_actions_and_marks_only_verified_paths_native(self) -> None:
         catalog = BUNDLED_INTERACTION_CATALOG
 
-        self.assertEqual(catalog.catalog_version, "1.39.0")
+        self.assertEqual(catalog.catalog_version, "1.40.0")
         self.assertEqual(catalog.action_catalog_version, "1.22.0")
         self.assertEqual(
             catalog.host_version_range,
@@ -572,7 +572,28 @@ class InteractionCatalogTests(unittest.TestCase):
                 mirror.procedure_materialization.shortcut.availability,
                 mirror.procedure_materialization.mcp.availability,
             ),
-            ("unavailable", "unavailable", "unavailable"),
+            ("unavailable", "unavailable", "available"),
+        )
+        mirror_mcp = mirror.procedure_materialization.mcp
+        self.assertEqual(
+            (
+                mirror_mcp.source,
+                mirror_mcp.semantic_binding,
+                mirror_mcp.parameter_binding,
+                mirror_mcp.server_name,
+                mirror_mcp.tool_name,
+                mirror_mcp.authorization,
+                mirror_mcp.result_binding,
+            ),
+            (
+                "catalog.action_level_mcp",
+                "all_leaf_operations",
+                "accepted_action_arguments",
+                "operating-line",
+                "operatingline.blender.action.execute",
+                "accepted_replay_next_step",
+                "companion_state_report",
+            ),
         )
         self.assertIn(
             "Shift+A", mirror.procedure_materialization.shortcut.reason
@@ -2135,6 +2156,34 @@ class InteractionCatalogTests(unittest.TestCase):
                 "blender.mesh.create_cone",
                 "blender.mesh.create_torus",
             ),
+        )
+
+    def test_loads_byte_frozen_pre_mirror_action_level_mcp_catalog(self) -> None:
+        frozen_path = (
+            REPO_ROOT
+            / "adapters"
+            / "blender"
+            / "catalog"
+            / "v1"
+            / "interaction-catalog-1.39.0.json"
+        )
+        frozen_bytes = frozen_path.read_bytes()
+        frozen = load_interaction_catalog(frozen_path, ACTION_CATALOG_PATH)
+
+        self.assertEqual(
+            hashlib.sha256(frozen_bytes).hexdigest(),
+            "52c40792822383da01e9763cbb06b59f4be4a7d6a1724d6a5d42c7107500cfb4",
+        )
+        self.assertEqual(frozen.catalog_version, "1.39.0")
+        mirror = next(
+            recipe
+            for recipe in frozen.recipes
+            if recipe.action_name == "blender.modifier.add_mirror"
+        )
+        assert mirror.procedure_materialization is not None
+        self.assertEqual(
+            mirror.procedure_materialization.mcp.availability,
+            "unavailable",
         )
 
     def test_loads_byte_frozen_subdivision_surface_catalog_without_bevel_edges(
@@ -3731,7 +3780,7 @@ class InteractionCatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown field arguments"):
             self._load_raw(extra)
 
-    def test_action_level_mcp_allowlist_is_exactly_seven_native_primitives(
+    def test_action_level_mcp_allowlist_accepts_the_seven_native_primitives(
         self,
     ) -> None:
         raw = json.loads(RESOURCE_PATH.read_text(encoding="utf-8"))
@@ -3771,9 +3820,7 @@ class InteractionCatalogTests(unittest.TestCase):
             "blender.mesh.create_monkey.native",
         ):
             with self.subTest(recipe_id=recipe_id):
-                with self.assertRaisesRegex(
-                    ValueError, "approved primitive recipes"
-                ):
+                with self.assertRaisesRegex(ValueError, "exact approved recipes"):
                     parse_mcp_materialization(available_mcp, recipe_id)
 
         mismatched = deepcopy(raw)

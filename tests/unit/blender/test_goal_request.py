@@ -330,9 +330,19 @@ class GoalRequestTransportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message):
                 transport._poll_action_request()
 
-    def test_action_step_accepts_only_the_seven_approved_primitives(self) -> None:
+    def test_action_step_accepts_only_the_exact_action_level_mcp_allowlist(self) -> None:
         instance_id = str(uuid.uuid4())
         step = self._action_delivery(instance_id)["step"]
+
+        self.assertNotIn(
+            "blender.modifier.add_mirror",
+            domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS,
+        )
+        self.assertEqual(
+            domain.ACTION_LEVEL_MCP_ACTIONS,
+            domain.ACTION_LEVEL_MCP_PRIMITIVE_ACTIONS
+            | {"blender.modifier.add_mirror"},
+        )
 
         for action_name in (
             "blender.mesh.create_uv_sphere",
@@ -342,6 +352,7 @@ class GoalRequestTransportTests(unittest.TestCase):
             "blender.mesh.create_torus",
             "blender.mesh.create_cone",
             "blender.mesh.create_cylinder",
+            "blender.modifier.add_mirror",
         ):
             with self.subTest(action_name=action_name):
                 candidate = deepcopy(step)
@@ -356,7 +367,7 @@ class GoalRequestTransportTests(unittest.TestCase):
             with self.subTest(action_name=action_name):
                 candidate = deepcopy(step)
                 candidate["action"]["name"] = action_name
-                with self.assertRaisesRegex(ValueError, "approved primitives"):
+                with self.assertRaisesRegex(ValueError, "approved action-level MCP allowlist"):
                     CompanionTransport._validate_action_step(candidate)
 
     def test_action_result_waits_for_state_delivery_and_flushes_on_shutdown(self) -> None:

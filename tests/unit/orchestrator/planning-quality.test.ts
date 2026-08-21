@@ -175,6 +175,98 @@ const evaluateSubdivisionSurface = (
     },
   );
 
+const mirrorPlan = (): GuidePlan => {
+  const plan = subdivisionSurfacePlan();
+  const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+  leaf.action = {
+    adapterId: 'blender',
+    name: 'blender.modifier.add_mirror',
+    arguments: {
+      targetId: 'tutorial.cube',
+      modifierId: 'tutorial.cube.mirror',
+      modifierName: 'OperatingLine.Cube.Mirror',
+      axis: 'Y',
+    },
+  };
+  leaf.anchors = [
+    { kind: 'object', objectName: 'OperatingLine.Cube' },
+    {
+      kind: 'owned_control',
+      surfaceId: 'modifier.stack',
+      controlId: 'tutorial.cube.mirror',
+    },
+  ];
+  leaf.expectedObservations = [
+    {
+      kind: 'modifier_ready',
+      parameters: {
+        targetId: 'tutorial.cube',
+        modifierId: 'tutorial.cube.mirror',
+        modifierType: 'MIRROR',
+        axis: 'Y',
+      },
+    },
+  ];
+  return guidePlanSchema.parse({
+    ...plan,
+    id: 'mirror-quality',
+    title: 'Add a Mirror modifier',
+  });
+};
+
+const mirrorCoverage = {
+  policyVersion: 'catalog_capability_coverage_v1' as const,
+  requirements: [
+    {
+      requirementId: 'mirror',
+      statement: 'Add a Mirror modifier to the accepted Cube.',
+      coverage: [
+        {
+          capabilityId: 'geometry.mirror_modifier',
+          stepIds: ['snowman.model.head'],
+        },
+      ],
+    },
+  ],
+};
+
+const evaluateMirror = (input: {
+  plan?: GuidePlan;
+  targetId?: string;
+  actionName?: 'blender.modifier.add_mirror';
+  consumers?: readonly {
+    readonly consumerStepId: string;
+    readonly resourceId: string;
+    readonly resourceType: string;
+  }[];
+}) =>
+  evaluatePlanningQuality(
+    {
+      targetAdapterId: 'blender',
+      catalogVersion: blenderActionCatalog.catalogVersion,
+      capabilityCoverage: mirrorCoverage,
+      plan: input.plan ?? mirrorPlan(),
+    },
+    blenderActionCatalog,
+    {
+      verifiedExternalResourceConsumers:
+        input.consumers ??
+        ([
+          {
+            consumerStepId: 'snowman.model.head',
+            resourceId: 'tutorial.cube',
+            resourceType: 'OBJECT',
+          },
+        ] as const),
+      managedActionReplayAuthority: {
+        replayId: '22222222-2222-4222-8222-222222222222',
+        leafId: 'snowman.model.head',
+        actionName: input.actionName ?? 'blender.modifier.add_mirror',
+        targetId: input.targetId ?? 'tutorial.cube',
+      },
+    },
+  );
+
 describe('planning quality baseline', () => {
   it('accepts the complete teachable snowman plan deterministically', () => {
     const requiredPhaseIds = ['geometry', 'materials', 'animation', 'render_setup', 'output'];
@@ -371,6 +463,52 @@ describe('planning quality baseline', () => {
       expect.objectContaining({ code: 'resource.missing_creator' }),
     );
   });
+
+  it('accepts only an exact managed Mirror replay as a verified external consumer', () => {
+    const report = evaluateMirror({});
+
+    expect(report.valid).toBe(true);
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({
+        code: 'resource.verified_external_input',
+        severity: 'warning',
+        stepIds: ['snowman.model.head'],
+      }),
+    );
+    expect(report.findings).not.toContainEqual(
+      expect.objectContaining({ code: 'resource.missing_creator' }),
+    );
+  });
+
+  it.each(['authority target', 'observation axis', 'owned-control anchor'] as const)(
+    'rejects a Mirror external consumer with a mismatched %s',
+    (mismatch) => {
+      const plan = mirrorPlan();
+      const leaf = plan.steps.find((step) => step.id === 'snowman.model.head')!;
+      let targetId: string | undefined;
+      if (mismatch === 'authority target') targetId = 'tutorial.other';
+      if (mismatch === 'observation axis') {
+        leaf.expectedObservations[0]!.parameters['axis'] = 'X';
+      }
+      if (mismatch === 'owned-control anchor') {
+        leaf.anchors = leaf.anchors.map((anchor) =>
+          anchor.kind === 'owned_control'
+            ? { ...anchor, controlId: 'tutorial.cube.other' }
+            : anchor,
+        );
+      }
+
+      const report = evaluateMirror({ plan, ...(targetId === undefined ? {} : { targetId }) });
+
+      expect(report.valid).toBe(false);
+      expect(report.findings).toContainEqual(
+        expect.objectContaining({ code: 'resource.missing_creator' }),
+      );
+      expect(report.findings).not.toContainEqual(
+        expect.objectContaining({ code: 'resource.verified_external_input' }),
+      );
+    },
+  );
 
   it('degrades honestly for a historical catalog without phase metadata', () => {
     const historicalCatalogWithoutPhases = blenderActionCatalogs.find(

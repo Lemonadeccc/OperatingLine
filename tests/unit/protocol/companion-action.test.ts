@@ -10,6 +10,7 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  actionLevelMcpActionNames,
   managedPrimitiveActionNames,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
@@ -32,7 +33,7 @@ const requestedAt = '2026-08-20T10:00:00.000+08:00';
 const dispatchedAt = '2026-08-20T10:00:01.000+08:00';
 const occurredAt = '2026-08-20T10:00:02.000+08:00';
 
-function step(actionName: string = managedPrimitiveActionNames[0]) {
+function step(actionName: string = actionLevelMcpActionNames[0]) {
   return {
     id: 'head.eye.create-sphere',
     parentId: 'head.eye',
@@ -58,7 +59,7 @@ function step(actionName: string = managedPrimitiveActionNames[0]) {
   } as const;
 }
 
-function delivery(actionName: string = managedPrimitiveActionNames[0]) {
+function delivery(actionName: string = actionLevelMcpActionNames[0]) {
   return {
     formatVersion: '1.0.0',
     requestId: ids.requestId,
@@ -102,7 +103,7 @@ function result(status: 'succeeded' | 'failed' | 'rejected' = 'succeeded') {
 
 function publicStatus(
   status: 'queued' | 'dispatched' | 'recovery_required' = 'queued',
-  actionName: string = managedPrimitiveActionNames[0],
+  actionName: string = actionLevelMcpActionNames[0],
 ) {
   const request = delivery(actionName);
   const resolved = {
@@ -141,14 +142,29 @@ describe('companion action execution protocol', () => {
       { ...request, requestId: 'request-1' },
       { ...request, expectedState: { ...expectedState, sequence: 0 } },
       { ...request, action: 'blender.mesh.create_cube' },
+      {
+        ...request,
+        action: 'blender.modifier.add_mirror',
+        arguments: {
+          targetId: 'attacker.target',
+          modifierId: 'attacker.modifier',
+          modifierName: 'OperatingLine.Attacker',
+          axis: 'Z',
+        },
+      },
       { ...request, python: 'bpy.ops.mesh.primitive_uv_sphere_add()' },
     ]) {
       expect(companionActionExecutionCreateRequestSchema.safeParse(invalid).success).toBe(false);
     }
   });
 
-  it('delivers and reports status for exactly the seven managed Blender primitive actions', () => {
-    for (const actionName of managedPrimitiveActionNames) {
+  it('delivers and reports status only for the exact managed action-level MCP allowlist', () => {
+    expect(actionLevelMcpActionNames).toEqual([
+      ...managedPrimitiveActionNames,
+      'blender.modifier.add_mirror',
+    ]);
+    expect(managedPrimitiveActionNames).not.toContain('blender.modifier.add_mirror');
+    for (const actionName of actionLevelMcpActionNames) {
       const request = delivery(actionName);
       expect(companionActionExecutionDeliverySchema.parse(request)).toEqual(request);
       expect(

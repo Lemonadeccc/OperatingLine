@@ -13,8 +13,8 @@ import {
 } from './companion.js';
 import { guideStepIdSchema } from './guide.js';
 import {
-  managedPrimitiveActionNameSchema,
-  type ManagedPrimitiveActionName,
+  actionLevelMcpActionNameSchema,
+  type ActionLevelMcpActionName,
 } from './managed-primitive-action.js';
 import {
   procedureAuthoringMaterializationRequestSchema,
@@ -27,8 +27,8 @@ export const procedureLeafReplayFormatVersionSchema = z.literal(procedureLeafRep
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
-export const procedureLeafReplayActionNameSchema = managedPrimitiveActionNameSchema;
-export type ProcedureLeafReplayActionName = ManagedPrimitiveActionName;
+export const procedureLeafReplayActionNameSchema = actionLevelMcpActionNameSchema;
+export type ProcedureLeafReplayActionName = ActionLevelMcpActionName;
 
 const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_uv_sphere': 'uv_sphere_ready',
@@ -38,6 +38,7 @@ const procedureLeafReplayObservationKindByAction = {
   'blender.mesh.create_torus': 'torus_ready',
   'blender.mesh.create_cone': 'cone_ready',
   'blender.mesh.create_cylinder': 'cylinder_ready',
+  'blender.modifier.add_mirror': 'modifier_ready',
 } as const satisfies Record<ProcedureLeafReplayActionName, string>;
 
 const replayIntegritySchema = z.strictObject({
@@ -142,7 +143,7 @@ const procedureLeafReplayClaimsSchema = z.strictObject({
   approval: z.literal('pending'),
   hostExecutionStarted: z.literal(false),
   managedActionResult: z.literal('pending'),
-  menuTrack: z.literal('catalog_grounded_not_executed'),
+  menuTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
 });
@@ -759,6 +760,48 @@ const procedureLeafReplayCylinderDetailsSchema = z
     }
   });
 
+const procedureLeafReplayMirrorParametersSchema = z.strictObject({
+  targetId: z.string().min(1),
+  modifierId: z.string().min(1),
+  modifierType: z.literal('MIRROR'),
+  axis: z.enum(['X', 'Y', 'Z']),
+});
+
+const procedureLeafReplayMirrorDetailsSchema = z
+  .strictObject({
+    parameters: procedureLeafReplayMirrorParametersSchema,
+    supported: z.literal(true),
+    targetId: z.string().min(1),
+    modifierId: z.string().min(1),
+    modifierType: z.literal('MIRROR'),
+    propertiesMatch: z.literal(true),
+    axis: z.enum(['X', 'Y', 'Z']),
+    expectedAxis: z.enum(['X', 'Y', 'Z']),
+    mirrorFixedStateMatches: z.literal(true),
+    mirrorObjectAbsent: z.literal(true),
+    sourceContentIntact: z.literal(true),
+    evaluatedVertexCount: z.number().int().positive().max(8192),
+    evaluatedEdgeCount: z.number().int().positive().max(16384),
+    evaluatedFaceCount: z.number().int().positive().max(8192),
+    evaluatedFinite: z.literal(true),
+    evaluatedWithinLimits: z.literal(true),
+  })
+  .superRefine((details, context) => {
+    if (
+      details.targetId !== details.parameters.targetId ||
+      details.modifierId !== details.parameters.modifierId ||
+      details.modifierType !== details.parameters.modifierType ||
+      details.axis !== details.parameters.axis ||
+      details.expectedAxis !== details.parameters.axis
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['parameters'],
+        message: 'Mirror replay details must match their evaluated parameters',
+      });
+    }
+  });
+
 const procedureLeafReplayUvSphereObservationSchema = companionObservationSchema.safeExtend({
   kind: z.literal('uv_sphere_ready'),
   satisfied: z.literal(true),
@@ -801,6 +844,12 @@ const procedureLeafReplayCylinderObservationSchema = companionObservationSchema.
   details: procedureLeafReplayCylinderDetailsSchema,
 });
 
+const procedureLeafReplayMirrorObservationSchema = companionObservationSchema.safeExtend({
+  kind: z.literal('modifier_ready'),
+  satisfied: z.literal(true),
+  details: procedureLeafReplayMirrorDetailsSchema,
+});
+
 export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind', [
   procedureLeafReplayUvSphereObservationSchema,
   procedureLeafReplayIcosphereObservationSchema,
@@ -809,6 +858,7 @@ export const procedureLeafReplayObservationSchema = z.discriminatedUnion('kind',
   procedureLeafReplayTorusObservationSchema,
   procedureLeafReplayConeObservationSchema,
   procedureLeafReplayCylinderObservationSchema,
+  procedureLeafReplayMirrorObservationSchema,
 ]);
 export type ProcedureLeafReplayObservation = z.infer<typeof procedureLeafReplayObservationSchema>;
 
@@ -855,7 +905,7 @@ const procedureLeafReplaySuccessGateSchema = z
 
 const procedureLeafReplayVerificationScopeSchema = z.strictObject({
   managedActionResult: z.literal('verified'),
-  menuTrack: z.literal('catalog_grounded_not_executed'),
+  menuTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   nativeUndoCheckpoint: z.literal('companion_reported_current_at_report').optional(),
@@ -1094,7 +1144,7 @@ const procedureLeafReplayFailureRecoveryVerificationScopeSchema = z.strictObject
     'not_requested',
   ]),
   recoveryOutcome: z.enum(['not_required', 'companion_reported_verified']),
-  menuTrack: z.literal('catalog_grounded_not_executed'),
+  menuTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   shortcutTrack: z.enum(['candidate_not_executed', 'unavailable']),
   mcpTrack: z.enum(['catalog_grounded_not_executed', 'unavailable']),
   failureNativeUndoCheckpoint: z.enum([

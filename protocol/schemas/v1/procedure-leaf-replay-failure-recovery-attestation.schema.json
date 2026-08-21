@@ -2194,6 +2194,152 @@
                       "details"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "modifier_ready"
+                      },
+                      "satisfied": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "details": {
+                        "type": "object",
+                        "properties": {
+                          "parameters": {
+                            "type": "object",
+                            "properties": {
+                              "targetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "modifierType": {
+                                "type": "string",
+                                "const": "MIRROR"
+                              },
+                              "axis": {
+                                "type": "string",
+                                "enum": [
+                                  "X",
+                                  "Y",
+                                  "Z"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "targetId",
+                              "modifierId",
+                              "modifierType",
+                              "axis"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "supported": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "targetId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modifierId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "modifierType": {
+                            "type": "string",
+                            "const": "MIRROR"
+                          },
+                          "propertiesMatch": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "axis": {
+                            "type": "string",
+                            "enum": [
+                              "X",
+                              "Y",
+                              "Z"
+                            ]
+                          },
+                          "expectedAxis": {
+                            "type": "string",
+                            "enum": [
+                              "X",
+                              "Y",
+                              "Z"
+                            ]
+                          },
+                          "mirrorFixedStateMatches": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "mirrorObjectAbsent": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "sourceContentIntact": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedVertexCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "evaluatedEdgeCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 16384
+                          },
+                          "evaluatedFaceCount": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 8192
+                          },
+                          "evaluatedFinite": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "evaluatedWithinLimits": {
+                            "type": "boolean",
+                            "const": true
+                          }
+                        },
+                        "required": [
+                          "parameters",
+                          "supported",
+                          "targetId",
+                          "modifierId",
+                          "modifierType",
+                          "propertiesMatch",
+                          "axis",
+                          "expectedAxis",
+                          "mirrorFixedStateMatches",
+                          "mirrorObjectAbsent",
+                          "sourceContentIntact",
+                          "evaluatedVertexCount",
+                          "evaluatedEdgeCount",
+                          "evaluatedFaceCount",
+                          "evaluatedFinite",
+                          "evaluatedWithinLimits"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "satisfied",
+                      "details"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               }
@@ -2866,7 +3012,8 @@
                 "blender.mesh.create_plane",
                 "blender.mesh.create_torus",
                 "blender.mesh.create_cone",
-                "blender.mesh.create_cylinder"
+                "blender.mesh.create_cylinder",
+                "blender.modifier.add_mirror"
               ]
             }
           },
@@ -2917,7 +3064,10 @@
         },
         "menuTrack": {
           "type": "string",
-          "const": "catalog_grounded_not_executed"
+          "enum": [
+            "catalog_grounded_not_executed",
+            "unavailable"
+          ]
         },
         "shortcutTrack": {
           "type": "string",

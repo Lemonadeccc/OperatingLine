@@ -221,7 +221,7 @@ function installConeSegmentFrame(catalog: InteractionCatalog) {
 }
 
 describe('interaction catalog protocol', () => {
-  it('permits action-level MCP only for the seven managed Blender primitive actions', () => {
+  it('permits action-level MCP only for the seven managed primitives and exact Mirror recipe', () => {
     const availableRecipe = recipeFor(blenderInteractionCatalog, 'blender.mesh.create_uv_sphere');
 
     for (const actionName of managedPrimitiveActionNames) {
@@ -232,6 +232,18 @@ describe('interaction catalog protocol', () => {
       expect(() => validateInteractionCatalog(catalog)).not.toThrow();
     }
 
+    const mirrorOnly = structuredClone(blenderInteractionCatalog);
+    mirrorOnly.recipes = [
+      structuredClone(recipeFor(blenderInteractionCatalog, 'blender.modifier.add_mirror')),
+    ];
+    expect(() => validateInteractionCatalog(mirrorOnly)).not.toThrow();
+
+    const wrongMirrorRecipe = structuredClone(mirrorOnly);
+    wrongMirrorRecipe.recipes[0]!.id = 'blender.modifier.add_mirror.native';
+    expect(() => validateInteractionCatalog(wrongMirrorRecipe)).toThrow(
+      'action-level MCP is restricted to exact approved Blender recipes',
+    );
+
     for (const actionName of [
       'blender.mesh.create_primitive_batch',
       'blender.mesh.edit_subdivide',
@@ -241,7 +253,7 @@ describe('interaction catalog protocol', () => {
       catalog.recipes = [structuredClone(availableRecipe)];
       catalog.recipes[0]!.actionName = actionName;
       expect(() => validateInteractionCatalog(catalog)).toThrow(
-        'action-level MCP is restricted to exact managed Blender primitive native recipes',
+        'action-level MCP is restricted to exact approved Blender recipes',
       );
     }
 
@@ -249,14 +261,14 @@ describe('interaction catalog protocol', () => {
     wrongRecipe.recipes = [structuredClone(availableRecipe)];
     wrongRecipe.recipes[0]!.id = 'blender.mesh.create_uv_sphere.semantic';
     expect(() => validateInteractionCatalog(wrongRecipe)).toThrow(
-      'action-level MCP is restricted to exact managed Blender primitive native recipes',
+      'action-level MCP is restricted to exact approved Blender recipes',
     );
   });
 
   it('covers every Blender action with a native path or explicit semantic fallback', () => {
     const catalog = interactionCatalogSchema.parse(blenderInteractionCatalog);
 
-    expect(catalog.catalogVersion).toBe('1.39.0');
+    expect(catalog.catalogVersion).toBe('1.40.0');
     expect(catalog.actionCatalogVersion).toBe(blenderActionCatalog.catalogVersion);
     expect(catalog.hostVersionRange).toBe('>=4.5.0 <4.6.0 || >=5.1.0 <5.2.0');
     expect(catalog.recipes.map((recipe) => recipe.actionName)).toEqual(
@@ -321,6 +333,7 @@ describe('interaction catalog protocol', () => {
       '1.37.0',
       '1.38.0',
       '1.39.0',
+      '1.40.0',
     ]);
 
     const availableMcpRecipes = catalog.recipes.filter(
@@ -334,6 +347,7 @@ describe('interaction catalog protocol', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.modifier.add_mirror',
     ]);
     for (const recipe of availableMcpRecipes) {
       expect(recipe.procedureMaterialization?.mcp).toEqual({
@@ -1757,8 +1771,14 @@ describe('interaction catalog protocol', () => {
         reason: expect.stringContaining('Shift+A'),
       },
       mcp: {
-        availability: 'unavailable',
-        reason: 'No approved action-level MCP tool is available.',
+        availability: 'available',
+        source: 'catalog.action_level_mcp',
+        semanticBinding: 'all_leaf_operations',
+        parameterBinding: 'accepted_action_arguments',
+        serverName: 'operating-line',
+        toolName: 'operatingline.blender.action.execute',
+        authorization: 'accepted_replay_next_step',
+        resultBinding: 'companion_state_report',
       },
     });
     const materializedActionNames = new Set([

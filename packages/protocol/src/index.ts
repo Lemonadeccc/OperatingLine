@@ -39,6 +39,51 @@ export * from './procedure-semantic-retrieval.js';
 export * from './procedure-tutorial-authoring-run.js';
 export * from './procedure-tutorial-import.js';
 export * from './procedure-tutorial-media.js';
+export * from './procedure-tutorial-media-authoring.js';
+export {
+  procedureTutorialMediaAuthoringRunFormatVersion,
+  procedureTutorialMediaAuthoringRunFormatVersionSchema,
+  procedureTutorialMediaAuthoringRunStageValues,
+  procedureTutorialMediaAuthoringRunStageSchema,
+  procedureTutorialMediaAuthoringMaterializationSummarySchema,
+  procedureTutorialMediaAuthoringRunCreateRequestSchema,
+  procedureTutorialMediaAuthoringRunStatusRequestSchema,
+  procedureTutorialMediaAuthoringRunStatusSchema,
+  procedureTutorialMediaAuthoringReviewRequestSchema,
+  procedureTutorialMediaAuthoringResumeRequestSchema,
+  procedureTutorialMediaAuthoringBindingSchema,
+  type ProcedureTutorialMediaAuthoringRunStage,
+  type ProcedureTutorialMediaAuthoringMaterializationSummary,
+  type ProcedureTutorialMediaAuthoringRunCreateRequest,
+  type ProcedureTutorialMediaAuthoringRunStatusRequest,
+  type ProcedureTutorialMediaAuthoringRunStatus,
+  type ProcedureTutorialMediaAuthoringReviewRequest,
+  type ProcedureTutorialMediaAuthoringResumeRequest,
+  type ProcedureTutorialMediaAuthoringBinding,
+} from './procedure-tutorial-media-authoring-run.js';
+export * from './procedure-zero-baseline.js';
+export {
+  procedureZeroBaselineRefinementFormatVersion,
+  procedureZeroBaselineRefinementFormatVersionSchema,
+  procedureZeroBaselineRefinementCreateRequestSchema,
+  procedureZeroBaselineRefinementRequestSchema,
+  procedureZeroBaselineReviewBindingSchema,
+  procedureZeroBaselineStorageBindingSchema,
+  procedureZeroBaselineReviewRequestSchema,
+  procedureZeroBaselineSemanticStartRequestSchema,
+  procedureZeroBaselineRefinementStartRequestSchema,
+  procedureZeroBaselineRefinementStatusRequestSchema,
+  procedureZeroBaselineRefinementStatusSchema,
+  type ProcedureZeroBaselineRefinementCreateRequest,
+  type ProcedureZeroBaselineRefinementRequest,
+  type ProcedureZeroBaselineReviewBinding,
+  type ProcedureZeroBaselineStorageBinding,
+  type ProcedureZeroBaselineReviewRequest,
+  type ProcedureZeroBaselineSemanticStartRequest,
+  type ProcedureZeroBaselineRefinementStartRequest,
+  type ProcedureZeroBaselineRefinementStatusRequest,
+  type ProcedureZeroBaselineRefinementStatus,
+} from './procedure-zero-baseline-refinement.js';
 export * from './procedure-tutorial-youtube.js';
 export * from './revision.js';
 export * from './runtime.js';

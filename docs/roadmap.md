@@ -325,8 +325,16 @@
         三哈希确认；通过后把 ProcedureTree 与完整 binding 证据原子存储。外部阶段不会在重启后自动重放，
         完成态不表示 Proposal、宿主执行或验证。见
         [ADR 0085](adr/0085-selected-caption-procedure-authoring-run.md)。
-  - [ ] 选择确认可视化 UI、媒体分析 manifest/ASR/OCR 到完整 ProcedureTree 的组合，以及大步骤/小步骤
-        质量校准。
+  - [x] 已验证媒体 manifest 到 authoring 准备：完成任务以 request/job id 取回并重新验证 CAS/manifest，
+        把 semantic/ASR/frame/OCR/UI/shortcut candidate 精确绑定到最终 prompt evidence id；跨时段或无 grounding
+        signal 的 segment 返回 blocker 与 `packet=null`。该入口不调用 Provider 或生成树。见
+        [ADR 0096](adr/0096-verified-media-authoring-preparation.md)。
+  - [x] 已验证媒体到完整候选树的分阶段工作流与可视化审阅入口：只接受服务端保留的 exact ready
+        preparation，异步执行一次 Provider generation 与确定性 materialization，再以 preparation/packet/
+        candidate/materialized 四重绑定暂停等待人工审阅；store 与 completed evidence 原子提交，崩溃恢复
+        不重放 Provider，UI 的 Provider 与 review 确认绑定精确 descriptor/run/hash，并可直接打开已存树编辑器。
+        见 [ADR 0097](adr/0097-reviewed-media-procedure-authoring-run.md)。
+  - [ ] 用真实双人盲审标准校准教学视频的大步骤/小步骤层级、语义质量及 released dataset 准入。
   - [ ] ActionCatalog/InteractionCatalog 检索与增量覆盖：只有项目尚未支持且经过版本化真实宿主验证的
         菜单、快捷键别名和 MCP 函数映射，才能从 candidate 晋升为 verified。
   - [x] ProcedureTree 本地可视化 revision 编辑器：Orchestrator 工作台显示树节点与 semantic/menu/shortcut/MCP
@@ -602,6 +610,12 @@
           `cylinder_ready` 及 Start→Next 原生 Undo 直连证明成功。旧 binding 不继承权限，Cylinder shortcut 仍
           unavailable，menu 的 canonical Euler teaching projection 不冒充 managed quaternion 执行。见
           [ADR 0093](adr/0093-cylinder-action-level-mcp.md)。
+    - [x] Mirror modifier action-level MCP executor：冻结 InteractionCatalog `1.39.0`，由 `1.40.0` 只为
+          `blender.modifier.add_mirror` 开放 accepted replay 的通用 action executor。Runtime 从不可变 binding
+          派生 target/modifier identity 与 axis，要求完整 fixed-property、源网格、evaluated topology 和
+          `modifier_ready` 强 Observation，并继续绑定 decision、Start→Next 原生 Undo checkpoint、可信 receipt
+          与补偿回退；menu/shortcut 仍 unavailable，旧 binding 不继承权限。见
+          [ADR 0099](adr/0099-mirror-action-level-mcp.md)。
     - [x] 首个原生 shortcut proof executor：冻结 InteractionCatalog `1.38.0`，由 `1.39.0` 只为已接受的
           factory Cube Subdivision Surface replay 声明 `Ctrl+1 → F9 → Level → Enter`。Blender 4.5.3/5.1.1
           的 `Window.event_simulate` 执行器生成四段哈希收据、强 Observation、完整 factory Cube 指纹与原生
@@ -612,7 +626,11 @@
           Controller 重建，文件加载、复制 `.blend` 与 OS 进程重启不会继承旧 target。该证明明确排除 OS HID、menu 点击、
           managed Action/MCP identity 及其它对象或快捷键。见
           [ADR 0094](adr/0094-native-subdivision-shortcut-proof.md)。
-    - [ ] 真实逐控件 menu/shortcut executor，以及七种已证明 primitive 之外的复合与编辑叶节点覆盖；根据失败
+    - [ ] Poke Faces 原生 shortcut proof：双版本 live BMesh probe 的完整 Object→Object 五种候选全部失败；
+          Edit Mode 内 pre-push 一次和 post-push 两次 Undo/Redo roundtrip 通过，`UNDO_GROUPED` 仅 Undo 通过。
+          生产结构需拆成 Enter Edit→Poke→Exit Edit 三叶且只让中间叶拥有 history proof；完整 action gate 仍
+          fail closed。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+    - [ ] 真实逐控件 menu/shortcut executor，以及八种已证明 managed action 之外的复合与编辑叶节点覆盖；根据失败
           分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
@@ -620,9 +638,17 @@
         locality、compile 和人工 review gate；store/discard 原子提交，重启不重放不确定的 Provider 调用。
         见 [ADR 0086](adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
         [ADR 0087](adr/0087-evidence-bound-procedure-refinement.md)。
-  - [ ] 从一句话通过 Provider/RAG 零基线生成完整 ProcedureTree；当前 refinement 必须绑定一棵 latest
-        immutable base tree、明确 scope 和已完成 semantic retrieval receipt，本地可视化编辑器也只编辑
-        已存树，不能充当零基线生成器。
+  - [x] 从一句话通过显式 Provider 零基线生成完整 candidate ProcedureTree：Runtime 对完整 Provider disclosure
+        与三项授权 fail closed，按请求 fingerprint 分配稳定 UUIDv8 tree id 和 revision 1，复用既有严格
+        authoring/compile 门并跨重启恢复；结果不使用 existing-tree retrieval，也不 store/propose/execute。见
+        [ADR 0095](adr/0095-zero-baseline-procedure-generation.md)。
+  - [x] 零基线到语义 RAG、流式对话与自动局部重规划的安全分阶段编排：revision 1 candidate 先以四哈希
+        binding 暂停人工 review，store 时与 reviewed evidence 原子提交；随后只对这棵精确已存树执行非空
+        semantic retrieval，并把 durable receipt 交给既有 streamed refinement coordinator。后者继续执行固定
+        `0.8` confidence、scope/locality、compile 与第二次 review/store 门。全流程可按 workflow id 恢复，
+        requested-only Provider 阶段不重放；语义失败写入 terminal `semantic_failed`，同一 workflow/request 不重试；
+        不创建 Proposal 或执行 Blender。见
+        [ADR 0098](adr/0098-zero-baseline-grounded-dialogue-refinement.md)。
   - [ ] 经授权、去重、版本切分和双人盲审的轨迹数据集与训练/RAG 导出；candidate、unavailable 或权利
         不明确的视频数据不得进入 released 训练集。
 

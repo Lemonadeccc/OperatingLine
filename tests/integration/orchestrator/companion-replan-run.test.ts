@@ -593,10 +593,15 @@ describe('asynchronous companion replan runs', () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-replan-run-restart-'));
     const databasePath = join(directory, 'events.db');
     let releaseProvider!: () => void;
+    let markProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolveStarted) => {
+      markProviderStarted = resolveStarted;
+    });
     const providerGate = new Promise<void>((resolveGate) => {
       releaseProvider = resolveGate;
     });
     const firstProvider = provider(async ({ packet }) => {
+      markProviderStarted();
       await providerGate;
       return validDraft(packet);
     });
@@ -611,9 +616,9 @@ describe('asynchronous companion replan runs', () => {
       const request = runRequest(revisionRequestId, instanceId);
       expect((await createRun(first, request)).status).toBe(202);
 
-      const stopping = first.stop();
+      await providerStarted;
+      await first.stop();
       releaseProvider();
-      await stopping;
 
       const restartedProvider = provider(({ packet }) => validDraft(packet));
       const restarted = await startRuntime({

@@ -10,8 +10,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..domain import (
-    is_action_level_mcp_primitive,
-    is_action_level_mcp_primitive_recipe,
+    is_action_level_mcp_action,
+    is_action_level_mcp_recipe,
 )
 
 
@@ -1469,9 +1469,9 @@ def _parse_mcp_materialization(
     for key, expected_value in expected.items():
         if raw[key] != expected_value:
             raise ValueError(f"{label} has unsupported {key}")
-    if not is_action_level_mcp_primitive_recipe(recipe_id):
+    if not is_action_level_mcp_recipe(recipe_id):
         raise ValueError(
-            f"{label} action-level MCP is restricted to approved primitive recipes"
+            f"{label} action-level MCP is restricted to exact approved recipes"
         )
     return ProcedureMaterializationChannel(
         availability="available",
@@ -1846,16 +1846,21 @@ def _validate_ordered_parameter_operations(
     materialization = recipe.procedure_materialization
     if materialization is None:
         return
+    expected_action_level_mcp_recipe_id = (
+        "blender.modifier.add_mirror.semantic"
+        if recipe.action_name == "blender.modifier.add_mirror"
+        else f"{recipe.action_name}.native"
+    )
     if (
         materialization.mcp.availability == "available"
         and (
-            not is_action_level_mcp_primitive(recipe.action_name)
-            or recipe.id != f"{recipe.action_name}.native"
+            not is_action_level_mcp_action(recipe.action_name)
+            or recipe.id != expected_action_level_mcp_recipe_id
         )
     ):
         raise ValueError(
             f"Interaction recipe {recipe.id} action-level MCP must bind its exact "
-            "approved primitive native recipe"
+            "approved recipe"
         )
     semantic = materialization.semantic
     if semantic is not None:

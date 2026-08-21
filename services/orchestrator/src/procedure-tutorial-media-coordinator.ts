@@ -7,6 +7,7 @@ import {
   procedureTutorialMediaJobStatusSchema,
   procedureTutorialMediaResumeRequestSchema,
   type ProcedureTutorialMediaAnalysisRequest,
+  type ProcedureTutorialMediaAnalysisResult,
   type ProcedureTutorialMediaJobStatus,
   type ProcedureTutorialMediaResumeRequest,
   type ProcedureTutorialMediaStage,
@@ -191,6 +192,13 @@ export interface ProcedureTutorialMediaCoordinator {
   ready(): Promise<void>;
   create(request: ProcedureTutorialMediaAnalysisRequest): ProcedureTutorialMediaJobStatus;
   status(requestId: string, jobId: string): ProcedureTutorialMediaJobStatus;
+  completed(
+    requestId: string,
+    jobId: string,
+  ): {
+    readonly request: ProcedureTutorialMediaAnalysisRequest;
+    readonly result: ProcedureTutorialMediaAnalysisResult;
+  } | null;
   resume(request: ProcedureTutorialMediaResumeRequest): ProcedureTutorialMediaJobStatus;
   beginClose(): void;
   close(): Promise<void>;
@@ -747,6 +755,14 @@ export function createProcedureTutorialMediaCoordinator(
       if (job === undefined || job.jobId !== jobId)
         throw new ProcedureTutorialMediaCoordinatorError('not_found');
       return structuredClone(job.status);
+    },
+    completed(requestId, jobId) {
+      requireReady();
+      const job = jobs.get(requestId);
+      if (job === undefined || job.jobId !== jobId)
+        throw new ProcedureTutorialMediaCoordinatorError('not_found');
+      if (job.status.status !== 'completed') return null;
+      return structuredClone({ request: job.request, result: job.status.result });
     },
     resume(requestInput) {
       requireReady();

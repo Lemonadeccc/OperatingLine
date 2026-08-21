@@ -214,6 +214,11 @@ describe('procedure tutorial media coordinator', () => {
     expect(coordinator.create(request)).toEqual(accepted);
     const completed = await terminalStatus(coordinator, request.requestId, accepted.jobId);
     expect(completed.status).toBe('completed');
+    if (completed.status !== 'completed') throw new Error('expected completed media analysis');
+    expect(coordinator.completed(request.requestId, accepted.jobId)).toEqual({
+      request,
+      result: completed.result,
+    });
     expect(coordinator.create(request)).toEqual(completed);
     expect(events.filter((event) => event.eventType.endsWith('.requested'))).toHaveLength(1);
 

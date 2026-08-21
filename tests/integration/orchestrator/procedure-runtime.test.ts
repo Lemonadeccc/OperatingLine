@@ -167,6 +167,44 @@ function strongPrimitiveObservationDetails(input: {
   };
 }
 
+function strongMirrorObservationDetails(input: {
+  readonly parameters: Record<string, unknown>;
+  readonly evaluatedTopology: {
+    readonly evaluatedVertexCount: number;
+    readonly evaluatedEdgeCount: number;
+    readonly evaluatedFaceCount: number;
+  };
+}) {
+  const targetId = input.parameters['targetId'];
+  const modifierId = input.parameters['modifierId'];
+  const modifierType = input.parameters['modifierType'];
+  const axis = input.parameters['axis'];
+  if (
+    typeof targetId !== 'string' ||
+    typeof modifierId !== 'string' ||
+    modifierType !== 'MIRROR' ||
+    (axis !== 'X' && axis !== 'Y' && axis !== 'Z')
+  ) {
+    throw new Error('Expected managed Mirror observation identities');
+  }
+  return {
+    parameters: structuredClone(input.parameters),
+    supported: true,
+    targetId,
+    modifierId,
+    modifierType,
+    propertiesMatch: true,
+    axis,
+    expectedAxis: axis,
+    mirrorFixedStateMatches: true,
+    mirrorObjectAbsent: true,
+    sourceContentIntact: true,
+    ...input.evaluatedTopology,
+    evaluatedFinite: true,
+    evaluatedWithinLimits: true,
+  };
+}
+
 async function waitUntilAfter(isoTimestamp: string): Promise<void> {
   const timestamp = Date.parse(isoTimestamp);
   for (let attempt = 0; attempt < 100 && Date.now() <= timestamp; attempt += 1) {
@@ -3163,7 +3201,7 @@ describe('procedure compilation runtime', () => {
     }
   });
 
-  it('keeps the active Mirror procedure structural-only and non-executing', async () => {
+  it('materializes the active Mirror procedure with its exact action-level MCP binding', async () => {
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
@@ -3202,7 +3240,7 @@ describe('procedure compilation runtime', () => {
         throw new Error('Expected one materialized Mirror leaf');
       }
       expect(materialization).toMatchObject({
-        formatVersion: '1.0.0',
+        formatVersion: '1.4.0',
         catalogBinding: {
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
           interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
@@ -3213,7 +3251,7 @@ describe('procedure compilation runtime', () => {
             recipeId: 'blender.modifier.add_mirror.semantic',
             menu: 'unavailable',
             shortcut: 'unavailable',
-            mcp: 'unavailable',
+            mcp: 'materialized',
           },
         ],
       });
@@ -3238,7 +3276,27 @@ describe('procedure compilation runtime', () => {
       expect(leaf.shortcutTracks).toEqual([
         expect.objectContaining({ availability: 'unavailable' }),
       ]);
-      expect(leaf.mcpTracks).toEqual([expect.objectContaining({ availability: 'unavailable' })]);
+      expect(leaf.mcpTracks).toEqual([
+        expect.objectContaining({
+          availability: 'available',
+          modality: 'mcp',
+          operations: [
+            expect.objectContaining({
+              serverName: 'operating-line',
+              toolName: 'operatingline.blender.action.execute',
+              arguments: {
+                formatVersion: '1.0.0',
+                requestId: '$runtime.requestId',
+                replayId: '$runtime.replayId',
+                expectedState: '$runtime.expectedState',
+              },
+              argumentSource: 'accepted_leaf_action',
+              actionArguments: leaf.action.arguments,
+              resultBinding: `${leaf.id}.companion_state_report`,
+            }),
+          ],
+        }),
+      ]);
       expect(leaf.validation).toMatchObject({ status: 'candidate', validatedHostVersions: [] });
 
       const compiledMcp = await callMcpTool(runtime, 2, 'operatingline.procedure.compile', {
@@ -5155,6 +5213,14 @@ describe('procedure compilation runtime', () => {
       topology: { vertexCount: 64, edgeCount: 96, faceCount: 34 },
       geometryDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
     },
+    {
+      primitive: 'mirror',
+      actionName: 'blender.modifier.add_mirror',
+      goal: '在已接受的 Cube 上添加精确绑定本地 Y 轴的 Mirror modifier。',
+      fixture: mirrorAuthoringCandidateFixture,
+      topology: { vertexCount: 16, edgeCount: 24, faceCount: 12 },
+      geometryDetailKeys: [],
+    },
   ])(
     'gates the accepted $primitive orchestration result on its exact action-level MCP and Start checkpoint',
     async ({ primitive, actionName, goal, fixture, topology, geometryDetailKeys }) => {
@@ -5207,10 +5273,18 @@ describe('procedure compilation runtime', () => {
         );
         expect(proposed.binding).toMatchObject({
           actionName,
-          claims: { mcpTrack: 'catalog_grounded_not_executed' },
+          claims: {
+            menuTrack: primitive === 'mirror' ? 'unavailable' : 'catalog_grounded_not_executed',
+            mcpTrack: 'catalog_grounded_not_executed',
+          },
           materialization: {
             formatVersion: '1.4.0',
-            coverage: [expect.objectContaining({ mcp: 'materialized' })],
+            coverage: [
+              expect.objectContaining({
+                menu: primitive === 'mirror' ? 'unavailable' : 'materialized',
+                mcp: 'materialized',
+              }),
+            ],
           },
         });
         const proposal = proposed.binding.proposal;
@@ -5356,11 +5430,21 @@ describe('procedure compilation runtime', () => {
         });
 
         await waitUntilAfter(delivery!.dispatchedAt);
-        const fullObservationDetails = strongPrimitiveObservationDetails({
-          parameters: expectedObservation.parameters,
-          topology,
-          geometryDetailKeys,
-        });
+        const fullObservationDetails =
+          primitive === 'mirror'
+            ? strongMirrorObservationDetails({
+                parameters: expectedObservation.parameters,
+                evaluatedTopology: {
+                  evaluatedVertexCount: topology.vertexCount,
+                  evaluatedEdgeCount: topology.edgeCount,
+                  evaluatedFaceCount: topology.faceCount,
+                },
+              })
+            : strongPrimitiveObservationDetails({
+                parameters: expectedObservation.parameters,
+                topology,
+                geometryDetailKeys,
+              });
         const reportFor = (sequence: number, details: Record<string, unknown>) => {
           const occurredAt = new Date().toISOString();
           return {
@@ -5461,12 +5545,55 @@ describe('procedure compilation runtime', () => {
           ).toMatchObject({ status: 'dispatched' });
         }
 
+        if (primitive === 'mirror') {
+          const missingFixedStateDetails: Record<string, unknown> =
+            structuredClone(fullObservationDetails);
+          delete missingFixedStateDetails['mirrorFixedStateMatches'];
+          const missingFixedStateReport = reportFor(successSequence++, missingFixedStateDetails);
+          await postState(missingFixedStateReport);
+          const missingFixedStateResult = await postResult(missingFixedStateReport);
+          expect(missingFixedStateResult.status).toBe(409);
+          await expect(missingFixedStateResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8973, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+
+          const wrongAxisReport = reportFor(successSequence++, {
+            ...fullObservationDetails,
+            axis: 'X',
+          });
+          await postState(wrongAxisReport);
+          const wrongAxisResult = await postResult(wrongAxisReport);
+          expect(wrongAxisResult.status).toBe(409);
+          await expect(wrongAxisResult.json()).resolves.toMatchObject({
+            error: 'action_execution_observation_mismatch',
+          });
+          expect(
+            companionActionExecutionStatusSchema.parse(
+              (
+                await callMcpTool(runtime, 8974, 'operatingline.blender.action.status', {
+                  requestId: actionRequest.requestId,
+                })
+              ).result?.structuredContent,
+            ),
+          ).toMatchObject({ status: 'dispatched' });
+        }
+
         const successReport = reportFor(successSequence, fullObservationDetails);
         await postState(successReport);
         const result = resultFor(successReport);
         const resultResponse = await postResult(successReport);
-        expect(resultResponse.status).toBe(200);
-        await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+        const resultResponseBody = await resultResponse.json();
+        expect(resultResponse.status, JSON.stringify(resultResponseBody)).toBe(200);
+        expect(resultResponseBody).toEqual({ result: 'accepted' });
 
         const statusMcp = await callMcpTool(runtime, 898, 'operatingline.blender.action.status', {
           requestId: actionRequest.requestId,

@@ -20,10 +20,19 @@ import {
   guideProtocolVersion,
   procedureAuthoringCandidateTreeSchema,
   procedureAuthoringPromptPacketSchema,
+  procedureRefinementCreateRequestSchema,
+  procedureRefinementProviderDisclosureListSchema,
+  procedureSemanticRetrievalProviderDisclosureListSchema,
+  procedureSemanticRetrievalRequestSchema,
   procedureTutorialAuthoringRunStatusSchema,
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationResultSchema,
   procedureTutorialYoutubeTrackSelectionResultSchema,
+  procedureZeroBaselineRefinementCreateRequestSchema,
+  procedureZeroBaselineRefinementStartRequestSchema,
+  procedureZeroBaselineRefinementStatusSchema,
+  procedureZeroBaselineReviewRequestSchema,
+  procedureZeroBaselineSemanticStartRequestSchema,
   type GuidePlan,
   type ProcedureAuthoringCandidateTree,
   type ProcedureAuthoringPromptPacket,
@@ -321,6 +330,18 @@ describe('OperatingLine runtime', () => {
         database: 'ready',
         adapters: [{ id: 'fake-blender', connected: true }],
       });
+      const tutorialAuthoringUi = await fetch(`${runtime.baseUrl}/procedure-tutorial-authoring`);
+      expect(tutorialAuthoringUi.status).toBe(200);
+      expect(tutorialAuthoringUi.headers.get('cache-control')).toBe('no-store');
+      expect(tutorialAuthoringUi.headers.get('content-security-policy')).toContain(
+        "default-src 'none'",
+      );
+      await expect(tutorialAuthoringUi.text()).resolves.toContain('教程制作审阅台');
+      const tutorialAuthoringScript = await fetch(
+        `${runtime.baseUrl}/procedure-tutorial-authoring/app.js`,
+      );
+      expect(tutorialAuthoringScript.status).toBe(200);
+      expect(tutorialAuthoringScript.headers.get('content-type')).toContain('javascript');
       const emptyProviders = await fetch(`${runtime.baseUrl}/api/v1/planner/providers`, {
         headers: { authorization: `Bearer ${accessToken}` },
       });
@@ -349,7 +370,7 @@ describe('OperatingLine runtime', () => {
         .find((line) => line.startsWith('data: '));
       expect(dataLine).toBeDefined();
       const toolsPayload = JSON.parse(dataLine!.slice('data: '.length)) as {
-        result?: { tools?: Array<{ name?: string; inputSchema?: unknown }> };
+        result?: { tools?: Array<{ name?: string; description?: string; inputSchema?: unknown }> };
       };
       expect(toolsPayload).toMatchObject({
         result: {
@@ -362,7 +383,10 @@ describe('OperatingLine runtime', () => {
                 'List the latest state snapshot for each actively present host companion.',
             },
             { name: 'operatingline.action_catalog.get' },
-            { name: 'operatingline.blender.action.execute' },
+            {
+              name: 'operatingline.blender.action.execute',
+              description: expect.stringContaining('Mirror Modifier'),
+            },
             { name: 'operatingline.blender.action.status' },
             { name: 'operatingline.blender.shortcut-proof.execute' },
             { name: 'operatingline.blender.shortcut-proof.status' },
@@ -370,6 +394,11 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.tutorial.media.jobs.create' },
             { name: 'operatingline.procedure.tutorial.media.jobs.status' },
             { name: 'operatingline.procedure.tutorial.media.jobs.restart' },
+            { name: 'operatingline.procedure.tutorial.media.authoring.prepare' },
+            { name: 'operatingline.procedure.tutorial.media.authoring.runs.create' },
+            { name: 'operatingline.procedure.tutorial.media.authoring.runs.status' },
+            { name: 'operatingline.procedure.tutorial.media.authoring.runs.review' },
+            { name: 'operatingline.procedure.tutorial.media.authoring.runs.resume' },
             { name: 'operatingline.procedure.tutorial.import' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.list' },
             { name: 'operatingline.procedure.tutorial.youtube.tracks.recommend' },
@@ -383,6 +412,12 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.prompt.get' },
             { name: 'operatingline.procedure.authoring.providers.list' },
             { name: 'operatingline.procedure.authoring.generate' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.generate' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.refinement.create' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.refinement.review' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.refinement.semantic.start' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.refinement.start' },
+            { name: 'operatingline.procedure.authoring.zero-baseline.refinement.status' },
             { name: 'operatingline.procedure.authoring.validate' },
             { name: 'operatingline.procedure.authoring.materialize' },
             { name: 'operatingline.procedure.replay.propose' },
@@ -735,6 +770,27 @@ describe('OperatingLine runtime', () => {
       await expect(guideResponse.json()).resolves.toMatchObject({
         plan: { id: plan.id, revision: plan.revision },
       });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('lists all five staged zero-baseline refinement tools over MCP', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    try {
+      const response = await callMcpRequest<{
+        tools: Array<{ name: string }>;
+      }>(runtime, 2, 'tools/list');
+
+      expect(response.result?.tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          'operatingline.procedure.authoring.zero-baseline.refinement.create',
+          'operatingline.procedure.authoring.zero-baseline.refinement.review',
+          'operatingline.procedure.authoring.zero-baseline.refinement.semantic.start',
+          'operatingline.procedure.authoring.zero-baseline.refinement.start',
+          'operatingline.procedure.authoring.zero-baseline.refinement.status',
+        ]),
+      );
     } finally {
       await runtime.stop();
     }
@@ -2080,10 +2136,27 @@ describe('OperatingLine runtime', () => {
           },
         },
       };
+      const zeroBaselineRequest = {
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        targetAdapterId: 'blender',
+        actionCatalogVersion: blenderActionCatalog.catalogVersion,
+        interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+        goal: '从一句话创建一棵全新的雪人 ProcedureTree。',
+        locale: 'zh-CN',
+        authorization: {
+          providerDescriptor: provider.descriptor,
+          explicitlyConfirmedByUser: true,
+          goalAndCatalogContextTransmissionAcknowledged: true,
+          possibleProviderCostAcknowledged: true,
+          confirmedAt: '2026-08-20T10:00:00+08:00',
+        },
+      };
       const headers = {
         authorization: `Bearer ${accessToken}`,
         'content-type': 'application/json',
       };
+      let completedZeroBaselineResult: unknown;
 
       try {
         const providerList = await callMcpTool(
@@ -2176,6 +2249,57 @@ describe('OperatingLine runtime', () => {
         await expect(repeated.json()).resolves.toEqual(result);
         expect(providerInputs).toHaveLength(1);
 
+        const zeroBaseline = await callMcpTool(
+          runtime,
+          184,
+          'operatingline.procedure.authoring.zero-baseline.generate',
+          zeroBaselineRequest,
+        );
+        expect(zeroBaseline.result?.isError).not.toBe(true);
+        const zeroBaselineResult = zeroBaseline.result?.structuredContent as {
+          allocation: { strategy: string };
+          generation: {
+            tree: { id: string; revision: number };
+            sideEffects: Record<string, unknown>;
+          };
+          retrieval: { status: string; reason: string };
+          outcome: string;
+        };
+        expect(zeroBaselineResult).toMatchObject({
+          allocation: { strategy: 'request_fingerprint_uuid_v8' },
+          retrieval: {
+            status: 'not_used',
+            reason: 'zero_baseline_has_no_existing_tree',
+          },
+          outcome: 'candidate_only',
+          generation: {
+            sideEffects: {
+              modelCalled: true,
+              procedureStored: false,
+              proposalCreated: false,
+              hostExecutionStarted: false,
+            },
+          },
+        });
+        expect(zeroBaselineResult.generation.tree.id).toMatch(
+          /^[a-f0-9]{8}-[a-f0-9]{4}-8[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+        );
+        expect(zeroBaselineResult.generation.tree.revision).toBe(1);
+        completedZeroBaselineResult = structuredClone(zeroBaselineResult);
+        expect(providerInputs).toHaveLength(2);
+
+        const repeatedZeroBaseline = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/authoring/zero-baseline/generate`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(zeroBaselineRequest),
+          },
+        );
+        expect(repeatedZeroBaseline.status).toBe(200);
+        await expect(repeatedZeroBaseline.json()).resolves.toEqual(zeroBaselineResult);
+        expect(providerInputs).toHaveLength(2);
+
         const generatedFromCaptions = await callMcpTool(
           runtime,
           182,
@@ -2242,10 +2366,10 @@ describe('OperatingLine runtime', () => {
           },
         });
         expect(generatedFromCaptions.result?.structuredContent).toEqual(captionResult);
-        expect(providerInputs).toHaveLength(2);
-        expect(providerInputs[1]?.packet).toEqual(captionResult['packet']);
-        expect(JSON.stringify(providerInputs[1])).not.toContain('captionDocument');
-        expect(JSON.stringify(providerInputs[1])).not.toContain(captionDocument);
+        expect(providerInputs).toHaveLength(3);
+        expect(providerInputs[2]?.packet).toEqual(captionResult['packet']);
+        expect(JSON.stringify(providerInputs[2])).not.toContain('captionDocument');
+        expect(JSON.stringify(providerInputs[2])).not.toContain(captionDocument);
 
         const repeatedCaptionGeneration = await fetch(
           `${runtime.baseUrl}/api/v1/procedure/tutorial/generate`,
@@ -2257,7 +2381,7 @@ describe('OperatingLine runtime', () => {
         );
         expect(repeatedCaptionGeneration.status).toBe(200);
         await expect(repeatedCaptionGeneration.json()).resolves.toEqual(captionResult);
-        expect(providerInputs).toHaveLength(2);
+        expect(providerInputs).toHaveLength(3);
 
         const storedProcedures = await callMcpTool(
           runtime,
@@ -2332,13 +2456,398 @@ describe('OperatingLine runtime', () => {
           'procedure.authoring.provider.generation.completed',
           'procedure.authoring.provider.generation.requested',
           'procedure.authoring.provider.generation.completed',
+          'procedure.authoring.provider.generation.requested',
+          'procedure.authoring.provider.generation.completed',
         ]);
         expect(JSON.stringify(generationEvents)).not.toContain('captionDocument');
         expect(JSON.stringify(generationEvents)).not.toContain(captionDocument);
+        expect(
+          database
+            .listExecutionEventsByTypes([
+              'procedure.zero-baseline.generation.requested',
+              'procedure.zero-baseline.generation.completed',
+            ])
+            .map((event) => event.eventType),
+        ).toEqual([
+          'procedure.zero-baseline.generation.requested',
+          'procedure.zero-baseline.generation.completed',
+        ]);
       } finally {
         database.close();
       }
+
+      const restarted = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: [blenderActionCatalog],
+        interactionCatalogs: [blenderInteractionCatalog],
+      });
+      try {
+        const restored = await fetch(
+          `${restarted.baseUrl}/api/v1/procedure/authoring/zero-baseline/generate`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(zeroBaselineRequest),
+          },
+        );
+        expect(restored.status).toBe(200);
+        await expect(restored.json()).resolves.toEqual(completedZeroBaselineResult);
+      } finally {
+        await restarted.stop();
+      }
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unknown fields on the staged zero-baseline create route', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    try {
+      const response = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/zero-baseline/refinement/runs`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            workflowId: randomUUID(),
+            apiKey: 'MUST_NOT_BE_ACCEPTED',
+          }),
+        },
+      );
+
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error?: string };
+      expect(body.error).toBe('invalid_procedure_zero_baseline_refinement_create_request');
+      expect(JSON.stringify(body)).not.toContain('MUST_NOT_BE_ACCEPTED');
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('returns not-found for an unknown staged zero-baseline workflow over MCP', async () => {
+    const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
+    try {
+      const workflowId = randomUUID();
+      const response = await callMcpTool(
+        runtime,
+        185,
+        'operatingline.procedure.authoring.zero-baseline.refinement.status',
+        { formatVersion: '1.0.0', workflowId },
+      );
+
+      expect(response.result?.isError).toBe(true);
+      expect(JSON.parse(response.result?.content?.[0]?.text ?? '{}')).toEqual({
+        error: 'procedure_zero_baseline_refinement_not_found',
+        workflowId,
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('runs the reviewed zero-baseline through semantic retrieval into native streamed refinement', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'operatingline-zero-refinement-runtime-'));
+    const descriptor = {
+      contractVersion: '1.0.0',
+      id: 'zero-refinement-runtime-provider',
+      version: '1.0.0',
+      displayName: 'Zero refinement runtime provider',
+      description: 'Deterministic local provider for staged zero-baseline runtime coverage.',
+      availability: { available: true },
+      limits: { maxConcurrency: 2 },
+      dataHandling: {
+        executionLocation: 'local',
+        dataTransmission: 'none',
+        credentialManagement: 'provider_managed',
+      },
+    } as const;
+    const provider: PlannerProvider = {
+      descriptor,
+      generate: async () => {
+        throw new Error('Initial planning is outside this workflow.');
+      },
+      authorProcedure: async ({ packet }) => generatedProcedureCandidate(packet),
+      embedProcedure: async ({ documents }) => ({
+        vectors: documents.map(() => [1, 0]),
+      }),
+      procedureRefinementDialogue: async ({ emit }) => {
+        emit({ type: 'assistant_text_delta', delta: 'Refining the selected eye.' });
+        return {
+          assistantMessage: 'Refining the selected eye.',
+          decision: { kind: 'refine', confidence: 0.9, threshold: 0.8 },
+        };
+      },
+      refineProcedure: async ({ packet }) => {
+        const target = structuredClone(packet.context.baseTree.tree);
+        target.revision = packet.context.targetRevision;
+        const leaf = target.nodes.find((node) => node.id === 'snowman.head.eyes.left');
+        if (leaf === undefined) throw new Error('Expected generated eye leaf');
+        leaf.title = `${leaf.title} refined`;
+        return target;
+      },
+      describeRuntimeTreatment: (operation) => ({
+        profile: {
+          descriptor,
+          vendor: 'Local integration test',
+          implementation: { name: descriptor.id, version: descriptor.version },
+          model: {
+            requested: `${operation}-fixture`,
+            resolvedRevision: 'fixture-v1',
+            resolution: 'resolved',
+          },
+          api: {
+            surface: 'memory',
+            version: '1',
+            sdkName: 'none',
+            sdkVersion: '1.0.0',
+            endpointClass: 'local',
+            serviceTier: null,
+            region: null,
+          },
+        },
+        generationSettings: {
+          normalizedParameters: { operation },
+          seed: 1,
+          determinism: 'deterministic',
+        },
+        costPolicy: {
+          possibleProviderCost: false,
+          basis: 'no_provider_cost',
+          publicStatement: 'The local integration-test provider has no provider charge.',
+        },
+      }),
+    };
+    const runtime = await startRuntime({
+      databasePath: join(directory, 'events.db'),
+      accessToken,
+      actionCatalogs: [blenderActionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+      plannerProviders: [provider],
+    });
+    const headers = {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    };
+
+    try {
+      const generationConfirmedAt = new Date(Date.now() - 2_000).toISOString();
+      const createRequest = procedureZeroBaselineRefinementCreateRequestSchema.parse({
+        formatVersion: '1.0.0',
+        workflowId: randomUUID(),
+        generationRequest: {
+          formatVersion: '1.0.0',
+          requestId: randomUUID(),
+          targetAdapterId: 'blender',
+          actionCatalogVersion: blenderActionCatalog.catalogVersion,
+          interactionCatalogVersion: blenderInteractionCatalog.catalogVersion,
+          goal: 'Create a new snowman eye ProcedureTree, then refine the eye step.',
+          locale: 'en',
+          authorization: {
+            providerDescriptor: descriptor,
+            explicitlyConfirmedByUser: true,
+            goalAndCatalogContextTransmissionAcknowledged: true,
+            possibleProviderCostAcknowledged: true,
+            confirmedAt: generationConfirmedAt,
+          },
+        },
+        authorization: {
+          explicitlyConfirmedByUser: true,
+          candidateOnlyUntilExactReviewAcknowledged: true,
+          noHostExecutionAcknowledged: true,
+          confirmedAt: new Date().toISOString(),
+        },
+      });
+      const createdResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/zero-baseline/refinement/runs`,
+        { method: 'POST', headers, body: JSON.stringify(createRequest) },
+      );
+      const createdBody = await createdResponse.json();
+      if (createdResponse.status !== 202) {
+        throw new Error(`Staged create failed: ${JSON.stringify(createdBody)}`);
+      }
+      expect({ status: createdResponse.status, body: createdBody }).toMatchObject({ status: 202 });
+      const created = procedureZeroBaselineRefinementStatusSchema.parse(createdBody);
+      expect(created.phase).toBe('awaiting_baseline_review');
+      expect(created.sideEffects.procedureStored).toBe(false);
+
+      const reviewRequest = procedureZeroBaselineReviewRequestSchema.parse({
+        formatVersion: '1.0.0',
+        workflowId: createRequest.workflowId,
+        reviewId: randomUUID(),
+        binding: created.baselineReviewBinding,
+        decision: {
+          kind: 'store',
+          confirmations: {
+            exactCandidateTreeReviewed: true,
+            exactCatalogBindingReviewed: true,
+            candidateOnlyAndNoHostExecutionAcknowledged: true,
+          },
+        },
+        reviewedAt: created.updatedAt,
+      });
+      const reviewedMcp = await callMcpTool(
+        runtime,
+        186,
+        'operatingline.procedure.authoring.zero-baseline.refinement.review',
+        reviewRequest,
+      );
+      expect(reviewedMcp.result?.isError).not.toBe(true);
+      const reviewed = procedureZeroBaselineRefinementStatusSchema.parse(
+        reviewedMcp.result?.structuredContent,
+      );
+      expect(reviewed.phase).toBe('awaiting_semantic');
+      expect(reviewed.sideEffects).toEqual({
+        procedureStored: true,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+
+      const semanticProvidersResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/semantic/providers`,
+        { headers },
+      );
+      expect(semanticProvidersResponse.status).toBe(200);
+      const semanticDisclosure = procedureSemanticRetrievalProviderDisclosureListSchema.parse(
+        await semanticProvidersResponse.json(),
+      ).providers[0]!;
+      const semanticRequest = procedureSemanticRetrievalRequestSchema.parse({
+        formatVersion: '1.0.0',
+        requestId: randomUUID(),
+        query: 'Refine the left eye operation.',
+        providerDisclosure: semanticDisclosure,
+        filters: {
+          adapterId: reviewed.storedBaseline!.tree.adapterId,
+          actionCatalogVersion: reviewed.storedBaseline!.tree.actionCatalogVersion,
+          interactionCatalogVersion: reviewed.storedBaseline!.tree.interactionCatalogVersion,
+          validationStatus: 'candidate',
+        },
+        retrieval: { topK: 1, minScore: -1 },
+        authorization: {
+          explicitlyConfirmedByUser: true,
+          dataHandlingAcknowledged: true,
+          possibleProviderCostAcknowledged: true,
+          disclosure: {
+            providerDescriptorDisclosed: true,
+            embeddingModelAndRuntimeTreatmentDisclosed: true,
+            costPolicyDisclosed: true,
+            querySentToProvider: true,
+            boundedLeafDocumentSentToProvider: true,
+            sourceEvidenceContentSentToProvider: false,
+            documentFormat: 'procedure_leaf_embedding_document_v1',
+          },
+          confirmedAt: reviewed.updatedAt,
+        },
+      });
+      const semanticStart = procedureZeroBaselineSemanticStartRequestSchema.parse({
+        formatVersion: '1.0.0',
+        workflowId: createRequest.workflowId,
+        request: semanticRequest,
+      });
+      const semanticResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/authoring/zero-baseline/refinement/runs/semantic`,
+        { method: 'POST', headers, body: JSON.stringify(semanticStart) },
+      );
+      expect(semanticResponse.status).toBe(202);
+      const grounded = procedureZeroBaselineRefinementStatusSchema.parse(
+        await semanticResponse.json(),
+      );
+      expect(grounded.phase).toBe('awaiting_refinement');
+      expect(grounded.semanticRetrieval?.hits).toHaveLength(1);
+
+      const refinementProvidersResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/refinement/providers`,
+        { headers },
+      );
+      expect(refinementProvidersResponse.status).toBe(200);
+      const refinementDisclosure = procedureRefinementProviderDisclosureListSchema.parse(
+        await refinementProvidersResponse.json(),
+      ).providers[0]!;
+      const refinementRequest = procedureRefinementCreateRequestSchema.parse({
+        formatVersion: '1.0.0',
+        runId: randomUUID(),
+        dialogueRequestId: randomUUID(),
+        refinementRequestId: randomUUID(),
+        baseTree: grounded.storedBaseline,
+        targetRevision: 2,
+        requestedScopeRootIds: ['snowman.head.eyes.left'],
+        semanticContext: grounded.semanticContext,
+        instruction: 'Make the selected eye operation more precise.',
+        history: [],
+        providerDisclosure: refinementDisclosure,
+        authorization: {
+          explicitlyConfirmedByUser: true,
+          dataHandlingAcknowledged: true,
+          possibleProviderCostAcknowledged: true,
+          authorizedProviderCallLimit: 2,
+          automaticRefinementAcknowledged: true,
+          noHostExecutionAcknowledged: true,
+          exactStoredBaseTreeDisclosed: true,
+          exactSemanticContextDisclosed: true,
+          dialogueAndRefinementRuntimeTreatmentsDisclosed: true,
+          providerInputPolicy: refinementDisclosure.inputPolicy,
+          confirmedAt: grounded.semanticContext!.completedAt,
+        },
+      });
+      const refinementStart = procedureZeroBaselineRefinementStartRequestSchema.parse({
+        formatVersion: '1.0.0',
+        workflowId: createRequest.workflowId,
+        request: refinementRequest,
+      });
+      const startedMcp = await callMcpTool(
+        runtime,
+        187,
+        'operatingline.procedure.authoring.zero-baseline.refinement.start',
+        refinementStart,
+      );
+      expect(startedMcp.result?.isError).not.toBe(true);
+      const started = procedureZeroBaselineRefinementStatusSchema.parse(
+        startedMcp.result?.structuredContent,
+      );
+      expect(started.phase).toBe('refinement');
+      expect(started.refinement?.runId).toBe(refinementRequest.runId);
+
+      let awaitingReview = started;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const statusResponse = await fetch(
+          `${runtime.baseUrl}/api/v1/procedure/authoring/zero-baseline/refinement/runs/status`,
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              formatVersion: '1.0.0',
+              workflowId: createRequest.workflowId,
+            }),
+          },
+        );
+        expect(statusResponse.status).toBe(200);
+        awaitingReview = procedureZeroBaselineRefinementStatusSchema.parse(
+          await statusResponse.json(),
+        );
+        if (awaitingReview.refinement?.status === 'awaiting_review') break;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+      }
+      expect(awaitingReview.refinement?.status).toBe('awaiting_review');
+      expect(awaitingReview.refinement?.assistantMessage).toBe('Refining the selected eye.');
+      expect(awaitingReview.sideEffects).toEqual({
+        procedureStored: true,
+        proposalCreated: false,
+        hostExecutionStarted: false,
+      });
+
+      const statusMcp = await callMcpTool(
+        runtime,
+        188,
+        'operatingline.procedure.authoring.zero-baseline.refinement.status',
+        { formatVersion: '1.0.0', workflowId: createRequest.workflowId },
+      );
+      expect(statusMcp.result?.structuredContent).toEqual(awaitingReview);
+    } finally {
+      await runtime.stop();
       rmSync(directory, { recursive: true, force: true });
     }
   });

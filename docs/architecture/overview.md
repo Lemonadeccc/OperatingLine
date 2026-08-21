@@ -427,13 +427,23 @@ Tesseract `.traineddata` 复制到私有只读运行时快照，再对快照预�
 Job 不是可续跑的分阶段 checkpoint。可恢复失败只返回 `retryFromStage: download` 和一次精确 recovery receipt；
 `jobs.restart` 要求重新确认网络、下载和保留副作用，清空阶段进度，从下载开始重跑全部七阶段，绝不复用先前
 部分阶段或产物。未配置、路径/权限不安全、工具/模型缺失或预检失败时，capabilities 明确保持 unavailable，
-不会降级成不完整分析。结果是媒体证据 manifest，不会调用 Provider、生成或存储 ProcedureTree、创建
+不会降级成不完整分析。结果是媒体证据 manifest；该 job 本身不会调用 Provider、生成或存储 ProcedureTree、创建
 Proposal 或执行宿主。
+
+后续 MCP `operatingline.procedure.tutorial.media.authoring.prepare`（及对应 HTTP）会重新验证 completed manifest、
+CAS 内容与 provenance，把有序 ASR 和视觉候选绑定到确定性 `1.5.0` authoring packet。独立 media authoring run 再以
+显式确认的 Provider descriptor 执行至多一次 generation、本地 catalog materialization、四哈希 review 与原子存储。
+Provider 完成但外层 checkpoint 尚未写入的崩溃窗只会从下层 durable completion 修复 checkpoint，不会再次调用
+Provider；本地 materialization/storage 恢复必须携带精确 recovery receipt。完成态仍不创建 Proposal、不执行 Blender、
+不证明当前宿主状态或形成 released 训练数据。见 [ADR 0096](../adr/0096-verified-media-authoring-preparation.md) 与
+[ADR 0097](../adr/0097-reviewed-media-procedure-authoring-run.md)。
 
 当前独立、证据绑定的 live embedding semantic retrieval/RAG context 已接入显式授权的流式 Procedure
 refinement：固定阈值最多触发第二次 Provider 调用，完整树经本地 scope sanitization、locality、compile 和
-人工 review gate 后才可原子保存，重启不会重放不确定的外部调用。它仍未接入媒体分析；媒体分析到完整
-ProcedureTree 的组合、从一句话零基线生成完整树和训练导出仍未完成。已有树可以通过本地工作台进行
+人工 review gate 后才可原子保存，重启不会重放不确定的外部调用。没有现存树时，zero-baseline workflow 可从
+一句话生成 revision-1 candidate，并在四哈希 review 原子存储后依次进入 semantic RAG 与同一 refinement coordinator；
+语义失败为不可重试的 terminal wrapper 状态。媒体分析也已通过上面的 prepare + reviewed run 接入完整树存储。
+训练/RAG 数据集发布仍未完成。已有树可以通过本地工作台进行
 stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；见
 [ADR 0088](../adr/0088-local-procedure-tree-revision-editor.md)。生成与媒体组合边界见
 [ADR 0045](../adr/0045-provider-neutral-procedure-authoring.md)、
@@ -450,13 +460,18 @@ stable-ID preview、参数编辑、评论和 immutable revision 分支/合并；
 [ADR 0084](../adr/0084-authorized-youtube-media-analysis.md)、
 [ADR 0085](../adr/0085-selected-caption-procedure-authoring-run.md)、
 [ADR 0086](../adr/0086-provider-neutral-procedure-semantic-retrieval.md) 与
-[ADR 0087](../adr/0087-evidence-bound-procedure-refinement.md)。
+[ADR 0087](../adr/0087-evidence-bound-procedure-refinement.md)、
+[ADR 0095](../adr/0095-zero-baseline-procedure-generation.md)、
+[ADR 0096](../adr/0096-verified-media-authoring-preparation.md)、
+[ADR 0097](../adr/0097-reviewed-media-procedure-authoring-run.md) 与
+[ADR 0098](../adr/0098-zero-baseline-grounded-dialogue-refinement.md)。
 
 后续的供应商无关 `operatingline.procedure.authoring.materialize` 与 HTTP
 `POST /api/v1/procedure/authoring/materialize` 接受完全相同的 packet + candidate，并先重复上述 packet-bound
 validation。只有已安装 InteractionCatalog 上的封闭声明可改变轨迹。当前 Blender InteractionCatalog
-`1.38.0` 精确绑定 ActionCatalog `1.22.0`，冻结授权 UV Sphere、Icosphere、Cube、Plane、Torus 与 Cone
-action-level MCP 的 `1.37.0`；`1.37.0` 另冻结 `1.36.0`。当前目录为 UV Sphere 声明七步 ordered menu 与六步
+`1.40.0` 精确绑定 ActionCatalog `1.22.0`，冻结 `1.39.0` 的原生 Subdivision shortcut proof，并为
+UV Sphere、Icosphere、Cube、Plane、Torus、Cone、Cylinder 与 Mirror 的 accepted replay 提供有界
+action-level MCP 权限；旧 binding 不继承新增权限。当前目录为 UV Sphere 声明七步 ordered menu 与六步
 candidate shortcut：`keyMode` 区分 chord/sequence，
 `vector3_x/y/z` 把 location 分量绑定到 `G → X/Y/Z`，每条替代轨迹分别要求 Action 参数完整映射或省略。
 `1.33.0` 另以 `procedureMaterialization.semantic` 明确声明 location、radius 与 objectName 到语义操作的

@@ -115,6 +115,12 @@ export function evaluatePlanningQuality(
       readonly leafId: string;
       readonly targetProfile: 'factory_cube_8_12_6';
     };
+    readonly managedActionReplayAuthority?: {
+      readonly replayId: string;
+      readonly leafId: string;
+      readonly actionName: 'blender.modifier.add_mirror';
+      readonly targetId: string;
+    };
   } = {},
 ): PlanningQualityReport {
   const request = planningQualityEvaluationRequestSchema.parse(input);
@@ -159,6 +165,55 @@ export function evaluatePlanningQuality(
       exactShortcutBoundary &&
       exactTuple?.consumerStepId === shortcutProofAuthority.leafId &&
       exactTuple.resourceId === 'tutorial.cube' &&
+      exactTuple.resourceType === 'OBJECT'
+    ) {
+      verifiedExternalResourceConsumerKeys.add(
+        `${exactTuple.consumerStepId}\u0000${exactTuple.resourceType}\u0000${exactTuple.resourceId}`,
+      );
+    }
+  }
+  const managedActionReplayAuthority = options.managedActionReplayAuthority;
+  if (verifiedExternalResourceConsumers.length > 0 && managedActionReplayAuthority !== undefined) {
+    const replayStep = request.plan.steps.find(
+      (step) => step.id === managedActionReplayAuthority.leafId,
+    );
+    const action = replayStep?.action;
+    const targetId = action?.arguments['targetId'];
+    const modifierId = action?.arguments['modifierId'];
+    const axis = action?.arguments['axis'];
+    const expectedObservation = replayStep?.expectedObservations[0];
+    const exactManagedActionBoundary =
+      request.targetAdapterId === 'blender' &&
+      action?.adapterId === 'blender' &&
+      action.name === managedActionReplayAuthority.actionName &&
+      targetId === managedActionReplayAuthority.targetId &&
+      typeof modifierId === 'string' &&
+      modifierId.length > 0 &&
+      typeof action.arguments['modifierName'] === 'string' &&
+      ['X', 'Y', 'Z'].includes(String(axis)) &&
+      Object.keys(action.arguments).length === 4 &&
+      replayStep?.anchors.filter((anchor) => anchor.kind === 'object').length === 1 &&
+      replayStep.anchors.filter((anchor) => anchor.kind === 'owned_control').length === 1 &&
+      replayStep.anchors.some(
+        (anchor) =>
+          anchor.kind === 'owned_control' &&
+          anchor.surfaceId === 'modifier.stack' &&
+          anchor.controlId === modifierId,
+      ) &&
+      replayStep.expectedObservations.length === 1 &&
+      expectedObservation?.kind === 'modifier_ready' &&
+      expectedObservation.parameters['targetId'] === targetId &&
+      expectedObservation.parameters['modifierId'] === modifierId &&
+      expectedObservation.parameters['modifierType'] === 'MIRROR' &&
+      expectedObservation.parameters['axis'] === axis;
+    const exactTuple =
+      verifiedExternalResourceConsumers.length === 1
+        ? verifiedExternalResourceConsumers[0]
+        : undefined;
+    if (
+      exactManagedActionBoundary &&
+      exactTuple?.consumerStepId === managedActionReplayAuthority.leafId &&
+      exactTuple.resourceId === managedActionReplayAuthority.targetId &&
       exactTuple.resourceType === 'OBJECT'
     ) {
       verifiedExternalResourceConsumerKeys.add(

@@ -92,6 +92,41 @@ Icosphere 回归把 12/30/20 精确变为 32/90/60，并证明全三角输入仍
 - 本切片不开放任意组件选择、relative offset、Poke Center 选择、legacy keymap 依赖或其他 operator
   参数。
 
+## 2026-08-20 原生历史停止门
+
+双版本前台 probe 在 Blender 4.5.3 LTS 与 5.1.1 中为每个候选启动全新 Blender session，使用 live
+BMesh/Object Mesh 指纹而不是从另一条序列推断结果。两版得到完全一致的证据：
+
+可用 `pnpm probe:blender:edit-poke-history` 重跑该停止门；在没有候选满足完整恢复与 Redo 前，命令预期以非零
+状态退出并保留每个 session 的 JSON 证据目录。
+
+- `Undo → TAB → Redo`：Undo 后为 `EDIT_MESH + final mesh`，TAB 得到 `OBJECT + final mesh`，因此没有恢复
+  Object baseline；随后的 Redo 仍为 Object final。
+- `Undo×2 → TAB → Redo`：第二次 Undo 为 `EDIT_MESH + baseline mesh`，TAB 得到 Object baseline，但随后的
+  Redo 仍为 Object baseline，没有恢复 Object final。
+- `checkpoint → Undo×3 → Redo×3`：第三次 Undo 仍为 `EDIT_MESH + baseline mesh`，不是 Object baseline；三次
+  Redo 则依次现场恢复 Edit baseline、Edit final 与 Object final。
+- 把同一空 checkpoint 延长为固定 `Undo×4 → Redo×4`，第四次 Undo 仍停在 Edit baseline；把 checkpoint
+  换成 Object Mode 的 `ed.undo_push` 也得到同一失败结果。增加次数或改变 Object checkpoint API 都没有形成
+  Object baseline。
+- 把模式切换拆出模型变更叶节点，并在 Edit baseline 调用 `ed.undo_push` 后执行原始 F3/F9 Poke 轨迹，一次
+  Undo/Redo 可以严格恢复 live Edit baseline/final；在 Edit final 执行 `ed.undo_push` 的候选也能以固定两次
+  Undo/Redo 恢复同一对状态。两条 Edit-only 候选在两版均通过全部 hash/identity/pointer/datablock 检查。
+- `UNDO_GROUPED` wrapper 的现场候选只能 Undo 回 Edit baseline，Redo 不能恢复 Edit final，因此分组 operator
+  不能替代通过的 pre-push 边界。
+
+所有独立分支中 Object/Mesh identity、runtime pointer、transform 与 `bpy.data.meshes` 数量均保持稳定；每个
+快照的内容 hash 也与其现场拓扑一致。完整 action 停止门要求同一候选同时到达 Object baseline 并可 Redo 回
+Object final，所以两版的完整 action 候选仍全部失败，而不是因为探针崩溃或复用了别的分支历史。Edit-only
+通过只证明了可采用的内部叶节点边界，不把当前 Object→Edit→Poke→Object recipe 升级为 production proof。
+
+因此现有 Poke F9 轨迹继续只是 candidate shortcut，不得接入当前要求完整 Object baseline 与可逆 Redo 的原生
+shortcut proof executor。最小架构变更是让 proof executor 支持复合交互：把 Enter Edit、模型变更和 Exit Edit
+建模为三个有序叶节点，只让中间 Poke 叶节点拥有 `ed.undo_push` 与原生 Undo/Redo 证明，模式切换叶节点明确为
+非模型变更且不得冒充同一历史事务。复合层仍须另行证明 Object 起止状态、Back 后的 Object baseline 以及可逆
+Redo；在这项证明完成前 production 保持 unavailable。不得用独立数据快照/恢复、陈旧 Object Mesh 数据或不定
+次数 Undo 绕过该门。
+
 ## 未选择方案
 
 - **把 legacy `Alt+P` 当作默认快捷键**：它只属于兼容 keymap，现代默认 Blender keymap 不提供该

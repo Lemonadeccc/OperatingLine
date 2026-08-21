@@ -10,14 +10,15 @@ import {
   procedureAuthoringPromptAcquisitionFormatVersion,
   procedureAuthoringPromptDocumentFormatVersion,
   procedureAuthoringPromptLegacyFormatVersion,
+  procedureAuthoringPromptMediaAnalysisFormatVersion,
   procedureAuthoringPromptContextSchema,
   procedureAuthoringPromptFormatVersion,
   procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringPromptPacketContentSchema,
   procedureAuthoringPromptPacketMaxCanonicalBytes,
   procedureAuthoringPromptPacketSchema,
-  procedureAuthoringPromptRequestSchema,
-  procedureAuthoringTutorialInputSchema,
+  procedureAuthoringVerifiedPromptRequestSchema,
+  procedureAuthoringVerifiedTutorialInputSchema,
   procedureAuthoringTutorialTranscriptDocumentSchema,
   protocolJsonValueCanonicalization,
   validateActionCatalog,
@@ -26,8 +27,8 @@ import {
   type InteractionCatalog,
   type ProcedureAuthoringPromptPacket,
   type ProcedureAuthoringPromptPacketContent,
-  type ProcedureAuthoringPromptRequest,
-  type ProcedureAuthoringTutorialInput,
+  type ProcedureAuthoringVerifiedPromptRequest,
+  type ProcedureAuthoringVerifiedTutorialInput,
   type ProcedureAuthoringTutorialTranscriptDocument,
   type ProcedureAuthoringCandidateTree,
 } from '@operatingline/protocol';
@@ -65,6 +66,10 @@ const tutorialAcquisitionWorkflowInstructions = [
 
 const tutorialSelectionWorkflowInstructions = [
   'The caption track was explicitly selected in the local evidence ledger before import. Preserve the structured selection receipt binding exactly; free-text selection notes are intentionally excluded from this packet.',
+] as const;
+
+const tutorialLocalMediaAnalysisWorkflowInstructions = [
+  'The tutorial segments were produced by the exact verified local media-analysis manifest, tools, models, segmentation digests, semantic ids, candidate ids, and evidence references recorded in provenance. Preserve those bindings exactly and do not relabel them as user-supplied transcript data.',
 ] as const;
 
 export interface ProcedureAuthoringPromptPacketBuildOptions {
@@ -276,11 +281,11 @@ function addAuthoringIdentityConstraints(
 
 export function procedureAuthoringTutorialInputFromPacket(
   packetInput: ProcedureAuthoringPromptPacket,
-): ProcedureAuthoringTutorialInput | undefined {
+): ProcedureAuthoringVerifiedTutorialInput | undefined {
   const packet = procedureAuthoringPromptPacketSchema.parse(packetInput);
   const tutorial = packet.context.tutorialProvenance;
   if (tutorial === undefined) return undefined;
-  return procedureAuthoringTutorialInputSchema.parse({
+  return procedureAuthoringVerifiedTutorialInputSchema.parse({
     video: {
       uri: tutorial.source.uri,
       title: tutorial.source.title,
@@ -288,26 +293,41 @@ export function procedureAuthoringTutorialInputFromPacket(
       rightsStatus: tutorial.source.rightsStatus,
       ...(tutorial.source.license === undefined ? {} : { license: tutorial.source.license }),
     },
-    transcript: {
-      origin: 'user_supplied',
-      ...(tutorial.transcript.locale === undefined ? {} : { locale: tutorial.transcript.locale }),
-      segments: tutorial.transcript.segments.map((segment) => ({
-        startMs: segment.locator.startMs,
-        endMs: segment.locator.endMs,
-        text: segment.text,
-        confidence: segment.confidence,
-      })),
-    },
+    transcript:
+      tutorial.transcript.localMediaAnalysis === undefined
+        ? {
+            origin: 'user_supplied' as const,
+            ...(tutorial.transcript.locale === undefined
+              ? {}
+              : { locale: tutorial.transcript.locale }),
+            segments: tutorial.transcript.segments.map((segment) => ({
+              startMs: segment.locator.startMs,
+              endMs: segment.locator.endMs,
+              text: segment.text,
+              confidence: segment.confidence,
+            })),
+          }
+        : {
+            origin: 'local_media_analysis' as const,
+            locale: tutorial.transcript.locale!,
+            localMediaAnalysis: tutorial.transcript.localMediaAnalysis,
+            segments: tutorial.transcript.segments.map((segment) => ({
+              startMs: segment.locator.startMs,
+              endMs: segment.locator.endMs,
+              text: segment.text,
+              confidence: segment.confidence,
+            })),
+          },
   });
 }
 
 export function buildProcedureAuthoringPromptPacket(
-  requestInput: ProcedureAuthoringPromptRequest,
+  requestInput: ProcedureAuthoringVerifiedPromptRequest,
   actionCatalogInput: ActionCatalog,
   interactionCatalogInput: InteractionCatalog,
   options: ProcedureAuthoringPromptPacketBuildOptions = {},
 ): ProcedureAuthoringPromptPacket {
-  const request = procedureAuthoringPromptRequestSchema.parse(requestInput);
+  const request = procedureAuthoringVerifiedPromptRequestSchema.parse(requestInput);
   const tutorialTranscriptDocument =
     options.tutorialTranscriptDocument === undefined
       ? undefined
@@ -388,7 +408,7 @@ export function buildProcedureAuthoringPromptPacket(
           title: request.tutorial.video.title,
           durationMs: request.tutorial.video.durationMs,
           rightsStatus: request.tutorial.video.rightsStatus,
-          ...(request.tutorial.video.license === undefined
+          ...(!('license' in request.tutorial.video) || request.tutorial.video.license === undefined
             ? {}
             : { license: request.tutorial.video.license }),
         };
@@ -434,6 +454,9 @@ export function buildProcedureAuthoringPromptPacket(
               ...(tutorialTranscriptDocument === undefined
                 ? {}
                 : { document: tutorialTranscriptDocument }),
+              ...(request.tutorial.transcript.origin === 'local_media_analysis'
+                ? { localMediaAnalysis: request.tutorial.transcript.localMediaAnalysis }
+                : {}),
               segments: tutorialSegments,
             },
           },
@@ -467,6 +490,9 @@ export function buildProcedureAuthoringPromptPacket(
       ...(tutorialTranscriptDocument?.acquisition?.selection === undefined
         ? {}
         : { tutorialTranscriptSelectionBound: true }),
+      ...(request.tutorial?.transcript.origin === 'local_media_analysis'
+        ? { tutorialLocalMediaAnalysisBound: true }
+        : {}),
     },
   });
   const baseResponseSchema = z.toJSONSchema(procedureAuthoringCandidateTreeSchema, {
@@ -498,13 +524,15 @@ export function buildProcedureAuthoringPromptPacket(
     formatVersion:
       request.tutorial === undefined
         ? procedureAuthoringPromptLegacyFormatVersion
-        : tutorialTranscriptDocument === undefined
-          ? procedureAuthoringPromptTutorialFormatVersion
-          : tutorialTranscriptDocument.acquisition === undefined
-            ? procedureAuthoringPromptDocumentFormatVersion
-            : tutorialTranscriptDocument.acquisition.selection === undefined
-              ? procedureAuthoringPromptAcquisitionFormatVersion
-              : procedureAuthoringPromptFormatVersion,
+        : request.tutorial.transcript.origin === 'local_media_analysis'
+          ? procedureAuthoringPromptMediaAnalysisFormatVersion
+          : tutorialTranscriptDocument === undefined
+            ? procedureAuthoringPromptTutorialFormatVersion
+            : tutorialTranscriptDocument.acquisition === undefined
+              ? procedureAuthoringPromptDocumentFormatVersion
+              : tutorialTranscriptDocument.acquisition.selection === undefined
+                ? procedureAuthoringPromptAcquisitionFormatVersion
+                : procedureAuthoringPromptFormatVersion,
     context,
     retrieval: {
       toolName: 'operatingline.procedure.search',
@@ -533,6 +561,9 @@ export function buildProcedureAuthoringPromptPacket(
               ...(tutorialTranscriptDocument?.acquisition?.selection === undefined
                 ? []
                 : tutorialSelectionWorkflowInstructions),
+              ...(request.tutorial.transcript.origin === 'local_media_analysis'
+                ? tutorialLocalMediaAnalysisWorkflowInstructions
+                : []),
             ],
     },
     limits: {

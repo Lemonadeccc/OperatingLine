@@ -51,7 +51,7 @@ describe('OperatingLine MCP instructions', () => {
     expect(operatingLineMcpInstructions).toContain('operatingline.blender.action.status');
     expect(operatingLineMcpInstructions).toContain('accepted and started, untouched');
     expect(operatingLineMcpInstructions).toContain(
-      'UV Sphere, Icosphere, Cube, Plane, Torus, Cone, or Cylinder replays',
+      'UV Sphere, Icosphere, Cube, Plane, Torus, Cone, Cylinder, or Mirror Modifier replays',
     );
     expect(operatingLineMcpInstructions).toContain(
       'every other action-level MCP path remains unavailable',

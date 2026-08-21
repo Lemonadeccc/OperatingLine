@@ -18,12 +18,14 @@ export const procedureAuthoringPromptTutorialFormatVersion = '1.1.0' as const;
 export const procedureAuthoringPromptDocumentFormatVersion = '1.2.0' as const;
 export const procedureAuthoringPromptAcquisitionFormatVersion = '1.3.0' as const;
 export const procedureAuthoringPromptFormatVersion = '1.4.0' as const;
+export const procedureAuthoringPromptMediaAnalysisFormatVersion = '1.5.0' as const;
 export const supportedProcedureAuthoringPromptFormatVersions = [
   procedureAuthoringPromptLegacyFormatVersion,
   procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringPromptDocumentFormatVersion,
   procedureAuthoringPromptAcquisitionFormatVersion,
   procedureAuthoringPromptFormatVersion,
+  procedureAuthoringPromptMediaAnalysisFormatVersion,
 ] as const;
 export const procedureAuthoringPromptPacketMaxCanonicalBytes = 262_144 as const;
 export const procedureAuthoringTutorialSegmentMaxCount = 2_000 as const;
@@ -225,17 +227,291 @@ export type ProcedureAuthoringTutorialTranscriptDocument = z.infer<
   typeof procedureAuthoringTutorialTranscriptDocumentSchema
 >;
 
+export const procedureAuthoringLocalMediaRightsAuthorizationSchema = z.discriminatedUnion('basis', [
+  z.strictObject({
+    basis: z.literal('rights_holder_permission'),
+    reference: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.strictObject({
+    basis: z.literal('license_verified'),
+    reference: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }),
+  z.strictObject({
+    basis: z.literal('public_domain_verified'),
+    reference: z
+      .string()
+      .min(1)
+      .max(256)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    confirmedAt: z.iso.datetime({ offset: true }),
+  }),
+]);
+export type ProcedureAuthoringLocalMediaRightsAuthorization = z.infer<
+  typeof procedureAuthoringLocalMediaRightsAuthorizationSchema
+>;
+
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const localMediaArtifactUriSchema = z
+  .string()
+  .regex(/^operatingline-media:\/\/sha256\/[a-f0-9]{64}$/);
+const procedureAuthoringLocalMediaAnalysisSchema = z
+  .strictObject({
+    analysisRequestId: z.uuid(),
+    analysisJobId: z.uuid(),
+    analysisFingerprint: sha256Schema,
+    analysisProfile: z.literal('youtube_tutorial_evidence_v1'),
+    completedAt: z.iso.datetime({ offset: true }),
+    rightsAuthorization: procedureAuthoringLocalMediaRightsAuthorizationSchema,
+    manifest: z.strictObject({
+      artifactUri: localMediaArtifactUriSchema,
+      sha256: sha256Schema,
+      rootSha256: sha256Schema,
+    }),
+    tools: z
+      .array(
+        z.strictObject({
+          toolId: z
+            .string()
+            .min(1)
+            .max(128)
+            .regex(/^[a-z0-9][a-z0-9._-]*$/),
+          toolVersion: z
+            .string()
+            .min(1)
+            .max(64)
+            .regex(/^[A-Za-z0-9][A-Za-z0-9.+_-]*$/),
+          invocationContractVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+          executableSha256: sha256Schema,
+          versionOutputSha256: sha256Schema,
+          normalizedInvocationSha256: sha256Schema,
+          configurationSha256: sha256Schema,
+          modelSha256: sha256Schema.optional(),
+        }),
+      )
+      .min(1)
+      .max(128),
+    segmentation: z.strictObject({
+      algorithmId: z.literal('operatingline.deterministic_tutorial_segmentation'),
+      algorithmVersion: z
+        .string()
+        .min(1)
+        .max(64)
+        .regex(/^[A-Za-z0-9][A-Za-z0-9.+_-]*$/),
+      inputSha256: sha256Schema,
+      outputSha256: sha256Schema,
+    }),
+    semanticBindings: z
+      .array(
+        z.strictObject({
+          semanticSegmentId: z.uuid(),
+          order: z.number().int().positive().max(procedureAuthoringTutorialSegmentMaxCount),
+          promptEvidenceId: guideStepIdSchema,
+          startMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+          endMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+          canonicalDescription: z.string().min(1).max(4_096).regex(/\S/),
+          asrSegmentIds: z.array(z.uuid()).max(1_000),
+          ocrCandidateIds: z.array(z.uuid()).max(1_000),
+          uiCandidateIds: z.array(z.uuid()).max(1_000),
+          shortcutCandidateIds: z.array(z.uuid()).max(1_000),
+          evidence: z
+            .array(
+              z.strictObject({
+                artifactUri: localMediaArtifactUriSchema,
+                frameId: z.uuid().optional(),
+                timestampMs: z.number().int().nonnegative().max(86_400_000),
+              }),
+            )
+            .min(1)
+            .max(2_000),
+        }),
+      )
+      .min(1)
+      .max(procedureAuthoringTutorialSegmentMaxCount),
+  })
+  .superRefine((analysis, context) => {
+    if (analysis.analysisRequestId === analysis.analysisJobId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['analysisJobId'],
+        message: 'Local media analysis job id must differ from its request id',
+      });
+    }
+    if (
+      analysis.manifest.artifactUri !== `operatingline-media://sha256/${analysis.manifest.sha256}`
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['manifest', 'artifactUri'],
+        message: 'Local media manifest URI must bind its exact digest',
+      });
+    }
+    if (!analysis.tools.some((tool) => tool.modelSha256 !== undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tools'],
+        message: 'Local media analysis provenance requires at least one exact model digest',
+      });
+    }
+    if (new Set(analysis.tools.map((tool) => tool.toolId)).size !== analysis.tools.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tools'],
+        message: 'Local media analysis tool ids must be unique',
+      });
+    }
+    if (
+      new Set(analysis.semanticBindings.map((binding) => binding.semanticSegmentId)).size !==
+        analysis.semanticBindings.length ||
+      new Set(analysis.semanticBindings.map((binding) => binding.promptEvidenceId)).size !==
+        analysis.semanticBindings.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['semanticBindings'],
+        message: 'Local media semantic and prompt evidence ids must be unique',
+      });
+    }
+  });
+
+const procedureAuthoringTutorialTranscriptInputSchema = z.discriminatedUnion('origin', [
+  z.strictObject({
+    origin: z.literal('user_supplied'),
+    locale: procedureAuthoringLocaleSchema.optional(),
+    segments: z
+      .array(procedureAuthoringTutorialTranscriptSegmentSchema)
+      .min(1)
+      .max(procedureAuthoringTutorialSegmentMaxCount),
+  }),
+  z.strictObject({
+    origin: z.literal('local_media_analysis'),
+    locale: procedureAuthoringLocaleSchema,
+    localMediaAnalysis: procedureAuthoringLocalMediaAnalysisSchema,
+    segments: z
+      .array(procedureAuthoringTutorialTranscriptSegmentSchema)
+      .min(1)
+      .max(procedureAuthoringTutorialSegmentMaxCount),
+  }),
+]);
+
+const procedureAuthoringLocalMediaTutorialVideoInputSchema = z.discriminatedUnion('rightsStatus', [
+  z.strictObject({
+    uri: procedureAuthoringTutorialUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('permission_granted'),
+  }),
+  z.strictObject({
+    uri: procedureAuthoringTutorialUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('license_verified'),
+  }),
+  z.strictObject({
+    uri: procedureAuthoringTutorialUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('public_domain'),
+  }),
+]);
+
+export const procedureAuthoringVerifiedTutorialInputSchema = z
+  .union([
+    z.strictObject({
+      video: procedureAuthoringTutorialVideoInputSchema,
+      transcript: procedureAuthoringTutorialTranscriptInputSchema.options[0],
+    }),
+    z.strictObject({
+      video: procedureAuthoringLocalMediaTutorialVideoInputSchema,
+      transcript: procedureAuthoringTutorialTranscriptInputSchema.options[1],
+    }),
+  ])
+  .superRefine((tutorial, context) => {
+    if (tutorial.transcript.origin === 'local_media_analysis') {
+      const expectedRightsStatus =
+        tutorial.transcript.localMediaAnalysis.rightsAuthorization.basis ===
+        'rights_holder_permission'
+          ? 'permission_granted'
+          : tutorial.transcript.localMediaAnalysis.rightsAuthorization.basis === 'license_verified'
+            ? 'license_verified'
+            : 'public_domain';
+      if (tutorial.video.rightsStatus !== expectedRightsStatus) {
+        context.addIssue({
+          code: 'custom',
+          path: ['video'],
+          message:
+            'Local media tutorial rights must be derived from analysis authorization without caller-supplied license text',
+        });
+      }
+      if (
+        tutorial.transcript.localMediaAnalysis.semanticBindings.length !==
+        tutorial.transcript.segments.length
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'localMediaAnalysis', 'semanticBindings'],
+          message: 'Local media semantic bindings must match the normalized transcript segments',
+        });
+      }
+      for (const [
+        index,
+        binding,
+      ] of tutorial.transcript.localMediaAnalysis.semanticBindings.entries()) {
+        const segment = tutorial.transcript.segments[index];
+        if (
+          binding.order !== index + 1 ||
+          binding.startMs !== segment?.startMs ||
+          binding.endMs !== segment?.endMs
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['transcript', 'localMediaAnalysis', 'semanticBindings', index],
+            message:
+              'Local media semantic binding order and time range must match its transcript segment',
+          });
+        }
+      }
+    }
+    let previousEndMs = -1;
+    for (const [index, segment] of tutorial.transcript.segments.entries()) {
+      if (segment.endMs <= segment.startMs) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'segments', index, 'endMs'],
+          message: 'Tutorial transcript segment must have a positive time range',
+        });
+      }
+      if (segment.endMs > tutorial.video.durationMs) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'segments', index, 'endMs'],
+          message: 'Tutorial transcript segment exceeds the video duration',
+        });
+      }
+      if (segment.startMs < previousEndMs) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'segments', index, 'startMs'],
+          message: 'Tutorial transcript segments must be ordered and non-overlapping',
+        });
+      }
+      previousEndMs = Math.max(previousEndMs, segment.endMs);
+    }
+  });
+
 export const procedureAuthoringTutorialInputSchema = z
   .strictObject({
     video: procedureAuthoringTutorialVideoInputSchema,
-    transcript: z.strictObject({
-      origin: z.literal('user_supplied'),
-      locale: procedureAuthoringLocaleSchema.optional(),
-      segments: z
-        .array(procedureAuthoringTutorialTranscriptSegmentSchema)
-        .min(1)
-        .max(procedureAuthoringTutorialSegmentMaxCount),
-    }),
+    transcript: procedureAuthoringTutorialTranscriptInputSchema.options[0],
   })
   .superRefine((tutorial, context) => {
     let previousEndMs = -1;
@@ -265,6 +541,9 @@ export const procedureAuthoringTutorialInputSchema = z
     }
   });
 export type ProcedureAuthoringTutorialInput = z.infer<typeof procedureAuthoringTutorialInputSchema>;
+export type ProcedureAuthoringVerifiedTutorialInput = z.infer<
+  typeof procedureAuthoringVerifiedTutorialInputSchema
+>;
 
 export const procedureAuthoringPromptRequestSchema = z.strictObject({
   targetAdapterId: z.string().min(1).max(180).regex(/^\S+$/),
@@ -277,6 +556,14 @@ export const procedureAuthoringPromptRequestSchema = z.strictObject({
   tutorial: procedureAuthoringTutorialInputSchema.optional(),
 });
 export type ProcedureAuthoringPromptRequest = z.infer<typeof procedureAuthoringPromptRequestSchema>;
+
+export const procedureAuthoringVerifiedPromptRequestSchema = z.strictObject({
+  ...procedureAuthoringPromptRequestSchema.shape,
+  tutorial: procedureAuthoringVerifiedTutorialInputSchema.optional(),
+});
+export type ProcedureAuthoringVerifiedPromptRequest = z.infer<
+  typeof procedureAuthoringVerifiedPromptRequestSchema
+>;
 
 const procedureCandidateValidationSchema = procedureLeafNodeSchema.shape.validation.safeExtend({
   status: z.literal('candidate'),
@@ -362,7 +649,7 @@ const procedureAuthoringTutorialSourceSchema = z.discriminatedUnion('rightsStatu
     title: procedureAuthoringTutorialTitleSchema,
     durationMs: procedureAuthoringTutorialDurationSchema,
     rightsStatus: z.literal('license_verified'),
-    license: procedureAuthoringTutorialLicenseSchema,
+    license: procedureAuthoringTutorialLicenseSchema.optional(),
   }),
   z.strictObject({
     id: guideStepIdSchema,
@@ -375,13 +662,52 @@ const procedureAuthoringTutorialSourceSchema = z.discriminatedUnion('rightsStatu
   }),
 ]);
 
+const localMediaRightsJsonSchemaConditions = (
+  [
+    ['rights_holder_permission', 'permission_granted'],
+    ['license_verified', 'license_verified'],
+    ['public_domain_verified', 'public_domain'],
+  ] as const
+).map(([basis, rightsStatus]) => ({
+  if: {
+    properties: {
+      transcript: {
+        properties: {
+          localMediaAnalysis: {
+            properties: {
+              rightsAuthorization: {
+                properties: { basis: { const: basis } },
+                required: ['basis'],
+              },
+            },
+            required: ['rightsAuthorization'],
+          },
+        },
+        required: ['localMediaAnalysis'],
+      },
+    },
+    required: ['transcript'],
+  },
+  then: {
+    properties: {
+      source: {
+        properties: { rightsStatus: { const: rightsStatus } },
+        required: ['rightsStatus'],
+        not: { required: ['license'] },
+      },
+    },
+    required: ['source'],
+  },
+}));
+
 const procedureAuthoringTutorialProvenanceSchema = z
   .strictObject({
     source: procedureAuthoringTutorialSourceSchema,
     transcript: z.strictObject({
-      origin: z.enum(['user_supplied', 'youtube_data_api_v3']),
+      origin: z.enum(['user_supplied', 'youtube_data_api_v3', 'local_media_analysis']),
       locale: procedureAuthoringLocaleSchema.optional(),
       document: procedureAuthoringTutorialTranscriptDocumentSchema.optional(),
+      localMediaAnalysis: procedureAuthoringLocalMediaAnalysisSchema.optional(),
       segments: z
         .array(
           z.strictObject({
@@ -403,11 +729,79 @@ const procedureAuthoringTutorialProvenanceSchema = z
   .superRefine((tutorial, context) => {
     const document = tutorial.transcript.document;
     const acquisition = document?.acquisition;
+    const localMediaAnalysis = tutorial.transcript.localMediaAnalysis;
     if ((tutorial.transcript.origin === 'youtube_data_api_v3') !== (acquisition !== undefined)) {
       context.addIssue({
         code: 'custom',
         path: ['transcript', 'origin'],
         message: 'YouTube transcript origin and acquisition provenance must be declared together',
+      });
+    }
+    if (
+      (tutorial.transcript.origin === 'local_media_analysis') !==
+      (localMediaAnalysis !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transcript', 'origin'],
+        message: 'Local media transcript origin and analysis provenance must be declared together',
+      });
+    }
+    if (localMediaAnalysis !== undefined) {
+      const expectedRightsStatus =
+        localMediaAnalysis.rightsAuthorization.basis === 'rights_holder_permission'
+          ? 'permission_granted'
+          : localMediaAnalysis.rightsAuthorization.basis === 'license_verified'
+            ? 'license_verified'
+            : 'public_domain';
+      if (
+        tutorial.source.rightsStatus !== expectedRightsStatus ||
+        tutorial.source.license !== undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['source'],
+          message:
+            'Local media tutorial rights must match analysis authorization without license text',
+        });
+      }
+      if (tutorial.transcript.locale === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'locale'],
+          message: 'Local media transcript provenance requires its analyzed locale',
+        });
+      }
+      if (localMediaAnalysis.semanticBindings.length !== tutorial.transcript.segments.length) {
+        context.addIssue({
+          code: 'custom',
+          path: ['transcript', 'localMediaAnalysis', 'semanticBindings'],
+          message: 'Local media semantic bindings must match prompt tutorial evidence',
+        });
+      }
+      for (const [index, binding] of localMediaAnalysis.semanticBindings.entries()) {
+        const segment = tutorial.transcript.segments[index];
+        if (
+          binding.order !== index + 1 ||
+          binding.promptEvidenceId !== segment?.id ||
+          binding.startMs !== segment?.locator.startMs ||
+          binding.endMs !== segment?.locator.endMs
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['transcript', 'localMediaAnalysis', 'semanticBindings', index],
+            message: 'Local media semantic bindings must match exact prompt tutorial evidence',
+          });
+        }
+      }
+    } else if (
+      tutorial.source.rightsStatus === 'license_verified' &&
+      tutorial.source.license === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['source', 'license'],
+        message: 'Licensed tutorial provenance requires license text outside local media analysis',
       });
     }
     if (acquisition !== undefined) {
@@ -525,6 +919,28 @@ const procedureAuthoringTutorialProvenanceSchema = z
           },
         },
       },
+      {
+        if: {
+          properties: {
+            transcript: {
+              properties: { origin: { const: 'local_media_analysis' } },
+              required: ['origin'],
+            },
+          },
+          required: ['transcript'],
+        },
+        then: {
+          properties: {
+            transcript: { required: ['localMediaAnalysis'] },
+          },
+        },
+        else: {
+          properties: {
+            transcript: { not: { required: ['localMediaAnalysis'] } },
+          },
+        },
+      },
+      ...localMediaRightsJsonSchemaConditions,
     ],
   });
 
@@ -560,6 +976,7 @@ export const procedureAuthoringPromptContextSchema = z
       tutorialTranscriptDocumentBound: z.literal(true).optional(),
       tutorialTranscriptAcquisitionBound: z.literal(true).optional(),
       tutorialTranscriptSelectionBound: z.literal(true).optional(),
+      tutorialLocalMediaAnalysisBound: z.literal(true).optional(),
     }),
   })
   .superRefine((context, refinement) => {
@@ -601,6 +1018,17 @@ export const procedureAuthoringPromptContextSchema = z
         code: 'custom',
         path: ['constraints', 'tutorialTranscriptSelectionBound'],
         message: 'Tutorial transcript selection provenance and binding must be declared together',
+      });
+    }
+    const localMediaAnalysisPresent =
+      context.tutorialProvenance?.transcript.localMediaAnalysis !== undefined;
+    const localMediaAnalysisBindingRequired =
+      context.constraints.tutorialLocalMediaAnalysisBound === true;
+    if (localMediaAnalysisPresent !== localMediaAnalysisBindingRequired) {
+      refinement.addIssue({
+        code: 'custom',
+        path: ['constraints', 'tutorialLocalMediaAnalysisBound'],
+        message: 'Local media analysis provenance and binding must be declared together',
       });
     }
   })
@@ -703,12 +1131,65 @@ export const procedureAuthoringPromptContextSchema = z
           },
         },
       },
+      {
+        if: {
+          properties: {
+            tutorialProvenance: {
+              properties: {
+                transcript: { required: ['localMediaAnalysis'] },
+              },
+              required: ['transcript'],
+            },
+          },
+          required: ['tutorialProvenance'],
+        },
+        then: {
+          properties: {
+            constraints: { required: ['tutorialLocalMediaAnalysisBound'] },
+          },
+        },
+        else: {
+          properties: {
+            constraints: { not: { required: ['tutorialLocalMediaAnalysisBound'] } },
+          },
+        },
+      },
     ],
   });
 export type ProcedureAuthoringPromptContext = z.infer<typeof procedureAuthoringPromptContextSchema>;
 
 const procedureAuthoringPromptVersionJsonSchemaMetadata = {
   allOf: [
+    {
+      if: {
+        properties: {
+          formatVersion: {
+            enum: [
+              procedureAuthoringPromptLegacyFormatVersion,
+              procedureAuthoringPromptTutorialFormatVersion,
+              procedureAuthoringPromptDocumentFormatVersion,
+              procedureAuthoringPromptAcquisitionFormatVersion,
+              procedureAuthoringPromptFormatVersion,
+            ],
+          },
+        },
+        required: ['formatVersion'],
+      },
+      then: {
+        properties: {
+          context: {
+            properties: {
+              tutorialProvenance: {
+                properties: {
+                  transcript: { not: { required: ['localMediaAnalysis'] } },
+                },
+                required: ['transcript'],
+              },
+            },
+          },
+        },
+      },
+    },
     {
       if: {
         properties: { formatVersion: { const: procedureAuthoringPromptLegacyFormatVersion } },
@@ -827,6 +1308,32 @@ const procedureAuthoringPromptVersionJsonSchemaMetadata = {
         },
       },
     },
+    {
+      if: {
+        properties: {
+          formatVersion: { const: procedureAuthoringPromptMediaAnalysisFormatVersion },
+        },
+        required: ['formatVersion'],
+      },
+      then: {
+        properties: {
+          context: {
+            properties: {
+              tutorialProvenance: {
+                properties: {
+                  transcript: {
+                    properties: { origin: { const: 'local_media_analysis' } },
+                    required: ['origin', 'localMediaAnalysis'],
+                  },
+                },
+                required: ['transcript'],
+              },
+            },
+            required: ['tutorialProvenance'],
+          },
+        },
+      },
+    },
   ],
 } as const;
 
@@ -863,13 +1370,15 @@ export const procedureAuthoringPromptPacketContentSchema = z
     const expectedFormat =
       tutorial === undefined
         ? procedureAuthoringPromptLegacyFormatVersion
-        : tutorial.transcript.document === undefined
-          ? procedureAuthoringPromptTutorialFormatVersion
-          : tutorial.transcript.document.acquisition === undefined
-            ? procedureAuthoringPromptDocumentFormatVersion
-            : tutorial.transcript.document.acquisition.selection === undefined
-              ? procedureAuthoringPromptAcquisitionFormatVersion
-              : procedureAuthoringPromptFormatVersion;
+        : tutorial.transcript.localMediaAnalysis !== undefined
+          ? procedureAuthoringPromptMediaAnalysisFormatVersion
+          : tutorial.transcript.document === undefined
+            ? procedureAuthoringPromptTutorialFormatVersion
+            : tutorial.transcript.document.acquisition === undefined
+              ? procedureAuthoringPromptDocumentFormatVersion
+              : tutorial.transcript.document.acquisition.selection === undefined
+                ? procedureAuthoringPromptAcquisitionFormatVersion
+                : procedureAuthoringPromptFormatVersion;
     if (packet.formatVersion !== expectedFormat) {
       context.addIssue({
         code: 'custom',

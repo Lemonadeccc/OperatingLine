@@ -67,6 +67,7 @@ function segmentEndpointsDiffer(parameters: Record<string, unknown>): boolean {
 
 const replayActionContracts = {
   'blender.mesh.create_uv_sphere': {
+    observationShape: 'mesh_primitive',
     observationKind: 'uv_sphere_ready',
     geometryMatchDetailKeys: ['radiusMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -83,6 +84,7 @@ const replayActionContracts = {
     expectedTopology: () => ({ vertexCount: 482, edgeCount: 992, faceCount: 512 }),
   },
   'blender.mesh.create_icosphere': {
+    observationShape: 'mesh_primitive',
     observationKind: 'icosphere_ready',
     geometryMatchDetailKeys: ['radiusMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -120,6 +122,7 @@ const replayActionContracts = {
     },
   },
   'blender.mesh.create_cube': {
+    observationShape: 'mesh_primitive',
     observationKind: 'cube_ready',
     geometryMatchDetailKeys: ['sizeMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -136,6 +139,7 @@ const replayActionContracts = {
     expectedTopology: () => ({ vertexCount: 8, edgeCount: 12, faceCount: 6 }),
   },
   'blender.mesh.create_plane': {
+    observationShape: 'mesh_primitive',
     observationKind: 'plane_ready',
     geometryMatchDetailKeys: ['sizeMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -152,6 +156,7 @@ const replayActionContracts = {
     expectedTopology: () => ({ vertexCount: 4, edgeCount: 4, faceCount: 1 }),
   },
   'blender.mesh.create_torus': {
+    observationShape: 'mesh_primitive',
     observationKind: 'torus_ready',
     geometryMatchDetailKeys: ['geometryMatches'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -198,6 +203,7 @@ const replayActionContracts = {
     },
   },
   'blender.mesh.create_cone': {
+    observationShape: 'mesh_primitive',
     observationKind: 'cone_ready',
     geometryMatchDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -228,6 +234,7 @@ const replayActionContracts = {
     },
   },
   'blender.mesh.create_cylinder': {
+    observationShape: 'mesh_primitive',
     observationKind: 'cylinder_ready',
     geometryMatchDetailKeys: ['segmentGeometryMatches', 'endpointsMatch'],
     expectedParameters: (actionArguments: Record<string, unknown>) => ({
@@ -245,21 +252,48 @@ const replayActionContracts = {
       segmentEndpointsDiffer(parameters),
     expectedTopology: () => ({ vertexCount: 64, edgeCount: 96, faceCount: 34 }),
   },
+  'blender.modifier.add_mirror': {
+    observationShape: 'mirror_modifier',
+    observationKind: 'modifier_ready',
+    expectedParameters: (actionArguments: Record<string, unknown>) => ({
+      targetId: actionArguments['targetId'],
+      modifierId: actionArguments['modifierId'],
+      modifierType: 'MIRROR',
+      axis: actionArguments['axis'],
+    }),
+    parametersValid: (parameters: Record<string, unknown>) =>
+      Object.keys(parameters).length === 4 &&
+      typeof parameters['targetId'] === 'string' &&
+      parameters['targetId'].length > 0 &&
+      typeof parameters['modifierId'] === 'string' &&
+      parameters['modifierId'].length > 0 &&
+      parameters['modifierType'] === 'MIRROR' &&
+      ['X', 'Y', 'Z'].includes(String(parameters['axis'])),
+  },
 } as const satisfies Record<
   ProcedureLeafReplayActionName,
-  {
-    readonly observationKind: string;
-    readonly geometryMatchDetailKeys: readonly string[];
-    readonly expectedParameters: (
-      actionArguments: Record<string, unknown>,
-    ) => Record<string, unknown>;
-    readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
-    readonly expectedTopology: (actionArguments: Record<string, unknown>) => {
-      readonly vertexCount: number;
-      readonly edgeCount: number;
-      readonly faceCount: number;
-    } | null;
-  }
+  | {
+      readonly observationShape: 'mesh_primitive';
+      readonly observationKind: string;
+      readonly geometryMatchDetailKeys: readonly string[];
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+      readonly expectedTopology: (actionArguments: Record<string, unknown>) => {
+        readonly vertexCount: number;
+        readonly edgeCount: number;
+        readonly faceCount: number;
+      } | null;
+    }
+  | {
+      readonly observationShape: 'mirror_modifier';
+      readonly observationKind: 'modifier_ready';
+      readonly expectedParameters: (
+        actionArguments: Record<string, unknown>,
+      ) => Record<string, unknown>;
+      readonly parametersValid: (parameters: Record<string, unknown>) => boolean;
+    }
 >;
 
 export class ProcedureLeafReplayError extends Error {
@@ -359,6 +393,12 @@ export function prepareProcedureLeafReplay(
 
   const coverage = materialization.coverage;
   const leafCoverage = coverage[0];
+  const expectedMenuTrackAvailability =
+    leafCoverage?.menu === 'materialized'
+      ? 'available'
+      : leafCoverage?.menu === 'unavailable'
+        ? 'unavailable'
+        : null;
   const shortcutCoverageValid =
     leafCoverage?.shortcut === 'materialized' || leafCoverage?.shortcut === 'unavailable';
   const expectedMcpTrackAvailability =
@@ -370,7 +410,7 @@ export function prepareProcedureLeafReplay(
   if (
     coverage.length !== 1 ||
     leafCoverage?.leafId !== leaf.id ||
-    leafCoverage.menu !== 'materialized' ||
+    expectedMenuTrackAvailability === null ||
     !shortcutCoverageValid ||
     expectedMcpTrackAvailability === null ||
     leafCoverage.recipeId === null
@@ -381,7 +421,7 @@ export function prepareProcedureLeafReplay(
   }
   if (
     leaf.menuTracks.length !== 1 ||
-    leaf.menuTracks[0]?.availability !== 'available' ||
+    leaf.menuTracks[0]?.availability !== expectedMenuTrackAvailability ||
     leaf.shortcutTracks.length !== 1 ||
     leaf.shortcutTracks[0]?.availability !==
       (leafCoverage.shortcut === 'materialized' ? 'available' : 'unavailable') ||
@@ -460,7 +500,8 @@ export function buildProcedureLeafReplayBinding(input: {
       approval: 'pending',
       hostExecutionStarted: false,
       managedActionResult: 'pending',
-      menuTrack: 'catalog_grounded_not_executed',
+      menuTrack:
+        leafCoverage?.menu === 'materialized' ? 'catalog_grounded_not_executed' : 'unavailable',
       shortcutTrack:
         leafCoverage?.shortcut === 'materialized' ? 'candidate_not_executed' : 'unavailable',
       mcpTrack:
@@ -487,76 +528,143 @@ export function validateStrongProcedureLeafReplayObservation(
   const expectedObservation = expectedStep?.expectedObservations[0];
   const observation = report.observations[0];
   const expectedParameters = expectedObservation?.parameters;
-  const expectedResourceId = expectedParameters?.['resourceId'];
-  const expectedObjectName = expectedParameters?.['objectName'];
-  const meshContentSha256 = observation?.details['meshContentSha256'];
-  const expectedTopology =
-    expectedParameters === undefined ? null : actionContract.expectedTopology(expectedParameters);
-  const strongBooleanDetailKeys = [
-    'parametersValid',
-    'objectOwned',
-    'meshOwned',
-    'collectionOwned',
-    'receiptMatches',
-    'objectDataMatches',
-    'collectionLinkMatches',
-    'nameMatches',
-    'locationMatches',
-    'rotationMatches',
-    'scaleMatches',
-    'transformIsolated',
-    'modifiersAbsent',
-    'shapeKeysAbsent',
-    'materialsAbsent',
-    'contentIntact',
-    'topologyMatches',
-    'finiteCoordinates',
-    ...actionContract.geometryMatchDetailKeys,
-  ] as const;
-  const strongDetailKeys = new Set<string>([
-    'parameters',
-    'supported',
-    'resourceId',
-    'objectName',
-    'meshId',
-    'collectionId',
-    ...strongBooleanDetailKeys,
-    'vertexCount',
-    'edgeCount',
-    'faceCount',
-    'meshContentSha256',
-  ]);
   if (
     expectedStep?.action?.name !== binding.actionName ||
     expectedStep.expectedObservations.length !== 1 ||
+    expectedObservation === undefined ||
     expectedObservation?.kind !== actionContract.observationKind ||
     report.observations.length !== 1 ||
-    observation?.kind !== actionContract.observationKind ||
+    observation === undefined ||
+    observation.kind !== actionContract.observationKind ||
     observation.satisfied !== true ||
-    Object.keys(observation.details).length !== strongDetailKeys.size ||
-    Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
     observation.details['supported'] !== true ||
     !sameCanonicalValue(observation.details['parameters'], expectedObservation.parameters) ||
     expectedParameters === undefined ||
-    !actionContract.parametersValid(expectedParameters) ||
-    typeof expectedResourceId !== 'string' ||
-    typeof expectedObjectName !== 'string' ||
-    expectedTopology === null ||
-    observation.details['resourceId'] !== expectedResourceId ||
-    observation.details['objectName'] !== expectedObjectName ||
-    observation.details['meshId'] !== `${expectedResourceId}.mesh` ||
-    observation.details['collectionId'] !== 'snowman.collection' ||
-    strongBooleanDetailKeys.some((key) => observation.details[key] !== true) ||
-    observation.details['vertexCount'] !== expectedTopology.vertexCount ||
-    observation.details['edgeCount'] !== expectedTopology.edgeCount ||
-    observation.details['faceCount'] !== expectedTopology.faceCount ||
-    typeof meshContentSha256 !== 'string' ||
-    !/^[0-9a-f]{64}$/.test(meshContentSha256)
+    !actionContract.parametersValid(expectedParameters)
   ) {
     throw new ProcedureLeafReplayError(
       `Companion report lacks the exact satisfied ${actionContract.observationKind} observation`,
       409,
     );
+  }
+
+  if (actionContract.observationShape === 'mirror_modifier') {
+    const strongDetailKeys = new Set([
+      'parameters',
+      'supported',
+      'targetId',
+      'modifierId',
+      'modifierType',
+      'propertiesMatch',
+      'axis',
+      'expectedAxis',
+      'mirrorFixedStateMatches',
+      'mirrorObjectAbsent',
+      'sourceContentIntact',
+      'evaluatedVertexCount',
+      'evaluatedEdgeCount',
+      'evaluatedFaceCount',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ]);
+    const booleanDetailKeys = [
+      'propertiesMatch',
+      'mirrorFixedStateMatches',
+      'mirrorObjectAbsent',
+      'sourceContentIntact',
+      'evaluatedFinite',
+      'evaluatedWithinLimits',
+    ] as const;
+    const evaluatedCounts = [
+      ['evaluatedVertexCount', 8192],
+      ['evaluatedEdgeCount', 16384],
+      ['evaluatedFaceCount', 8192],
+    ] as const;
+    const expectedTargetId = expectedParameters['targetId'];
+    const expectedModifierId = expectedParameters['modifierId'];
+    const expectedAxis = expectedParameters['axis'];
+    if (
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      observation.details['targetId'] !== expectedTargetId ||
+      observation.details['modifierId'] !== expectedModifierId ||
+      observation.details['modifierType'] !== 'MIRROR' ||
+      observation.details['axis'] !== expectedAxis ||
+      observation.details['expectedAxis'] !== expectedAxis ||
+      booleanDetailKeys.some((key) => observation.details[key] !== true) ||
+      evaluatedCounts.some(([key, maximum]) => {
+        const value = observation.details[key];
+        return (
+          !Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > maximum
+        );
+      })
+    ) {
+      throw new ProcedureLeafReplayError(
+        'Companion report lacks the exact satisfied managed Mirror observation',
+        409,
+      );
+    }
+  } else {
+    const expectedResourceId = expectedParameters['resourceId'];
+    const expectedObjectName = expectedParameters['objectName'];
+    const meshContentSha256 = observation.details['meshContentSha256'];
+    const expectedTopology = actionContract.expectedTopology(expectedParameters);
+    const strongBooleanDetailKeys = [
+      'parametersValid',
+      'objectOwned',
+      'meshOwned',
+      'collectionOwned',
+      'receiptMatches',
+      'objectDataMatches',
+      'collectionLinkMatches',
+      'nameMatches',
+      'locationMatches',
+      'rotationMatches',
+      'scaleMatches',
+      'transformIsolated',
+      'modifiersAbsent',
+      'shapeKeysAbsent',
+      'materialsAbsent',
+      'contentIntact',
+      'topologyMatches',
+      'finiteCoordinates',
+      ...actionContract.geometryMatchDetailKeys,
+    ] as const;
+    const strongDetailKeys = new Set<string>([
+      'parameters',
+      'supported',
+      'resourceId',
+      'objectName',
+      'meshId',
+      'collectionId',
+      ...strongBooleanDetailKeys,
+      'vertexCount',
+      'edgeCount',
+      'faceCount',
+      'meshContentSha256',
+    ]);
+    if (
+      Object.keys(observation.details).length !== strongDetailKeys.size ||
+      Object.keys(observation.details).some((key) => !strongDetailKeys.has(key)) ||
+      typeof expectedResourceId !== 'string' ||
+      typeof expectedObjectName !== 'string' ||
+      expectedTopology === null ||
+      observation.details['resourceId'] !== expectedResourceId ||
+      observation.details['objectName'] !== expectedObjectName ||
+      observation.details['meshId'] !== `${expectedResourceId}.mesh` ||
+      observation.details['collectionId'] !== 'snowman.collection' ||
+      strongBooleanDetailKeys.some((key) => observation.details[key] !== true) ||
+      observation.details['vertexCount'] !== expectedTopology.vertexCount ||
+      observation.details['edgeCount'] !== expectedTopology.edgeCount ||
+      observation.details['faceCount'] !== expectedTopology.faceCount ||
+      typeof meshContentSha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(meshContentSha256)
+    ) {
+      throw new ProcedureLeafReplayError(
+        `Companion report lacks the exact satisfied ${actionContract.observationKind} observation`,
+        409,
+      );
+    }
   }
   return procedureLeafReplayObservationSchema.parse({
     kind: actionContract.observationKind,
@@ -769,7 +877,7 @@ export function buildProcedureLeafReplayAttestation(input: {
     },
     verificationScope: {
       managedActionResult: 'verified',
-      menuTrack: 'catalog_grounded_not_executed',
+      menuTrack: binding.claims.menuTrack,
       shortcutTrack: binding.claims.shortcutTrack,
       mcpTrack: binding.claims.mcpTrack,
       nativeUndoCheckpoint: 'companion_reported_current_at_report',
@@ -1132,7 +1240,7 @@ export function buildProcedureLeafReplayFailureRecoveryAttestation(input: {
             ? 'companion_reported_failed'
             : 'not_requested',
       recoveryOutcome: automaticRollback ? 'not_required' : 'companion_reported_verified',
-      menuTrack: 'catalog_grounded_not_executed',
+      menuTrack: binding.claims.menuTrack,
       shortcutTrack: binding.claims.shortcutTrack,
       mcpTrack: binding.claims.mcpTrack,
       failureNativeUndoCheckpoint:

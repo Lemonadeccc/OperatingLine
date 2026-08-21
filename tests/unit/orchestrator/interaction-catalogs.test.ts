@@ -310,7 +310,7 @@ describe('interaction catalog registry', () => {
     expect(
       frozenPokeFaces.recipes.find((recipe) => recipe.actionName === 'blender.modifier.add_mirror'),
     ).toBeUndefined();
-    expect(blenderInteractionCatalog.catalogVersion).toBe('1.39.0');
+    expect(blenderInteractionCatalog.catalogVersion).toBe('1.40.0');
     const availableMcpRecipes = blenderInteractionCatalog.recipes.filter(
       (recipe) => recipe.procedureMaterialization?.mcp.availability === 'available',
     );
@@ -322,6 +322,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.modifier.add_mirror',
     ]);
     const uvSphereMcp = availableMcpRecipes[0]?.procedureMaterialization?.mcp;
     for (const recipe of availableMcpRecipes) {
@@ -1573,6 +1574,7 @@ describe('interaction catalog registry', () => {
       'blender.mesh.create_cone',
       'blender.mesh.create_cylinder',
       'blender.mesh.create_torus',
+      'blender.modifier.add_mirror',
     ]);
   });
 
@@ -1694,6 +1696,19 @@ describe('interaction catalog registry', () => {
     );
     active.catalogVersion = frozen.catalogVersion;
     activeCylinder.procedureMaterialization.mcp = frozenCylinderMcp!;
+    const activeMirror = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    const frozenMirror = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    if (
+      activeMirror?.procedureMaterialization === undefined ||
+      frozenMirror?.procedureMaterialization === undefined
+    ) {
+      throw new Error('Expected Mirror procedure materialization');
+    }
+    activeMirror.procedureMaterialization.mcp = frozenMirror.procedureMaterialization.mcp;
     const activeSubdivisionShortcut = active.recipes.find(
       (recipe) => recipe.actionName === 'blender.modifier.add_subdivision_surface',
     )?.procedureMaterialization?.shortcut;
@@ -1742,12 +1757,65 @@ describe('interaction catalog registry', () => {
       },
     });
     active.catalogVersion = frozen.catalogVersion;
+    const activeMirror = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    const frozenMirror = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    if (
+      activeMirror?.procedureMaterialization === undefined ||
+      frozenMirror?.procedureMaterialization === undefined
+    ) {
+      throw new Error('Expected Mirror procedure materialization');
+    }
+    activeMirror.procedureMaterialization.mcp = frozenMirror.procedureMaterialization.mcp;
     delete activeShortcut.proofExecution;
     const activeSelection = activeShortcut.preconditions.find(
       (precondition) => precondition.kind === 'selection',
     );
     if (activeSelection === undefined) throw new Error('Expected selection precondition');
     activeSelection.value = 'Exactly one accepted target Mesh object is active and selected';
+    expect(active).toEqual(frozen);
+  });
+
+  it('freezes InteractionCatalog 1.39.0 and changes only Mirror MCP authorization in 1.40.0', () => {
+    const frozenBytes = readFileSync(
+      resolve('adapters/blender/catalog/v1/interaction-catalog-1.39.0.json'),
+    );
+    expect(createHash('sha256').update(frozenBytes).digest('hex')).toBe(
+      '52c40792822383da01e9763cbb06b59f4be4a7d6a1724d6a5d42c7107500cfb4',
+    );
+    const frozen = JSON.parse(frozenBytes.toString('utf8')) as typeof blenderInteractionCatalog;
+    const active = structuredClone(blenderInteractionCatalog);
+    const frozenMirror = frozen.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    const activeMirror = active.recipes.find(
+      (recipe) => recipe.actionName === 'blender.modifier.add_mirror',
+    );
+    if (
+      frozenMirror?.procedureMaterialization === undefined ||
+      activeMirror?.procedureMaterialization === undefined
+    ) {
+      throw new Error('Expected Mirror procedure materialization');
+    }
+    expect(frozenMirror.procedureMaterialization.mcp).toEqual({
+      availability: 'unavailable',
+      reason: 'No approved action-level MCP tool is available.',
+    });
+    expect(activeMirror.procedureMaterialization.mcp).toEqual({
+      availability: 'available',
+      source: 'catalog.action_level_mcp',
+      semanticBinding: 'all_leaf_operations',
+      parameterBinding: 'accepted_action_arguments',
+      serverName: 'operating-line',
+      toolName: 'operatingline.blender.action.execute',
+      authorization: 'accepted_replay_next_step',
+      resultBinding: 'companion_state_report',
+    });
+    active.catalogVersion = frozen.catalogVersion;
+    activeMirror.procedureMaterialization.mcp = frozenMirror.procedureMaterialization.mcp;
     expect(active).toEqual(frozen);
   });
 

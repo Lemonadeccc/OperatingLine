@@ -1756,7 +1756,15 @@ const javascript = `(() => {
   elements.mergeCommitButton.addEventListener('click', () => commitPreview(state.mergePreview, 'merge').catch(handleError));
 
   state.token = consumeFragmentToken();
-  if (!state.token) showStatus('缺少访问令牌。请通过带 #token=… 的本地地址重新打开。', true);
+  if (!state.token) {
+    showStatus('缺少访问令牌。请通过带 #token=… 的本地地址重新打开。', true);
+  } else {
+    const requestedTreeId = new URLSearchParams(window.location.search).get('treeId')?.trim();
+    if (requestedTreeId) {
+      elements.treeId.value = requestedTreeId;
+      loadTree(requestedTreeId).catch(handleError);
+    }
+  }
 })();`;
 
 function asset(body: string, contentType: string): ProcedureTreeEditorUiAsset {
