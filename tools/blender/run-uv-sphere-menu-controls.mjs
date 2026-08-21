@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 
-const testFile = resolve('tests/e2e/blender/uv_sphere_menu_control_round_trip.py');
+const testFile = resolve('tests/e2e/blender/uv_sphere_menu_control_driver_round_trip.py');
 const operationIds = [
   'workspace.layout',
   'menu.add',
@@ -21,6 +21,50 @@ const expectedArguments = {
   radius: 1.5,
   location: [1.25, -2, 0.75],
 };
+const expectedOperationSummaries = [
+  {
+    operationId: 'workspace.layout',
+    status: 'precondition_verified',
+    path: ['Layout'],
+    parameters: {},
+  },
+  {
+    operationId: 'menu.add',
+    status: 'control_executed',
+    path: ['Layout', 'Add'],
+    parameters: {},
+  },
+  {
+    operationId: 'menu.mesh',
+    status: 'control_executed',
+    path: ['Layout', 'Add', 'Mesh'],
+    parameters: {},
+  },
+  {
+    operationId: 'operator.uv_sphere',
+    status: 'control_executed',
+    path: ['Layout', 'Add', 'Mesh', 'UV Sphere'],
+    parameters: { radius: 1 },
+  },
+  {
+    operationId: 'control.location',
+    status: 'control_executed',
+    path: ['Sidebar', 'Item', 'Transform', 'Location'],
+    parameters: { value: expectedArguments.location },
+  },
+  {
+    operationId: 'control.scale',
+    status: 'control_executed',
+    path: ['Sidebar', 'Item', 'Transform', 'Scale'],
+    parameters: { value: [1.5, 1.5, 1.5] },
+  },
+  {
+    operationId: 'control.object_name',
+    status: 'control_executed',
+    path: ['Properties', 'Object', 'Name'],
+    parameters: { value: expectedArguments.objectName },
+  },
+];
 const historyLabels = [
   'final',
   ...Array.from({ length: 8 }, (_, index) => `undo-${index + 1}`),
@@ -64,6 +108,7 @@ function validate(payload, expectedHostVersion) {
     payload.hostVersion !== expectedHostVersion ||
     payload.uiScale !== 2 ||
     !same(payload.operationIds, operationIds) ||
+    !same(payload.operationSummaries, expectedOperationSummaries) ||
     payload.acceptedAction?.name !== 'blender.mesh.create_uv_sphere' ||
     !same(payload.acceptedAction?.arguments, expectedArguments) ||
     payload.sourceOperator?.id !== 'MESH_OT_primitive_uv_sphere_add' ||
