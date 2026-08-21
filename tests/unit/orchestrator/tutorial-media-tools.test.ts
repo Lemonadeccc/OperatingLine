@@ -180,8 +180,20 @@ describe('YouTube media source', () => {
     const root = await fixtureDirectory();
     const target = join(root, 'target.mp4');
     await writeFile(target, 'target');
-    const runner = fakeRunner(async () => {
+    const runner = fakeRunner(async (_command, options) => {
       await symlink(target, join(root, 'source', 'media.mp4'));
+      await new Promise<void>((resolveAbort, rejectAbort) => {
+        const timeout = setTimeout(
+          () => rejectAbort(new Error('download monitor did not reject the symbolic link')),
+          1_000,
+        );
+        const abort = () => {
+          clearTimeout(timeout);
+          resolveAbort();
+        };
+        if (options.signal?.aborted) abort();
+        else options.signal?.addEventListener('abort', abort, { once: true });
+      });
       return { stdout: Buffer.from(JSON.stringify({ id: 'wrong-id' })) };
     });
     const source = createYouTubeMediaSource({
@@ -221,6 +233,41 @@ describe('YouTube media source', () => {
     await expect(source.download({ request: mediaRequest() })).rejects.toMatchObject({
       code: 'quota_exceeded',
     });
+  });
+
+  it('classifies fast-completing byte and entry quota violations before validation errors', async () => {
+    for (const quota of ['bytes', 'entries'] as const) {
+      const root = await fixtureDirectory();
+      const mediaPath = join(root, 'source', 'media.mp4');
+      const runner = fakeRunner(async () => {
+        await writeFile(mediaPath, quota === 'bytes' ? 'oversized' : 'video');
+        if (quota === 'entries') await writeFile(join(root, 'source', 'extra.part'), 'extra');
+        return {
+          stdout: Buffer.from(
+            JSON.stringify({
+              id: 'dQw4w9WgXcQ',
+              title: 'Fixture',
+              duration: 12.5,
+              filepath: mediaPath,
+            }),
+          ),
+        };
+      });
+      const source = createYouTubeMediaSource({
+        authorizationVerifier: { verify: vi.fn(async () => undefined) },
+        executable: executable(root, 'yt-dlp'),
+        ffmpegExecutable: executable(root, 'ffmpeg'),
+        jobDirectory: root,
+        ...(quota === 'bytes'
+          ? { maximumDownloadBytes: 4 }
+          : { maximumDownloadDirectoryEntries: 1 }),
+        runner,
+      });
+
+      await expect(source.download({ request: mediaRequest() })).rejects.toMatchObject({
+        code: 'quota_exceeded',
+      });
+    }
   });
 
   it('verifies trusted registry bindings, validity, and recent confirmations', async () => {

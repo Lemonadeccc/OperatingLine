@@ -13,7 +13,7 @@ import {
 const videoIdPattern = /^[A-Za-z0-9_-]{11}$/u;
 const maximumMetadataBytes = 256 * 1_024;
 const defaultMaximumDownloadBytes = 8 * 1_024 * 1_024 * 1_024;
-const maximumDownloadDirectoryEntries = 10_000;
+const defaultMaximumDownloadDirectoryEntries = 10_000;
 const downloadSizePollIntervalMs = 100;
 
 export type YouTubeMediaSourceErrorCode =
@@ -65,6 +65,7 @@ export interface YouTubeMediaSourceOptions {
   readonly authorizationVerifier: YouTubeMediaAuthorizationVerifier;
   readonly timeoutMs?: number;
   readonly maximumDownloadBytes?: number;
+  readonly maximumDownloadDirectoryEntries?: number;
 }
 
 function absoluteNormalizedPath(value: string): boolean {
@@ -125,21 +126,31 @@ function parseMetadata(
   return { durationMs, title };
 }
 
-async function downloadDirectoryBytes(directory: string): Promise<number> {
+type DownloadDirectoryObservation =
+  | { readonly kind: 'valid'; readonly bytes: number }
+  | { readonly kind: 'invalid_download' }
+  | { readonly kind: 'quota_exceeded' };
+
+async function observeDownloadDirectory(
+  directory: string,
+  maximumEntries: number,
+): Promise<DownloadDirectoryObservation> {
   const entries = await readdir(directory);
-  if (entries.length > maximumDownloadDirectoryEntries) return Number.POSITIVE_INFINITY;
+  if (entries.length > maximumEntries) return { kind: 'quota_exceeded' };
   let bytes = 0;
   for (const name of entries) {
     const info = await lstat(join(directory, name));
-    if (info.isSymbolicLink() || !info.isFile()) return Number.POSITIVE_INFINITY;
+    if (info.isSymbolicLink() || !info.isFile()) return { kind: 'invalid_download' };
     bytes += info.size;
-    if (!Number.isSafeInteger(bytes)) return Number.POSITIVE_INFINITY;
+    if (!Number.isSafeInteger(bytes)) return { kind: 'quota_exceeded' };
   }
-  return bytes;
+  return { kind: 'valid', bytes };
 }
 
 export function createYouTubeMediaSource(options: YouTubeMediaSourceOptions): YouTubeMediaSource {
   const maximumDownloadBytes = options.maximumDownloadBytes ?? defaultMaximumDownloadBytes;
+  const maximumDownloadDirectoryEntries =
+    options.maximumDownloadDirectoryEntries ?? defaultMaximumDownloadDirectoryEntries;
   if (
     !absoluteNormalizedPath(options.executable) ||
     !absoluteNormalizedPath(options.ffmpegExecutable) ||
@@ -148,6 +159,9 @@ export function createYouTubeMediaSource(options: YouTubeMediaSourceOptions): Yo
     (options.timeoutMs ?? 1_800_000) <= 0 ||
     !Number.isSafeInteger(maximumDownloadBytes) ||
     maximumDownloadBytes <= 0 ||
+    !Number.isSafeInteger(maximumDownloadDirectoryEntries) ||
+    maximumDownloadDirectoryEntries <= 0 ||
+    maximumDownloadDirectoryEntries > defaultMaximumDownloadDirectoryEntries ||
     options.authorizationVerifier === null ||
     typeof options.authorizationVerifier?.verify !== 'function'
   ) {
@@ -187,10 +201,20 @@ export function createYouTubeMediaSource(options: YouTubeMediaSourceOptions): Yo
         input.signal?.addEventListener('abort', abortDownload, { once: true });
         if (input.signal?.aborted) downloadController.abort();
         let monitorStopped = false;
+        let invalidDownloadDetected = false;
         let quotaExceeded = false;
         const monitor = (async () => {
           while (!monitorStopped) {
-            if ((await downloadDirectoryBytes(sourceDirectory)) > maximumDownloadBytes) {
+            const observation = await observeDownloadDirectory(
+              sourceDirectory,
+              maximumDownloadDirectoryEntries,
+            );
+            if (observation.kind === 'invalid_download') {
+              invalidDownloadDetected = true;
+              downloadController.abort();
+              return;
+            }
+            if (observation.kind === 'quota_exceeded' || observation.bytes > maximumDownloadBytes) {
               quotaExceeded = true;
               downloadController.abort();
               return;
@@ -243,6 +267,18 @@ export function createYouTubeMediaSource(options: YouTubeMediaSourceOptions): Yo
           input.signal?.removeEventListener('abort', abortDownload);
           await monitor;
         }
+        const finalObservation = await observeDownloadDirectory(
+          sourceDirectory,
+          maximumDownloadDirectoryEntries,
+        );
+        if (finalObservation.kind === 'invalid_download') invalidDownloadDetected = true;
+        if (
+          finalObservation.kind === 'quota_exceeded' ||
+          (finalObservation.kind === 'valid' && finalObservation.bytes > maximumDownloadBytes)
+        ) {
+          quotaExceeded = true;
+        }
+        if (invalidDownloadDetected) throw new YouTubeMediaSourceError('invalid_download');
         if (quotaExceeded) throw new YouTubeMediaSourceError('quota_exceeded');
         if (runError !== undefined) throw runError;
         const mediaPath = join(sourceDirectory, 'media.mp4');
