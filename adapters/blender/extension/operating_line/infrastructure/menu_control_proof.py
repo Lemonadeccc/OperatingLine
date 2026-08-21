@@ -450,6 +450,7 @@ class UVSphereMenuControlProof:
 
     def _record_history(self, label: str) -> None:
         proof_object = bpy.data.objects.get(EXPECTED_ARGUMENTS["objectName"]) or bpy.data.objects.get("Sphere")
+        scene_snapshot = _scene_snapshot()
         self._history_snapshots.append({
             "label": label,
             "objectNames": sorted(bpy.data.objects.keys()),
@@ -458,7 +459,8 @@ class UVSphereMenuControlProof:
             "proofObjectLocation": None if proof_object is None else list(proof_object.location),
             "proofObjectScale": None if proof_object is None else list(proof_object.scale),
             "proofMeshTopology": None if proof_object is None else {"vertices": len(proof_object.data.vertices), "edges": len(proof_object.data.edges), "polygons": len(proof_object.data.polygons)},
-            "sceneFingerprintSha256": compute_scene_fingerprint_sha256(_scene_snapshot()),
+            "sceneSnapshot": scene_snapshot,
+            "sceneFingerprintSha256": compute_scene_fingerprint_sha256(scene_snapshot),
         })
 
     def _build_fixed_steps(self) -> None:
@@ -660,6 +662,8 @@ class UVSphereMenuControlProof:
             "requiresUndoRecovery": uncertain,
             "recoveryRequirement": "native_undo_checkpoint_required" if uncertain else None,
             "failureStatus": failure_status,
+            "baselineSceneSnapshot": self._baseline_snapshot,
+            "baselineSceneFingerprintSha256": self._baseline_fingerprint,
             "currentSceneSnapshot": current_snapshot,
             "currentSceneFingerprintSha256": current_fingerprint,
         }

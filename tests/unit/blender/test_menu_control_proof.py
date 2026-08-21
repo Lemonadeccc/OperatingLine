@@ -161,6 +161,7 @@ class MenuControlProofContractTests(unittest.TestCase):
         proof = module.UVSphereMenuControlProof()
         proof._on_failure = failures.append
         proof._mutation_started = True
+        proof._baseline_snapshot = {"state": "baseline"}
         proof._baseline_fingerprint = "a" * 64
         original_snapshot = module._scene_snapshot
         module._scene_snapshot = lambda: {"state": "uncertain"}
@@ -172,6 +173,8 @@ class MenuControlProofContractTests(unittest.TestCase):
         self.assertTrue(failures[0]["requiresUndoRecovery"])
         self.assertEqual(failures[0]["failureStatus"], "failed_checkpointed")
         self.assertEqual(failures[0]["recoveryRequirement"], "native_undo_checkpoint_required")
+        self.assertEqual(failures[0]["baselineSceneSnapshot"], {"state": "baseline"})
+        self.assertEqual(failures[0]["baselineSceneFingerprintSha256"], "a" * 64)
 
     def test_fixed_sequence_has_observations_then_strong_observation_then_exact_history(self) -> None:
         proof = module.UVSphereMenuControlProof()
