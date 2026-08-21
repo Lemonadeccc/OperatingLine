@@ -50,6 +50,7 @@
     "package:claude-desktop:signed": "pnpm package:claude-desktop && node tools/distribution/sign-claude-desktop.mjs --mode production",
     "test:blender": "node tools/blender/run-tests.mjs",
     "test:blender:companion": "tsx tools/blender/run-companion-e2e.mjs",
+    "test:blender:menu-controls:companion": "tsx tools/blender/run-menu-control-companion-e2e.mjs",
     "test:blender:f9": "node tools/blender/run-icosphere-f9.mjs",
     "test:blender:subdivide": "node tools/blender/run-subdivide-f9.mjs",
     "test:blender:subdivision-surface": "node tools/blender/run-subdivision-surface-f9.mjs",
