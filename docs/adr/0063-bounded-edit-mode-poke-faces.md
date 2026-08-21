@@ -127,6 +127,36 @@ shortcut proof executor。最小架构变更是让 proof executor 支持复合�
 Redo；在这项证明完成前 production 保持 unavailable。不得用独立数据快照/恢复、陈旧 Object Mesh 数据或不定
 次数 Undo 绕过该门。
 
+## 2026-08-21 三叶复合证明（不发布生产能力）
+
+`pnpm test:blender:poke-compound-proof` 已在 Blender 4.5.3 LTS 与 5.1.1 前台通过隔离证明：Forward
+严格执行 `Enter Edit → Poke → Exit Edit`，Back/Redo 分别严格执行 `Enter Edit → 一次原生 Undo/Redo
+→ Exit Edit`。每个叶节点都有先 intent 后 receipt；只有中间叶携带 Edit baseline/final、拓扑、选择、
+Object/Mesh identity、runtime pointer、datablock、checkpoint、journal 与 history-head 证明，并明确没有证明
+单一 Object-mode Undo/Redo transaction。
+
+同一 foreground run 还证明：Forward、Back、Redo 与 `unlock_final` 使用互不相同的 single-use decision
+consumption；`abandon_baseline` 从复制的 `restored_locked` 持久 marker 走另一终止路径；lock 跨完整往返和
+controller 重建保持。每个三叶 recipe 的每个 intent/receipt crash boundary 都分类为 exact same-live-session、
+`history_conflict` 或永久 `history_lost`，reconcile 不自动执行下一叶。错误 proof leaf、零/两次 history
+operation、外部 history-head 变化、错误 pointer/datablock/selection，以及 managed compensation/snapshot
+字段替代均 fail closed。Blender 输出的五个 terminal current-state 由 Node/TypeScript 使用现有 procedure
+compound schema 和 canonical integrity validator 再验证；orchestrator 的正例同时通过现有 decision-consumption、
+三叶 intent/receipt 与 host-attestation 完整性验证。
+
+复核后，harness 进一步改为由 Blender 产生完整 `BlenderExecutionDecisionReceipt` /
+`BlenderHistoryTransitionDecisionReceipt`、精确 binding 与 trusted consumption event，再由 TypeScript 使用既有
+authority-consumption/procedure-compound 规则复核；持久 marker 的独立 integrity 现在覆盖 decision journal、逐叶
+intent/receipt、checkpoint 与全部 host-only 字段。`history_conflict`/`history_lost` 会持久 quarantine，loss 后只允许
+fresh exact Object baseline Observation 驱动的 `abandon_baseline`。双版本 harness 也真实执行一次 Object-mode Undo，
+确认它只产生 quarantined negative evidence 而不产生 compound proof，并用 Redo 恢复测试现场。
+
+这仍只是 Wave 1B 隔离 proof，不修改 ActionCatalog/InteractionCatalog alias 或 extension mirror，也不把 Poke
+接入 production action/shortcut coordinator。当前 runner 没有真实杀死/重启 Blender 子进程、执行 `.blend` file-load
+或断开再连接 transport；它只对这些边界使用持久 marker 的 process/session/document/lock/head mismatch 做分类验证。
+因此 Wave 1B 完整 crash/file-load/disconnect acceptance 仍未完成，Poke 继续 `unavailable`，直到补齐这些真实宿主
+边界且 Wave 2 发布新的 catalog revision/composition；现有 candidate shortcut 不继承本证明的执行权限。
+
 ## 未选择方案
 
 - **把 legacy `Alt+P` 当作默认快捷键**：它只属于兼容 keymap，现代默认 Blender keymap 不提供该

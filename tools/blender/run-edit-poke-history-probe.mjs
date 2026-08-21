@@ -50,6 +50,7 @@ const scenarios = [
   'edit_ed_push_roundtrip',
   'edit_post_push_roundtrip',
   'edit_grouped_operator_roundtrip',
+  'three_leaf_object_roundtrip',
 ];
 const fullActionScenarios = new Set([
   'undo_tab_redo',
@@ -63,6 +64,7 @@ const editLeafScenarios = new Set([
   'edit_post_push_roundtrip',
   'edit_grouped_operator_roundtrip',
 ]);
+const compoundScenarios = new Set(['three_leaf_object_roundtrip']);
 const failures = [];
 for (const { blender, firstLine } of candidates) {
   const outputDirectory = mkdtempSync(join(tmpdir(), 'operatingline-edit-poke-history-'));
@@ -152,11 +154,17 @@ for (const { blender, firstLine } of candidates) {
     evaluatedCandidates.some(
       (candidate) => editLeafScenarios.has(candidate.scenario) && candidate.outcome === 'passed',
     );
+  const compoundGatePassed =
+    allScenariosExecuted &&
+    evaluatedCandidates.some(
+      (candidate) => compoundScenarios.has(candidate.scenario) && candidate.outcome === 'passed',
+    );
   const aggregate = {
-    ok: fullActionGatePassed,
-    boundedGate: fullActionGatePassed ? 'passed' : 'failed',
+    ok: compoundGatePassed,
+    boundedGate: compoundGatePassed ? 'passed' : 'failed',
     fullActionGate: fullActionGatePassed ? 'passed' : 'failed',
     editLeafGate: editLeafGatePassed ? 'passed' : 'failed',
+    compoundGate: compoundGatePassed ? 'passed' : 'failed',
     blenderVersion: firstLine,
     allScenariosExecuted,
     evaluatedCandidates,
@@ -168,6 +176,7 @@ for (const { blender, firstLine } of candidates) {
       boundedGate: aggregate.boundedGate,
       fullActionGate: aggregate.fullActionGate,
       editLeafGate: aggregate.editLeafGate,
+      compoundGate: aggregate.compoundGate,
       blenderVersion: aggregate.blenderVersion,
       allScenariosExecuted: aggregate.allScenariosExecuted,
       outcomes: evaluatedCandidates.map(({ scenario, outcome, failedChecks }) => ({
@@ -179,7 +188,7 @@ for (const { blender, firstLine } of candidates) {
     })}`,
   );
 
-  if (fullActionGatePassed) {
+  if (compoundGatePassed) {
     rmSync(outputDirectory, { recursive: true, force: true });
     console.log(`Poke native-history stop gate passed with ${firstLine}`);
   } else {

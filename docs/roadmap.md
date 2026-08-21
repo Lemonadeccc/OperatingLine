@@ -628,10 +628,14 @@
           Controller 重建，文件加载、复制 `.blend` 与 OS 进程重启不会继承旧 target。该证明明确排除 OS HID、menu 点击、
           managed Action/MCP identity 及其它对象或快捷键。见
           [ADR 0094](adr/0094-native-subdivision-shortcut-proof.md)。
-    - [ ] Poke Faces 原生 shortcut proof：双版本 live BMesh probe 的完整 Object→Object 五种候选全部失败；
-          Edit Mode 内 pre-push 一次和 post-push 两次 Undo/Redo roundtrip 通过，`UNDO_GROUPED` 仅 Undo 通过。
-          生产结构需拆成 Enter Edit→Poke→Exit Edit 三叶且只让中间叶拥有 history proof；完整 action gate 仍
-          fail closed。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
+    - [ ] Poke Faces 隔离三叶 compound proof：Blender 4.5.3/5.1.1 前台已严格通过 Forward
+          `Enter Edit→Poke→Exit Edit`、Back/Redo 各一次原生 history operation、逐叶 intent/receipt、
+          middle-leaf-only checkpoint/history、完整 current-state integrity、每叶 crash/reconnect 分类、持久 lock、
+          `unlock_final`/`abandon_baseline` 与负例门；Node/TypeScript 再用现有 compound protocol validator 验证
+          terminal evidence，并真实覆盖 Object-mode Undo 的 quarantine negative。尚未真实覆盖 Blender 子进程
+          crash/restart、`.blend` file-load 与 transport disconnect/reconnect；这些目前只做 marker mismatch 分类，
+          所以完整 Wave 1B gate 未关闭。未发布或修改任何 catalog，production Poke 继续 unavailable，等待上述
+          host 边界与 Wave 2 catalog publication/composition。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
     - [ ] 真实逐控件 menu/shortcut executor，以及八种已证明 managed action 之外的复合与编辑叶节点覆盖；根据失败
           分类改参数、切换策略或触发语义局部重规划仍未完成。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整

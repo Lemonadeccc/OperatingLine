@@ -58,6 +58,7 @@
     "test:blender:edit-inset": "node tools/blender/run-edit-inset-f9.mjs",
     "test:blender:edit-poke": "node tools/blender/run-edit-poke-f9.mjs",
     "probe:blender:edit-poke-history": "node tools/blender/run-edit-poke-history-probe.mjs",
+    "test:blender:poke-compound-proof": "tsx tools/blender/run-poke-compound-proof.mjs",
     "test:blender:mirror": "node tools/blender/run-mirror-ui.mjs",
     "test:blender:undo": "node tools/blender/run-native-undo.mjs",
     "test:blender:visual": "node tools/blender/capture-overlay.mjs",

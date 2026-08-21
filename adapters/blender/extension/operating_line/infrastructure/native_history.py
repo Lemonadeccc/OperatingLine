@@ -2,10 +2,12 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 import os
 from pathlib import Path
+import struct
 import tempfile
 from typing import Any
 import uuid
@@ -22,6 +24,7 @@ from .snowman_actions.common import (
 
 
 NATIVE_HISTORY_MARKER_KEY = "_operating_line_native_history_v1"
+POKE_COMPOUND_HISTORY_MARKER_KEY = "_operating_line_poke_compound_history_v1"
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_ARTIFACT_CACHE_BYTES = 256 * 1024 * 1024
 
@@ -47,6 +50,873 @@ class NativeHistoryRestore:
     target_operation: str
     before: SessionSnapshot
     after: SessionSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class PokeCompoundHistoryState:
+    """Protocol-compatible persisted current state plus the host-only leaf journal."""
+
+    compound_id: str
+    replay_id: str
+    compound_content_sha256: str
+    plan_content_sha256: str
+    target_adapter_id: str
+    target_instance_id: str
+    action_catalog_version: str
+    interaction_catalog_version: str
+    recipe_kind: str
+    lock_token_sha256: str
+    blender_process_identity_sha256: str
+    blender_session_uid: str
+    document_fingerprint_sha256: str
+    native_history_marker_sha256: str
+    object_identity_sha256: str
+    mesh_identity_sha256: str
+    object_pointer_sha256: str
+    mesh_pointer_sha256: str
+    mesh_datablock_sha256: str
+    topology_sha256: str
+    selection_sha256: str
+    history_head_sha256: str
+    state_sha256: str
+    integrity_sha256: str
+    marker_integrity_sha256: str
+    recorded_object_baseline_json: str
+    recorded_object_baseline_sha256: str
+    status: str
+    lifecycle_state: str
+    mode: str
+    history_lock: str = "held"
+    history_continuity: str = "same_live_session"
+    native_history_loss_recorded: bool = False
+    in_progress_leaf_id: str | None = None
+    permitted_history_transitions: tuple[str, ...] = ()
+    leaf_intents: tuple[str, ...] = ()
+    leaf_receipts: tuple[str, ...] = ()
+    native_history_operation_count: int = 0
+    checkpoint_sha256: str | None = None
+    consumed_decision_keys: tuple[str, ...] = ()
+    decision_consumption_sha256s: tuple[str, ...] = ()
+
+
+class PokeCompoundHistoryLock:
+    """Fail-closed durable lock for Forward/Back/Redo Poke recipes.
+
+    The Scene marker survives an orchestrator/controller rebuild while the same Blender process,
+    document, session uid, pointers, and native history head remain live. File load, process loss,
+    or a missing marker is never repaired from a snapshot.
+    """
+
+    _TERMINAL_BY_RECIPE = {
+        "forward": "forward_applied_locked",
+        "back": "restored_locked",
+        "redo": "reapplied_locked",
+    }
+
+    _PERMITTED_BY_STATUS = {
+        "intent_recorded": (),
+        "recovery_required": (),
+        "forward_applied_locked": ("back", "unlock_final"),
+        "restored_locked": ("redo", "abandon_baseline"),
+        "reapplied_locked": ("back", "unlock_final"),
+        "history_conflict": (),
+        "history_lost": ("abandon_baseline",),
+        "quarantined": (),
+        "unlocked_final": (),
+        "abandoned_baseline": (),
+    }
+
+    @staticmethod
+    def _canonical(value: object) -> bytes:
+        if value is None:
+            return b"n"
+        if value is False:
+            return b"f"
+        if value is True:
+            return b"t"
+        if isinstance(value, str):
+            encoded = value.encode("utf-8")
+            return f"s{len(encoded)}:".encode() + encoded
+        if isinstance(value, (int, float)):
+            return b"d" + struct.pack(">d", float(value)).hex().encode("ascii")
+        if isinstance(value, (list, tuple)):
+            encoded_items = [PokeCompoundHistoryLock._canonical(item) for item in value]
+            return f"a{len(encoded_items)}:".encode() + b"".join(
+                f"{len(item)}:".encode() + item for item in encoded_items
+            )
+        if isinstance(value, Mapping):
+            entries = sorted(value.items(), key=lambda item: item[0].encode("utf-8"))
+            output = [f"o{len(entries)}:".encode()]
+            for key, item_value in entries:
+                encoded_key = PokeCompoundHistoryLock._canonical(str(key))
+                encoded_value = PokeCompoundHistoryLock._canonical(item_value)
+                output.extend(
+                    (
+                        f"{len(encoded_key)}:".encode(),
+                        encoded_key,
+                        f"{len(encoded_value)}:".encode(),
+                        encoded_value,
+                    )
+                )
+            return b"".join(output)
+        raise TypeError("Poke compound marker contains a non-JSON value")
+
+    @staticmethod
+    def _domain_hash(domain: str, payload: object) -> str:
+        return hashlib.sha256(
+            PokeCompoundHistoryLock._canonical({"domain": domain, "payload": payload})
+        ).hexdigest()
+
+    @staticmethod
+    def current_state(state: PokeCompoundHistoryState) -> dict[str, object]:
+        return {
+            "compoundId": state.compound_id,
+            "replayId": state.replay_id,
+            "compoundContentSha256": state.compound_content_sha256,
+            "historyLockTokenSha256": state.lock_token_sha256,
+            "blenderProcessIdentitySha256": state.blender_process_identity_sha256,
+            "blenderSessionUid": state.blender_session_uid,
+            "documentFingerprintSha256": state.document_fingerprint_sha256,
+            "nativeHistoryMarkerSha256": state.native_history_marker_sha256,
+            "historyHeadSha256": state.history_head_sha256,
+            "objectIdentitySha256": state.object_identity_sha256,
+            "meshIdentitySha256": state.mesh_identity_sha256,
+            "objectPointerSha256": state.object_pointer_sha256,
+            "meshPointerSha256": state.mesh_pointer_sha256,
+            "meshDatablockSha256": state.mesh_datablock_sha256,
+            "topologySha256": state.topology_sha256,
+            "selectionSha256": state.selection_sha256,
+            "stateSha256": state.state_sha256,
+            "integritySha256": state.integrity_sha256,
+            "status": state.status,
+            "lifecycleState": state.lifecycle_state,
+            "mode": state.mode,
+            "historyLock": state.history_lock,
+            "historyContinuity": state.history_continuity,
+            "nativeHistoryLossRecorded": state.native_history_loss_recorded,
+            "inProgressLeafId": state.in_progress_leaf_id,
+            "permittedHistoryTransitions": list(state.permitted_history_transitions),
+        }
+
+    @classmethod
+    def seal(cls, state: PokeCompoundHistoryState) -> PokeCompoundHistoryState:
+        payload = cls.current_state(state)
+        payload.pop("integritySha256")
+        current_sealed = replace(
+            state,
+            integrity_sha256=cls._domain_hash(
+                "operatingline.procedure-compound.current-state.v1", payload
+            ),
+        )
+        marker_candidate = replace(current_sealed, marker_integrity_sha256="0" * 64)
+        return replace(
+            current_sealed,
+            marker_integrity_sha256=hashlib.sha256(
+                cls._encode(marker_candidate).encode("utf-8")
+            ).hexdigest(),
+        )
+
+    @classmethod
+    def _replace(cls, state: PokeCompoundHistoryState, **changes: object) -> PokeCompoundHistoryState:
+        return cls.seal(replace(state, **changes))
+
+    @classmethod
+    def _validate_state(cls, state: PokeCompoundHistoryState) -> None:
+        sealed = cls.seal(state)
+        if state.integrity_sha256 != sealed.integrity_sha256:
+            raise RuntimeError("Poke compound current-state integrity is invalid")
+        if state.marker_integrity_sha256 != sealed.marker_integrity_sha256:
+            raise RuntimeError("Poke compound full-marker integrity is invalid")
+        try:
+            baseline = json.loads(state.recorded_object_baseline_json)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Poke compound recorded baseline is invalid") from error
+        if (
+            not isinstance(baseline, dict)
+            or cls._domain_hash(
+                "operatingline.procedure-compound.recorded-object-baseline.v1",
+                baseline,
+            )
+            != state.recorded_object_baseline_sha256
+        ):
+            raise RuntimeError("Poke compound recorded baseline integrity is invalid")
+        hashes = (
+            *state.leaf_intents,
+            *state.leaf_receipts,
+            *state.consumed_decision_keys,
+            *state.decision_consumption_sha256s,
+        )
+        if any(
+            len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in hashes
+        ):
+            raise RuntimeError("Poke compound journal contains an invalid evidence hash")
+        if len(state.consumed_decision_keys) != len(state.decision_consumption_sha256s):
+            raise RuntimeError("Poke compound decision-consumption journal is incomplete")
+        if len(state.leaf_receipts) >= 2 and state.checkpoint_sha256 is None:
+            raise RuntimeError("Poke compound middle receipt requires a native checkpoint")
+        if state.status == cls._TERMINAL_BY_RECIPE.get(state.recipe_kind) and (
+            len(state.leaf_intents) != 3
+            or len(state.leaf_receipts) != 3
+            or state.checkpoint_sha256 is None
+        ):
+            raise RuntimeError("Poke compound terminal proof journal is incomplete")
+        if state.permitted_history_transitions != cls._PERMITTED_BY_STATUS.get(state.status, ()):
+            raise RuntimeError("Poke compound permitted transitions do not match status")
+
+    @staticmethod
+    def _consume_decision(
+        state: PokeCompoundHistoryState,
+        evidence: Mapping[str, object],
+        expected_kind: str,
+        expected_transition: str,
+    ) -> PokeCompoundHistoryState:
+        if frozenset(evidence) != {"receipt", "binding", "consumption"}:
+            raise RuntimeError("Poke compound transition decision is invalid")
+        receipt = evidence.get("receipt")
+        binding = evidence.get("binding")
+        consumption_event = evidence.get("consumption")
+        if not all(isinstance(value, Mapping) for value in (receipt, binding, consumption_event)):
+            raise RuntimeError("Poke compound transition decision evidence is invalid")
+        assert isinstance(receipt, Mapping)
+        assert isinstance(binding, Mapping)
+        assert isinstance(consumption_event, Mapping)
+        transition = "forward" if expected_kind == "BlenderExecutionDecisionReceipt" else receipt.get("transition")
+        if receipt.get("kind") != expected_kind or transition != expected_transition:
+            raise RuntimeError("Poke compound transition decision kind is invalid")
+        common_receipt_keys = {
+            "formatVersion",
+            "decisionId",
+            "nonce",
+            "issuedAt",
+            "expiresAt",
+            "kind",
+        }
+        forward_receipt_keys = common_receipt_keys | {
+            "acceptedContentSha256",
+            "acceptedContentKind",
+            "replayId",
+            "target",
+            "blenderSessionId",
+            "documentFingerprintSha256",
+            "actionCatalogVersion",
+            "interactionCatalogVersion",
+        }
+        history_receipt_keys = common_receipt_keys | {
+            "compoundId",
+            "replayId",
+            "target",
+            "blenderProcessIdentitySha256",
+            "blenderSessionUid",
+            "documentFingerprintSha256",
+            "compoundContentSha256",
+            "historyLockTokenSha256",
+            "currentStateSha256",
+            "expectedHistoryHeadSha256",
+            "transition",
+            "expectedStatus",
+            "terminalObservationSha256",
+            "nativeHistoryLossRecorded",
+            "actionCatalogVersion",
+            "interactionCatalogVersion",
+        }
+        if (
+            receipt.get("formatVersion") != "1.0.0"
+            or frozenset(receipt)
+            != (
+                forward_receipt_keys
+                if expected_kind == "BlenderExecutionDecisionReceipt"
+                else history_receipt_keys
+            )
+            or frozenset(consumption_event)
+            != {
+                "formatVersion",
+                "eventId",
+                "sequence",
+                "kind",
+                "credentialId",
+                "singleUseKeySha256",
+                "operationId",
+                "bindingSha256",
+                "consumedAt",
+            }
+            or consumption_event.get("formatVersion") != "1.0.0"
+        ):
+            raise RuntimeError("Poke compound decision evidence shape is invalid")
+        try:
+            uuid.UUID(str(receipt["decisionId"]))
+            uuid.UUID(str(consumption_event["eventId"]))
+            uuid.UUID(str(consumption_event["operationId"]))
+        except (KeyError, ValueError) as error:
+            raise RuntimeError("Poke compound decision identity is invalid") from error
+        nonce = receipt.get("nonce")
+        if not isinstance(nonce, str) or not 16 <= len(nonce) <= 128:
+            raise RuntimeError("Poke compound decision nonce is invalid")
+        if expected_kind == "BlenderExecutionDecisionReceipt":
+            expected_binding = {
+                "acceptedContentSha256": state.plan_content_sha256,
+                "acceptedContentKind": "plan",
+                "replayId": state.replay_id,
+                "adapterId": state.target_adapter_id,
+                "instanceId": state.target_instance_id,
+                "blenderSessionId": state.blender_session_uid,
+                "documentFingerprintSha256": state.document_fingerprint_sha256,
+                "actionCatalogVersion": state.action_catalog_version,
+                "interactionCatalogVersion": state.interaction_catalog_version,
+            }
+            receipt_matches = all(
+                receipt.get(key) == value for key, value in {
+                    "acceptedContentSha256": state.plan_content_sha256,
+                    "acceptedContentKind": "plan",
+                    "replayId": state.replay_id,
+                    "blenderSessionId": state.blender_session_uid,
+                    "documentFingerprintSha256": state.document_fingerprint_sha256,
+                    "actionCatalogVersion": state.action_catalog_version,
+                    "interactionCatalogVersion": state.interaction_catalog_version,
+                }.items()
+            ) and receipt.get("target") == {
+                "adapterId": state.target_adapter_id,
+                "instanceId": state.target_instance_id,
+            }
+            expected_consumption_kind = "blender_decision_consumed"
+        else:
+            expected_binding = {
+                "compoundId": state.compound_id,
+                "replayId": state.replay_id,
+                "adapterId": state.target_adapter_id,
+                "instanceId": state.target_instance_id,
+                "blenderProcessIdentitySha256": state.blender_process_identity_sha256,
+                "blenderSessionUid": state.blender_session_uid,
+                "documentFingerprintSha256": state.document_fingerprint_sha256,
+                "compoundContentSha256": state.compound_content_sha256,
+                "historyLockTokenSha256": state.lock_token_sha256,
+                "currentStateSha256": state.integrity_sha256,
+                "expectedHistoryHeadSha256": state.history_head_sha256,
+                "transition": expected_transition,
+                "expectedStatus": state.status,
+                "terminalObservationSha256": receipt.get("terminalObservationSha256"),
+                "nativeHistoryLossRecorded": state.native_history_loss_recorded,
+                "actionCatalogVersion": state.action_catalog_version,
+                "interactionCatalogVersion": state.interaction_catalog_version,
+            }
+            receipt_matches = all(
+                receipt.get(key) == value
+                for key, value in {
+                    "compoundId": state.compound_id,
+                    "replayId": state.replay_id,
+                    "blenderProcessIdentitySha256": state.blender_process_identity_sha256,
+                    "blenderSessionUid": state.blender_session_uid,
+                    "documentFingerprintSha256": state.document_fingerprint_sha256,
+                    "compoundContentSha256": state.compound_content_sha256,
+                    "historyLockTokenSha256": state.lock_token_sha256,
+                    "currentStateSha256": state.integrity_sha256,
+                    "expectedHistoryHeadSha256": state.history_head_sha256,
+                    "expectedStatus": state.status,
+                    "nativeHistoryLossRecorded": state.native_history_loss_recorded,
+                    "actionCatalogVersion": state.action_catalog_version,
+                    "interactionCatalogVersion": state.interaction_catalog_version,
+                }.items()
+            ) and receipt.get("target") == {
+                "adapterId": state.target_adapter_id,
+                "instanceId": state.target_instance_id,
+            }
+            expected_consumption_kind = "blender_history_transition_consumed"
+        if not receipt_matches or dict(binding) != expected_binding:
+            raise RuntimeError("Poke compound decision binding does not match current state")
+        try:
+            issued_at = datetime.fromisoformat(str(receipt["issuedAt"]).replace("Z", "+00:00"))
+            expires_at = datetime.fromisoformat(str(receipt["expiresAt"]).replace("Z", "+00:00"))
+            consumed_at = datetime.fromisoformat(
+                str(consumption_event["consumedAt"]).replace("Z", "+00:00")
+            )
+        except (KeyError, ValueError) as error:
+            raise RuntimeError("Poke compound decision time evidence is invalid") from error
+        if not issued_at <= consumed_at < expires_at:
+            raise RuntimeError("Poke compound decision was consumed outside its validity window")
+        if expires_at - issued_at > timedelta(minutes=15):
+            raise RuntimeError("Poke compound decision validity exceeds fifteen minutes")
+        key = hashlib.sha256(
+            PokeCompoundHistoryLock._canonical({"nonce": receipt.get("nonce")})
+        ).hexdigest()
+        binding_sha256 = hashlib.sha256(
+            PokeCompoundHistoryLock._canonical(
+                {
+                    "decisionSha256": hashlib.sha256(
+                        PokeCompoundHistoryLock._canonical(receipt)
+                    ).hexdigest(),
+                    "binding": binding,
+                }
+            )
+        ).hexdigest()
+        if (
+            consumption_event.get("kind") != expected_consumption_kind
+            or consumption_event.get("credentialId") != receipt.get("decisionId")
+            or consumption_event.get("singleUseKeySha256") != key
+            or consumption_event.get("bindingSha256") != binding_sha256
+        ):
+            raise RuntimeError("Poke compound trusted consumption event is invalid")
+        consumption = hashlib.sha256(
+            PokeCompoundHistoryLock._canonical(consumption_event)
+        ).hexdigest()
+        if key in state.consumed_decision_keys:
+            raise RuntimeError("Poke compound transition decision was already consumed")
+        return PokeCompoundHistoryLock._replace(
+            state,
+            consumed_decision_keys=(*state.consumed_decision_keys, key),
+            decision_consumption_sha256s=(
+                *state.decision_consumption_sha256s,
+                consumption,
+            ),
+        )
+
+    @staticmethod
+    def _encode(state: PokeCompoundHistoryState) -> str:
+        return json.dumps(
+            {
+                "compoundId": state.compound_id,
+                "replayId": state.replay_id,
+                "compoundContentSha256": state.compound_content_sha256,
+                "planContentSha256": state.plan_content_sha256,
+                "targetAdapterId": state.target_adapter_id,
+                "targetInstanceId": state.target_instance_id,
+                "actionCatalogVersion": state.action_catalog_version,
+                "interactionCatalogVersion": state.interaction_catalog_version,
+                "recipeKind": state.recipe_kind,
+                "lockTokenSha256": state.lock_token_sha256,
+                "blenderProcessIdentitySha256": state.blender_process_identity_sha256,
+                "blenderSessionUid": state.blender_session_uid,
+                "documentFingerprintSha256": state.document_fingerprint_sha256,
+                "nativeHistoryMarkerSha256": state.native_history_marker_sha256,
+                "objectIdentitySha256": state.object_identity_sha256,
+                "meshIdentitySha256": state.mesh_identity_sha256,
+                "objectPointerSha256": state.object_pointer_sha256,
+                "meshPointerSha256": state.mesh_pointer_sha256,
+                "meshDatablockSha256": state.mesh_datablock_sha256,
+                "topologySha256": state.topology_sha256,
+                "selectionSha256": state.selection_sha256,
+                "historyHeadSha256": state.history_head_sha256,
+                "stateSha256": state.state_sha256,
+                "integritySha256": state.integrity_sha256,
+                "markerIntegritySha256": state.marker_integrity_sha256,
+                "recordedObjectBaselineJson": state.recorded_object_baseline_json,
+                "recordedObjectBaselineSha256": state.recorded_object_baseline_sha256,
+                "status": state.status,
+                "lifecycleState": state.lifecycle_state,
+                "mode": state.mode,
+                "historyLock": state.history_lock,
+                "historyContinuity": state.history_continuity,
+                "nativeHistoryLossRecorded": state.native_history_loss_recorded,
+                "inProgressLeafId": state.in_progress_leaf_id,
+                "permittedHistoryTransitions": list(state.permitted_history_transitions),
+                "leafIntents": list(state.leaf_intents),
+                "leafReceipts": list(state.leaf_receipts),
+                "nativeHistoryOperationCount": state.native_history_operation_count,
+                "checkpointSha256": state.checkpoint_sha256,
+                "consumedDecisionKeys": list(state.consumed_decision_keys),
+                "decisionConsumptionSha256s": list(state.decision_consumption_sha256s),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def _decode(value: object) -> PokeCompoundHistoryState:
+        if not isinstance(value, str) or not value:
+            raise RuntimeError("Poke compound native history marker is missing")
+        payload = json.loads(value)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Poke compound native history marker is invalid")
+        try:
+            state = PokeCompoundHistoryState(
+                compound_id=str(payload["compoundId"]),
+                replay_id=str(payload["replayId"]),
+                compound_content_sha256=str(payload["compoundContentSha256"]),
+                plan_content_sha256=str(payload["planContentSha256"]),
+                target_adapter_id=str(payload["targetAdapterId"]),
+                target_instance_id=str(payload["targetInstanceId"]),
+                action_catalog_version=str(payload["actionCatalogVersion"]),
+                interaction_catalog_version=str(payload["interactionCatalogVersion"]),
+                recipe_kind=str(payload["recipeKind"]),
+                lock_token_sha256=str(payload["lockTokenSha256"]),
+                blender_process_identity_sha256=str(
+                    payload["blenderProcessIdentitySha256"]
+                ),
+                blender_session_uid=str(payload["blenderSessionUid"]),
+                document_fingerprint_sha256=str(
+                    payload["documentFingerprintSha256"]
+                ),
+                native_history_marker_sha256=str(payload["nativeHistoryMarkerSha256"]),
+                object_identity_sha256=str(payload["objectIdentitySha256"]),
+                mesh_identity_sha256=str(payload["meshIdentitySha256"]),
+                object_pointer_sha256=str(payload["objectPointerSha256"]),
+                mesh_pointer_sha256=str(payload["meshPointerSha256"]),
+                mesh_datablock_sha256=str(payload["meshDatablockSha256"]),
+                topology_sha256=str(payload["topologySha256"]),
+                selection_sha256=str(payload["selectionSha256"]),
+                history_head_sha256=str(payload["historyHeadSha256"]),
+                state_sha256=str(payload["stateSha256"]),
+                integrity_sha256=str(payload["integritySha256"]),
+                marker_integrity_sha256=str(payload["markerIntegritySha256"]),
+                recorded_object_baseline_json=str(payload["recordedObjectBaselineJson"]),
+                recorded_object_baseline_sha256=str(payload["recordedObjectBaselineSha256"]),
+                status=str(payload["status"]),
+                lifecycle_state=str(payload["lifecycleState"]),
+                mode=str(payload["mode"]),
+                history_lock=str(payload["historyLock"]),
+                history_continuity=str(payload["historyContinuity"]),
+                native_history_loss_recorded=bool(payload["nativeHistoryLossRecorded"]),
+                in_progress_leaf_id=(
+                    None if payload["inProgressLeafId"] is None else str(payload["inProgressLeafId"])
+                ),
+                permitted_history_transitions=tuple(
+                    str(item) for item in payload["permittedHistoryTransitions"]
+                ),
+                leaf_intents=tuple(str(item) for item in payload["leafIntents"]),
+                leaf_receipts=tuple(str(item) for item in payload["leafReceipts"]),
+                native_history_operation_count=int(
+                    payload["nativeHistoryOperationCount"]
+                ),
+                checkpoint_sha256=(
+                    None if payload["checkpointSha256"] is None else str(payload["checkpointSha256"])
+                ),
+                consumed_decision_keys=tuple(str(item) for item in payload["consumedDecisionKeys"]),
+                decision_consumption_sha256s=tuple(
+                    str(item) for item in payload["decisionConsumptionSha256s"]
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError("Poke compound native history marker is invalid") from error
+        if len(state.leaf_receipts) > len(state.leaf_intents):
+            raise RuntimeError("Poke compound leaf journal is out of order")
+        PokeCompoundHistoryLock._validate_state(state)
+        return state
+
+    @staticmethod
+    def _write(scene: bpy.types.Scene, state: PokeCompoundHistoryState) -> None:
+        PokeCompoundHistoryLock._validate_state(state)
+        scene[POKE_COMPOUND_HISTORY_MARKER_KEY] = PokeCompoundHistoryLock._encode(
+            state
+        )
+
+    def acquire(
+        self,
+        scene: bpy.types.Scene,
+        state: PokeCompoundHistoryState,
+        decision: Mapping[str, object],
+    ) -> None:
+        if POKE_COMPOUND_HISTORY_MARKER_KEY in scene:
+            raise RuntimeError("A Poke compound native history lock is already held")
+        if (
+            state.recipe_kind != "forward"
+            or state.status != "intent_recorded"
+            or state.leaf_intents
+            or state.leaf_receipts
+        ):
+            raise RuntimeError("Poke compound Forward must acquire before Enter Edit")
+        self._validate_state(state)
+        consumed = self._consume_decision(
+            state, decision, "BlenderExecutionDecisionReceipt", "forward"
+        )
+        self._write(scene, consumed)
+
+    def read(self, scene: bpy.types.Scene) -> PokeCompoundHistoryState:
+        return self._decode(scene.get(POKE_COMPOUND_HISTORY_MARKER_KEY))
+
+    def reconcile(
+        self,
+        scene: bpy.types.Scene,
+        observed: Mapping[str, object] | None,
+    ) -> str:
+        try:
+            state = self.read(scene)
+        except (RuntimeError, json.JSONDecodeError):
+            return "history_lost"
+        if observed is None or any(
+            observed.get(key) is None
+            for key in (
+                "blenderProcessIdentitySha256",
+                "blenderSessionUid",
+                "nativeHistoryMarkerSha256",
+            )
+        ):
+            return "history_lost"
+        if (
+            observed.get("blenderProcessIdentitySha256")
+            != state.blender_process_identity_sha256
+            or observed.get("blenderSessionUid") != state.blender_session_uid
+            or observed.get("nativeHistoryMarkerSha256")
+            != state.native_history_marker_sha256
+        ):
+            return "history_lost"
+        expected = {
+            "compoundId": state.compound_id,
+            "replayId": state.replay_id,
+            "compoundContentSha256": state.compound_content_sha256,
+            "historyLockTokenSha256": state.lock_token_sha256,
+            "blenderProcessIdentitySha256": state.blender_process_identity_sha256,
+            "blenderSessionUid": state.blender_session_uid,
+            "documentFingerprintSha256": state.document_fingerprint_sha256,
+            "nativeHistoryMarkerSha256": state.native_history_marker_sha256,
+            "historyHeadSha256": state.history_head_sha256,
+            "objectIdentitySha256": state.object_identity_sha256,
+            "meshIdentitySha256": state.mesh_identity_sha256,
+            "objectPointerSha256": state.object_pointer_sha256,
+            "meshPointerSha256": state.mesh_pointer_sha256,
+            "meshDatablockSha256": state.mesh_datablock_sha256,
+            "topologySha256": state.topology_sha256,
+            "selectionSha256": state.selection_sha256,
+            "stateSha256": state.state_sha256,
+            "integritySha256": state.integrity_sha256,
+            "status": state.status,
+            "lifecycleState": state.lifecycle_state,
+            "mode": state.mode,
+            "historyLock": state.history_lock,
+            "historyContinuity": state.history_continuity,
+            "nativeHistoryLossRecorded": state.native_history_loss_recorded,
+            "inProgressLeafId": state.in_progress_leaf_id,
+            "permittedHistoryTransitions": list(state.permitted_history_transitions),
+        }
+        return (
+            "same_live_session"
+            if all(observed.get(key) == value for key, value in expected.items())
+            else "history_conflict"
+        )
+
+    def reconcile_and_quarantine(
+        self,
+        scene: bpy.types.Scene,
+        observed: Mapping[str, object] | None,
+    ) -> str:
+        classification = self.reconcile(scene, observed)
+        if classification == "same_live_session":
+            return classification
+        try:
+            state = self.read(scene)
+        except (RuntimeError, json.JSONDecodeError):
+            return "history_lost"
+        if classification == "history_lost":
+            quarantined = self._replace(
+                state,
+                status="history_lost",
+                lifecycle_state="unknown",
+                mode="UNKNOWN",
+                history_lock="quarantined",
+                history_continuity="lost_permanently",
+                native_history_loss_recorded=True,
+                in_progress_leaf_id=None,
+                permitted_history_transitions=("abandon_baseline",),
+            )
+        else:
+            quarantined = self._replace(
+                state,
+                status="history_conflict",
+                lifecycle_state="unknown",
+                mode="UNKNOWN",
+                history_lock="quarantined",
+                in_progress_leaf_id=None,
+                permitted_history_transitions=(),
+            )
+        self._write(scene, quarantined)
+        return classification
+
+    def record_leaf_intent(
+        self,
+        scene: bpy.types.Scene,
+        leaf_id: str,
+        intent_sha256: str,
+    ) -> PokeCompoundHistoryState:
+        state = self.read(scene)
+        if len(state.leaf_intents) != len(state.leaf_receipts) or len(state.leaf_intents) >= 3:
+            raise RuntimeError("Poke compound leaf intent is out of order")
+        next_state = self._replace(
+            state,
+            status="recovery_required",
+            lifecycle_state="unknown",
+            mode="UNKNOWN",
+            in_progress_leaf_id=leaf_id,
+            permitted_history_transitions=(),
+            leaf_intents=(*state.leaf_intents, intent_sha256),
+            native_history_operation_count=0,
+        )
+        self._write(scene, next_state)
+        return next_state
+
+    def begin_recipe(
+        self,
+        scene: bpy.types.Scene,
+        recipe_kind: str,
+        decision: Mapping[str, object],
+    ) -> PokeCompoundHistoryState:
+        state = self.read(scene)
+        allowed = (
+            recipe_kind == "back"
+            and state.status in {"forward_applied_locked", "reapplied_locked"}
+        ) or (recipe_kind == "redo" and state.status == "restored_locked")
+        if not allowed:
+            raise RuntimeError("Poke compound history transition is not authorized")
+        consumed = self._consume_decision(
+            state,
+            decision,
+            "BlenderHistoryTransitionDecisionReceipt",
+            recipe_kind,
+        )
+        next_state = self._replace(
+            consumed,
+            recipe_kind=recipe_kind,
+            leaf_intents=(),
+            leaf_receipts=(),
+            native_history_operation_count=0,
+            checkpoint_sha256=None,
+        )
+        self._write(scene, next_state)
+        return next_state
+
+    def record_native_history_operation(
+        self,
+        scene: bpy.types.Scene,
+        direction: str,
+    ) -> PokeCompoundHistoryState:
+        state = self.read(scene)
+        if len(state.leaf_intents) != 2 or len(state.leaf_receipts) != 1:
+            raise RuntimeError("Native Undo/Redo is allowed only in the middle leaf")
+        expected = {"back": "undo", "redo": "redo"}.get(state.recipe_kind)
+        if direction != expected:
+            raise RuntimeError("Native history direction is not authorized")
+        count = state.native_history_operation_count + 1
+        if count != 1:
+            raise RuntimeError("Poke compound middle leaf requires exactly one native operation")
+        next_state = self._replace(state, native_history_operation_count=count)
+        self._write(scene, next_state)
+        return next_state
+
+    def record_leaf_receipt(
+        self,
+        scene: bpy.types.Scene,
+        recipe_kind: str,
+        receipt_sha256: str,
+        *,
+        mode: str,
+        history_proof_attached: bool,
+        native_history_operation_count: int,
+        history_head_sha256: str,
+        observed: Mapping[str, str],
+        checkpoint_sha256: str | None = None,
+    ) -> PokeCompoundHistoryState:
+        state = self.read(scene)
+        index = len(state.leaf_receipts)
+        if len(state.leaf_intents) != index + 1 or index >= 3:
+            raise RuntimeError("Poke compound leaf receipt is out of order")
+        middle = index == 1
+        expected_mode = "EDIT_MESH" if middle else ("EDIT_MESH" if index == 0 else "OBJECT")
+        expected_count = 1 if middle and recipe_kind in {"back", "redo"} else 0
+        if (
+            recipe_kind != state.recipe_kind
+            or mode != expected_mode
+            or history_proof_attached is not middle
+            or native_history_operation_count != expected_count
+            or (middle and checkpoint_sha256 is None)
+        ):
+            raise RuntimeError("Poke compound proof is attached to the wrong leaf or mode")
+        terminal = index == 2
+        next_status = self._TERMINAL_BY_RECIPE[recipe_kind] if terminal else "recovery_required"
+        next_state = self._replace(
+            state,
+            status=next_status,
+            lifecycle_state=(
+                "object_baseline"
+                if next_status == "restored_locked"
+                else "object_final"
+                if terminal
+                else "unknown"
+            ),
+            mode=mode if terminal else "UNKNOWN",
+            in_progress_leaf_id=None if terminal else state.in_progress_leaf_id,
+            permitted_history_transitions=self._PERMITTED_BY_STATUS[next_status],
+            leaf_receipts=(*state.leaf_receipts, receipt_sha256),
+            history_head_sha256=history_head_sha256,
+            object_identity_sha256=observed["objectIdentitySha256"],
+            mesh_identity_sha256=observed["meshIdentitySha256"],
+            object_pointer_sha256=observed["objectPointerSha256"],
+            mesh_pointer_sha256=observed["meshPointerSha256"],
+            mesh_datablock_sha256=observed["meshDatablockSha256"],
+            topology_sha256=observed["topologySha256"],
+            selection_sha256=observed["selectionSha256"],
+            state_sha256=observed["stateSha256"],
+            checkpoint_sha256=(
+                checkpoint_sha256
+                if checkpoint_sha256 is not None
+                else state.checkpoint_sha256
+            ),
+            native_history_operation_count=0,
+        )
+        self._write(scene, next_state)
+        return next_state
+
+    def release(
+        self,
+        scene: bpy.types.Scene,
+        transition: str,
+        decision: Mapping[str, object],
+        observed: Mapping[str, object],
+    ) -> dict[str, object]:
+        state = self.read(scene)
+        allowed = (
+            transition == "unlock_final"
+            and state.status in {"forward_applied_locked", "reapplied_locked"}
+        ) or (
+            transition == "abandon_baseline" and state.status == "restored_locked"
+        ) or (
+            transition == "abandon_baseline" and state.status == "history_lost"
+        )
+        lost_abandon = state.status == "history_lost"
+        if not allowed or (
+            not lost_abandon
+            and (
+                len(state.leaf_receipts) != 3
+                or state.checkpoint_sha256 is None
+                or state.in_progress_leaf_id is not None
+            )
+        ):
+            raise RuntimeError("Poke compound history lock cannot be released")
+        if lost_abandon:
+            baseline = json.loads(state.recorded_object_baseline_json)
+            if not isinstance(baseline, dict) or any(
+                observed.get(key) != value for key, value in baseline.items()
+            ):
+                raise RuntimeError(
+                    "Poke compound history loss requires a fresh exact baseline observation"
+                )
+        elif self.reconcile(scene, observed) != "same_live_session":
+            raise RuntimeError("Poke compound terminal state is not exactly reconciled")
+        consumed = self._consume_decision(
+            state,
+            decision,
+            "BlenderHistoryTransitionDecisionReceipt",
+            transition,
+        )
+        terminal = self._replace(
+            consumed,
+            status="unlocked_final" if transition == "unlock_final" else "abandoned_baseline",
+            lifecycle_state=(
+                "object_final" if transition == "unlock_final" else "object_baseline"
+            ),
+            mode="OBJECT",
+            history_lock="released",
+            permitted_history_transitions=(),
+            object_identity_sha256=str(observed["objectIdentitySha256"]),
+            mesh_identity_sha256=str(observed["meshIdentitySha256"]),
+            object_pointer_sha256=str(observed["objectPointerSha256"]),
+            mesh_pointer_sha256=str(observed["meshPointerSha256"]),
+            mesh_datablock_sha256=str(observed["meshDatablockSha256"]),
+            topology_sha256=str(observed["topologySha256"]),
+            selection_sha256=str(observed["selectionSha256"]),
+            state_sha256=str(observed["stateSha256"]),
+            history_head_sha256=str(observed["historyHeadSha256"]),
+        )
+        terminal_state = self.current_state(terminal)
+        del scene[POKE_COMPOUND_HISTORY_MARKER_KEY]
+        return terminal_state
 
 
 SessionProvider = Callable[[], DemoSession]
@@ -683,9 +1553,12 @@ def native_undo_checkpoint_attestation(
 
 __all__ = (
     "NATIVE_HISTORY_MARKER_KEY",
+    "POKE_COMPOUND_HISTORY_MARKER_KEY",
     "NativeHistoryCheckpoint",
     "NativeHistoryController",
     "NativeHistoryRestore",
+    "PokeCompoundHistoryLock",
+    "PokeCompoundHistoryState",
     "cancel_native_history",
     "commit_native_history",
     "discard_native_history",

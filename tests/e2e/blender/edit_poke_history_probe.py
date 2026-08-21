@@ -24,6 +24,7 @@ SCENARIOS = {
     "edit_ed_push_roundtrip",
     "edit_post_push_roundtrip",
     "edit_grouped_operator_roundtrip",
+    "three_leaf_object_roundtrip",
 }
 assert SCENARIO in SCENARIOS
 EDIT_MODE_SCENARIOS = {
@@ -81,6 +82,12 @@ def write_result(payload: dict[str, object]) -> None:
 def rounded(value: float) -> float:
     normalized = round(float(value), 9)
     return 0.0 if normalized == -0.0 else normalized
+
+
+def canonical_sha256(value: object) -> str:
+    return sha256(
+        json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def canonical_cycle(indices: tuple[int, ...]) -> list[int]:
@@ -206,6 +213,11 @@ def push_edit_checkpoint(message: str) -> None:
 def execute_grouped_poke() -> None:
     assert bpy.context.mode == "EDIT_MESH"
     assert bpy.ops.operating_line.grouped_poke() == {"FINISHED"}
+
+
+def set_object_mode(mode: str) -> None:
+    assert mode in {"EDIT", "OBJECT"}
+    assert bpy.ops.object.mode_set(mode=mode) == {"FINISHED"}
 
 
 def capture_factory_baseline() -> None:
@@ -380,6 +392,35 @@ def finish() -> None:
             if SCENARIO == "edit_grouped_operator_roundtrip"
             else ["EDIT_BASELINE", "ED_UNDO_PUSH", "POKE", "CTRL+Z", "CTRL+SHIFT+Z"]
         )
+    elif SCENARIO == "three_leaf_object_roundtrip":
+        expected_hashes = {
+            "backEditBefore": final["meshContentSha256"],
+            "backEditAfter": baseline["meshContentSha256"],
+            "restoredObject": baseline["meshContentSha256"],
+            "redoEditBefore": baseline["meshContentSha256"],
+            "redoEditAfter": final["meshContentSha256"],
+            "reappliedObject": final["meshContentSha256"],
+        }
+        scenario_checks = {
+            "forwardEndsAtObjectFinal": final["mode"] == "OBJECT",
+            "backUsesOneEditUndo": (
+                snapshots["backEditBefore"]["mode"] == "EDIT_MESH"
+                and comparable(snapshots["backEditAfter"])
+                == comparable(snapshots["editBaseline"])
+                and comparable(snapshots["restoredObject"]) == comparable(baseline)
+            ),
+            "redoUsesOneEditRedo": (
+                snapshots["redoEditBefore"]["mode"] == "EDIT_MESH"
+                and comparable(snapshots["redoEditAfter"])
+                == comparable(snapshots["editFinal"])
+                and comparable(snapshots["reappliedObject"]) == comparable(final)
+            ),
+        }
+        sequence = [
+            "Forward: TAB -> grouped Poke -> TAB",
+            "Back: TAB -> CTRL+Z exactly once -> TAB",
+            "Redo: TAB -> CTRL+SHIFT+Z exactly once -> TAB",
+        ]
     else:
         expected_hashes = {
             "afterUndo1": final["meshContentSha256"],
@@ -427,6 +468,54 @@ def finish() -> None:
         "snapshots": snapshots,
         "historyEvents": sequence,
     }
+    if SCENARIO == "three_leaf_object_roundtrip":
+        edit_baseline = snapshots["editBaseline"]
+        edit_final = snapshots["editFinal"]
+        middle_proof = {
+            "modeScope": "edit_middle_only",
+            "objectModeUndoRedoClaim": False,
+            "objectPointerSha256": canonical_sha256(edit_baseline["runtimePointers"]["object"]),
+            "meshPointerSha256": canonical_sha256(edit_baseline["runtimePointers"]["mesh"]),
+            "meshDatablockSha256": canonical_sha256(edit_baseline["objectIdentity"]["meshName"]),
+            "baselineTopologySha256": canonical_sha256(edit_baseline["topology"]),
+            "finalTopologySha256": canonical_sha256(edit_final["topology"]),
+            "baselineSelectionSha256": canonical_sha256(edit_baseline["selection"]),
+            "finalSelectionSha256": canonical_sha256(edit_final["selection"]),
+            "historyHeadBeforeSha256": edit_baseline["meshContentSha256"],
+            "historyHeadAfterSha256": edit_final["meshContentSha256"],
+            "checkpointSha256": canonical_sha256(
+                {"baseline": edit_baseline["meshContentSha256"], "final": edit_final["meshContentSha256"]}
+            ),
+        }
+        def compound_leaf(kind: str, changing: bool, count: int, proof_kind: str | None):
+            return {
+                "kind": kind,
+                "modelChanging": changing,
+                "nativeUndoRedoOperationCount": count,
+                "historyProof": None if proof_kind is None else {"kind": proof_kind, **middle_proof},
+            }
+        result["compoundAttestation"] = {
+            "objectModeUndoRedoTransactionProven": False,
+            "objectBaseline": baseline,
+            "objectFinal": final,
+            "editBaseline": edit_baseline,
+            "editFinal": edit_final,
+            "forwardLeaves": [
+                compound_leaf("enter_edit", False, 0, None),
+                compound_leaf("poke", True, 0, "poke_native_checkpoint"),
+                compound_leaf("exit_edit", False, 0, None),
+            ],
+            "backLeaves": [
+                compound_leaf("enter_edit", False, 0, None),
+                compound_leaf("native_undo_once", True, 1, "native_undo_once"),
+                compound_leaf("exit_edit", False, 0, None),
+            ],
+            "redoLeaves": [
+                compound_leaf("enter_edit", False, 0, None),
+                compound_leaf("native_redo_once", True, 1, "native_redo_once"),
+                compound_leaf("exit_edit", False, 0, None),
+            ],
+        }
     write_result(result)
     prefix = "CANDIDATE_PASS" if candidate_passed else "CANDIDATE_FAILED"
     print(
@@ -519,19 +608,32 @@ def add_text(label: str, text: str) -> None:
 add_event("dismiss splash", "ESC", delay=0.15)
 add_event("anchor cursor", "MOUSEMOVE", "NOTHING", delay=0.15)
 steps.append(("capture factory baseline", 0.1, capture_factory_baseline))
-if SCENARIO not in EDIT_MODE_SCENARIOS:
+if SCENARIO not in EDIT_MODE_SCENARIOS and SCENARIO != "three_leaf_object_roundtrip":
     steps.append(("push native baseline checkpoint", 0.1, push_baseline_checkpoint))
-add_press_release("enter edit mode", "TAB", delay=0.3)
+if SCENARIO == "three_leaf_object_roundtrip":
+    steps.append(("Enter leaf mode-set Edit", 0.3, lambda: set_object_mode("EDIT")))
+else:
+    add_press_release("enter edit mode", "TAB", delay=0.3)
 add_press_release("face select mode", "THREE", delay=0.2)
 add_press_release("select all", "A", delay=0.2)
 if SCENARIO in EDIT_MODE_SCENARIOS:
     steps.append(("capture live Edit baseline", 0.1, lambda: capture("baseline")))
+elif SCENARIO == "three_leaf_object_roundtrip":
+    steps.append(("capture compound Edit baseline", 0.1, lambda: capture("editBaseline")))
 if SCENARIO == "edit_ed_push_roundtrip":
     steps.append(
         (
             "push live Edit baseline",
             0.1,
             lambda: push_edit_checkpoint("OperatingLine Edit baseline"),
+        )
+    )
+if SCENARIO == "three_leaf_object_roundtrip":
+    steps.append(
+        (
+            "push compound Edit baseline",
+            0.1,
+            lambda: push_edit_checkpoint("OperatingLine compound Edit baseline"),
         )
     )
 if SCENARIO == "edit_grouped_operator_roundtrip":
@@ -547,7 +649,12 @@ else:
     add_press_release("confirm offset", "RET", delay=0.5)
     add_press_release("close redo panel", "RET", delay=0.5)
 if SCENARIO not in EDIT_MODE_SCENARIOS:
-    add_press_release("return to object mode", "TAB", delay=0.5)
+    if SCENARIO == "three_leaf_object_roundtrip":
+        steps.append(("capture compound Edit final", 0.1, lambda: capture("editFinal")))
+    if SCENARIO == "three_leaf_object_roundtrip":
+        steps.append(("Exit leaf mode-set Object", 0.5, lambda: set_object_mode("OBJECT")))
+    else:
+        add_press_release("return to object mode", "TAB", delay=0.5)
 steps.append(("capture final", 0.1, lambda: capture("final")))
 if SCENARIO == "edit_post_push_roundtrip":
     steps.append(
@@ -558,7 +665,20 @@ if SCENARIO == "edit_post_push_roundtrip":
         )
     )
 
-if SCENARIO == "undo_tab_redo":
+if SCENARIO == "three_leaf_object_roundtrip":
+    steps.append(("Back Enter leaf mode-set Edit", 0.5, lambda: set_object_mode("EDIT")))
+    steps.append(("capture Back Edit final", 0.1, lambda: capture("backEditBefore")))
+    add_press_release("Back native Undo exactly once", "Z", delay=0.8, ctrl=True)
+    steps.append(("capture Back Edit baseline", 0.1, lambda: capture("backEditAfter")))
+    steps.append(("Back Exit leaf mode-set Object", 0.5, lambda: set_object_mode("OBJECT")))
+    steps.append(("capture restored Object", 0.1, lambda: capture("restoredObject")))
+    steps.append(("Redo Enter leaf mode-set Edit", 0.5, lambda: set_object_mode("EDIT")))
+    steps.append(("capture Redo Edit baseline", 0.1, lambda: capture("redoEditBefore")))
+    add_press_release("Redo native Redo exactly once", "Z", delay=0.8, ctrl=True, shift=True)
+    steps.append(("capture Redo Edit final", 0.1, lambda: capture("redoEditAfter")))
+    steps.append(("Redo Exit leaf mode-set Object", 0.5, lambda: set_object_mode("OBJECT")))
+    steps.append(("capture reapplied Object", 0.1, lambda: capture("reappliedObject")))
+elif SCENARIO == "undo_tab_redo":
     add_press_release("undo exit edit mode", "Z", delay=0.8, ctrl=True)
     steps.append(("capture after Undo", 0.1, lambda: capture("afterUndo")))
     add_press_release("tab after Undo", "TAB", delay=0.5)
