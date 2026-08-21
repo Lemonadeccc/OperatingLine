@@ -7,11 +7,14 @@ import {
   companionSessionHelloRequestSchema,
   companionSessionHelloResponseSchema,
   guideProtocolVersion,
+  isCompanionSessionV11,
   type ActionCatalog,
   type CompanionHeartbeatRequest,
   type CompanionHeartbeatResponse,
   type CompanionSessionHelloRequest,
+  type CompanionSessionHelloRequestV11,
   type CompanionSessionHelloResponse,
+  type CompanionSessionHelloResponseV11,
 } from '@operatingline/protocol';
 
 import { satisfiesStableVersionRange } from './stable-version-ranges.js';
@@ -46,6 +49,11 @@ export interface ActiveCompanionSession {
   readonly lease: CompanionSessionHelloResponse;
 }
 
+export interface ActiveCompanionDocumentSession {
+  readonly hello: CompanionSessionHelloRequestV11;
+  readonly lease: CompanionSessionHelloResponseV11;
+}
+
 interface CompanionLeaseRecord {
   readonly hello: CompanionSessionHelloRequest;
   readonly leaseId: string;
@@ -72,6 +80,11 @@ export interface CompanionLeaseManager {
   ): CompanionSessionHelloResponse;
   heartbeat(request: CompanionHeartbeatRequest): CompanionHeartbeatResponse;
   authorize(leaseId: string, adapterId: string, instanceId: string): ActiveCompanionSession;
+  authorizeDocumentSession(
+    leaseId: string,
+    adapterId: string,
+    instanceId: string,
+  ): ActiveCompanionDocumentSession;
   authorizeLegacy(adapterId: string, instanceId: string): void;
   observeLegacy(adapterId: string, instanceId: string): void;
   hasActivePresence(adapterId: string, instanceId: string): boolean;
@@ -134,9 +147,28 @@ export function createCompanionLeaseManager(
   }
 
   const leasesById = new Map<string, CompanionLeaseRecord>();
-  const currentLeaseIdByIdentity = new Map<string, string>();
+  const currentLeaseIdByTarget = new Map<string, string>();
+  const currentLeaseIdBySessionId = new Map<string, string>();
   const legacyPresenceExpiryByIdentity = new Map<string, number>();
   const negotiatedIdentityKeys = new Set<string>();
+
+  const removeLease = (leaseId: string): void => {
+    const record = leasesById.get(leaseId);
+    if (record === undefined) {
+      return;
+    }
+    leasesById.delete(leaseId);
+    const targetKey = identityKey(record.hello.adapterId, record.hello.instanceId);
+    if (currentLeaseIdByTarget.get(targetKey) === leaseId) {
+      currentLeaseIdByTarget.delete(targetKey);
+    }
+    if (
+      isCompanionSessionV11(record.hello) &&
+      currentLeaseIdBySessionId.get(record.hello.sessionId) === leaseId
+    ) {
+      currentLeaseIdBySessionId.delete(record.hello.sessionId);
+    }
+  };
 
   const pruneExpired = (): void => {
     const currentTime = monotonicNow();
@@ -144,11 +176,7 @@ export function createCompanionLeaseManager(
       if (record.deadlineMs > currentTime) {
         continue;
       }
-      leasesById.delete(leaseId);
-      const key = identityKey(record.hello.adapterId, record.hello.instanceId);
-      if (currentLeaseIdByIdentity.get(key) === leaseId) {
-        currentLeaseIdByIdentity.delete(key);
-      }
+      removeLease(leaseId);
     }
     for (const [key, expiresAtMs] of legacyPresenceExpiryByIdentity) {
       if (expiresAtMs <= currentTime) {
@@ -157,9 +185,15 @@ export function createCompanionLeaseManager(
     }
   };
 
-  const responseFor = (record: CompanionLeaseRecord): CompanionSessionHelloResponse =>
-    companionSessionHelloResponseSchema.parse({
-      contractVersion: '1.0.0',
+  const responseFor = (record: CompanionLeaseRecord): CompanionSessionHelloResponse => {
+    const identity = isCompanionSessionV11(record.hello)
+      ? {
+          sessionId: record.hello.sessionId,
+          documentIncarnationId: record.hello.documentIncarnationId,
+        }
+      : {};
+    return companionSessionHelloResponseSchema.parse({
+      contractVersion: record.hello.contractVersion,
       leaseId: record.leaseId,
       negotiatedGuideProtocolVersion: record.negotiatedGuideProtocolVersion,
       catalogVersion: record.catalogVersion,
@@ -167,16 +201,18 @@ export function createCompanionLeaseManager(
       heartbeatIntervalMs: heartbeatInterval,
       leaseTtlMs: leaseTtl,
       expiresAt: new Date(record.expiresAtWallClockMs).toISOString(),
+      ...identity,
     });
+  };
 
   const currentRecord = (
     leaseId: string,
     adapterId: string,
     instanceId: string,
   ): CompanionLeaseRecord => {
+    pruneExpired();
     const record = leasesById.get(leaseId);
     if (record === undefined) {
-      pruneExpired();
       throw new CompanionLeaseError(
         'lease_not_current',
         'Companion lease is unknown or has been superseded',
@@ -191,7 +227,17 @@ export function createCompanionLeaseManager(
       );
     }
     const key = identityKey(adapterId, instanceId);
-    if (currentLeaseIdByIdentity.get(key) !== leaseId) {
+    if (currentLeaseIdByTarget.get(key) !== leaseId) {
+      throw new CompanionLeaseError(
+        'lease_not_current',
+        'Companion lease has been superseded by a newer session',
+        409,
+      );
+    }
+    if (
+      isCompanionSessionV11(record.hello) &&
+      currentLeaseIdBySessionId.get(record.hello.sessionId) !== leaseId
+    ) {
       throw new CompanionLeaseError(
         'lease_not_current',
         'Companion lease has been superseded by a newer session',
@@ -199,8 +245,7 @@ export function createCompanionLeaseManager(
       );
     }
     if (record.deadlineMs <= monotonicNow()) {
-      leasesById.delete(leaseId);
-      currentLeaseIdByIdentity.delete(key);
+      removeLease(leaseId);
       throw new CompanionLeaseError(
         'lease_not_current',
         'Companion lease is unknown, expired, or has been superseded',
@@ -277,14 +322,27 @@ export function createCompanionLeaseManager(
         deadlineMs: establishedAt + leaseTtl,
         expiresAtWallClockMs: establishedAtWallClock + leaseTtl,
       };
-      leasesById.set(leaseId, record);
       const key = identityKey(request.adapterId, request.instanceId);
       negotiatedIdentityKeys.add(key);
-      const previousLeaseId = currentLeaseIdByIdentity.get(key);
-      if (previousLeaseId !== undefined) {
-        leasesById.delete(previousLeaseId);
+      const supersededLeaseIds = new Set<string>();
+      const previousTargetLeaseId = currentLeaseIdByTarget.get(key);
+      if (previousTargetLeaseId !== undefined) {
+        supersededLeaseIds.add(previousTargetLeaseId);
       }
-      currentLeaseIdByIdentity.set(key, leaseId);
+      if (isCompanionSessionV11(request)) {
+        const previousSessionLeaseId = currentLeaseIdBySessionId.get(request.sessionId);
+        if (previousSessionLeaseId !== undefined) {
+          supersededLeaseIds.add(previousSessionLeaseId);
+        }
+      }
+      for (const supersededLeaseId of supersededLeaseIds) {
+        removeLease(supersededLeaseId);
+      }
+      leasesById.set(leaseId, record);
+      currentLeaseIdByTarget.set(key, leaseId);
+      if (isCompanionSessionV11(request)) {
+        currentLeaseIdBySessionId.set(request.sessionId, leaseId);
+      }
       legacyPresenceExpiryByIdentity.delete(key);
       return responseFor(record);
     },
@@ -292,6 +350,25 @@ export function createCompanionLeaseManager(
     heartbeat(input) {
       const request = companionHeartbeatRequestSchema.parse(input);
       const record = currentRecord(request.leaseId, request.adapterId, request.instanceId);
+      if (record.hello.contractVersion !== request.contractVersion) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'Companion heartbeat contract version does not match the negotiated lease',
+          409,
+        );
+      }
+      if (
+        isCompanionSessionV11(request) &&
+        (!isCompanionSessionV11(record.hello) ||
+          request.sessionId !== record.hello.sessionId ||
+          request.documentIncarnationId !== record.hello.documentIncarnationId)
+      ) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'Companion heartbeat session identity does not match the negotiated lease',
+          409,
+        );
+      }
       if (request.sequence < record.lastHeartbeatSequence) {
         throw new CompanionLeaseError(
           'stale_heartbeat',
@@ -305,16 +382,38 @@ export function createCompanionLeaseManager(
         record.expiresAtWallClockMs = wallClockNow() + leaseTtl;
       }
       return companionHeartbeatResponseSchema.parse({
-        contractVersion: '1.0.0',
+        contractVersion: request.contractVersion,
         leaseId: record.leaseId,
         sequence: request.sequence,
         expiresAt: new Date(record.expiresAtWallClockMs).toISOString(),
+        ...(isCompanionSessionV11(request)
+          ? {
+              sessionId: request.sessionId,
+              documentIncarnationId: request.documentIncarnationId,
+            }
+          : {}),
       });
     },
 
     authorize(leaseId, adapterId, instanceId) {
       const record = currentRecord(leaseId, adapterId, instanceId);
       return { hello: record.hello, lease: responseFor(record) };
+    },
+
+    authorizeDocumentSession(leaseId, adapterId, instanceId) {
+      const record = currentRecord(leaseId, adapterId, instanceId);
+      if (!isCompanionSessionV11(record.hello)) {
+        throw new CompanionLeaseError(
+          'lease_identity_mismatch',
+          'Companion document authorization requires a version 1.1 session lease',
+          409,
+        );
+      }
+      const lease = responseFor(record);
+      if (!isCompanionSessionV11(lease)) {
+        throw new Error('Version 1.1 companion lease produced a mismatched response');
+      }
+      return { hello: record.hello, lease };
     },
 
     authorizeLegacy(adapterId, instanceId) {
@@ -359,7 +458,7 @@ export function createCompanionLeaseManager(
     hasActivePresence(adapterId, instanceId) {
       pruneExpired();
       const key = identityKey(adapterId, instanceId);
-      return currentLeaseIdByIdentity.has(key) || legacyPresenceExpiryByIdentity.has(key);
+      return currentLeaseIdByTarget.has(key) || legacyPresenceExpiryByIdentity.has(key);
     },
   };
 }

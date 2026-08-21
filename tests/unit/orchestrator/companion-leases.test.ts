@@ -36,6 +36,43 @@ function hello(instanceId = randomUUID()) {
   };
 }
 
+function helloV11(
+  overrides: Partial<{
+    instanceId: string;
+    sessionId: string;
+    documentIncarnationId: string;
+  }> = {},
+) {
+  return {
+    ...hello(overrides.instanceId),
+    contractVersion: '1.1.0' as const,
+    sessionId: overrides.sessionId ?? randomUUID(),
+    documentIncarnationId: overrides.documentIncarnationId ?? randomUUID(),
+  };
+}
+
+function heartbeatV11(request: ReturnType<typeof helloV11>, leaseId: string, sequence = 1) {
+  return {
+    contractVersion: '1.1.0' as const,
+    leaseId,
+    adapterId: request.adapterId,
+    instanceId: request.instanceId,
+    sessionId: request.sessionId,
+    documentIncarnationId: request.documentIncarnationId,
+    sequence,
+  };
+}
+
+function expectConflict(action: () => unknown, code: CompanionLeaseError['code']): void {
+  try {
+    action();
+    throw new Error('Expected a CompanionLeaseError');
+  } catch (error) {
+    expect(error).toBeInstanceOf(CompanionLeaseError);
+    expect(error).toMatchObject({ code, statusCode: 409 });
+  }
+}
+
 describe('companion lease manager', () => {
   it('negotiates the newest shared Guide version and renews idempotently', () => {
     let wallClockNow = Date.parse('2026-08-13T04:00:00.000Z');
@@ -76,6 +113,191 @@ describe('companion lease manager', () => {
     monotonicNow += 50;
     wallClockNow += 50;
     expect(manager.heartbeat(heartbeat).expiresAt).toBe('2026-08-13T04:00:00.400Z');
+  });
+
+  it('echoes v1.1 session identity and preserves it across heartbeat and runtime restart', () => {
+    let wallClockNow = Date.parse('2026-08-13T04:00:00.000Z');
+    let monotonicNow = 1_000;
+    const options = {
+      monotonicNow: () => monotonicNow,
+      wallClockNow: () => wallClockNow,
+      heartbeatIntervalMs: 100,
+      leaseTtlMs: 300,
+    };
+    const request = helloV11();
+    const manager = createCompanionLeaseManager(options);
+    const lease = manager.establish(request, blenderActionCatalog);
+
+    expect(lease).toMatchObject({
+      contractVersion: '1.1.0',
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+    });
+    monotonicNow += 100;
+    wallClockNow += 100;
+    const heartbeat = manager.heartbeat(heartbeatV11(request, lease.leaseId));
+    expect(heartbeat).toMatchObject({
+      contractVersion: '1.1.0',
+      leaseId: lease.leaseId,
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+      expiresAt: '2026-08-13T04:00:00.400Z',
+    });
+    expect(manager.authorizeDocumentSession(lease.leaseId, 'blender', request.instanceId)).toEqual({
+      hello: request,
+      lease: { ...lease, expiresAt: '2026-08-13T04:00:00.400Z' },
+    });
+
+    const reconnected = manager.establish(request, blenderActionCatalog);
+    expect(reconnected.leaseId).not.toBe(lease.leaseId);
+    expectConflict(
+      () => manager.authorizeDocumentSession(lease.leaseId, 'blender', request.instanceId),
+      'lease_not_current',
+    );
+    expect(
+      manager.authorizeDocumentSession(reconnected.leaseId, 'blender', request.instanceId),
+    ).toMatchObject({ hello: request, lease: { leaseId: reconnected.leaseId } });
+
+    const restarted = createCompanionLeaseManager(options);
+    const replacement = restarted.establish(request, blenderActionCatalog);
+    expect(replacement.leaseId).not.toBe(reconnected.leaseId);
+    expect(replacement).toMatchObject({
+      sessionId: request.sessionId,
+      documentIncarnationId: request.documentIncarnationId,
+    });
+  });
+
+  it('supersedes by session across target and document rotation and cleans both indexes', () => {
+    const manager = createCompanionLeaseManager();
+    const sessionId = randomUUID();
+    const firstRequest = helloV11({ sessionId });
+    const first = manager.establish(firstRequest, blenderActionCatalog);
+    const secondRequest = helloV11({ sessionId });
+    const second = manager.establish(secondRequest, blenderActionCatalog);
+
+    expect(firstRequest.instanceId).not.toBe(secondRequest.instanceId);
+    expect(firstRequest.documentIncarnationId).not.toBe(secondRequest.documentIncarnationId);
+    expect(manager.hasActivePresence('blender', firstRequest.instanceId)).toBe(false);
+    expect(manager.hasActivePresence('blender', secondRequest.instanceId)).toBe(true);
+    expectConflict(
+      () => manager.heartbeat(heartbeatV11(firstRequest, first.leaseId)),
+      'lease_not_current',
+    );
+    expectConflict(
+      () => manager.authorize(first.leaseId, 'blender', firstRequest.instanceId),
+      'lease_not_current',
+    );
+    expect(
+      manager.authorizeDocumentSession(second.leaseId, 'blender', secondRequest.instanceId),
+    ).toMatchObject({
+      hello: {
+        sessionId,
+        documentIncarnationId: secondRequest.documentIncarnationId,
+      },
+    });
+  });
+
+  it('supersedes a target on process/session rotation and removes the old session index', () => {
+    const manager = createCompanionLeaseManager();
+    const instanceId = randomUUID();
+    const firstRequest = helloV11({ instanceId });
+    const first = manager.establish(firstRequest, blenderActionCatalog);
+    const secondRequest = helloV11({ instanceId });
+    const second = manager.establish(secondRequest, blenderActionCatalog);
+
+    expect(firstRequest.sessionId).not.toBe(secondRequest.sessionId);
+    expectConflict(
+      () => manager.authorizeDocumentSession(first.leaseId, 'blender', instanceId),
+      'lease_not_current',
+    );
+    expect(manager.authorizeDocumentSession(second.leaseId, 'blender', instanceId).hello).toEqual(
+      secondRequest,
+    );
+
+    const movedFirstSession = helloV11({ sessionId: firstRequest.sessionId });
+    const movedLease = manager.establish(movedFirstSession, blenderActionCatalog);
+    expect(manager.hasActivePresence('blender', instanceId)).toBe(true);
+    expect(manager.hasActivePresence('blender', movedFirstSession.instanceId)).toBe(true);
+    expect(
+      manager.authorizeDocumentSession(movedLease.leaseId, 'blender', movedFirstSession.instanceId)
+        .hello.sessionId,
+    ).toBe(firstRequest.sessionId);
+  });
+
+  it('cleans the session and target indexes when a v1.1 lease expires', () => {
+    let monotonicNow = 1_000;
+    const manager = createCompanionLeaseManager({
+      monotonicNow: () => monotonicNow,
+      heartbeatIntervalMs: 100,
+      leaseTtlMs: 300,
+    });
+    const request = helloV11();
+    const lease = manager.establish(request, blenderActionCatalog);
+
+    monotonicNow = 1_301;
+    expect(manager.hasActivePresence('blender', request.instanceId)).toBe(false);
+    expectConflict(
+      () => manager.authorizeDocumentSession(lease.leaseId, 'blender', request.instanceId),
+      'lease_not_current',
+    );
+
+    const movedRequest = helloV11({ sessionId: request.sessionId });
+    const movedLease = manager.establish(movedRequest, blenderActionCatalog);
+    expect(manager.hasActivePresence('blender', request.instanceId)).toBe(false);
+    expect(
+      manager.authorizeDocumentSession(movedLease.leaseId, 'blender', movedRequest.instanceId),
+    ).toMatchObject({ hello: { sessionId: request.sessionId } });
+  });
+
+  it('rejects heartbeat contract or document identity mismatch without renewing', () => {
+    let monotonicNow = 1_000;
+    let wallClockNow = Date.parse('2026-08-13T04:00:00.000Z');
+    const manager = createCompanionLeaseManager({
+      monotonicNow: () => monotonicNow,
+      wallClockNow: () => wallClockNow,
+      heartbeatIntervalMs: 100,
+      leaseTtlMs: 300,
+    });
+    const request = helloV11();
+    const lease = manager.establish(request, blenderActionCatalog);
+
+    monotonicNow += 100;
+    wallClockNow += 100;
+    expectConflict(
+      () =>
+        manager.heartbeat({
+          ...heartbeatV11(request, lease.leaseId),
+          documentIncarnationId: randomUUID(),
+        }),
+      'lease_identity_mismatch',
+    );
+    expectConflict(
+      () =>
+        manager.heartbeat({
+          contractVersion: '1.0.0',
+          leaseId: lease.leaseId,
+          adapterId: request.adapterId,
+          instanceId: request.instanceId,
+          sequence: 1,
+        }),
+      'lease_identity_mismatch',
+    );
+    expect(manager.authorize(lease.leaseId, 'blender', request.instanceId).lease.expiresAt).toBe(
+      '2026-08-13T04:00:00.300Z',
+    );
+  });
+
+  it('rejects v1.0 leases for document authorization without inventing identity', () => {
+    const manager = createCompanionLeaseManager();
+    const request = hello();
+    const lease = manager.establish(request, blenderActionCatalog);
+    expectConflict(
+      () => manager.authorizeDocumentSession(lease.leaseId, request.adapterId, request.instanceId),
+      'lease_identity_mismatch',
+    );
+    expect(manager.authorize(lease.leaseId, request.adapterId, request.instanceId).hello).toEqual(
+      request,
+    );
   });
 
   it('rejects historical-only clients because payload version projection is not implemented', () => {

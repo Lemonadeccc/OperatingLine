@@ -4,10 +4,12 @@ import { resolve } from 'node:path';
 
 import {
   companionSessionContractVersion,
+  companionSessionLegacyContractVersion,
   companionHeartbeatRequestSchema,
   companionHeartbeatResponseSchema,
   companionSessionHelloRequestSchema,
   companionSessionHelloResponseSchema,
+  isCompanionSessionV11,
 } from '@operatingline/protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -30,9 +32,9 @@ const capabilities = {
   },
 } as const;
 
-function helloRequest() {
+function helloRequestV10() {
   return {
-    contractVersion: companionSessionContractVersion,
+    contractVersion: companionSessionLegacyContractVersion,
     adapterId: 'blender',
     instanceId: randomUUID(),
     companionVersion: '0.1.0',
@@ -43,9 +45,18 @@ function helloRequest() {
   } as const;
 }
 
-function helloResponse() {
+function helloRequestV11() {
   return {
+    ...helloRequestV10(),
     contractVersion: companionSessionContractVersion,
+    sessionId: randomUUID(),
+    documentIncarnationId: randomUUID(),
+  } as const;
+}
+
+function helloResponseV10() {
+  return {
+    contractVersion: companionSessionLegacyContractVersion,
     leaseId: randomUUID(),
     negotiatedGuideProtocolVersion: '1.5.0',
     catalogVersion: '1.11.0',
@@ -56,72 +67,106 @@ function helloResponse() {
   } as const;
 }
 
+function helloResponseV11() {
+  return {
+    ...helloResponseV10(),
+    contractVersion: companionSessionContractVersion,
+    sessionId: randomUUID(),
+    documentIncarnationId: randomUUID(),
+  } as const;
+}
+
 describe('companion session protocol', () => {
-  it('accepts a strict hello request with unique advertised guide versions', () => {
-    const request = helloRequest();
-    expect(companionSessionHelloRequestSchema.parse(request)).toEqual(request);
+  it('publishes 1.1 as latest while preserving the exact strict 1.0 hello request', () => {
+    expect(companionSessionContractVersion).toBe('1.1.0');
+    expect(companionSessionLegacyContractVersion).toBe('1.0.0');
+
+    const legacy = helloRequestV10();
+    const current = helloRequestV11();
+    expect(companionSessionHelloRequestSchema.parse(legacy)).toEqual(legacy);
+    expect(companionSessionHelloRequestSchema.parse(current)).toEqual(current);
+    expect(isCompanionSessionV11(legacy)).toBe(false);
+    expect(isCompanionSessionV11(current)).toBe(true);
 
     for (const invalid of [
-      { ...request, contractVersion: '1.1.0' },
-      { ...request, instanceId: 'not-a-uuid' },
-      { ...request, companionVersion: 'next' },
-      { ...request, supportedGuideProtocolVersions: [] },
-      { ...request, supportedGuideProtocolVersions: ['1.5.0', '1.5.0'] },
-      { ...request, ambientConsent: true },
+      { ...legacy, sessionId: randomUUID() },
+      { ...legacy, documentIncarnationId: randomUUID() },
+      { ...current, sessionId: undefined },
+      { ...current, documentIncarnationId: undefined },
+      { ...current, sessionId: 'not-a-uuid' },
+      { ...current, ambientConsent: true },
+      { ...current, supportedGuideProtocolVersions: [] },
+      { ...current, supportedGuideProtocolVersions: ['1.5.0', '1.5.0'] },
     ]) {
       expect(companionSessionHelloRequestSchema.safeParse(invalid).success).toBe(false);
     }
   });
 
-  it('requires a hello lease TTL longer than the heartbeat interval', () => {
-    const response = helloResponse();
-    expect(companionSessionHelloResponseSchema.parse(response)).toEqual(response);
+  it('keeps hello responses strict, version-correlated, and TTL constrained', () => {
+    const legacy = helloResponseV10();
+    const current = helloResponseV11();
+    expect(companionSessionHelloResponseSchema.parse(legacy)).toEqual(legacy);
+    expect(companionSessionHelloResponseSchema.parse(current)).toEqual(current);
 
     for (const invalid of [
-      { ...response, negotiatedGuideProtocolVersion: '2.0.0' },
-      { ...response, heartbeatIntervalMs: 0 },
-      { ...response, leaseTtlMs: response.heartbeatIntervalMs },
-      { ...response, leaseTtlMs: response.heartbeatIntervalMs - 1 },
-      { ...response, expiresAt: '2026-08-13T12:00:15' },
-      { ...response, extra: true },
+      { ...legacy, sessionId: randomUUID() },
+      { ...current, documentIncarnationId: undefined },
+      { ...current, leaseTtlMs: current.heartbeatIntervalMs },
+      { ...current, expiresAt: '2026-08-13T12:00:15' },
+      { ...current, extra: true },
     ]) {
       expect(companionSessionHelloResponseSchema.safeParse(invalid).success).toBe(false);
     }
   });
 
-  it('binds heartbeat renewal to the exact lease and companion instance', () => {
-    const request = {
-      contractVersion: companionSessionContractVersion,
+  it('requires and echoes document identity only in 1.1 heartbeat shapes', () => {
+    const legacyRequest = {
+      contractVersion: companionSessionLegacyContractVersion,
       leaseId: randomUUID(),
       adapterId: 'blender',
       instanceId: randomUUID(),
       sequence: 1,
     } as const;
-    const response = {
+    const currentRequest = {
+      ...legacyRequest,
       contractVersion: companionSessionContractVersion,
-      leaseId: request.leaseId,
-      sequence: request.sequence,
+      sessionId: randomUUID(),
+      documentIncarnationId: randomUUID(),
+    } as const;
+    const legacyResponse = {
+      contractVersion: companionSessionLegacyContractVersion,
+      leaseId: legacyRequest.leaseId,
+      sequence: 1,
       expiresAt: '2026-08-13T12:00:20.000Z',
     } as const;
+    const currentResponse = {
+      ...legacyResponse,
+      contractVersion: companionSessionContractVersion,
+      sessionId: currentRequest.sessionId,
+      documentIncarnationId: currentRequest.documentIncarnationId,
+    } as const;
 
-    expect(companionHeartbeatRequestSchema.parse(request)).toEqual(request);
-    expect(companionHeartbeatResponseSchema.parse(response)).toEqual(response);
+    expect(companionHeartbeatRequestSchema.parse(legacyRequest)).toEqual(legacyRequest);
+    expect(companionHeartbeatRequestSchema.parse(currentRequest)).toEqual(currentRequest);
+    expect(companionHeartbeatResponseSchema.parse(legacyResponse)).toEqual(legacyResponse);
+    expect(companionHeartbeatResponseSchema.parse(currentResponse)).toEqual(currentResponse);
 
-    expect(companionHeartbeatRequestSchema.safeParse({ ...request, sequence: 0 }).success).toBe(
-      false,
-    );
-    expect(companionHeartbeatRequestSchema.safeParse({ ...request, adapterId: ' ' }).success).toBe(
-      false,
-    );
-    expect(
-      companionHeartbeatResponseSchema.safeParse({ ...response, leaseId: 'expired' }).success,
-    ).toBe(false);
-    expect(companionHeartbeatResponseSchema.safeParse({ ...response, renewed: true }).success).toBe(
-      false,
-    );
+    for (const [schema, invalid] of [
+      [companionHeartbeatRequestSchema, { ...legacyRequest, sessionId: randomUUID() }],
+      [companionHeartbeatRequestSchema, { ...currentRequest, documentIncarnationId: undefined }],
+      [companionHeartbeatRequestSchema, { ...currentRequest, sequence: 0 }],
+      [
+        companionHeartbeatResponseSchema,
+        { ...legacyResponse, documentIncarnationId: randomUUID() },
+      ],
+      [companionHeartbeatResponseSchema, { ...currentResponse, sessionId: undefined }],
+      [companionHeartbeatResponseSchema, { ...currentResponse, renewed: true }],
+    ] as const) {
+      expect(schema.safeParse(invalid).success).toBe(false);
+    }
   });
 
-  it('generates four strict language-neutral schemas', () => {
+  it('generates four schemas with two strict, non-mixable version branches', () => {
     const filenames = [
       'companion-session-hello-request.schema.json',
       'companion-session-hello-response.schema.json',
@@ -132,27 +177,48 @@ describe('companion session protocol', () => {
     for (const filename of filenames) {
       const schema = JSON.parse(readFileSync(resolve('protocol/schemas/v1', filename), 'utf8')) as {
         $id?: string;
-        additionalProperties?: boolean;
+        oneOf?: JsonSchemaBranch[];
+        anyOf?: JsonSchemaBranch[];
       };
       expect(schema.$id).toBe(
         `https://operatingline.dev/schema/v1/${filename.replace('.schema.json', '.json')}`,
       );
-      expect(schema.additionalProperties).toBe(false);
+      const variants = schema.oneOf ?? schema.anyOf;
+      expect(variants).toHaveLength(2);
+      expect(variants?.map((variant) => variant.properties?.contractVersion?.const)).toEqual([
+        '1.0.0',
+        '1.1.0',
+      ]);
+      for (const variant of variants ?? []) {
+        expect(variant.additionalProperties).toBe(false);
+        const isCurrent = variant.properties?.contractVersion?.const === '1.1.0';
+        expect(variant.required?.includes('sessionId')).toBe(isCurrent);
+        expect(variant.required?.includes('documentIncarnationId')).toBe(isCurrent);
+        expect('sessionId' in (variant.properties ?? {})).toBe(isCurrent);
+        expect('documentIncarnationId' in (variant.properties ?? {})).toBe(isCurrent);
+      }
     }
 
-    const helloRequestSchema = JSON.parse(
+    const helloRequest = JSON.parse(
       readFileSync(
         resolve('protocol/schemas/v1/companion-session-hello-request.schema.json'),
         'utf8',
       ),
-    ) as {
-      properties?: {
-        supportedGuideProtocolVersions?: { uniqueItems?: boolean; minItems?: number };
-      };
-    };
-    expect(helloRequestSchema.properties?.supportedGuideProtocolVersions).toMatchObject({
-      minItems: 1,
-      uniqueItems: true,
-    });
+    ) as { oneOf?: JsonSchemaBranch[] };
+    for (const variant of helloRequest.oneOf ?? []) {
+      expect(variant.properties?.supportedGuideProtocolVersions).toMatchObject({
+        minItems: 1,
+        uniqueItems: true,
+      });
+    }
   });
 });
+
+interface JsonSchemaBranch {
+  readonly properties?: Record<
+    string,
+    { readonly const?: string; readonly minItems?: number; readonly uniqueItems?: boolean }
+  >;
+  readonly required?: string[];
+  readonly additionalProperties?: boolean;
+}
