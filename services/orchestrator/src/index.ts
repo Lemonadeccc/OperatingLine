@@ -7786,7 +7786,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           });
         }
         const sessionFingerprintSha256 = createHash('sha256').update(leaseHeader).digest('hex');
-        const result = actionExecutionCoordinator.complete(
+        const result = await actionExecutionCoordinator.complete(
           parsedResult.data,
           sessionFingerprintSha256,
           (candidate, execution) =>

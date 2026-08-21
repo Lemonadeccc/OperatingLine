@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type { OperatingLineDatabase } from '@operatingline/persistence';
@@ -7,6 +7,7 @@ import {
   companionActionExecutionDeliverySchema,
   companionActionExecutionResultSchema,
   companionActionExecutionStatusSchema,
+  canonicalizeProtocolJsonValue,
   type CompanionActionExecutionCreateRequest,
   type CompanionActionExecutionDelivery,
   type CompanionActionExecutionResult,
@@ -19,12 +20,19 @@ const actionExecutionEventTypes = [
   'blender.action-execution.dispatched',
   'blender.action-execution.completed',
   'blender.action-execution.recovery-required',
+  'blender.action-execution.failure-handoff-completed',
 ] as const;
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const storedActionExecutionEventSchema = z.strictObject({
   execution: companionActionExecutionStatusSchema,
   sessionFingerprintSha256: contentSha256Schema,
+});
+const failureHandoffEventSchema = z.strictObject({
+  handoffId: z.string().min(1).max(256),
+  requestId: z.uuid(),
+  executionContentSha256: contentSha256Schema,
+  handedOffAt: z.iso.datetime({ offset: true }),
 });
 
 type ActionExecutionDatabase = Pick<
@@ -49,6 +57,22 @@ export interface BlenderActionExecutionCoordinatorOptions {
   readonly database: ActionExecutionDatabase;
   readonly now?: () => string;
   readonly createId?: () => string;
+  readonly onTerminalFailure?: (handoff: BlenderTerminalFailureHandoff) => Promise<void>;
+}
+
+export interface BlenderTerminalFailureHandoff {
+  readonly handoffId: string;
+  readonly requestId: string;
+  readonly execution: CompanionActionExecutionStatus;
+  readonly executionContentSha256: string;
+}
+
+function executionContentSha256(execution: CompanionActionExecutionStatus): string {
+  return createHash('sha256').update(canonicalizeProtocolJsonValue(execution)).digest('hex');
+}
+
+function failureHandoffId(execution: CompanionActionExecutionStatus): string {
+  return `blender-terminal-failure:${execution.requestId}:${executionContentSha256(execution)}`;
 }
 
 function sameCreateRequest(
@@ -137,12 +161,31 @@ export function createBlenderActionExecutionCoordinator(
   const now = options.now ?? (() => new Date().toISOString());
   const createId = options.createId ?? randomUUID;
   const executions = new Map<string, StoredActionExecution>();
+  const completedFailureHandoffs = new Set<string>();
+  const pendingFailureHandoffs = new Set<string>();
+  const inFlightFailureHandoffs = new Set<string>();
 
-  for (const event of options.database.listExecutionEventsByTypes(actionExecutionEventTypes)) {
+  const storedEvents = options.database.listExecutionEventsByTypes(actionExecutionEventTypes);
+  for (const event of storedEvents) {
+    if (event.eventType === 'blender.action-execution.failure-handoff-completed') continue;
     const parsed = storedActionExecutionEventSchema.parse(event.payload);
     const previous = executions.get(parsed.execution.requestId);
     assertStoredTransition(previous, parsed);
     executions.set(parsed.execution.requestId, parsed);
+  }
+  for (const event of storedEvents) {
+    if (event.eventType !== 'blender.action-execution.failure-handoff-completed') continue;
+    const handoff = failureHandoffEventSchema.parse(event.payload);
+    const execution = executions.get(handoff.requestId)?.execution;
+    if (
+      execution === undefined ||
+      (execution.status !== 'failed' && execution.status !== 'rejected') ||
+      handoff.executionContentSha256 !== executionContentSha256(execution) ||
+      handoff.handoffId !== failureHandoffId(execution)
+    ) {
+      throw new Error(`Action execution ${handoff.requestId} has invalid failure handoff evidence`);
+    }
+    completedFailureHandoffs.add(handoff.requestId);
   }
 
   const append = (
@@ -172,6 +215,65 @@ export function createBlenderActionExecutionCoordinator(
       }),
     });
   }
+  for (const { execution } of executions.values()) {
+    if (
+      (execution.status === 'failed' || execution.status === 'rejected') &&
+      !completedFailureHandoffs.has(execution.requestId)
+    ) {
+      pendingFailureHandoffs.add(execution.requestId);
+    }
+  }
+
+  const handoffTerminalFailure = async (
+    execution: CompanionActionExecutionStatus,
+  ): Promise<boolean> => {
+    if (completedFailureHandoffs.has(execution.requestId)) return true;
+    pendingFailureHandoffs.add(execution.requestId);
+    if (
+      options.onTerminalFailure === undefined ||
+      inFlightFailureHandoffs.has(execution.requestId)
+    ) {
+      return false;
+    }
+    const executionHash = executionContentSha256(execution);
+    const handoffId = failureHandoffId(execution);
+    inFlightFailureHandoffs.add(execution.requestId);
+    try {
+      await options.onTerminalFailure({
+        handoffId,
+        requestId: execution.requestId,
+        execution,
+        executionContentSha256: executionHash,
+      });
+      const handedOffAt = now();
+      options.database.appendEvent({
+        id: `blender-action-execution:${handoffId}:completed`,
+        eventType: 'blender.action-execution.failure-handoff-completed',
+        payload: {
+          handoffId,
+          requestId: execution.requestId,
+          executionContentSha256: executionHash,
+          handedOffAt,
+        },
+        createdAt: handedOffAt,
+      });
+      completedFailureHandoffs.add(execution.requestId);
+      pendingFailureHandoffs.delete(execution.requestId);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      inFlightFailureHandoffs.delete(execution.requestId);
+    }
+  };
+
+  const retryTerminalFailureHandoffs = async (): Promise<readonly string[]> => {
+    for (const requestId of [...pendingFailureHandoffs]) {
+      const execution = executions.get(requestId)?.execution;
+      if (execution !== undefined) await handoffTerminalFailure(execution);
+    }
+    return [...pendingFailureHandoffs].sort();
+  };
 
   const get = (requestId: string): CompanionActionExecutionStatus | null =>
     executions.get(requestId)?.execution ?? null;
@@ -288,14 +390,14 @@ export function createBlenderActionExecutionCoordinator(
     return delivery;
   };
 
-  const complete = (
+  const complete = async (
     input: CompanionActionExecutionResult,
     sessionFingerprintSha256: string,
     validateResult: (
       result: CompanionActionExecutionResult,
       execution: CompanionActionExecutionStatus,
     ) => void,
-  ): 'accepted' | 'duplicate' => {
+  ): Promise<'accepted' | 'duplicate'> => {
     const result = companionActionExecutionResultSchema.parse(input);
     const fingerprint = contentSha256Schema.parse(sessionFingerprintSha256);
     const stored = executions.get(result.requestId);
@@ -321,7 +423,12 @@ export function createBlenderActionExecutionCoordinator(
           'The action result does not match its accepted delivery and Companion session',
         );
       }
-      if (isDeepStrictEqual(stored.execution.result, result)) return 'duplicate';
+      if (isDeepStrictEqual(stored.execution.result, result)) {
+        if (stored.execution.status === 'failed' || stored.execution.status === 'rejected') {
+          await handoffTerminalFailure(stored.execution);
+        }
+        return 'duplicate';
+      }
       throw new BlenderActionExecutionError(
         'action_execution_result_conflict',
         409,
@@ -349,7 +456,7 @@ export function createBlenderActionExecutionCoordinator(
     }
     validateResult(result, stored.execution);
     const completedAt = now();
-    append('blender.action-execution.completed', {
+    const completed = append('blender.action-execution.completed', {
       sessionFingerprintSha256: fingerprint,
       execution: companionActionExecutionStatusSchema.parse({
         ...stored.execution,
@@ -358,10 +465,22 @@ export function createBlenderActionExecutionCoordinator(
         updatedAt: completedAt,
       }),
     });
+    if (completed.status === 'failed' || completed.status === 'rejected') {
+      await handoffTerminalFailure(completed);
+    }
     return 'accepted';
   };
 
-  return { complete, findForCreate, get, ownsTarget, poll, queue };
+  return {
+    complete,
+    findForCreate,
+    get,
+    ownsTarget,
+    pendingTerminalFailureHandoffs: () => [...pendingFailureHandoffs].sort(),
+    poll,
+    queue,
+    retryTerminalFailureHandoffs,
+  };
 }
 
 export type BlenderActionExecutionCoordinator = ReturnType<
