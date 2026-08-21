@@ -94,7 +94,8 @@
                     "1.2.0",
                     "1.3.0",
                     "1.4.0",
-                    "1.5.0"
+                    "1.5.0",
+                    "1.6.0"
                   ]
                 },
                 "context": {
@@ -191,153 +192,293 @@
                       "type": "object",
                       "properties": {
                         "source": {
-                          "oneOf": [
+                          "anyOf": [
                             {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048,
+                                      "pattern": "^https:\\/\\/[^\\s]+$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "permission_granted"
+                                    },
+                                    "license": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 1000,
+                                      "pattern": "\\S"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "kind": {
-                                  "type": "string",
-                                  "const": "tutorial_video"
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048,
+                                      "pattern": "^https:\\/\\/[^\\s]+$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "license_verified"
+                                    },
+                                    "license": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 1000,
+                                      "pattern": "\\S"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "uri": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 2048,
-                                  "pattern": "^https:\\/\\/[^\\s]+$"
-                                },
-                                "title": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 500,
-                                  "pattern": "\\S"
-                                },
-                                "durationMs": {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "rightsStatus": {
-                                  "type": "string",
-                                  "const": "permission_granted"
-                                },
-                                "license": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 1000,
-                                  "pattern": "\\S"
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2048,
+                                      "pattern": "^https:\\/\\/[^\\s]+$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "public_domain"
+                                    },
+                                    "license": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 1000,
+                                      "pattern": "\\S"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "id",
-                                "kind",
-                                "uri",
-                                "title",
-                                "durationMs",
-                                "rightsStatus"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "pattern": "^operatingline-media:\\/\\/sha256\\/[a-f0-9]{64}$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "permission_granted"
+                                    },
+                                    "license": {
+                                      "not": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "kind": {
-                                  "type": "string",
-                                  "const": "tutorial_video"
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "pattern": "^operatingline-media:\\/\\/sha256\\/[a-f0-9]{64}$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "license_verified"
+                                    },
+                                    "license": {
+                                      "not": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 },
-                                "uri": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 2048,
-                                  "pattern": "^https:\\/\\/[^\\s]+$"
-                                },
-                                "title": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 500,
-                                  "pattern": "\\S"
-                                },
-                                "durationMs": {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "rightsStatus": {
-                                  "type": "string",
-                                  "const": "license_verified"
-                                },
-                                "license": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 1000,
-                                  "pattern": "\\S"
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "tutorial_video"
+                                    },
+                                    "uri": {
+                                      "type": "string",
+                                      "pattern": "^operatingline-media:\\/\\/sha256\\/[a-f0-9]{64}$"
+                                    },
+                                    "title": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500,
+                                      "pattern": "\\S"
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "rightsStatus": {
+                                      "type": "string",
+                                      "const": "public_domain"
+                                    },
+                                    "license": {
+                                      "not": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "kind",
+                                    "uri",
+                                    "title",
+                                    "durationMs",
+                                    "rightsStatus"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "id",
-                                "kind",
-                                "uri",
-                                "title",
-                                "durationMs",
-                                "rightsStatus"
-                              ],
-                              "additionalProperties": false
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
-                                },
-                                "kind": {
-                                  "type": "string",
-                                  "const": "tutorial_video"
-                                },
-                                "uri": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 2048,
-                                  "pattern": "^https:\\/\\/[^\\s]+$"
-                                },
-                                "title": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 500,
-                                  "pattern": "\\S"
-                                },
-                                "durationMs": {
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "rightsStatus": {
-                                  "type": "string",
-                                  "const": "public_domain"
-                                },
-                                "license": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 1000,
-                                  "pattern": "\\S"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "kind",
-                                "uri",
-                                "title",
-                                "durationMs",
-                                "rightsStatus"
-                              ],
-                              "additionalProperties": false
+                              ]
                             }
                           ]
                         },
@@ -658,9 +799,233 @@
                                   "type": "string",
                                   "pattern": "^[a-f0-9]{64}$"
                                 },
+                                "source": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "authorized_youtube_download"
+                                        },
+                                        "videoId": {
+                                          "type": "string",
+                                          "minLength": 11,
+                                          "maxLength": 11,
+                                          "pattern": "^[A-Za-z0-9_-]{11}$"
+                                        },
+                                        "sourceIdentitySha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "contentSha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "rightsBasis": {
+                                          "type": "string",
+                                          "enum": [
+                                            "rights_holder_permission",
+                                            "license_verified",
+                                            "public_domain_verified"
+                                          ]
+                                        },
+                                        "rightsValidation": {
+                                          "type": "object",
+                                          "properties": {
+                                            "authorityId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 180,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                            },
+                                            "receiptContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityKind": {
+                                              "type": "string",
+                                              "const": "media_rights_authority"
+                                            },
+                                            "sideEffect": {
+                                              "type": "string",
+                                              "const": "rights_validation"
+                                            }
+                                          },
+                                          "required": [
+                                            "authorityId",
+                                            "receiptContentSha256",
+                                            "authorityContentSha256",
+                                            "authorityKind",
+                                            "sideEffect"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "platformDownloadValidation": {
+                                          "type": "object",
+                                          "properties": {
+                                            "authorityId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 180,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                            },
+                                            "receiptContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityKind": {
+                                              "type": "string",
+                                              "const": "youtube_platform_authority"
+                                            },
+                                            "sideEffect": {
+                                              "type": "string",
+                                              "const": "youtube_media_download"
+                                            }
+                                          },
+                                          "required": [
+                                            "authorityId",
+                                            "receiptContentSha256",
+                                            "authorityContentSha256",
+                                            "authorityKind",
+                                            "sideEffect"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "videoId",
+                                        "sourceIdentitySha256",
+                                        "contentSha256",
+                                        "rightsBasis",
+                                        "rightsValidation",
+                                        "platformDownloadValidation"
+                                      ],
+                                      "additionalProperties": false,
+                                      "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "const": "user_supplied_local_file"
+                                        },
+                                        "sourceIdentitySha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "contentSha256": {
+                                          "type": "string",
+                                          "pattern": "^[a-f0-9]{64}$"
+                                        },
+                                        "rightsBasis": {
+                                          "type": "string",
+                                          "enum": [
+                                            "rights_holder_permission",
+                                            "license_verified",
+                                            "public_domain_verified"
+                                          ]
+                                        },
+                                        "importValidation": {
+                                          "type": "object",
+                                          "properties": {
+                                            "authorityId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 180,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                            },
+                                            "receiptContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityKind": {
+                                              "type": "string",
+                                              "const": "local_import_authority"
+                                            },
+                                            "sideEffect": {
+                                              "type": "string",
+                                              "const": "local_media_import"
+                                            }
+                                          },
+                                          "required": [
+                                            "authorityId",
+                                            "receiptContentSha256",
+                                            "authorityContentSha256",
+                                            "authorityKind",
+                                            "sideEffect"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "rightsValidation": {
+                                          "type": "object",
+                                          "properties": {
+                                            "authorityId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 180,
+                                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                            },
+                                            "receiptContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityContentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "authorityKind": {
+                                              "type": "string",
+                                              "const": "media_rights_authority"
+                                            },
+                                            "sideEffect": {
+                                              "type": "string",
+                                              "const": "rights_validation"
+                                            }
+                                          },
+                                          "required": [
+                                            "authorityId",
+                                            "receiptContentSha256",
+                                            "authorityContentSha256",
+                                            "authorityKind",
+                                            "sideEffect"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "sourceIdentitySha256",
+                                        "contentSha256",
+                                        "rightsBasis",
+                                        "importValidation",
+                                        "rightsValidation"
+                                      ],
+                                      "additionalProperties": false,
+                                      "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+                                    }
+                                  ]
+                                },
                                 "analysisProfile": {
                                   "type": "string",
-                                  "const": "youtube_tutorial_evidence_v1"
+                                  "enum": [
+                                    "youtube_tutorial_evidence_v1",
+                                    "local_tutorial_evidence_v1"
+                                  ]
                                 },
                                 "completedAt": {
                                   "type": "string",
@@ -763,6 +1128,227 @@
                                     "rootSha256": {
                                       "type": "string",
                                       "pattern": "^[a-f0-9]{64}$"
+                                    },
+                                    "source": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "const": "authorized_youtube_download"
+                                            },
+                                            "videoId": {
+                                              "type": "string",
+                                              "minLength": 11,
+                                              "maxLength": 11,
+                                              "pattern": "^[A-Za-z0-9_-]{11}$"
+                                            },
+                                            "sourceIdentitySha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "contentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "rightsBasis": {
+                                              "type": "string",
+                                              "enum": [
+                                                "rights_holder_permission",
+                                                "license_verified",
+                                                "public_domain_verified"
+                                              ]
+                                            },
+                                            "rightsValidation": {
+                                              "type": "object",
+                                              "properties": {
+                                                "authorityId": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 180,
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                },
+                                                "receiptContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityKind": {
+                                                  "type": "string",
+                                                  "const": "media_rights_authority"
+                                                },
+                                                "sideEffect": {
+                                                  "type": "string",
+                                                  "const": "rights_validation"
+                                                }
+                                              },
+                                              "required": [
+                                                "authorityId",
+                                                "receiptContentSha256",
+                                                "authorityContentSha256",
+                                                "authorityKind",
+                                                "sideEffect"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "platformDownloadValidation": {
+                                              "type": "object",
+                                              "properties": {
+                                                "authorityId": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 180,
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                },
+                                                "receiptContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityKind": {
+                                                  "type": "string",
+                                                  "const": "youtube_platform_authority"
+                                                },
+                                                "sideEffect": {
+                                                  "type": "string",
+                                                  "const": "youtube_media_download"
+                                                }
+                                              },
+                                              "required": [
+                                                "authorityId",
+                                                "receiptContentSha256",
+                                                "authorityContentSha256",
+                                                "authorityKind",
+                                                "sideEffect"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "videoId",
+                                            "sourceIdentitySha256",
+                                            "contentSha256",
+                                            "rightsBasis",
+                                            "rightsValidation",
+                                            "platformDownloadValidation"
+                                          ],
+                                          "additionalProperties": false,
+                                          "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "const": "user_supplied_local_file"
+                                            },
+                                            "sourceIdentitySha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "contentSha256": {
+                                              "type": "string",
+                                              "pattern": "^[a-f0-9]{64}$"
+                                            },
+                                            "rightsBasis": {
+                                              "type": "string",
+                                              "enum": [
+                                                "rights_holder_permission",
+                                                "license_verified",
+                                                "public_domain_verified"
+                                              ]
+                                            },
+                                            "importValidation": {
+                                              "type": "object",
+                                              "properties": {
+                                                "authorityId": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 180,
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                },
+                                                "receiptContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityKind": {
+                                                  "type": "string",
+                                                  "const": "local_import_authority"
+                                                },
+                                                "sideEffect": {
+                                                  "type": "string",
+                                                  "const": "local_media_import"
+                                                }
+                                              },
+                                              "required": [
+                                                "authorityId",
+                                                "receiptContentSha256",
+                                                "authorityContentSha256",
+                                                "authorityKind",
+                                                "sideEffect"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "rightsValidation": {
+                                              "type": "object",
+                                              "properties": {
+                                                "authorityId": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 180,
+                                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                },
+                                                "receiptContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityContentSha256": {
+                                                  "type": "string",
+                                                  "pattern": "^[a-f0-9]{64}$"
+                                                },
+                                                "authorityKind": {
+                                                  "type": "string",
+                                                  "const": "media_rights_authority"
+                                                },
+                                                "sideEffect": {
+                                                  "type": "string",
+                                                  "const": "rights_validation"
+                                                }
+                                              },
+                                              "required": [
+                                                "authorityId",
+                                                "receiptContentSha256",
+                                                "authorityContentSha256",
+                                                "authorityKind",
+                                                "sideEffect"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "sourceIdentitySha256",
+                                            "contentSha256",
+                                            "rightsBasis",
+                                            "importValidation",
+                                            "rightsValidation"
+                                          ],
+                                          "additionalProperties": false,
+                                          "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+                                        }
+                                      ]
                                     }
                                   },
                                   "required": [
@@ -984,7 +1570,6 @@
                                 "analysisFingerprint",
                                 "analysisProfile",
                                 "completedAt",
-                                "rightsAuthorization",
                                 "manifest",
                                 "tools",
                                 "segmentation",
@@ -1288,6 +1873,171 @@
                                     },
                                     "required": [
                                       "rightsAuthorization"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "localMediaAnalysis"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "transcript"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "source": {
+                                "properties": {
+                                  "rightsStatus": {
+                                    "const": "public_domain"
+                                  }
+                                },
+                                "required": [
+                                  "rightsStatus"
+                                ],
+                                "not": {
+                                  "required": [
+                                    "license"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "source"
+                            ]
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "transcript": {
+                                "properties": {
+                                  "localMediaAnalysis": {
+                                    "properties": {
+                                      "source": {
+                                        "properties": {
+                                          "rightsBasis": {
+                                            "const": "rights_holder_permission"
+                                          }
+                                        },
+                                        "required": [
+                                          "rightsBasis"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "source"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "localMediaAnalysis"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "transcript"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "source": {
+                                "properties": {
+                                  "rightsStatus": {
+                                    "const": "permission_granted"
+                                  }
+                                },
+                                "required": [
+                                  "rightsStatus"
+                                ],
+                                "not": {
+                                  "required": [
+                                    "license"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "source"
+                            ]
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "transcript": {
+                                "properties": {
+                                  "localMediaAnalysis": {
+                                    "properties": {
+                                      "source": {
+                                        "properties": {
+                                          "rightsBasis": {
+                                            "const": "license_verified"
+                                          }
+                                        },
+                                        "required": [
+                                          "rightsBasis"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "source"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "localMediaAnalysis"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "transcript"
+                            ]
+                          },
+                          "then": {
+                            "properties": {
+                              "source": {
+                                "properties": {
+                                  "rightsStatus": {
+                                    "const": "license_verified"
+                                  }
+                                },
+                                "required": [
+                                  "rightsStatus"
+                                ],
+                                "not": {
+                                  "required": [
+                                    "license"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "source"
+                            ]
+                          }
+                        },
+                        {
+                          "if": {
+                            "properties": {
+                              "transcript": {
+                                "properties": {
+                                  "localMediaAnalysis": {
+                                    "properties": {
+                                      "source": {
+                                        "properties": {
+                                          "rightsBasis": {
+                                            "const": "public_domain_verified"
+                                          }
+                                        },
+                                        "required": [
+                                          "rightsBasis"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "source"
                                     ]
                                   }
                                 },
@@ -3988,7 +4738,7 @@
                   "if": {
                     "properties": {
                       "formatVersion": {
-                        "const": "1.5.0"
+                        "const": "1.6.0"
                       }
                     },
                     "required": [
@@ -4005,6 +4755,18 @@
                                 "properties": {
                                   "origin": {
                                     "const": "local_media_analysis"
+                                  },
+                                  "localMediaAnalysis": {
+                                    "required": [
+                                      "source"
+                                    ],
+                                    "properties": {
+                                      "manifest": {
+                                        "required": [
+                                          "source"
+                                        ]
+                                      }
+                                    }
                                   }
                                 },
                                 "required": [
@@ -5321,7 +6083,8 @@
                     "1.2.0",
                     "1.3.0",
                     "1.4.0",
-                    "1.5.0"
+                    "1.5.0",
+                    "1.6.0"
                   ]
                 },
                 "packetContentSha256": {

@@ -2,7 +2,7 @@ import { lstat, mkdir, readdir } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { ProcedureTutorialMediaAnalysisRequest } from '@operatingline/protocol';
+import type { ProcedureTutorialMediaLegacyAnalysisRequest } from '@operatingline/protocol';
 
 import type { TutorialMediaProcessRunner } from './tutorial-media-process.js';
 import {
@@ -52,7 +52,7 @@ export interface YouTubeMediaDownload {
 
 export interface YouTubeMediaSource {
   download(input: {
-    readonly request: ProcedureTutorialMediaAnalysisRequest;
+    readonly request: ProcedureTutorialMediaLegacyAnalysisRequest;
     readonly signal?: AbortSignal;
   }): Promise<YouTubeMediaDownload>;
 }

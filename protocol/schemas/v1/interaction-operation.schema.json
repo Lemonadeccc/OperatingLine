@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "invoke_menu"
+        },
+        "menuHostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "menuHostId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "select_menu_item"
+        },
+        "menuHostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "itemOperatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "menuHostId",
+        "itemOperatorId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "send_shortcut"
+        },
+        "shortcutId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "shortcutId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "open_adjust_last_operation"
+        },
+        "expectedOperatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "expectedOperatorId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "set_f9_control"
+        },
+        "expectedOperatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "controlHostId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "typedValue": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            {
+              "type": "number",
+              "minimum": -1000000000000,
+              "maximum": 1000000000000
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "minItems": 1,
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": -1000000000000,
+                "maximum": 1000000000000
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "expectedOperatorId",
+        "controlHostId",
+        "typedValue"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "confirm_f9"
+        },
+        "expectedOperatorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "expectedOperatorId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "assert_interaction_state"
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "editor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "mode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "selection": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        },
+        "modalState": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+        }
+      },
+      "required": [
+        "kind",
+        "workspace",
+        "editor",
+        "mode",
+        "selection",
+        "modalState"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$id": "https://operatingline.dev/schema/v1/interaction-operation.json"
+}

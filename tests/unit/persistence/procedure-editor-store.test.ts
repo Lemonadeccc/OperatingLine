@@ -59,10 +59,13 @@ function commit(
 
 function commitFromWorker(path: string, input: ProcedureTreeRevisionCommitInput): Promise<string> {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(
-      `
-        const { parentPort, workerData } = require('node:worker_threads');
-        import('@operatingline/persistence').then(({ openOperatingLineDatabase }) => {
+    const persistenceModuleUrl = new URL(
+      '../../../packages/persistence/src/index.ts',
+      import.meta.url,
+    ).href;
+    const source = `
+        import { parentPort, workerData } from 'node:worker_threads';
+        import(workerData.persistenceModuleUrl).then(({ openOperatingLineDatabase }) => {
           const database = openOperatingLineDatabase(workerData.path);
           try {
             parentPort.postMessage(database.commitProcedureTreeRevision(workerData.input).result);
@@ -70,9 +73,11 @@ function commitFromWorker(path: string, input: ProcedureTreeRevisionCommitInput)
             database.close();
           }
         }).catch((error) => parentPort.postMessage({ error: String(error) }));
-      `,
-      { eval: true, workerData: { path, input } },
-    );
+      `;
+    const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(source)}`), {
+      execArgv: ['--import', 'tsx'],
+      workerData: { path, input, persistenceModuleUrl },
+    });
     worker.once('message', (result: unknown) => {
       if (typeof result === 'object' && result !== null && 'error' in result) {
         reject(new Error(String((result as { error: unknown }).error)));

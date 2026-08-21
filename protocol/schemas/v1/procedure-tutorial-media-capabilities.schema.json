@@ -5,8 +5,16 @@
       "type": "object",
       "properties": {
         "formatVersion": {
-          "type": "string",
-          "const": "1.0.0"
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "1.0.0"
+            },
+            {
+              "type": "string",
+              "const": "1.1.0"
+            }
+          ]
         },
         "serviceId": {
           "type": "string",
@@ -52,8 +60,16 @@
       "type": "object",
       "properties": {
         "formatVersion": {
-          "type": "string",
-          "const": "1.0.0"
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "1.0.0"
+            },
+            {
+              "type": "string",
+              "const": "1.1.0"
+            }
+          ]
         },
         "serviceId": {
           "type": "string",

@@ -3,12 +3,16 @@ import { randomUUID } from 'node:crypto';
 import type { ExecutionEventInput, StoredExecutionEvent } from '@operatingline/persistence';
 import {
   procedureTutorialMediaAnalysisRequestSchema,
-  procedureTutorialMediaAnalysisResultSchema,
-  procedureTutorialMediaJobStatusSchema,
+  procedureTutorialMediaLegacyAnalysisRequestSchema,
+  procedureTutorialMediaLegacyAnalysisResultSchema,
+  procedureTutorialMediaLegacyJobStatusSchema,
+  procedureTutorialMediaLegacyResumeRequestSchema,
   procedureTutorialMediaResumeRequestSchema,
   type ProcedureTutorialMediaAnalysisRequest,
   type ProcedureTutorialMediaAnalysisResult,
   type ProcedureTutorialMediaJobStatus,
+  type ProcedureTutorialMediaLegacyAnalysisRequest,
+  type ProcedureTutorialMediaLegacyJobStatus,
   type ProcedureTutorialMediaResumeRequest,
   type ProcedureTutorialMediaStage,
 } from '@operatingline/protocol';
@@ -45,7 +49,7 @@ const requestedPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
   jobId: z.uuid(),
-  request: procedureTutorialMediaAnalysisRequestSchema,
+  request: procedureTutorialMediaLegacyAnalysisRequestSchema,
 });
 const stagePayloadSchema = z.strictObject({
   attemptId: z.uuid(),
@@ -60,22 +64,22 @@ const stagePayloadSchema = z.strictObject({
 const terminalPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
-  status: procedureTutorialMediaJobStatusSchema,
+  status: procedureTutorialMediaLegacyJobStatusSchema,
 });
 const resumedPayloadSchema = z.strictObject({
   attemptId: z.uuid(),
   fingerprint: fingerprintSchema,
   occurredAt: z.iso.datetime({ offset: true }),
-  request: procedureTutorialMediaResumeRequestSchema,
+  request: procedureTutorialMediaLegacyResumeRequestSchema,
 });
 
 interface JobState {
-  readonly request: ProcedureTutorialMediaAnalysisRequest;
+  readonly request: ProcedureTutorialMediaLegacyAnalysisRequest;
   readonly fingerprint: string;
   readonly jobId: string;
   readonly acceptedAt: string;
   attemptId: string;
-  status: ProcedureTutorialMediaJobStatus;
+  status: ProcedureTutorialMediaLegacyJobStatus;
   completedStages: ProcedureTutorialMediaStage[];
   currentStage: ProcedureTutorialMediaStage;
   controller: AbortController | undefined;
@@ -103,6 +107,7 @@ export type ProcedureTutorialMediaCoordinatorErrorCode =
   | 'capacity_exceeded'
   | 'unsupported_locale'
   | 'analysis_window_exceeded'
+  | 'source_not_supported'
   | 'integrity_failed'
   | 'persistence_failed';
 
@@ -125,9 +130,11 @@ export class ProcedureTutorialMediaCoordinatorError extends Error {
                     ? 'The tutorial media analysis locale is unsupported.'
                     : code === 'analysis_window_exceeded'
                       ? 'The tutorial media analysis window exceeds the configured limit.'
-                      : code === 'integrity_failed'
-                        ? 'Restored tutorial media completion evidence failed integrity verification.'
-                        : 'Tutorial media job evidence could not be persisted.',
+                      : code === 'source_not_supported'
+                        ? 'The current media source contract is not executable in this Phase 0 runtime.'
+                        : code === 'integrity_failed'
+                          ? 'Restored tutorial media completion evidence failed integrity verification.'
+                          : 'Tutorial media job evidence could not be persisted.',
     );
     this.name = 'ProcedureTutorialMediaCoordinatorError';
   }
@@ -150,6 +157,7 @@ export function procedureTutorialMediaCoordinatorHttpStatus(
       return 409;
     case 'unsupported_locale':
     case 'analysis_window_exceeded':
+    case 'source_not_supported':
       return 422;
     case 'capacity_exceeded':
       return 429;
@@ -336,7 +344,7 @@ function restoreJobs(
       ) {
         throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
       }
-      const accepted = procedureTutorialMediaJobStatusSchema.parse({
+      const accepted = procedureTutorialMediaLegacyJobStatusSchema.parse({
         acceptedAt: payload.acceptedAt,
         formatVersion: payload.request.formatVersion,
         jobId: payload.jobId,
@@ -381,7 +389,7 @@ function restoreJobs(
           throw new ProcedureTutorialMediaCoordinatorError('persistence_failed');
         }
         job.currentStage = payload.stage;
-        job.status = procedureTutorialMediaJobStatusSchema.parse({
+        job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
           completedStages: job.completedStages,
           currentStage: payload.stage,
           formatVersion: job.request.formatVersion,
@@ -457,7 +465,7 @@ function restoreJobs(
     job.attemptId = resumed.attemptId;
     job.completedStages = [];
     job.currentStage = 'download';
-    job.status = procedureTutorialMediaJobStatusSchema.parse({
+    job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
       acceptedAt: job.acceptedAt,
       formatVersion: job.request.formatVersion,
       jobId: job.jobId,
@@ -473,7 +481,7 @@ function restoreJobs(
       const occurredAt = now();
       const stage = 'download';
       job.completedStages = [];
-      job.status = procedureTutorialMediaJobStatusSchema.parse({
+      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
         completedStages: job.completedStages,
         error: {
           code: 'cancelled',
@@ -540,7 +548,7 @@ export function createProcedureTutorialMediaCoordinator(
     }
   }
 
-  function publishTerminal(job: JobState, status: ProcedureTutorialMediaJobStatus): void {
+  function publishTerminal(job: JobState, status: ProcedureTutorialMediaLegacyJobStatus): void {
     const suffix =
       status.status === 'completed'
         ? 'completed'
@@ -558,7 +566,7 @@ export function createProcedureTutorialMediaCoordinator(
     } catch {
       const failedAt = now();
       job.completedStages = [];
-      job.status = procedureTutorialMediaJobStatusSchema.parse({
+      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
         completedStages: job.completedStages,
         error: {
           code: 'internal_error',
@@ -588,7 +596,7 @@ export function createProcedureTutorialMediaCoordinator(
             const occurredAt = now();
             if (update.state === 'started') {
               job.currentStage = update.stage;
-              job.status = procedureTutorialMediaJobStatusSchema.parse({
+              job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
                 completedStages: job.completedStages,
                 currentStage: update.stage,
                 formatVersion: job.request.formatVersion,
@@ -621,11 +629,11 @@ export function createProcedureTutorialMediaCoordinator(
         const occurredAt = now();
         publishTerminal(
           job,
-          procedureTutorialMediaJobStatusSchema.parse({
+          procedureTutorialMediaLegacyJobStatusSchema.parse({
             formatVersion: job.request.formatVersion,
             jobId: job.jobId,
             requestId: job.request.requestId,
-            result: procedureTutorialMediaAnalysisResultSchema.parse(result),
+            result: procedureTutorialMediaLegacyAnalysisResultSchema.parse(result),
             status: 'completed',
             updatedAt: occurredAt,
           }),
@@ -638,7 +646,7 @@ export function createProcedureTutorialMediaCoordinator(
           job.completedStages = [];
           publishTerminal(
             job,
-            procedureTutorialMediaJobStatusSchema.parse({
+            procedureTutorialMediaLegacyJobStatusSchema.parse({
               completedStages: job.completedStages,
               error: failure,
               formatVersion: job.request.formatVersion,
@@ -653,7 +661,7 @@ export function createProcedureTutorialMediaCoordinator(
         } else {
           publishTerminal(
             job,
-            procedureTutorialMediaJobStatusSchema.parse({
+            procedureTutorialMediaLegacyJobStatusSchema.parse({
               completedStages: job.completedStages,
               error: failure,
               failedAt: occurredAt,
@@ -696,7 +704,11 @@ export function createProcedureTutorialMediaCoordinator(
     },
     create(requestInput) {
       requireReady();
-      const request = procedureTutorialMediaAnalysisRequestSchema.parse(requestInput);
+      const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.parse(requestInput);
+      if (parsedRequest.formatVersion !== '1.0.0') {
+        throw new ProcedureTutorialMediaCoordinatorError('source_not_supported');
+      }
+      const request = procedureTutorialMediaLegacyAnalysisRequestSchema.parse(parsedRequest);
       if (request.analysisWindow.endMs - request.analysisWindow.startMs > maximumAnalysisWindowMs) {
         throw new ProcedureTutorialMediaCoordinatorError('analysis_window_exceeded');
       }
@@ -718,7 +730,7 @@ export function createProcedureTutorialMediaCoordinator(
       let jobId = randomUUID();
       while (jobId === request.requestId) jobId = randomUUID();
       const acceptedAt = now();
-      const status = procedureTutorialMediaJobStatusSchema.parse({
+      const status = procedureTutorialMediaLegacyJobStatusSchema.parse({
         acceptedAt,
         formatVersion: request.formatVersion,
         jobId,
@@ -766,7 +778,14 @@ export function createProcedureTutorialMediaCoordinator(
     },
     resume(requestInput) {
       requireReady();
-      const request = procedureTutorialMediaResumeRequestSchema.parse(requestInput);
+      if (requestInput.formatVersion === '1.1.0') {
+        const currentRequest = procedureTutorialMediaResumeRequestSchema.parse(requestInput);
+        const currentJob = jobs.get(currentRequest.requestId);
+        if (currentJob === undefined || currentJob.jobId !== currentRequest.jobId)
+          throw new ProcedureTutorialMediaCoordinatorError('not_found');
+        throw new ProcedureTutorialMediaCoordinatorError('source_not_supported');
+      }
+      const request = procedureTutorialMediaLegacyResumeRequestSchema.parse(requestInput);
       const job = jobs.get(request.requestId);
       if (job === undefined || job.jobId !== request.jobId)
         throw new ProcedureTutorialMediaCoordinatorError('not_found');
@@ -790,7 +809,7 @@ export function createProcedureTutorialMediaCoordinator(
       job.attemptId = attemptId;
       job.completedStages = [];
       job.currentStage = 'download';
-      job.status = procedureTutorialMediaJobStatusSchema.parse({
+      job.status = procedureTutorialMediaLegacyJobStatusSchema.parse({
         acceptedAt: job.acceptedAt,
         formatVersion: job.request.formatVersion,
         jobId: job.jobId,

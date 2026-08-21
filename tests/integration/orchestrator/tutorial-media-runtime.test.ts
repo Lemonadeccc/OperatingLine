@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   procedureTutorialMediaAnalysisRequestSchema,
-  procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaAnalysisStartRequestSchema,
   procedureTutorialMediaCapabilitiesSchema,
-  type ProcedureTutorialMediaAnalysisResult,
-  type ProcedureTutorialMediaArtifactRef,
   type ProcedureTutorialMediaCapabilities,
 } from '@operatingline/protocol';
 import {
@@ -61,9 +59,11 @@ function availableCapabilities() {
 
 function blockingAvailableRuntime(
   onClose: () => void = () => undefined,
+  onAnalyze: () => void = () => undefined,
 ): ProcedureTutorialMediaRuntime {
   const pipeline: ProcedureTutorialMediaPipeline = {
     async analyze(_request, _jobId, options) {
+      onAnalyze();
       return await new Promise<never>((_resolve, reject) => {
         const abort = () => reject(new DOMException('aborted', 'AbortError'));
         if (options?.signal?.aborted) abort();
@@ -106,193 +106,67 @@ const analysisRequest = procedureTutorialMediaAnalysisRequestSchema.parse({
   videoId: 'abcdefghijk',
 });
 
-const mediaCompletedAt = '2026-08-20T00:00:00.000Z';
-const mediaSourceSha256 = '1'.repeat(64);
-
-function mediaArtifact(
-  role: ProcedureTutorialMediaArtifactRef['role'],
-  mediaType: ProcedureTutorialMediaArtifactRef['mediaType'],
-  digit: string,
-): ProcedureTutorialMediaArtifactRef {
-  const sha256 = digit.repeat(64);
-  return {
-    uri: `operatingline-media://sha256/${sha256}`,
-    role,
-    mediaType,
-    sha256,
-    bytes: 10,
-    ...(role === 'source_video' ? {} : { sourceSha256: mediaSourceSha256 }),
-    createdAt: mediaCompletedAt,
-  };
-}
-
-function completedAnalysis(
-  request: typeof analysisRequest,
-  jobId: string,
-): ProcedureTutorialMediaAnalysisResult {
-  const source = mediaArtifact('source_video', 'video/mp4', '1');
-  const audio = mediaArtifact('audio_track', 'audio/wav', '2');
-  const frame = mediaArtifact('evidence_frame', 'image/png', '3');
-  const transcript = mediaArtifact('asr_transcript', 'application/json', '4');
-  const observations = mediaArtifact('ocr_observations', 'application/json', '5');
-  const manifest = mediaArtifact('analysis_manifest', 'application/json', '6');
-  const asrId = '11111111-1111-4111-8111-111111111112';
-  const frameId = '22222222-2222-4222-8222-222222222223';
-  const ocrId = '33333333-3333-4333-8333-333333333334';
-  const uiId = '44444444-4444-4444-8444-444444444445';
-  const shortcutId = '55555555-5555-4555-8555-555555555556';
-  return procedureTutorialMediaAnalysisResultSchema.parse({
-    formatVersion: request.formatVersion,
-    requestId: request.requestId,
-    jobId,
-    videoId: request.videoId,
-    analysisProfile: request.analysisProfile,
-    locale: request.locale,
-    analysisWindow: request.analysisWindow,
-    completedStages: request.requestedStages,
-    artifacts: [source, audio, frame, transcript, observations, manifest],
-    tools: [
-      {
-        toolId: 'fixture.asr',
-        toolVersion: '1.0.0',
-        invocationContractVersion: '1.0.0',
-        executableSha256: '7'.repeat(64),
-        versionOutputSha256: '8'.repeat(64),
-        normalizedInvocationSha256: '9'.repeat(64),
-        configurationSha256: 'a'.repeat(64),
-        environmentPolicy: 'local_inference_no_network',
-        modelSha256: 'b'.repeat(64),
-      },
-    ],
-    probe: {
-      sourceArtifactUri: source.uri,
-      container: 'mp4',
-      durationMs: request.analysisWindow.endMs,
-      video: {
-        codec: 'h264',
-        width: 1280,
-        height: 720,
-        frameRate: 30,
-        frameCount: 300,
-      },
-      audio: { codec: 'aac', channels: 2, sampleRateHz: 48_000 },
+const currentAnalysisRequest = procedureTutorialMediaAnalysisStartRequestSchema.parse({
+  formatVersion: '1.1.0',
+  requestId: analysisRequest.requestId,
+  source: {
+    kind: 'authorized_youtube_download',
+    videoId: analysisRequest.videoId,
+    sourceIdentitySha256: '0'.repeat(64),
+    contentSha256: '1'.repeat(64),
+    rightsBasis: 'rights_holder_permission',
+    platformDownloadValidation: {
+      authorityId: 'youtube-platform-authority-fixture',
+      authorityKind: 'youtube_platform_authority',
+      sideEffect: 'youtube_media_download',
+      receiptContentSha256: '2'.repeat(64),
+      authorityContentSha256: '3'.repeat(64),
     },
-    asrSegments: [
-      {
-        segmentId: asrId,
-        order: 1,
-        startMs: 0,
-        endMs: 10_000,
-        text: 'Add a UV sphere, move it, scale it, and name the eye.',
-        locale: 'en',
-        confidence: 0.94,
-        metrics: {
-          averageLogProbability: -0.1,
-          noSpeechProbability: 0.01,
-          compressionRatio: 1,
-        },
-      },
-    ],
-    frames: [{ frameId, order: 1, timestampMs: 5_000, artifact: frame }],
-    ocrCandidates: [
-      {
-        candidateId: ocrId,
-        frameId,
-        bounds: { x: 0, y: 0, width: 0.2, height: 0.1 },
-        confidence: 0.8,
-        text: 'UV Sphere',
-        locale: 'en',
-      },
-    ],
-    uiCandidates: [
-      {
-        candidateId: uiId,
-        frameId,
-        bounds: { x: 0.2, y: 0.2, width: 0.2, height: 0.1 },
-        confidence: 0.82,
-        role: 'menu_item',
-        label: 'UV Sphere',
-      },
-    ],
-    shortcutCandidates: [
-      {
-        candidateId: shortcutId,
-        frameId,
-        timestampMs: 5_000,
-        keys: ['Shift', 'A'],
-        confidence: 0.85,
-      },
-    ],
-    semanticSegments: [
-      {
-        segmentId: '66666666-6666-4666-8666-666666666667',
-        order: 1,
-        startMs: 0,
-        endMs: 10_000,
-        canonicalDescription: 'Create and adjust the eye sphere.',
-        confidence: 0.9,
-        asrSegmentIds: [asrId],
-        ocrCandidateIds: [ocrId],
-        uiCandidateIds: [uiId],
-        shortcutCandidateIds: [shortcutId],
-        evidence: [{ artifactUri: frame.uri, frameId, timestampMs: 5_000 }],
-      },
-    ],
-    segmentation: {
-      algorithmId: 'operatingline.deterministic_tutorial_segmentation',
-      algorithmVersion: '1.0.0',
-      inputSha256: 'c'.repeat(64),
-      outputSha256: 'd'.repeat(64),
+    rightsValidation: {
+      authorityId: 'rights-authority-fixture',
+      authorityKind: 'media_rights_authority',
+      sideEffect: 'rights_validation',
+      receiptContentSha256: '4'.repeat(64),
+      authorityContentSha256: '5'.repeat(64),
     },
-    sideEffects: {
-      networkFetched: true,
-      mediaDownloaded: true,
-      audioDerived: true,
-      framesDerived: true,
-      localAsrModelRun: true,
-      localOcrRun: true,
-      providerCalled: false,
-      procedureStored: false,
-      proposalCreated: false,
-      hostExecutionStarted: false,
+  },
+  analysisProfile: analysisRequest.analysisProfile,
+  locale: analysisRequest.locale,
+  analysisWindow: analysisRequest.analysisWindow,
+  requestedStages: analysisRequest.requestedStages,
+  approvals: analysisRequest.approvals,
+});
+const currentLocalAnalysisRequest = procedureTutorialMediaAnalysisStartRequestSchema.parse({
+  ...currentAnalysisRequest,
+  requestId: '5c54d9dc-8351-4c26-8dbf-48f4ae78f5da',
+  source: {
+    kind: 'user_supplied_local_file',
+    sourceIdentitySha256: '6'.repeat(64),
+    contentSha256: '7'.repeat(64),
+    rightsBasis: 'rights_holder_permission',
+    importValidation: {
+      authorityId: 'local-import-authority-fixture',
+      authorityKind: 'local_import_authority',
+      sideEffect: 'local_media_import',
+      receiptContentSha256: '8'.repeat(64),
+      authorityContentSha256: '9'.repeat(64),
     },
-    manifestIntegrity: {
-      manifestArtifactUri: manifest.uri,
-      manifestSha256: manifest.sha256,
-      artifactCount: 6,
-      rootSha256: 'e'.repeat(64),
-      generatedAt: mediaCompletedAt,
+    rightsValidation: {
+      authorityId: 'rights-authority-local-fixture',
+      authorityKind: 'media_rights_authority',
+      sideEffect: 'rights_validation',
+      receiptContentSha256: 'a'.repeat(64),
+      authorityContentSha256: 'b'.repeat(64),
     },
-    completedAt: mediaCompletedAt,
-  });
-}
-
-function completedAnalysisWithoutSemanticSegments(
-  request: typeof analysisRequest,
-  jobId: string,
-): ProcedureTutorialMediaAnalysisResult {
-  return procedureTutorialMediaAnalysisResultSchema.parse({
-    ...completedAnalysis(request, jobId),
-    semanticSegments: [],
-  });
-}
-
-function successfulAvailableRuntime(
-  onVerify: () => void | Promise<void>,
-  analyze: typeof completedAnalysis = completedAnalysis,
-): ProcedureTutorialMediaRuntime {
-  const pipeline: ProcedureTutorialMediaPipeline = {
-    async analyze(request, jobId) {
-      return analyze(request as typeof analysisRequest, jobId);
-    },
-    async verify(result) {
-      await onVerify();
-      return result;
-    },
-    async close() {},
-  };
-  return { capabilities: availableCapabilities(), maximumConcurrentJobs: 1, pipeline };
-}
+  },
+  analysisProfile: 'local_tutorial_evidence_v1',
+  requestedStages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+  approvals: {
+    networkAccessApproved: false,
+    mediaDownloadApproved: false,
+    retentionApproved: true,
+  },
+});
 
 async function mcpJson<T>(
   endpoint: string,
@@ -464,14 +338,20 @@ describe('tutorial media runtime integration', () => {
     }
   });
 
-  it('creates and reads an idempotent available job through the authenticated HTTP surface', async () => {
+  it('rejects legacy starts and fails closed for current sources before the legacy pipeline', async () => {
     let closeCount = 0;
+    let analyzeCount = 0;
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
-      tutorialMediaRuntime: blockingAvailableRuntime(() => {
-        closeCount += 1;
-      }),
+      tutorialMediaRuntime: blockingAvailableRuntime(
+        () => {
+          closeCount += 1;
+        },
+        () => {
+          analyzeCount += 1;
+        },
+      ),
     });
     const headers = {
       authorization: `Bearer ${accessToken}`,
@@ -483,63 +363,67 @@ describe('tutorial media runtime integration', () => {
         headers,
         body: JSON.stringify(analysisRequest),
       });
-      expect(created.status).toBe(202);
-      const accepted = (await created.json()) as {
-        jobId: string;
-        requestId: string;
-        status: string;
-      };
-      expect(accepted).toMatchObject({ requestId: analysisRequest.requestId, status: 'accepted' });
-
-      const status = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs/status`, {
+      expect(created.status).toBe(400);
+      await expect(created.json()).resolves.toMatchObject({
+        error: 'invalid_procedure_tutorial_media_analysis_request',
+      });
+      const unsupported = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          formatVersion: '1.0.0',
-          jobId: accepted.jobId,
-          requestId: analysisRequest.requestId,
-        }),
+        body: JSON.stringify(currentAnalysisRequest),
       });
-      expect(status.status).toBe(200);
-      await expect(status.json()).resolves.toMatchObject({
-        jobId: accepted.jobId,
-        requestId: analysisRequest.requestId,
-        status: expect.stringMatching(/^(accepted|running)$/u),
+      expect(unsupported.status).toBe(422);
+      await expect(unsupported.json()).resolves.toMatchObject({
+        error: 'procedure_tutorial_media_source_not_supported',
+        requestId: currentAnalysisRequest.requestId,
       });
-
-      const repeated = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(analysisRequest),
+      const unsupportedLocal = await fetch(
+        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`,
+        { method: 'POST', headers, body: JSON.stringify(currentLocalAnalysisRequest) },
+      );
+      expect(unsupportedLocal.status).toBe(422);
+      await expect(unsupportedLocal.json()).resolves.toMatchObject({
+        error: 'procedure_tutorial_media_source_not_supported',
+        requestId: currentLocalAnalysisRequest.requestId,
       });
-      expect(repeated.status).toBe(202);
-      await expect(repeated.json()).resolves.toMatchObject({ jobId: accepted.jobId });
+      for (const currentRequest of [currentAnalysisRequest, currentLocalAnalysisRequest]) {
+        const mcpResponse = await mcpJson<{
+          result?: { isError?: boolean; content?: Array<{ text?: string }> };
+        }>(runtime.mcpEndpoint, accessToken, {
+          jsonrpc: '2.0',
+          id: currentRequest.requestId,
+          method: 'tools/call',
+          params: {
+            name: 'operatingline.procedure.tutorial.media.jobs.create',
+            arguments: currentRequest,
+          },
+        });
+        expect(mcpResponse.payload.result?.isError).toBe(true);
+        expect(JSON.parse(mcpResponse.payload.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+          error: 'procedure_tutorial_media_source_not_supported',
+          requestId: currentRequest.requestId,
+        });
+      }
     } finally {
       await runtime.stop();
     }
     expect(closeCount).toBe(1);
+    expect(analyzeCount).toBe(0);
   });
 
-  it('prepares a verified completed media job for authoring without calling a Provider', async () => {
-    let verifyCount = 0;
-    let releaseVerification!: () => void;
-    let markVerificationStarted!: () => void;
-    const verificationStarted = new Promise<void>((resolve) => {
-      markVerificationStarted = resolve;
-    });
-    const verificationGate = new Promise<void>((resolve) => {
-      releaseVerification = resolve;
-    });
+  it('blocks YouTube authoring preparation when Phase 0 cannot complete a current analysis job', async () => {
+    let analyzeCount = 0;
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
       actionCatalogs: [blenderActionCatalog],
       interactionCatalogs: [blenderInteractionCatalog],
-      tutorialMediaRuntime: successfulAvailableRuntime(async () => {
-        verifyCount += 1;
-        markVerificationStarted();
-        await verificationGate;
-      }),
+      tutorialMediaRuntime: blockingAvailableRuntime(
+        () => undefined,
+        () => {
+          analyzeCount += 1;
+        },
+      ),
     });
     const headers = {
       authorization: `Bearer ${accessToken}`,
@@ -549,37 +433,19 @@ describe('tutorial media runtime integration', () => {
       const created = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(analysisRequest),
+        body: JSON.stringify(currentAnalysisRequest),
       });
-      expect(created.status).toBe(202);
-      const accepted = (await created.json()) as { jobId: string };
-      let completed: Record<string, unknown> | undefined;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const status = await fetch(
-          `${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs/status`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              formatVersion: '1.0.0',
-              requestId: analysisRequest.requestId,
-              jobId: accepted.jobId,
-            }),
-          },
-        );
-        const body = (await status.json()) as Record<string, unknown>;
-        if (body['status'] === 'completed') {
-          completed = body;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-      expect(completed).toBeDefined();
+      expect(created.status).toBe(422);
+      await expect(created.json()).resolves.toMatchObject({
+        error: 'procedure_tutorial_media_source_not_supported',
+        requestId: currentAnalysisRequest.requestId,
+      });
 
       const prepareRequest = {
-        formatVersion: '1.0.0',
-        analysisRequestId: analysisRequest.requestId,
-        analysisJobId: accepted.jobId,
+        formatVersion: '1.1.0',
+        analysisRequestId: currentAnalysisRequest.requestId,
+        analysisJobId: '88888888-8888-4888-8888-888888888888',
+        source: currentAnalysisRequest.source,
         request: {
           targetAdapterId: 'blender',
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
@@ -591,140 +457,37 @@ describe('tutorial media runtime integration', () => {
         },
         video: {
           title: 'Authorized eye tutorial',
+          uri: `https://www.youtube.com/watch?v=${currentAnalysisRequest.source.videoId}`,
         },
       };
-      const preparedPromise = fetch(
+      const prepared = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/tutorial/media/authoring/prepare`,
         { method: 'POST', headers, body: JSON.stringify(prepareRequest) },
       );
-      await verificationStarted;
-
-      const concurrentRepeat = mcpJson<{
-        result?: { isError?: boolean; structuredContent?: Record<string, unknown> };
-      }>(runtime.mcpEndpoint, accessToken, {
-        jsonrpc: '2.0',
-        id: 20,
-        method: 'tools/call',
-        params: {
-          name: 'operatingline.procedure.tutorial.media.authoring.prepare',
-          arguments: prepareRequest,
-        },
+      expect(prepared.status).toBe(404);
+      await expect(prepared.json()).resolves.toMatchObject({
+        error: 'procedure_tutorial_media_not_found',
+        requestId: currentAnalysisRequest.requestId,
       });
-      const conflicting = await fetch(
-        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/authoring/prepare`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            ...prepareRequest,
-            request: { ...prepareRequest.request, goal: 'Build a different object.' },
-          }),
-        },
-      );
-      expect(conflicting.status).toBe(409);
-      await expect(conflicting.json()).resolves.toMatchObject({
-        error: 'procedure_tutorial_media_authoring_conflict',
-        requestId: analysisRequest.requestId,
-      });
-      const atCapacity = await fetch(
-        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/authoring/prepare`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            ...prepareRequest,
-            analysisRequestId: '77777777-7777-4777-8777-777777777777',
-            analysisJobId: '88888888-8888-4888-8888-888888888888',
-          }),
-        },
-      );
-      expect(atCapacity.status).toBe(429);
-      await expect(atCapacity.json()).resolves.toMatchObject({
-        error: 'procedure_tutorial_media_authoring_capacity_exceeded',
-        requestId: '77777777-7777-4777-8777-777777777777',
-      });
-      releaseVerification();
-
-      const prepared = await preparedPromise;
-      expect(prepared.status).toBe(200);
-      const preparation = (await prepared.json()) as Record<string, unknown>;
-      expect(preparation).toMatchObject({
-        formatVersion: '1.0.0',
-        analysisRequestId: analysisRequest.requestId,
-        analysisJobId: accepted.jobId,
-        status: 'ready',
-        quality: {
-          semanticSegmentCount: 1,
-          blockers: [],
-          coverage: { asr: 1, frameEvidence: 1, visual: 1 },
-        },
-        evidenceBindings: [
-          {
-            promptSegmentOrder: 1,
-            semanticSegmentId: '66666666-6666-4666-8666-666666666667',
-          },
-        ],
-        sideEffects: {
-          providerCalled: false,
-          procedureStored: false,
-          proposalCreated: false,
-          hostExecutionStarted: false,
-        },
-      });
-      expect(verifyCount).toBe(1);
-
-      const concurrentPreparation = await concurrentRepeat;
-      expect(concurrentPreparation.payload.result?.isError).not.toBe(true);
-      expect(concurrentPreparation.payload.result?.structuredContent).toEqual(preparation);
-      expect(verifyCount).toBe(1);
-
-      const repeated = await mcpJson<{
-        result?: { isError?: boolean; structuredContent?: Record<string, unknown> };
-      }>(runtime.mcpEndpoint, accessToken, {
-        jsonrpc: '2.0',
-        id: 22,
-        method: 'tools/call',
-        params: {
-          name: 'operatingline.procedure.tutorial.media.authoring.prepare',
-          arguments: prepareRequest,
-        },
-      });
-      expect(repeated.payload.result?.isError).not.toBe(true);
-      expect(repeated.payload.result?.structuredContent).toEqual(preparation);
-      expect(verifyCount).toBe(2);
-
-      const forgedRights = await fetch(
-        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/authoring/prepare`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            ...prepareRequest,
-            video: { title: 'Authorized eye tutorial', rightsStatus: 'public_domain' },
-          }),
-        },
-      );
-      expect(forgedRights.status).toBe(400);
-      await expect(forgedRights.json()).resolves.toMatchObject({
-        error: 'invalid_procedure_tutorial_media_authoring_prepare_request',
-        requestId: analysisRequest.requestId,
-      });
-      expect(verifyCount).toBe(2);
+      expect(analyzeCount).toBe(0);
     } finally {
       await runtime.stop();
     }
   });
 
-  it('returns a blocked null packet over HTTP and MCP when verified analysis has no semantic segments', async () => {
-    let verifyCount = 0;
+  it('blocks local authoring preparation over MCP when Phase 0 cannot complete a current analysis job', async () => {
+    let analyzeCount = 0;
     const runtime = await startRuntime({
       databasePath: ':memory:',
       accessToken,
       actionCatalogs: [blenderActionCatalog],
       interactionCatalogs: [blenderInteractionCatalog],
-      tutorialMediaRuntime: successfulAvailableRuntime(() => {
-        verifyCount += 1;
-      }, completedAnalysisWithoutSemanticSegments),
+      tutorialMediaRuntime: blockingAvailableRuntime(
+        () => undefined,
+        () => {
+          analyzeCount += 1;
+        },
+      ),
     });
     const headers = {
       authorization: `Bearer ${accessToken}`,
@@ -734,32 +497,19 @@ describe('tutorial media runtime integration', () => {
       const created = await fetch(`${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(analysisRequest),
+        body: JSON.stringify(currentLocalAnalysisRequest),
       });
-      expect(created.status).toBe(202);
-      const accepted = (await created.json()) as { jobId: string };
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const status = await fetch(
-          `${runtime.baseUrl}/api/v1/procedure/tutorial/media/jobs/status`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              formatVersion: '1.0.0',
-              requestId: analysisRequest.requestId,
-              jobId: accepted.jobId,
-            }),
-          },
-        );
-        const body = (await status.json()) as Record<string, unknown>;
-        if (body['status'] === 'completed') break;
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      expect(created.status).toBe(422);
+      await expect(created.json()).resolves.toMatchObject({
+        error: 'procedure_tutorial_media_source_not_supported',
+        requestId: currentLocalAnalysisRequest.requestId,
+      });
 
       const prepareRequest = {
-        formatVersion: '1.0.0',
-        analysisRequestId: analysisRequest.requestId,
-        analysisJobId: accepted.jobId,
+        formatVersion: '1.1.0',
+        analysisRequestId: currentLocalAnalysisRequest.requestId,
+        analysisJobId: '99999999-9999-4999-8999-999999999999',
+        source: currentLocalAnalysisRequest.source,
         request: {
           targetAdapterId: 'blender',
           actionCatalogVersion: blenderActionCatalog.catalogVersion,
@@ -770,34 +520,12 @@ describe('tutorial media runtime integration', () => {
           locale: 'en',
         },
         video: {
-          title: 'Authorized eye tutorial without semantic segments',
+          title: 'Authorized local eye tutorial',
+          uri: `operatingline-media://sha256/${currentLocalAnalysisRequest.source.contentSha256}`,
         },
       };
-      const prepared = await fetch(
-        `${runtime.baseUrl}/api/v1/procedure/tutorial/media/authoring/prepare`,
-        { method: 'POST', headers, body: JSON.stringify(prepareRequest) },
-      );
-      expect(prepared.status).toBe(200);
-      const preparation = (await prepared.json()) as Record<string, unknown>;
-      expect(preparation).toMatchObject({
-        status: 'blocked',
-        packet: null,
-        evidenceBindings: [],
-        quality: {
-          semanticSegmentCount: 0,
-          blockers: [{ code: 'no_semantic_segments', semanticSegmentIds: [] }],
-        },
-        sideEffects: {
-          providerCalled: false,
-          procedureStored: false,
-          proposalCreated: false,
-          hostExecutionStarted: false,
-        },
-      });
-      expect(verifyCount).toBe(1);
-
-      const repeated = await mcpJson<{
-        result?: { isError?: boolean; structuredContent?: Record<string, unknown> };
+      const prepared = await mcpJson<{
+        result?: { isError?: boolean; content?: Array<{ text?: string }> };
       }>(runtime.mcpEndpoint, accessToken, {
         jsonrpc: '2.0',
         id: 21,
@@ -807,9 +535,12 @@ describe('tutorial media runtime integration', () => {
           arguments: prepareRequest,
         },
       });
-      expect(repeated.payload.result?.isError).not.toBe(true);
-      expect(repeated.payload.result?.structuredContent).toEqual(preparation);
-      expect(verifyCount).toBe(2);
+      expect(prepared.payload.result?.isError).toBe(true);
+      expect(JSON.parse(prepared.payload.result?.content?.[0]?.text ?? '{}')).toMatchObject({
+        error: 'procedure_tutorial_media_not_found',
+        requestId: currentLocalAnalysisRequest.requestId,
+      });
+      expect(analyzeCount).toBe(0);
     } finally {
       await runtime.stop();
     }

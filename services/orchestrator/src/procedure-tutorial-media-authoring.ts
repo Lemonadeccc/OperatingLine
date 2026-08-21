@@ -1,34 +1,33 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import {
   canonicalizeProtocolJsonValue,
-  procedureAuthoringLocalMediaRightsAuthorizationSchema,
   procedureTutorialMediaAuthoringFormatVersion,
-  procedureTutorialMediaAuthoringPreparationSchema,
-  procedureTutorialMediaAuthoringPrepareRequestSchema,
-  procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaAuthoringCurrentPreparationSchema,
+  procedureTutorialMediaAuthoringPrepareStartRequestSchema,
+  procedureTutorialMediaCurrentAnalysisResultSchema,
   type ActionCatalog,
   type InteractionCatalog,
   type ProcedureTutorialMediaAuthoringBlocker,
-  type ProcedureTutorialMediaAuthoringPreparation,
-  type ProcedureTutorialMediaAuthoringPrepareRequest,
+  type ProcedureTutorialMediaAuthoringCurrentPreparation,
+  type ProcedureTutorialMediaAuthoringPrepareStartRequest,
   type ProcedureTutorialMediaAuthoringQualityReport,
-  type ProcedureTutorialMediaAnalysisResult,
-  type ProcedureAuthoringLocalMediaRightsAuthorization,
+  type ProcedureTutorialMediaCurrentAnalysisResult,
 } from '@operatingline/protocol';
 
 import { buildProcedureAuthoringPromptPacket } from './procedure-authoring-prompt.js';
 
 export interface PrepareProcedureTutorialMediaAuthoringInput {
-  readonly analysis: ProcedureTutorialMediaAnalysisResult;
-  readonly request: ProcedureTutorialMediaAuthoringPrepareRequest['request'];
-  readonly video: ProcedureTutorialMediaAuthoringPrepareRequest['video'];
-  readonly rightsAuthorization: ProcedureAuthoringLocalMediaRightsAuthorization;
+  readonly analysis: ProcedureTutorialMediaCurrentAnalysisResult;
+  readonly source: ProcedureTutorialMediaAuthoringPrepareStartRequest['source'];
+  readonly request: ProcedureTutorialMediaAuthoringPrepareStartRequest['request'];
+  readonly video: ProcedureTutorialMediaAuthoringPrepareStartRequest['video'];
   readonly actionCatalog: ActionCatalog;
   readonly interactionCatalog: InteractionCatalog;
   readonly verifyAnalysis: (
-    analysis: ProcedureTutorialMediaAnalysisResult,
-  ) => Promise<ProcedureTutorialMediaAnalysisResult>;
+    analysis: ProcedureTutorialMediaCurrentAnalysisResult,
+  ) => Promise<ProcedureTutorialMediaCurrentAnalysisResult>;
 }
 
 function sha256(value: unknown): string {
@@ -40,7 +39,7 @@ function ratio(matching: number, total: number): number {
 }
 
 function qualityReport(
-  analysis: ProcedureTutorialMediaAnalysisResult,
+  analysis: ProcedureTutorialMediaCurrentAnalysisResult,
 ): ProcedureTutorialMediaAuthoringQualityReport {
   const segments = analysis.semanticSegments;
   const asrById = new Map(analysis.asrSegments.map((segment) => [segment.segmentId, segment]));
@@ -208,31 +207,37 @@ function sideEffects() {
 
 export async function prepareProcedureTutorialMediaAuthoring(
   input: PrepareProcedureTutorialMediaAuthoringInput,
-): Promise<ProcedureTutorialMediaAuthoringPreparation> {
-  const request = procedureTutorialMediaAuthoringPrepareRequestSchema.shape.request.parse(
-    input.request,
-  );
-  const video = procedureTutorialMediaAuthoringPrepareRequestSchema.shape.video.parse(input.video);
-  const supplied = procedureTutorialMediaAnalysisResultSchema.parse(input.analysis);
+): Promise<ProcedureTutorialMediaAuthoringCurrentPreparation> {
+  const supplied = procedureTutorialMediaCurrentAnalysisResultSchema.parse(input.analysis);
+  const authoringRequest = procedureTutorialMediaAuthoringPrepareStartRequestSchema.parse({
+    formatVersion: procedureTutorialMediaAuthoringFormatVersion,
+    analysisRequestId: supplied.requestId,
+    analysisJobId: supplied.jobId,
+    source: input.source,
+    request: input.request,
+    video: input.video,
+  });
+  const { request, video } = authoringRequest;
   const suppliedFingerprint = sha256(supplied);
-  const verified = procedureTutorialMediaAnalysisResultSchema.parse(
+  const verified = procedureTutorialMediaCurrentAnalysisResultSchema.parse(
     await input.verifyAnalysis(supplied),
   );
-  if (sha256(verified) !== suppliedFingerprint) {
+  if (
+    sha256(verified) !== suppliedFingerprint ||
+    !isDeepStrictEqual(authoringRequest.source, supplied.source) ||
+    !isDeepStrictEqual(verified.source, supplied.source)
+  ) {
     throw new Error('Tutorial media verifier returned analysis content different from the input');
   }
-  const rightsAuthorization = procedureAuthoringLocalMediaRightsAuthorizationSchema.parse(
-    input.rightsAuthorization,
-  );
   const rightsStatus =
-    rightsAuthorization.basis === 'rights_holder_permission'
+    supplied.source.rightsBasis === 'rights_holder_permission'
       ? ('permission_granted' as const)
-      : rightsAuthorization.basis === 'license_verified'
+      : supplied.source.rightsBasis === 'license_verified'
         ? ('license_verified' as const)
         : ('public_domain' as const);
   const tutorialVideo = {
     title: video.title,
-    uri: `https://www.youtube.com/watch?v=${verified.videoId}`,
+    uri: video.uri,
     durationMs: verified.probe.durationMs,
     rightsStatus,
   } as
@@ -262,6 +267,7 @@ export async function prepareProcedureTutorialMediaAuthoring(
   const quality = qualityReport(verified);
   const common = {
     formatVersion: procedureTutorialMediaAuthoringFormatVersion,
+    source: supplied.source,
     analysisRequestId: supplied.requestId,
     analysisJobId: supplied.jobId,
     analysisFingerprint: suppliedFingerprint,
@@ -276,7 +282,7 @@ export async function prepareProcedureTutorialMediaAuthoring(
       packet: null,
       status: 'blocked' as const,
     };
-    return procedureTutorialMediaAuthoringPreparationSchema.parse({
+    return procedureTutorialMediaAuthoringCurrentPreparationSchema.parse({
       ...content,
       fingerprint: sha256(content),
     });
@@ -297,13 +303,14 @@ export async function prepareProcedureTutorialMediaAuthoring(
             analysisRequestId: verified.requestId,
             analysisJobId: verified.jobId,
             analysisFingerprint: suppliedFingerprint,
+            source: supplied.source,
             analysisProfile: verified.analysisProfile,
             completedAt: verified.completedAt,
-            rightsAuthorization,
             manifest: {
               artifactUri: verified.manifestIntegrity.manifestArtifactUri,
               sha256: verified.manifestIntegrity.manifestSha256,
               rootSha256: verified.manifestIntegrity.rootSha256,
+              source: supplied.source,
             },
             tools: verified.tools.map((tool) => ({
               toolId: tool.toolId,
@@ -369,7 +376,7 @@ export async function prepareProcedureTutorialMediaAuthoring(
     return { ...binding, promptEvidenceId: matches[0]!.id };
   });
   const content = { ...common, evidenceBindings, packet, status: 'ready' as const };
-  return procedureTutorialMediaAuthoringPreparationSchema.parse({
+  return procedureTutorialMediaAuthoringCurrentPreparationSchema.parse({
     ...content,
     fingerprint: sha256(content),
   });

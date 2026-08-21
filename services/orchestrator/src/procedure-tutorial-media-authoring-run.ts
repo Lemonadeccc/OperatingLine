@@ -125,7 +125,7 @@ export interface ProcedureTutorialMediaAuthoringRunCoordinator {
     request: ProcedureTutorialMediaAuthoringRunCreateRequest,
   ): ProcedureTutorialMediaAuthoringRunStatus;
   status(request: {
-    readonly formatVersion: '1.0.0';
+    readonly formatVersion: '1.1.0';
     readonly requestId: string;
     readonly runId: string;
   }): ProcedureTutorialMediaAuthoringRunStatus;
@@ -183,6 +183,7 @@ function identity(state: RunState) {
     requestId: state.request.requestId,
     requestFingerprint: state.requestFingerprint,
     runId: state.runId,
+    mediaSource: state.request.preparation.source,
   } as const;
 }
 function summary(value: ProcedureAuthoringMaterializationResult) {
@@ -283,6 +284,7 @@ function buildBinding(state: RunState): ProcedureTutorialMediaAuthoringBinding {
       analysisRequestId: preparation.analysisRequestId,
       analysisJobId: preparation.analysisJobId,
       analysisFingerprint: preparation.analysisFingerprint,
+      mediaSource: preparation.source,
       preparationFingerprint: preparation.fingerprint,
       packetContentSha256: preparation.packet.integrity.contentSha256,
     },
@@ -791,7 +793,8 @@ export function createProcedureTutorialMediaAuthoringRunCoordinator(
       payload['formatVersion'] !== procedureTutorialMediaAuthoringRunFormatVersion ||
       payload['requestId'] !== state.request.requestId ||
       payload['requestFingerprint'] !== state.requestFingerprint ||
-      payload['runId'] !== state.runId
+      payload['runId'] !== state.runId ||
+      !isDeepStrictEqual(payload['mediaSource'], state.request.preparation.source)
     )
       throw new Error('Media authoring event scope does not match its request');
     if (Date.parse(String(payload['occurredAt'])) < Date.parse(state.updatedAt))

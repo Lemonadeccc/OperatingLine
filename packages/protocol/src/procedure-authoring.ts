@@ -18,13 +18,15 @@ export const procedureAuthoringPromptTutorialFormatVersion = '1.1.0' as const;
 export const procedureAuthoringPromptDocumentFormatVersion = '1.2.0' as const;
 export const procedureAuthoringPromptAcquisitionFormatVersion = '1.3.0' as const;
 export const procedureAuthoringPromptFormatVersion = '1.4.0' as const;
-export const procedureAuthoringPromptMediaAnalysisFormatVersion = '1.5.0' as const;
+export const procedureAuthoringPromptLegacyMediaAnalysisFormatVersion = '1.5.0' as const;
+export const procedureAuthoringPromptMediaAnalysisFormatVersion = '1.6.0' as const;
 export const supportedProcedureAuthoringPromptFormatVersions = [
   procedureAuthoringPromptLegacyFormatVersion,
   procedureAuthoringPromptTutorialFormatVersion,
   procedureAuthoringPromptDocumentFormatVersion,
   procedureAuthoringPromptAcquisitionFormatVersion,
   procedureAuthoringPromptFormatVersion,
+  procedureAuthoringPromptLegacyMediaAnalysisFormatVersion,
   procedureAuthoringPromptMediaAnalysisFormatVersion,
 ] as const;
 export const procedureAuthoringPromptPacketMaxCanonicalBytes = 262_144 as const;
@@ -40,6 +42,9 @@ const procedureAuthoringTutorialUriSchema = z
   .min(1)
   .max(2_048)
   .regex(/^https:\/\/[^\s]+$/, 'Tutorial video URI must be an HTTPS URL');
+const procedureAuthoringLocalMediaUriSchema = z
+  .string()
+  .regex(/^operatingline-media:\/\/sha256\/[a-f0-9]{64}$/);
 const procedureAuthoringTutorialTitleSchema = z.string().min(1).max(500).regex(/\S/);
 const procedureAuthoringTutorialDurationSchema = z
   .number()
@@ -89,6 +94,110 @@ export const procedureAuthoringYoutubeVideoIdSchema = z
   .string()
   .length(11)
   .regex(/^[A-Za-z0-9_-]{11}$/);
+const procedureAuthoringSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const procedureAuthoringMediaRightsBasisSchema = z.enum([
+  'rights_holder_permission',
+  'license_verified',
+  'public_domain_verified',
+]);
+export const procedureAuthoringMediaSourceValidationReceiptBindingSchema = z.strictObject({
+  authorityId: z
+    .string()
+    .min(1)
+    .max(180)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  receiptContentSha256: procedureAuthoringSha256Schema,
+  authorityContentSha256: procedureAuthoringSha256Schema,
+});
+export const procedureAuthoringMediaRightsValidationReceiptBindingSchema =
+  procedureAuthoringMediaSourceValidationReceiptBindingSchema.extend({
+    authorityKind: z.literal('media_rights_authority'),
+    sideEffect: z.literal('rights_validation'),
+  });
+export const procedureAuthoringYoutubeDownloadValidationReceiptBindingSchema =
+  procedureAuthoringMediaSourceValidationReceiptBindingSchema.extend({
+    authorityKind: z.literal('youtube_platform_authority'),
+    sideEffect: z.literal('youtube_media_download'),
+  });
+export const procedureAuthoringLocalImportValidationReceiptBindingSchema =
+  procedureAuthoringMediaSourceValidationReceiptBindingSchema.extend({
+    authorityKind: z.literal('local_import_authority'),
+    sideEffect: z.literal('local_media_import'),
+  });
+
+function requireDistinctMediaValidationBindings(
+  source: {
+    readonly rightsValidation: z.infer<
+      typeof procedureAuthoringMediaRightsValidationReceiptBindingSchema
+    >;
+  } & (
+    | {
+        readonly platformDownloadValidation: z.infer<
+          typeof procedureAuthoringYoutubeDownloadValidationReceiptBindingSchema
+        >;
+      }
+    | {
+        readonly importValidation: z.infer<
+          typeof procedureAuthoringLocalImportValidationReceiptBindingSchema
+        >;
+      }
+  ),
+  context: z.RefinementCtx,
+): void {
+  const acquisitionValidation =
+    'platformDownloadValidation' in source
+      ? source.platformDownloadValidation
+      : source.importValidation;
+  if (
+    acquisitionValidation.receiptContentSha256 === source.rightsValidation.receiptContentSha256 ||
+    acquisitionValidation.authorityContentSha256 ===
+      source.rightsValidation.authorityContentSha256 ||
+    acquisitionValidation.authorityId === source.rightsValidation.authorityId
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: [
+        'platformDownloadValidation' in source ? 'platformDownloadValidation' : 'importValidation',
+      ],
+      message: 'Acquisition and rights validation receipts must bind distinct authorities',
+    });
+  }
+}
+
+export const procedureAuthoringAuthorizedYoutubeMediaSourceSchema = z
+  .strictObject({
+    kind: z.literal('authorized_youtube_download'),
+    videoId: procedureAuthoringYoutubeVideoIdSchema,
+    sourceIdentitySha256: procedureAuthoringSha256Schema,
+    contentSha256: procedureAuthoringSha256Schema,
+    rightsBasis: procedureAuthoringMediaRightsBasisSchema,
+    rightsValidation: procedureAuthoringMediaRightsValidationReceiptBindingSchema,
+    platformDownloadValidation: procedureAuthoringYoutubeDownloadValidationReceiptBindingSchema,
+  })
+  .superRefine(requireDistinctMediaValidationBindings)
+  .meta({
+    $comment:
+      'Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids.',
+  });
+export const procedureAuthoringUserSuppliedLocalMediaSourceSchema = z
+  .strictObject({
+    kind: z.literal('user_supplied_local_file'),
+    sourceIdentitySha256: procedureAuthoringSha256Schema,
+    contentSha256: procedureAuthoringSha256Schema,
+    rightsBasis: procedureAuthoringMediaRightsBasisSchema,
+    importValidation: procedureAuthoringLocalImportValidationReceiptBindingSchema,
+    rightsValidation: procedureAuthoringMediaRightsValidationReceiptBindingSchema,
+  })
+  .superRefine(requireDistinctMediaValidationBindings)
+  .meta({
+    $comment:
+      'Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids.',
+  });
+export const procedureAuthoringMediaSourceSchema = z.union([
+  procedureAuthoringAuthorizedYoutubeMediaSourceSchema,
+  procedureAuthoringUserSuppliedLocalMediaSourceSchema,
+]);
+export type ProcedureAuthoringMediaSource = z.infer<typeof procedureAuthoringMediaSourceSchema>;
 export const procedureAuthoringYoutubeCaptionTrackIdSchema = z
   .string()
   .min(1)
@@ -260,7 +369,7 @@ export type ProcedureAuthoringLocalMediaRightsAuthorization = z.infer<
   typeof procedureAuthoringLocalMediaRightsAuthorizationSchema
 >;
 
-const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
+const sha256Schema = procedureAuthoringSha256Schema;
 const localMediaArtifactUriSchema = z
   .string()
   .regex(/^operatingline-media:\/\/sha256\/[a-f0-9]{64}$/);
@@ -269,13 +378,15 @@ const procedureAuthoringLocalMediaAnalysisSchema = z
     analysisRequestId: z.uuid(),
     analysisJobId: z.uuid(),
     analysisFingerprint: sha256Schema,
-    analysisProfile: z.literal('youtube_tutorial_evidence_v1'),
+    source: procedureAuthoringMediaSourceSchema.optional(),
+    analysisProfile: z.enum(['youtube_tutorial_evidence_v1', 'local_tutorial_evidence_v1']),
     completedAt: z.iso.datetime({ offset: true }),
-    rightsAuthorization: procedureAuthoringLocalMediaRightsAuthorizationSchema,
+    rightsAuthorization: procedureAuthoringLocalMediaRightsAuthorizationSchema.optional(),
     manifest: z.strictObject({
       artifactUri: localMediaArtifactUriSchema,
       sha256: sha256Schema,
       rootSha256: sha256Schema,
+      source: procedureAuthoringMediaSourceSchema.optional(),
     }),
     tools: z
       .array(
@@ -346,6 +457,25 @@ const procedureAuthoringLocalMediaAnalysisSchema = z
         message: 'Local media analysis job id must differ from its request id',
       });
     }
+    if ((analysis.source === undefined) === (analysis.rightsAuthorization === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['rightsAuthorization'],
+        message:
+          'Legacy analysis requires raw rights authorization; current analysis uses only source receipt bindings',
+      });
+    }
+    const expectedAnalysisProfile =
+      analysis.source?.kind === 'user_supplied_local_file'
+        ? 'local_tutorial_evidence_v1'
+        : 'youtube_tutorial_evidence_v1';
+    if (analysis.analysisProfile !== expectedAnalysisProfile) {
+      context.addIssue({
+        code: 'custom',
+        path: ['analysisProfile'],
+        message: 'Analysis profile must match the exact declared media source kind',
+      });
+    }
     if (
       analysis.manifest.artifactUri !== `operatingline-media://sha256/${analysis.manifest.sha256}`
     ) {
@@ -353,6 +483,17 @@ const procedureAuthoringLocalMediaAnalysisSchema = z
         code: 'custom',
         path: ['manifest', 'artifactUri'],
         message: 'Local media manifest URI must bind its exact digest',
+      });
+    }
+    if (
+      (analysis.source === undefined) !== (analysis.manifest.source === undefined) ||
+      (analysis.source !== undefined &&
+        JSON.stringify(analysis.source) !== JSON.stringify(analysis.manifest.source))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['manifest', 'source'],
+        message: 'Media analysis manifest must retain the exact prompt media source',
       });
     }
     if (!analysis.tools.some((tool) => tool.modelSha256 !== undefined)) {
@@ -405,24 +546,51 @@ const procedureAuthoringTutorialTranscriptInputSchema = z.discriminatedUnion('or
 
 const procedureAuthoringLocalMediaTutorialVideoInputSchema = z.discriminatedUnion('rightsStatus', [
   z.strictObject({
-    uri: procedureAuthoringTutorialUriSchema,
+    uri: procedureAuthoringLocalMediaUriSchema,
     title: procedureAuthoringTutorialTitleSchema,
     durationMs: procedureAuthoringTutorialDurationSchema,
     rightsStatus: z.literal('permission_granted'),
   }),
   z.strictObject({
-    uri: procedureAuthoringTutorialUriSchema,
+    uri: procedureAuthoringLocalMediaUriSchema,
     title: procedureAuthoringTutorialTitleSchema,
     durationMs: procedureAuthoringTutorialDurationSchema,
     rightsStatus: z.literal('license_verified'),
   }),
   z.strictObject({
-    uri: procedureAuthoringTutorialUriSchema,
+    uri: procedureAuthoringLocalMediaUriSchema,
     title: procedureAuthoringTutorialTitleSchema,
     durationMs: procedureAuthoringTutorialDurationSchema,
     rightsStatus: z.literal('public_domain'),
   }),
 ]);
+
+const procedureAuthoringAuthorizedYoutubeMediaTutorialVideoInputSchema = z.discriminatedUnion(
+  'rightsStatus',
+  [
+    z.strictObject({
+      uri: procedureAuthoringTutorialUriSchema,
+      title: procedureAuthoringTutorialTitleSchema,
+      durationMs: procedureAuthoringTutorialDurationSchema,
+      rightsStatus: z.literal('permission_granted'),
+      license: z.never().optional(),
+    }),
+    z.strictObject({
+      uri: procedureAuthoringTutorialUriSchema,
+      title: procedureAuthoringTutorialTitleSchema,
+      durationMs: procedureAuthoringTutorialDurationSchema,
+      rightsStatus: z.literal('license_verified'),
+      license: z.never().optional(),
+    }),
+    z.strictObject({
+      uri: procedureAuthoringTutorialUriSchema,
+      title: procedureAuthoringTutorialTitleSchema,
+      durationMs: procedureAuthoringTutorialDurationSchema,
+      rightsStatus: z.literal('public_domain'),
+      license: z.never().optional(),
+    }),
+  ],
+);
 
 export const procedureAuthoringVerifiedTutorialInputSchema = z
   .union([
@@ -431,17 +599,43 @@ export const procedureAuthoringVerifiedTutorialInputSchema = z
       transcript: procedureAuthoringTutorialTranscriptInputSchema.options[0],
     }),
     z.strictObject({
-      video: procedureAuthoringLocalMediaTutorialVideoInputSchema,
+      video: z.union([
+        procedureAuthoringAuthorizedYoutubeMediaTutorialVideoInputSchema,
+        procedureAuthoringLocalMediaTutorialVideoInputSchema,
+      ]),
       transcript: procedureAuthoringTutorialTranscriptInputSchema.options[1],
     }),
   ])
   .superRefine((tutorial, context) => {
     if (tutorial.transcript.origin === 'local_media_analysis') {
+      const mediaSource = tutorial.transcript.localMediaAnalysis.source;
+      if (
+        mediaSource?.kind === 'authorized_youtube_download' &&
+        tutorial.video.uri !== `https://www.youtube.com/watch?v=${mediaSource.videoId}`
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['video', 'uri'],
+          message: 'Tutorial URI must retain the authorized YouTube source video id',
+        });
+      }
+      if (
+        mediaSource?.kind === 'user_supplied_local_file' &&
+        tutorial.video.uri !== `operatingline-media://sha256/${mediaSource.contentSha256}`
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['video', 'uri'],
+          message: 'Tutorial URI must retain the exact local media content hash',
+        });
+      }
+      const rightsBasis =
+        tutorial.transcript.localMediaAnalysis.source?.rightsBasis ??
+        tutorial.transcript.localMediaAnalysis.rightsAuthorization?.basis;
       const expectedRightsStatus =
-        tutorial.transcript.localMediaAnalysis.rightsAuthorization.basis ===
-        'rights_holder_permission'
+        rightsBasis === 'rights_holder_permission'
           ? 'permission_granted'
-          : tutorial.transcript.localMediaAnalysis.rightsAuthorization.basis === 'license_verified'
+          : rightsBasis === 'license_verified'
             ? 'license_verified'
             : 'public_domain';
       if (tutorial.video.rightsStatus !== expectedRightsStatus) {
@@ -661,6 +855,35 @@ const procedureAuthoringTutorialSourceSchema = z.discriminatedUnion('rightsStatu
     license: procedureAuthoringTutorialLicenseSchema.optional(),
   }),
 ]);
+const procedureAuthoringLocalMediaTutorialSourceSchema = z.discriminatedUnion('rightsStatus', [
+  z.strictObject({
+    id: guideStepIdSchema,
+    kind: z.literal('tutorial_video'),
+    uri: procedureAuthoringLocalMediaUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('permission_granted'),
+    license: z.never().optional(),
+  }),
+  z.strictObject({
+    id: guideStepIdSchema,
+    kind: z.literal('tutorial_video'),
+    uri: procedureAuthoringLocalMediaUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('license_verified'),
+    license: z.never().optional(),
+  }),
+  z.strictObject({
+    id: guideStepIdSchema,
+    kind: z.literal('tutorial_video'),
+    uri: procedureAuthoringLocalMediaUriSchema,
+    title: procedureAuthoringTutorialTitleSchema,
+    durationMs: procedureAuthoringTutorialDurationSchema,
+    rightsStatus: z.literal('public_domain'),
+    license: z.never().optional(),
+  }),
+]);
 
 const localMediaRightsJsonSchemaConditions = (
   [
@@ -699,10 +922,50 @@ const localMediaRightsJsonSchemaConditions = (
     required: ['source'],
   },
 }));
+const currentLocalMediaRightsJsonSchemaConditions = (
+  [
+    ['rights_holder_permission', 'permission_granted'],
+    ['license_verified', 'license_verified'],
+    ['public_domain_verified', 'public_domain'],
+  ] as const
+).map(([basis, rightsStatus]) => ({
+  if: {
+    properties: {
+      transcript: {
+        properties: {
+          localMediaAnalysis: {
+            properties: {
+              source: {
+                properties: { rightsBasis: { const: basis } },
+                required: ['rightsBasis'],
+              },
+            },
+            required: ['source'],
+          },
+        },
+        required: ['localMediaAnalysis'],
+      },
+    },
+    required: ['transcript'],
+  },
+  then: {
+    properties: {
+      source: {
+        properties: { rightsStatus: { const: rightsStatus } },
+        required: ['rightsStatus'],
+        not: { required: ['license'] },
+      },
+    },
+    required: ['source'],
+  },
+}));
 
 const procedureAuthoringTutorialProvenanceSchema = z
   .strictObject({
-    source: procedureAuthoringTutorialSourceSchema,
+    source: z.union([
+      procedureAuthoringTutorialSourceSchema,
+      procedureAuthoringLocalMediaTutorialSourceSchema,
+    ]),
     transcript: z.strictObject({
       origin: z.enum(['user_supplied', 'youtube_data_api_v3', 'local_media_analysis']),
       locale: procedureAuthoringLocaleSchema.optional(),
@@ -748,10 +1011,34 @@ const procedureAuthoringTutorialProvenanceSchema = z
       });
     }
     if (localMediaAnalysis !== undefined) {
+      if (
+        localMediaAnalysis.source?.kind === 'authorized_youtube_download' &&
+        tutorial.source.uri !==
+          `https://www.youtube.com/watch?v=${localMediaAnalysis.source.videoId}`
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['source', 'uri'],
+          message: 'Tutorial URI must retain the authorized YouTube source video id',
+        });
+      }
+      if (
+        localMediaAnalysis.source?.kind === 'user_supplied_local_file' &&
+        tutorial.source.uri !==
+          `operatingline-media://sha256/${localMediaAnalysis.source.contentSha256}`
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['source', 'uri'],
+          message: 'Tutorial URI must retain the exact local media content hash',
+        });
+      }
+      const rightsBasis =
+        localMediaAnalysis.source?.rightsBasis ?? localMediaAnalysis.rightsAuthorization?.basis;
       const expectedRightsStatus =
-        localMediaAnalysis.rightsAuthorization.basis === 'rights_holder_permission'
+        rightsBasis === 'rights_holder_permission'
           ? 'permission_granted'
-          : localMediaAnalysis.rightsAuthorization.basis === 'license_verified'
+          : rightsBasis === 'license_verified'
             ? 'license_verified'
             : 'public_domain';
       if (
@@ -941,6 +1228,7 @@ const procedureAuthoringTutorialProvenanceSchema = z
         },
       },
       ...localMediaRightsJsonSchemaConditions,
+      ...currentLocalMediaRightsJsonSchemaConditions,
     ],
   });
 
@@ -1322,7 +1610,13 @@ const procedureAuthoringPromptVersionJsonSchemaMetadata = {
               tutorialProvenance: {
                 properties: {
                   transcript: {
-                    properties: { origin: { const: 'local_media_analysis' } },
+                    properties: {
+                      origin: { const: 'local_media_analysis' },
+                      localMediaAnalysis: {
+                        required: ['source'],
+                        properties: { manifest: { required: ['source'] } },
+                      },
+                    },
                     required: ['origin', 'localMediaAnalysis'],
                   },
                 },
@@ -1371,7 +1665,9 @@ export const procedureAuthoringPromptPacketContentSchema = z
       tutorial === undefined
         ? procedureAuthoringPromptLegacyFormatVersion
         : tutorial.transcript.localMediaAnalysis !== undefined
-          ? procedureAuthoringPromptMediaAnalysisFormatVersion
+          ? tutorial.transcript.localMediaAnalysis.source === undefined
+            ? procedureAuthoringPromptLegacyMediaAnalysisFormatVersion
+            : procedureAuthoringPromptMediaAnalysisFormatVersion
           : tutorial.transcript.document === undefined
             ? procedureAuthoringPromptTutorialFormatVersion
             : tutorial.transcript.document.acquisition === undefined

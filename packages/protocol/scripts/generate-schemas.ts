@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 
 import {
+  authorityRevocationSchema,
+  authorityValidationReceiptSchema,
   actionCatalogSchema,
   adapterStatusSchema,
   companionActionExecutionCreateRequestSchema,
@@ -47,7 +49,12 @@ import {
   companionShortcutProofTerminalReconciliationAckSchema,
   companionShortcutProofTerminalReconciliationDeliverySchema,
   companionStateReportSchema,
+  blenderExecutionDecisionReceiptSchema,
+  blenderHistoryTransitionDecisionReceiptSchema,
+  decisionLifecycleEventSchema,
+  datasetReleaseAuthorizationSchema,
   evalExportBundleSchema,
+  externalAuthorityRecordSchema,
   evalExportRequestSchema,
   guidePlanSchema,
   guidePlanDiffSchema,
@@ -69,6 +76,9 @@ import {
   humanEvalComparisonReportSchema,
   humanEvalSuiteSchema,
   interactionCatalogSchema,
+  interactionOperationSchema,
+  localMediaImportAuthorizationSchema,
+  mediaRightsEvidenceSchema,
   planningContextSchema,
   planningBenchmarkCaseSchema,
   planningPromptContextSchema,
@@ -95,20 +105,20 @@ import {
   procedureTutorialAuthoringRunCreateRequestSchema,
   procedureTutorialAuthoringRunStatusRequestSchema,
   procedureTutorialAuthoringRunStatusSchema,
-  procedureTutorialMediaAnalysisRequestSchema,
-  procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaAnalysisStartRequestSchema,
+  procedureTutorialMediaCurrentAnalysisResultSchema,
   procedureTutorialMediaCapabilitiesSchema,
-  procedureTutorialMediaJobStatusSchema,
+  procedureTutorialMediaCurrentJobStatusSchema,
   procedureTutorialMediaJobStatusRequestSchema,
   procedureTutorialMediaResumeRequestSchema,
-  procedureTutorialMediaAuthoringPreparationSchema,
-  procedureTutorialMediaAuthoringPrepareRequestSchema,
+  procedureTutorialMediaAuthoringCurrentPreparationSchema,
+  procedureTutorialMediaAuthoringPrepareStartRequestSchema,
   procedureTutorialMediaAuthoringBindingSchema,
   procedureTutorialMediaAuthoringResumeRequestSchema,
   procedureTutorialMediaAuthoringReviewRequestSchema,
   procedureTutorialMediaAuthoringRunCreateRequestSchema,
   procedureTutorialMediaAuthoringRunStatusRequestSchema,
-  procedureTutorialMediaAuthoringRunStatusSchema,
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
   procedureTutorialYoutubeTrackListRequestSchema,
   procedureTutorialYoutubeTrackListResultSchema,
   procedureTutorialYoutubeTrackRecommendationRequestSchema,
@@ -225,16 +235,99 @@ import {
   plannerReplanGenerateRequestSchema,
   plannerReplanGenerationResultSchema,
   providerEvalRunSchema,
+  providerCallAuthorizationSchema,
+  procedureCompoundReplaySchema,
   replanningPromptContextSchema,
   replanningPromptPacketSchema,
   replanningPromptRequestSchema,
+  trainingRunDecisionReceiptSchema,
+  trainingUseAuthorizationSchema,
+  youtubePlatformDownloadAuthorizationSchema,
 } from '../src/index.js';
 
 const outputDirectory = resolve(process.cwd(), '../../protocol/schemas/v1');
 mkdirSync(outputDirectory, { recursive: true });
 const checkOnly = process.argv.includes('--check');
+const onlyFilename = process.argv
+  .find((argument) => argument.startsWith('--only='))
+  ?.slice('--only='.length);
 
 const schemas = [
+  [
+    'external-authority-record.schema.json',
+    'https://operatingline.dev/schema/v1/external-authority-record.json',
+    externalAuthorityRecordSchema,
+  ],
+  [
+    'provider-call-authorization.schema.json',
+    'https://operatingline.dev/schema/v1/provider-call-authorization.json',
+    providerCallAuthorizationSchema,
+  ],
+  [
+    'local-media-import-authorization.schema.json',
+    'https://operatingline.dev/schema/v1/local-media-import-authorization.json',
+    localMediaImportAuthorizationSchema,
+  ],
+  [
+    'media-rights-evidence.schema.json',
+    'https://operatingline.dev/schema/v1/media-rights-evidence.json',
+    mediaRightsEvidenceSchema,
+  ],
+  [
+    'youtube-platform-download-authorization.schema.json',
+    'https://operatingline.dev/schema/v1/youtube-platform-download-authorization.json',
+    youtubePlatformDownloadAuthorizationSchema,
+  ],
+  [
+    'dataset-release-authorization.schema.json',
+    'https://operatingline.dev/schema/v1/dataset-release-authorization.json',
+    datasetReleaseAuthorizationSchema,
+  ],
+  [
+    'training-use-authorization.schema.json',
+    'https://operatingline.dev/schema/v1/training-use-authorization.json',
+    trainingUseAuthorizationSchema,
+  ],
+  [
+    'authority-revocation.schema.json',
+    'https://operatingline.dev/schema/v1/authority-revocation.json',
+    authorityRevocationSchema,
+  ],
+  [
+    'authority-validation-receipt.schema.json',
+    'https://operatingline.dev/schema/v1/authority-validation-receipt.json',
+    authorityValidationReceiptSchema,
+  ],
+  [
+    'blender-execution-decision-receipt.schema.json',
+    'https://operatingline.dev/schema/v1/blender-execution-decision-receipt.json',
+    blenderExecutionDecisionReceiptSchema,
+  ],
+  [
+    'blender-history-transition-decision-receipt.schema.json',
+    'https://operatingline.dev/schema/v1/blender-history-transition-decision-receipt.json',
+    blenderHistoryTransitionDecisionReceiptSchema,
+  ],
+  [
+    'training-run-decision-receipt.schema.json',
+    'https://operatingline.dev/schema/v1/training-run-decision-receipt.json',
+    trainingRunDecisionReceiptSchema,
+  ],
+  [
+    'decision-lifecycle-event.schema.json',
+    'https://operatingline.dev/schema/v1/decision-lifecycle-event.json',
+    decisionLifecycleEventSchema,
+  ],
+  [
+    'interaction-operation.schema.json',
+    'https://operatingline.dev/schema/v1/interaction-operation.json',
+    interactionOperationSchema,
+  ],
+  [
+    'procedure-compound-replay.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-compound-replay.json',
+    procedureCompoundReplaySchema,
+  ],
   [
     'companion-shortcut-proof-create-request.schema.json',
     'https://operatingline.dev/schema/v1/companion-shortcut-proof-create-request.json',
@@ -843,12 +936,12 @@ const schemas = [
   [
     'procedure-tutorial-media-authoring-prepare-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-authoring-prepare-request.json',
-    procedureTutorialMediaAuthoringPrepareRequestSchema,
+    procedureTutorialMediaAuthoringPrepareStartRequestSchema,
   ],
   [
     'procedure-tutorial-media-authoring-preparation.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-authoring-preparation.json',
-    procedureTutorialMediaAuthoringPreparationSchema,
+    procedureTutorialMediaAuthoringCurrentPreparationSchema,
   ],
   [
     'procedure-tutorial-media-authoring-run-create-request.schema.json',
@@ -863,7 +956,7 @@ const schemas = [
   [
     'procedure-tutorial-media-authoring-run-status.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-authoring-run-status.json',
-    procedureTutorialMediaAuthoringRunStatusSchema,
+    procedureTutorialMediaAuthoringCurrentRunStatusSchema,
   ],
   [
     'procedure-tutorial-media-authoring-review-request.schema.json',
@@ -928,17 +1021,17 @@ const schemas = [
   [
     'procedure-tutorial-media-analysis-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-analysis-request.json',
-    procedureTutorialMediaAnalysisRequestSchema,
+    procedureTutorialMediaAnalysisStartRequestSchema,
   ],
   [
     'procedure-tutorial-media-analysis-result.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-analysis-result.json',
-    procedureTutorialMediaAnalysisResultSchema,
+    procedureTutorialMediaCurrentAnalysisResultSchema,
   ],
   [
     'procedure-tutorial-media-job-status.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-media-job-status.json',
-    procedureTutorialMediaJobStatusSchema,
+    procedureTutorialMediaCurrentJobStatusSchema,
   ],
   [
     'procedure-tutorial-media-job-status-request.schema.json',
@@ -1458,16 +1551,100 @@ function hardenProcedureTreeEditorSchema(filename: string, schema: Record<string
   }
 }
 
+function hardenCompoundReplaySchema(filename: string, schema: Record<string, unknown>): void {
+  if (filename !== 'procedure-compound-replay.schema.json') return;
+  schema['$comment'] =
+    'Cross-field compound/replay/content/lock equality and canonical hash commitments require procedureCompoundReplaySchema plus verifyProcedureCompoundReplayIntegrity; standard JSON Schema enforces the status-discriminated structural invariants only.';
+  const terminalReceipt = {
+    if: {
+      properties: {
+        currentState: {
+          properties: {
+            status: {
+              enum: [
+                'forward_applied_locked',
+                'restored_locked',
+                'reapplied_locked',
+                'unlocked_final',
+                'abandoned_baseline',
+              ],
+            },
+          },
+          required: ['status'],
+        },
+      },
+      required: ['currentState'],
+    },
+    then: {
+      properties: {
+        leafProgress: {
+          items: { properties: { receiptSha256: { type: 'string' } } },
+        },
+      },
+    },
+  };
+  const lostState = {
+    if: {
+      properties: {
+        currentState: {
+          properties: { status: { const: 'history_lost' } },
+          required: ['status'],
+        },
+      },
+      required: ['currentState'],
+    },
+    then: {
+      properties: {
+        currentState: {
+          properties: {
+            lifecycleState: { const: 'unknown' },
+            mode: { const: 'UNKNOWN' },
+            historyLock: { const: 'quarantined' },
+            historyContinuity: { const: 'lost_permanently' },
+            nativeHistoryLossRecorded: { const: true },
+            inProgressLeafId: { type: 'null' },
+            permittedHistoryTransitions: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 1,
+              items: [{ const: 'abandon_baseline' }],
+            },
+          },
+        },
+      },
+    },
+  };
+  schema['allOf'] = [...((schema['allOf'] as unknown[]) ?? []), terminalReceipt, lostState];
+}
+
+function documentExecutionDecisionSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (
+    filename === 'blender-execution-decision-receipt.schema.json' ||
+    filename === 'blender-history-transition-decision-receipt.schema.json' ||
+    filename === 'training-run-decision-receipt.schema.json'
+  ) {
+    schema['$comment'] =
+      'issuedAt < expiresAt and the fifteen-minute maximum validity window require the exported Zod semantic validation gate; standard JSON Schema cannot compare dynamic sibling timestamps.';
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
+  if (onlyFilename !== undefined && filename !== onlyFilename) continue;
   const draft7TupleSchema =
     filename.startsWith('procedure-tutorial-media-') ||
     filename.startsWith('procedure-tutorial-authoring-') ||
+    filename === 'procedure-compound-replay.schema.json' ||
     filename.includes('shortcut-proof');
   const jsonSchema = z.toJSONSchema(schema, {
     target: draft7TupleSchema ? 'draft-7' : 'draft-2020-12',
   });
   if (draft7TupleSchema) hardenDraft7Tuples(jsonSchema);
   hardenProcedureTreeEditorSchema(filename, jsonSchema);
+  hardenCompoundReplaySchema(filename, jsonSchema);
+  documentExecutionDecisionSemanticGate(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

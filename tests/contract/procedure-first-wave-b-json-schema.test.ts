@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
+  computeProcedureTutorialAuthoringBindingContentSha256,
   procedureTutorialMediaAuthoringBindingSchema,
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+  procedureTutorialMediaAuthoringLegacyBindingSchema,
+  procedureTutorialMediaAuthoringLegacyRunStatusSchema,
   procedureTutorialMediaAuthoringResumeRequestSchema,
   procedureTutorialMediaAuthoringReviewRequestSchema,
   procedureTutorialMediaAuthoringRunCreateRequestSchema,
@@ -18,7 +22,12 @@ import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-
 const sha = (character: string) => character.repeat(64);
 
 function publicSchema(filename: string): object {
-  return JSON.parse(readFileSync(resolve('protocol/schemas/v1', filename), 'utf8')) as object;
+  return JSON.parse(
+    readFileSync(
+      resolve(process.env['OPERATINGLINE_SCHEMA_DIR'] ?? 'protocol/schemas/v1', filename),
+      'utf8',
+    ),
+  ) as object;
 }
 
 const descriptor = {
@@ -65,8 +74,29 @@ const zeroRefinementRequest = {
 
 describe('first-wave B public JSON Schemas', () => {
   it('publishes only strict media-authoring lifecycle request/status boundaries', async () => {
+    const mediaSource = {
+      kind: 'authorized_youtube_download' as const,
+      videoId: 'abcdefghijk',
+      sourceIdentitySha256: sha('0'),
+      contentSha256: sha('1'),
+      rightsBasis: 'rights_holder_permission' as const,
+      platformDownloadValidation: {
+        authorityId: 'youtube-platform-authority-fixture',
+        authorityKind: 'youtube_platform_authority' as const,
+        sideEffect: 'youtube_media_download' as const,
+        receiptContentSha256: sha('2'),
+        authorityContentSha256: sha('3'),
+      },
+      rightsValidation: {
+        authorityId: 'rights-authority-fixture',
+        authorityKind: 'media_rights_authority' as const,
+        sideEffect: 'rights_validation' as const,
+        receiptContentSha256: sha('4'),
+        authorityContentSha256: sha('5'),
+      },
+    };
     const statusRequest = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId: '11111111-1111-4111-8111-111111111111',
       runId: '22222222-2222-4222-8222-222222222222',
     } as const;
@@ -82,14 +112,35 @@ describe('first-wave B public JSON Schemas', () => {
       reviewedAt: '2026-08-21T08:02:00Z',
     } as const;
     const acceptedStatus = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId: statusRequest.requestId,
       requestFingerprint: sha('a'),
       runId: statusRequest.runId,
+      mediaSource,
       status: 'accepted',
       completedStages: [],
       acceptedAt: '2026-08-21T08:00:00Z',
       updatedAt: '2026-08-21T08:00:00Z',
+    } as const;
+    const invalidRunningStatus = {
+      ...acceptedStatus,
+      status: 'running',
+      completedStages: [],
+      currentStage: 'storage',
+      startedAt: acceptedStatus.acceptedAt,
+    } as const;
+    const invalidRecoveryStatus = {
+      ...acceptedStatus,
+      status: 'recovery_required',
+      completedStages: ['provider_generation'],
+      recoveryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      retryFromStage: 'storage',
+      error: {
+        code: 'storage_failed',
+        message: 'Storage failed.',
+        retryable: false,
+        stage: 'materialization',
+      },
     } as const;
 
     expect(procedureTutorialMediaAuthoringRunStatusRequestSchema.parse(statusRequest)).toEqual(
@@ -104,6 +155,15 @@ describe('first-wave B public JSON Schemas', () => {
     expect(procedureTutorialMediaAuthoringRunStatusSchema.parse(acceptedStatus)).toEqual(
       acceptedStatus,
     );
+    expect(
+      procedureTutorialMediaAuthoringCurrentRunStatusSchema.safeParse(acceptedStatus).success,
+    ).toBe(true);
+    expect(
+      procedureTutorialMediaAuthoringRunStatusSchema.safeParse(invalidRunningStatus).success,
+    ).toBe(false);
+    expect(
+      procedureTutorialMediaAuthoringRunStatusSchema.safeParse(invalidRecoveryStatus).success,
+    ).toBe(false);
     expect(
       procedureTutorialMediaAuthoringRunStatusRequestSchema.safeParse({
         ...statusRequest,
@@ -124,8 +184,8 @@ describe('first-wave B public JSON Schemas', () => {
     ).toBe(false);
     void procedureTutorialMediaAuthoringRunCreateRequestSchema;
 
-    const binding = {
-      formatVersion: '1.0.0',
+    const bindingContent = {
+      formatVersion: '1.1.0',
       requestId: statusRequest.requestId,
       requestFingerprint: sha('1'),
       runId: statusRequest.runId,
@@ -136,6 +196,7 @@ describe('first-wave B public JSON Schemas', () => {
         analysisFingerprint: sha('2'),
         preparationFingerprint: sha('3'),
         packetContentSha256: sha('4'),
+        mediaSource,
       },
       generation: {
         requestId: '77777777-7777-4777-8777-777777777777',
@@ -186,14 +247,53 @@ describe('first-wave B public JSON Schemas', () => {
         materializedTreeContentSha256: sha('7'),
       },
       storage: { treeId: 'tutorial.eye', revision: 1, contentSha256: sha('7') },
+    } as const;
+    const binding = {
+      ...bindingContent,
       integrity: {
-        algorithm: 'sha256',
-        canonicalization: 'operatingline-json-value-v1',
-        contentSha256: sha('9'),
+        algorithm: 'sha256' as const,
+        canonicalization: 'operatingline-json-value-v1' as const,
+        contentSha256: computeProcedureTutorialAuthoringBindingContentSha256(bindingContent),
       },
     } as const;
-    void procedureTutorialMediaAuthoringBindingSchema;
+    expect(procedureTutorialMediaAuthoringBindingSchema.parse(binding)).toEqual(binding);
 
+    const legacyAcceptedStatus = {
+      formatVersion: '1.0.0',
+      requestId: acceptedStatus.requestId,
+      requestFingerprint: acceptedStatus.requestFingerprint,
+      runId: acceptedStatus.runId,
+      status: acceptedStatus.status,
+      completedStages: acceptedStatus.completedStages,
+      acceptedAt: acceptedStatus.acceptedAt,
+      updatedAt: acceptedStatus.updatedAt,
+    } as const;
+    const legacyBindingFields = {
+      ...bindingContent,
+      formatVersion: '1.0.0',
+      source: {
+        kind: binding.source.kind,
+        analysisRequestId: binding.source.analysisRequestId,
+        analysisJobId: binding.source.analysisJobId,
+        analysisFingerprint: binding.source.analysisFingerprint,
+        preparationFingerprint: binding.source.preparationFingerprint,
+        packetContentSha256: binding.source.packetContentSha256,
+      },
+    } as const;
+    const legacyBinding = {
+      ...legacyBindingFields,
+      integrity: {
+        algorithm: 'sha256' as const,
+        canonicalization: 'operatingline-json-value-v1' as const,
+        contentSha256: computeProcedureTutorialAuthoringBindingContentSha256(legacyBindingFields),
+      },
+    } as const;
+    expect(
+      procedureTutorialMediaAuthoringLegacyRunStatusSchema.parse(legacyAcceptedStatus),
+    ).toEqual(legacyAcceptedStatus);
+    expect(procedureTutorialMediaAuthoringLegacyBindingSchema.parse(legacyBinding)).toEqual(
+      legacyBinding,
+    );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-authoring-run-status-request.schema.json'),
       [
@@ -219,7 +319,10 @@ describe('first-wave B public JSON Schemas', () => {
       publicSchema('procedure-tutorial-media-authoring-run-status.schema.json'),
       [
         { value: acceptedStatus, accepted: true },
+        { value: legacyAcceptedStatus, accepted: false },
         { value: { ...acceptedStatus, completedStages: ['storage'] }, accepted: false },
+        { value: invalidRunningStatus, accepted: false },
+        { value: invalidRecoveryStatus, accepted: false },
       ],
     );
     await validatePublicJsonSchemaCases(

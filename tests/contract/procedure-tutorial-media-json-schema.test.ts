@@ -7,15 +7,22 @@ import {
   procedureTutorialMediaAnalysisRequestSchema,
   procedureTutorialMediaAnalysisResultSchema,
   procedureTutorialMediaCapabilitiesSchema,
+  procedureTutorialMediaCurrentAnalysisResultSchema,
+  procedureTutorialMediaCurrentJobStatusSchema,
   procedureTutorialMediaJobStatusRequestSchema,
-  procedureTutorialMediaJobStatusSchema,
   procedureTutorialMediaResumeRequestSchema,
 } from '@operatingline/protocol';
+import { procedureTutorialMediaAnalysisStartRequestSchema } from '../../packages/protocol/src/procedure-tutorial-media.js';
 
 import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-support/public-json-schema-validator.js';
 
 function publicSchema(filename: string): object {
-  return JSON.parse(readFileSync(resolve('protocol/schemas/v1', filename), 'utf8')) as object;
+  return JSON.parse(
+    readFileSync(
+      resolve(process.env['OPERATINGLINE_SCHEMA_DIR'] ?? 'protocol/schemas/v1', filename),
+      'utf8',
+    ),
+  ) as object;
 }
 
 const sourceSha256 = 'a'.repeat(64);
@@ -29,6 +36,42 @@ const ocrCandidateId = 'b4362a77-a7cb-498f-b7da-f8021477d35f';
 const uiCandidateId = 'd25c10f8-792f-4f99-b519-ba60d6cf56bc';
 const shortcutCandidateId = '5e94919a-21e2-488f-8a37-a92cb7800ab6';
 const semanticSegmentId = '3b55472f-af56-4c77-aa2b-a79f7f294781';
+const rightsValidation = {
+  authorityId: 'rights-authority-fixture',
+  authorityKind: 'media_rights_authority',
+  sideEffect: 'rights_validation',
+  receiptContentSha256: '8'.repeat(64),
+  authorityContentSha256: '9'.repeat(64),
+} as const;
+const youtubeSource = {
+  kind: 'authorized_youtube_download',
+  videoId: 'dQw4w9WgXcQ',
+  sourceIdentitySha256: '1'.repeat(64),
+  contentSha256: sourceSha256,
+  rightsBasis: 'rights_holder_permission',
+  rightsValidation,
+  platformDownloadValidation: {
+    authorityId: 'youtube-platform-authority-fixture',
+    authorityKind: 'youtube_platform_authority',
+    sideEffect: 'youtube_media_download',
+    receiptContentSha256: '2'.repeat(64),
+    authorityContentSha256: '3'.repeat(64),
+  },
+} as const;
+const localSource = {
+  kind: 'user_supplied_local_file',
+  sourceIdentitySha256: '4'.repeat(64),
+  contentSha256: sourceSha256,
+  rightsBasis: 'rights_holder_permission',
+  importValidation: {
+    authorityId: 'local-import-authority-fixture',
+    authorityKind: 'local_import_authority',
+    sideEffect: 'local_media_import',
+    receiptContentSha256: '5'.repeat(64),
+    authorityContentSha256: '6'.repeat(64),
+  },
+  rightsValidation,
+} as const;
 
 const request = {
   formatVersion: '1.0.0',
@@ -51,6 +94,28 @@ const request = {
   approvals: {
     networkAccessApproved: true,
     mediaDownloadApproved: true,
+    retentionApproved: true,
+  },
+} as const;
+
+const youtubeStartRequest = {
+  formatVersion: '1.1.0',
+  requestId,
+  source: youtubeSource,
+  analysisProfile: 'youtube_tutorial_evidence_v1',
+  locale: 'en-US',
+  analysisWindow: request.analysisWindow,
+  requestedStages: request.requestedStages,
+  approvals: request.approvals,
+} as const;
+const localStartRequest = {
+  ...youtubeStartRequest,
+  source: localSource,
+  analysisProfile: 'local_tutorial_evidence_v1',
+  requestedStages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+  approvals: {
+    networkAccessApproved: false,
+    mediaDownloadApproved: false,
     retentionApproved: true,
   },
 } as const;
@@ -264,51 +329,149 @@ const capabilities = {
 } as const;
 
 describe('public tutorial media analysis JSON Schemas', () => {
+  it('round-trips exact YouTube and local sources and rejects loss or simultaneous claims', () => {
+    expect(
+      procedureTutorialMediaAnalysisStartRequestSchema.safeParse(youtubeStartRequest).success,
+    ).toBe(true);
+    expect(
+      procedureTutorialMediaAnalysisStartRequestSchema.safeParse(localStartRequest).success,
+    ).toBe(true);
+    expect(
+      procedureTutorialMediaAnalysisStartRequestSchema.safeParse({
+        ...youtubeStartRequest,
+        formatVersion: '1.0.0',
+        source: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureTutorialMediaAnalysisStartRequestSchema.safeParse({
+        ...localStartRequest,
+        source: { ...localSource, videoId: youtubeSource.videoId },
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureTutorialMediaAnalysisStartRequestSchema.safeParse({
+        ...youtubeStartRequest,
+        source: { ...youtubeSource, importValidation: localSource.importValidation },
+      }).success,
+    ).toBe(false);
+
+    const youtubeResult = {
+      ...result,
+      formatVersion: '1.1.0',
+      source: youtubeSource,
+      manifestIntegrity: { ...result.manifestIntegrity, source: youtubeSource },
+    } as const;
+    const resultWithoutVideoId = Object.fromEntries(
+      Object.entries(result).filter(([key]) => key !== 'videoId'),
+    );
+    const localResult = {
+      ...resultWithoutVideoId,
+      formatVersion: '1.1.0',
+      source: localSource,
+      analysisProfile: 'local_tutorial_evidence_v1',
+      completedStages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+      sideEffects: { ...result.sideEffects, networkFetched: false, mediaDownloaded: false },
+      manifestIntegrity: { ...result.manifestIntegrity, source: localSource },
+    } as const;
+    expect(procedureTutorialMediaAnalysisResultSchema.safeParse(youtubeResult).success).toBe(true);
+    expect(procedureTutorialMediaAnalysisResultSchema.safeParse(localResult).success).toBe(true);
+    expect(
+      procedureTutorialMediaAnalysisResultSchema.safeParse({
+        ...youtubeResult,
+        manifestIntegrity: { ...youtubeResult.manifestIntegrity, source: localSource },
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureTutorialMediaAnalysisResultSchema.safeParse({
+        ...youtubeResult,
+        videoId: 'aaaaaaaaaaa',
+      }).success,
+    ).toBe(false);
+  });
+
   it('keeps the request credential-free and requires separate rights and download approvals', async () => {
     const cases = [
-      { value: request, accepted: true },
+      { value: youtubeStartRequest, accepted: true },
+      { value: localStartRequest, accepted: true },
+      { value: request, accepted: false },
       {
-        value: { ...request, approvals: { ...request.approvals, mediaDownloadApproved: false } },
+        value: {
+          ...youtubeStartRequest,
+          approvals: { ...youtubeStartRequest.approvals, mediaDownloadApproved: false },
+        },
         accepted: false,
       },
       {
         value: {
-          ...request,
-          platformDownloadAuthorization: {
-            ...request.platformDownloadAuthorization,
-            basis: 'terms_of_service_assumed',
+          ...youtubeStartRequest,
+          source: {
+            ...youtubeSource,
+            platformDownloadValidation: youtubeSource.rightsValidation,
           },
         },
         accepted: false,
       },
       {
         value: {
-          ...request,
-          platformDownloadAuthorization: {
-            ...request.platformDownloadAuthorization,
-            reference: 'https://example.com/approval',
+          ...localStartRequest,
+          source: {
+            ...localSource,
+            importValidation: localSource.rightsValidation,
           },
         },
         accepted: false,
       },
-      { value: { ...request, url: 'https://youtube.example/watch' }, accepted: false },
-      { value: { ...request, path: '/tmp/video.mp4' }, accepted: false },
-      { value: { ...request, executable: 'media-tool' }, accepted: false },
-      { value: { ...request, argv: ['--download'] }, accepted: false },
-      { value: { ...request, accessToken: 'forbidden' }, accepted: false },
-      { value: { ...request, cookie: 'forbidden' }, accepted: false },
-      { value: { ...request, videoId: '../unsafe' }, accepted: false },
-      { value: { ...request, requestedStages: ['download', 'probe'] }, accepted: false },
       {
         value: {
-          ...request,
+          ...youtubeStartRequest,
+          source: {
+            ...youtubeSource,
+            platformDownloadValidation: {
+              ...youtubeSource.platformDownloadValidation,
+              receiptContentSha256: youtubeSource.rightsValidation.receiptContentSha256,
+              authorityContentSha256: youtubeSource.rightsValidation.authorityContentSha256,
+            },
+          },
+        },
+        accepted: true,
+        runtimeAccepted: false,
+      },
+      {
+        value: {
+          ...localStartRequest,
+          source: {
+            ...localSource,
+            importValidation: {
+              ...localSource.importValidation,
+              receiptContentSha256: localSource.rightsValidation.receiptContentSha256,
+              authorityContentSha256: localSource.rightsValidation.authorityContentSha256,
+            },
+          },
+        },
+        accepted: true,
+        runtimeAccepted: false,
+      },
+      { value: { ...youtubeStartRequest, url: 'https://youtube.example/watch' }, accepted: false },
+      { value: { ...youtubeStartRequest, path: '/tmp/video.mp4' }, accepted: false },
+      { value: { ...youtubeStartRequest, executable: 'media-tool' }, accepted: false },
+      { value: { ...youtubeStartRequest, argv: ['--download'] }, accepted: false },
+      { value: { ...youtubeStartRequest, accessToken: 'forbidden' }, accepted: false },
+      { value: { ...youtubeStartRequest, cookie: 'forbidden' }, accepted: false },
+      {
+        value: { ...youtubeStartRequest, requestedStages: ['download', 'probe'] },
+        accepted: false,
+      },
+      {
+        value: {
+          ...youtubeStartRequest,
           requestedStages: ['probe', 'download', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
         },
         accepted: false,
       },
       {
         value: {
-          ...request,
+          ...youtubeStartRequest,
           requestedStages: [
             'download',
             'download',
@@ -325,8 +488,10 @@ describe('public tutorial media analysis JSON Schemas', () => {
 
     for (const contractCase of cases) {
       expect(
-        procedureTutorialMediaAnalysisRequestSchema.safeParse(contractCase.value).success,
-      ).toBe(contractCase.accepted);
+        procedureTutorialMediaAnalysisStartRequestSchema.safeParse(contractCase.value).success,
+      ).toBe(
+        'runtimeAccepted' in contractCase ? contractCase.runtimeAccepted : contractCase.accepted,
+      );
     }
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-analysis-request.schema.json'),
@@ -335,11 +500,31 @@ describe('public tutorial media analysis JSON Schemas', () => {
   });
 
   it('publishes content-addressed result and safe job status contracts', async () => {
+    const youtubeResult = {
+      ...result,
+      formatVersion: '1.1.0',
+      source: youtubeSource,
+      manifestIntegrity: { ...result.manifestIntegrity, source: youtubeSource },
+    } as const;
+    const youtubeResultWithoutVideoId = Object.fromEntries(
+      Object.entries(result).filter(([key]) => key !== 'videoId'),
+    );
+    const localResult = {
+      ...youtubeResultWithoutVideoId,
+      formatVersion: '1.1.0',
+      source: localSource,
+      analysisProfile: 'local_tutorial_evidence_v1',
+      completedStages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+      sideEffects: { ...result.sideEffects, networkFetched: false, mediaDownloaded: false },
+      manifestIntegrity: { ...result.manifestIntegrity, source: localSource },
+    } as const;
     const resultCases = [
-      { value: result, accepted: true },
+      { value: youtubeResult, accepted: true },
+      { value: localResult, accepted: true },
+      { value: result, accepted: false },
       {
         value: {
-          ...result,
+          ...youtubeResult,
           artifacts: [
             { ...sourceArtifact, path: '/tmp/video.mp4' },
             audioArtifact,
@@ -353,23 +538,40 @@ describe('public tutorial media analysis JSON Schemas', () => {
       },
       {
         value: {
-          ...result,
-          tools: [{ ...result.tools[0], argv: ['--unsafe'] }],
+          ...youtubeResult,
+          tools: [{ ...youtubeResult.tools[0], argv: ['--unsafe'] }],
         },
         accepted: false,
       },
-      { value: { ...result, cookie: 'forbidden' }, accepted: false },
+      { value: { ...youtubeResult, cookie: 'forbidden' }, accepted: false },
       {
         value: {
-          ...result,
+          ...youtubeResult,
           completedStages: ['probe', 'download', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...youtubeResult,
+          source: { ...youtubeSource, contentSha256: 'f'.repeat(64) },
+        },
+        accepted: true,
+        runtimeAccepted: false,
+      },
+      {
+        value: {
+          ...localResult,
+          manifestIntegrity: { ...localResult.manifestIntegrity, source: youtubeSource },
         },
         accepted: false,
       },
     ] as const;
     for (const contractCase of resultCases) {
-      expect(procedureTutorialMediaAnalysisResultSchema.safeParse(contractCase.value).success).toBe(
-        contractCase.accepted,
+      expect(
+        procedureTutorialMediaCurrentAnalysisResultSchema.safeParse(contractCase.value).success,
+      ).toBe(
+        'runtimeAccepted' in contractCase ? contractCase.runtimeAccepted : contractCase.accepted,
       );
     }
     await validatePublicJsonSchemaCases(
@@ -380,12 +582,13 @@ describe('public tutorial media analysis JSON Schemas', () => {
     const statusCases = [
       {
         value: {
-          formatVersion: '1.0.0',
+          formatVersion: '1.1.0',
           requestId,
           jobId,
+          source: youtubeSource,
           status: 'completed',
-          result,
-          updatedAt: result.completedAt,
+          result: youtubeResult,
+          updatedAt: youtubeResult.completedAt,
         },
         accepted: true,
       },
@@ -394,13 +597,25 @@ describe('public tutorial media analysis JSON Schemas', () => {
           formatVersion: '1.0.0',
           requestId,
           jobId,
+          status: 'completed',
+          result,
+          updatedAt: result.completedAt,
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          formatVersion: '1.1.0',
+          requestId,
+          jobId,
+          source: localSource,
           status: 'failed',
-          completedStages: ['download'],
+          completedStages: [],
           error: {
-            code: 'shell_failed',
-            message: 'unsafe implementation detail',
+            code: 'source_unavailable',
+            message: 'Local import failed.',
             retryable: false,
-            stage: 'probe',
+            stage: 'download',
           },
           failedAt: '2026-08-18T08:06:00Z',
           updatedAt: '2026-08-18T08:06:00Z',
@@ -409,9 +624,30 @@ describe('public tutorial media analysis JSON Schemas', () => {
       },
       {
         value: {
-          formatVersion: '1.0.0',
+          formatVersion: '1.1.0',
           requestId,
           jobId,
+          source: localSource,
+          status: 'recovery_required',
+          recoveryId: '8e1ee079-31c8-4ac9-a3a3-cef6eaa406a7',
+          retryFromStage: 'import',
+          completedStages: [],
+          error: {
+            code: 'source_unavailable',
+            message: 'Local import failed.',
+            retryable: false,
+            stage: 'download',
+          },
+          updatedAt: '2026-08-18T08:00:00Z',
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          formatVersion: '1.1.0',
+          requestId,
+          jobId,
+          source: youtubeSource,
           status: 'accepted',
           acceptedAt: '2026-08-18T08:00:00Z',
           updatedAt: '2026-08-18T08:00:00Z',
@@ -421,9 +657,9 @@ describe('public tutorial media analysis JSON Schemas', () => {
       },
     ] as const;
     for (const contractCase of statusCases) {
-      expect(procedureTutorialMediaJobStatusSchema.safeParse(contractCase.value).success).toBe(
-        contractCase.accepted,
-      );
+      expect(
+        procedureTutorialMediaCurrentJobStatusSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
     }
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-job-status.schema.json'),
@@ -433,24 +669,54 @@ describe('public tutorial media analysis JSON Schemas', () => {
 
   it('publishes strict recovery and capability contracts', async () => {
     const statusRequest = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId,
       jobId,
     } as const;
     const statusRequestCases = [
       { value: statusRequest, accepted: true },
+      { value: { ...statusRequest, formatVersion: '1.0.0' }, accepted: false },
       { value: { ...statusRequest, token: 'forbidden' }, accepted: false },
     ] as const;
     const resume = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId,
       jobId,
+      source: youtubeSource,
       recoveryId: '8e1ee079-31c8-4ac9-a3a3-cef6eaa406a7',
       retryFromStage: 'download',
       approvals: request.approvals,
     } as const;
     const resumeCases = [
       { value: resume, accepted: true },
+      {
+        value: {
+          ...resume,
+          source: {
+            ...youtubeSource,
+            platformDownloadValidation: youtubeSource.rightsValidation,
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...resume,
+          source: localSource,
+          retryFromStage: 'import',
+          approvals: localStartRequest.approvals,
+        },
+        accepted: true,
+      },
+      {
+        value: {
+          ...resume,
+          source: { ...localSource, importValidation: localSource.rightsValidation },
+          retryFromStage: 'import',
+          approvals: localStartRequest.approvals,
+        },
+        accepted: false,
+      },
       { value: { ...resume, resumeToken: 'forbidden' }, accepted: false },
       { value: { ...resume, retryFromStage: 'asr' }, accepted: false },
       {
@@ -500,7 +766,20 @@ describe('public tutorial media analysis JSON Schemas', () => {
     );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-resume-request.schema.json'),
-      resumeCases,
+      [
+        {
+          value: {
+            formatVersion: '1.1.0',
+            requestId,
+            jobId,
+            source: youtubeSource,
+            recoveryId: resume.recoveryId,
+            retryFromStage: 'download',
+            approvals: request.approvals,
+          },
+          accepted: true,
+        },
+      ],
     );
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-capabilities.schema.json'),
@@ -511,7 +790,7 @@ describe('public tutorial media analysis JSON Schemas', () => {
   it('enforces cross-record time, coordinate, hash and evidence references in TypeScript', () => {
     expect(
       procedureTutorialMediaJobStatusRequestSchema.safeParse({
-        formatVersion: '1.0.0',
+        formatVersion: '1.1.0',
         requestId,
         jobId: requestId,
       }).success,

@@ -1,62 +1,345 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "type": "object",
-  "properties": {
-    "formatVersion": {
-      "type": "string",
-      "const": "1.0.0"
-    },
-    "requestId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "jobId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "recoveryId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "retryFromStage": {
-      "type": "string",
-      "const": "download"
-    },
-    "approvals": {
+  "anyOf": [
+    {
       "type": "object",
       "properties": {
-        "networkAccessApproved": {
-          "type": "boolean",
-          "const": true
+        "formatVersion": {
+          "type": "string",
+          "const": "1.1.0"
         },
-        "mediaDownloadApproved": {
-          "type": "boolean",
-          "const": true
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
-        "retentionApproved": {
-          "type": "boolean",
-          "const": true
+        "jobId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "authorized_youtube_download"
+            },
+            "videoId": {
+              "type": "string",
+              "minLength": 11,
+              "maxLength": 11,
+              "pattern": "^[A-Za-z0-9_-]{11}$"
+            },
+            "sourceIdentitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsBasis": {
+              "type": "string",
+              "enum": [
+                "rights_holder_permission",
+                "license_verified",
+                "public_domain_verified"
+              ]
+            },
+            "rightsValidation": {
+              "type": "object",
+              "properties": {
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 180,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                "receiptContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityKind": {
+                  "type": "string",
+                  "const": "media_rights_authority"
+                },
+                "sideEffect": {
+                  "type": "string",
+                  "const": "rights_validation"
+                }
+              },
+              "required": [
+                "authorityId",
+                "receiptContentSha256",
+                "authorityContentSha256",
+                "authorityKind",
+                "sideEffect"
+              ],
+              "additionalProperties": false
+            },
+            "platformDownloadValidation": {
+              "type": "object",
+              "properties": {
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 180,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                "receiptContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityKind": {
+                  "type": "string",
+                  "const": "youtube_platform_authority"
+                },
+                "sideEffect": {
+                  "type": "string",
+                  "const": "youtube_media_download"
+                }
+              },
+              "required": [
+                "authorityId",
+                "receiptContentSha256",
+                "authorityContentSha256",
+                "authorityKind",
+                "sideEffect"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "videoId",
+            "sourceIdentitySha256",
+            "contentSha256",
+            "rightsBasis",
+            "rightsValidation",
+            "platformDownloadValidation"
+          ],
+          "additionalProperties": false,
+          "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+        },
+        "recoveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "retryFromStage": {
+          "type": "string",
+          "const": "download"
+        },
+        "approvals": {
+          "type": "object",
+          "properties": {
+            "networkAccessApproved": {
+              "type": "boolean",
+              "const": true
+            },
+            "mediaDownloadApproved": {
+              "type": "boolean",
+              "const": true
+            },
+            "retentionApproved": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "networkAccessApproved",
+            "mediaDownloadApproved",
+            "retentionApproved"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
-        "networkAccessApproved",
-        "mediaDownloadApproved",
-        "retentionApproved"
+        "formatVersion",
+        "requestId",
+        "jobId",
+        "source",
+        "recoveryId",
+        "retryFromStage",
+        "approvals"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "formatVersion": {
+          "type": "string",
+          "const": "1.1.0"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "jobId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "user_supplied_local_file"
+            },
+            "sourceIdentitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "contentSha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "rightsBasis": {
+              "type": "string",
+              "enum": [
+                "rights_holder_permission",
+                "license_verified",
+                "public_domain_verified"
+              ]
+            },
+            "importValidation": {
+              "type": "object",
+              "properties": {
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 180,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                "receiptContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityKind": {
+                  "type": "string",
+                  "const": "local_import_authority"
+                },
+                "sideEffect": {
+                  "type": "string",
+                  "const": "local_media_import"
+                }
+              },
+              "required": [
+                "authorityId",
+                "receiptContentSha256",
+                "authorityContentSha256",
+                "authorityKind",
+                "sideEffect"
+              ],
+              "additionalProperties": false
+            },
+            "rightsValidation": {
+              "type": "object",
+              "properties": {
+                "authorityId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 180,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                "receiptContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityContentSha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "authorityKind": {
+                  "type": "string",
+                  "const": "media_rights_authority"
+                },
+                "sideEffect": {
+                  "type": "string",
+                  "const": "rights_validation"
+                }
+              },
+              "required": [
+                "authorityId",
+                "receiptContentSha256",
+                "authorityContentSha256",
+                "authorityKind",
+                "sideEffect"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "sourceIdentitySha256",
+            "contentSha256",
+            "rightsBasis",
+            "importValidation",
+            "rightsValidation"
+          ],
+          "additionalProperties": false,
+          "$comment": "Role-specific authorityKind and sideEffect literals prevent receipt substitution in JSON Schema. Runtime Zod parsing additionally requires distinct receipt hashes, authority hashes, and authority ids."
+        },
+        "recoveryId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "retryFromStage": {
+          "type": "string",
+          "const": "import"
+        },
+        "approvals": {
+          "type": "object",
+          "properties": {
+            "networkAccessApproved": {
+              "type": "boolean",
+              "const": false
+            },
+            "mediaDownloadApproved": {
+              "type": "boolean",
+              "const": false
+            },
+            "retentionApproved": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "networkAccessApproved",
+            "mediaDownloadApproved",
+            "retentionApproved"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "formatVersion",
+        "requestId",
+        "jobId",
+        "source",
+        "recoveryId",
+        "retryFromStage",
+        "approvals"
       ],
       "additionalProperties": false
     }
-  },
-  "required": [
-    "formatVersion",
-    "requestId",
-    "jobId",
-    "recoveryId",
-    "retryFromStage",
-    "approvals"
   ],
-  "additionalProperties": false,
   "$id": "https://operatingline.dev/schema/v1/procedure-tutorial-media-resume-request.json"
 }

@@ -67,6 +67,28 @@ const ids = {
   review: '77777777-7777-4777-8777-777777777777',
 } as const;
 
+const mediaSource = {
+  kind: 'authorized_youtube_download' as const,
+  videoId: 'abcdefghijk',
+  sourceIdentitySha256: '0'.repeat(64),
+  contentSha256: '1'.repeat(64),
+  rightsBasis: 'rights_holder_permission' as const,
+  platformDownloadValidation: {
+    authorityId: 'youtube-platform-authority-fixture',
+    authorityKind: 'youtube_platform_authority',
+    sideEffect: 'youtube_media_download',
+    receiptContentSha256: '2'.repeat(64),
+    authorityContentSha256: '3'.repeat(64),
+  },
+  rightsValidation: {
+    authorityId: 'rights-authority-fixture',
+    authorityKind: 'media_rights_authority',
+    sideEffect: 'rights_validation',
+    receiptContentSha256: '4'.repeat(64),
+    authorityContentSha256: '5'.repeat(64),
+  },
+};
+
 const descriptor = plannerProviderDescriptorSchema.parse({
   contractVersion: '1.0.0',
   id: 'procedure-author',
@@ -84,15 +106,16 @@ const descriptor = plannerProviderDescriptorSchema.parse({
 
 function request() {
   return {
-    formatVersion: '1.0.0' as const,
+    formatVersion: '1.1.0' as const,
     requestId: ids.request,
     preparation: {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       status: 'ready',
       analysisRequestId: ids.analysis,
       analysisJobId: ids.job,
       analysisFingerprint: 'a'.repeat(64),
       fingerprint: 'b'.repeat(64),
+      source: mediaSource,
       packet: { integrity: { contentSha256: 'c'.repeat(64) } },
     },
     provider: {
@@ -177,10 +200,11 @@ function history(until: 'provider_started' | 'review_required', duplicateStart =
   const input = request();
   const fingerprint = plannerProviderRequestFingerprint(input);
   const scope = {
-    formatVersion: '1.0.0',
+    formatVersion: '1.1.0',
     requestId: ids.request,
     requestFingerprint: fingerprint,
     runId: ids.run,
+    mediaSource,
   };
   const events = [
     stored(1, 'procedure.tutorial.media.authoring.requested', {

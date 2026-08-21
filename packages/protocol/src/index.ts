@@ -1,4 +1,5 @@
 export * from './adapter.js';
+export * from './authority.js';
 export * from './action-arguments.js';
 export * from './catalog.js';
 export * from './canonical-json-value.js';
@@ -10,6 +11,7 @@ export * from './companion-replan-run.js';
 export * from './companion-session.js';
 export * from './companion-shortcut-proof.js';
 export * from './diff.js';
+export * from './execution-decision.js';
 export * from './eval.js';
 export * from './eval-annotation.js';
 export * from './eval-common.js';
@@ -20,6 +22,7 @@ export * from './guide.js';
 export * from './goal.js';
 export * from './history.js';
 export * from './interaction-catalog.js';
+export * from './interaction-operation.js';
 export * from './managed-primitive-action.js';
 export * from './planning.js';
 export * from './prompt.js';
@@ -33,6 +36,7 @@ export * from './procedure-authoring-provider.js';
 export * from './procedure-materialization.js';
 export * from './procedure-parameter-projection.js';
 export * from './procedure-replay.js';
+export * from './procedure-compound-replay.js';
 export * from './procedure-shortcut-proof.js';
 export * from './procedure-refinement.js';
 export * from './procedure-semantic-retrieval.js';
@@ -41,7 +45,9 @@ export * from './procedure-tutorial-import.js';
 export * from './procedure-tutorial-media.js';
 export * from './procedure-tutorial-media-authoring.js';
 export {
+  procedureTutorialMediaAuthoringRunLegacyFormatVersion,
   procedureTutorialMediaAuthoringRunFormatVersion,
+  procedureTutorialMediaAuthoringRunLegacyFormatVersionSchema,
   procedureTutorialMediaAuthoringRunFormatVersionSchema,
   procedureTutorialMediaAuthoringRunStageValues,
   procedureTutorialMediaAuthoringRunStageSchema,
@@ -51,7 +57,10 @@ export {
   procedureTutorialMediaAuthoringRunStatusSchema,
   procedureTutorialMediaAuthoringReviewRequestSchema,
   procedureTutorialMediaAuthoringResumeRequestSchema,
+  procedureTutorialMediaAuthoringLegacyBindingSchema,
   procedureTutorialMediaAuthoringBindingSchema,
+  procedureTutorialMediaAuthoringLegacyRunStatusSchema,
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
   type ProcedureTutorialMediaAuthoringRunStage,
   type ProcedureTutorialMediaAuthoringMaterializationSummary,
   type ProcedureTutorialMediaAuthoringRunCreateRequest,

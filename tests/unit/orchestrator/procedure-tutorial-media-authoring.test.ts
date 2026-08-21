@@ -9,8 +9,10 @@ import {
 } from '@operatingline/blender-action-catalog';
 import {
   procedureAuthoringPromptPacketSchema,
+  procedureTutorialMediaAuthoringPrepareStartRequestSchema,
   procedureTutorialMediaAuthoringPreparationSchema,
-  type ProcedureTutorialMediaAnalysisResult,
+  type ProcedureAuthoringMediaSource,
+  type ProcedureTutorialMediaCurrentAnalysisResult,
   type ProcedureTutorialMediaArtifactRef,
 } from '@operatingline/protocol';
 
@@ -19,6 +21,27 @@ import { validatePublicJsonSchemaCases } from '../../../services/orchestrator/te
 
 const completedAt = '2026-08-20T00:00:00.000Z';
 const sourceSha256 = '1'.repeat(64);
+const mediaSource: ProcedureAuthoringMediaSource = {
+  kind: 'authorized_youtube_download',
+  videoId: 'abcdefghijk',
+  sourceIdentitySha256: '0'.repeat(64),
+  contentSha256: sourceSha256,
+  rightsBasis: 'rights_holder_permission',
+  platformDownloadValidation: {
+    authorityId: 'youtube-platform-authority-fixture',
+    authorityKind: 'youtube_platform_authority',
+    sideEffect: 'youtube_media_download',
+    receiptContentSha256: 'a'.repeat(64),
+    authorityContentSha256: 'b'.repeat(64),
+  },
+  rightsValidation: {
+    authorityId: 'rights-authority-fixture',
+    authorityKind: 'media_rights_authority',
+    sideEffect: 'rights_validation',
+    receiptContentSha256: 'c'.repeat(64),
+    authorityContentSha256: 'd'.repeat(64),
+  },
+};
 
 function artifact(
   role: ProcedureTutorialMediaArtifactRef['role'],
@@ -37,7 +60,7 @@ function artifact(
   };
 }
 
-function analysis(): ProcedureTutorialMediaAnalysisResult {
+function analysis(): ProcedureTutorialMediaCurrentAnalysisResult {
   const source = artifact('source_video', 'video/mp4', '1');
   const audio = artifact('audio_track', 'audio/wav', '2');
   const frame1 = artifact('evidence_frame', 'image/png', '3');
@@ -53,10 +76,11 @@ function analysis(): ProcedureTutorialMediaAnalysisResult {
   const uiId = '66666666-6666-4666-8666-666666666666';
   const shortcutId = '77777777-7777-4777-8777-777777777777';
   return {
-    formatVersion: '1.0.0',
+    formatVersion: '1.1.0',
     requestId: '88888888-8888-4888-8888-888888888888',
     jobId: '99999999-9999-4999-8999-999999999999',
     videoId: 'abcdefghijk',
+    source: mediaSource,
     analysisProfile: 'youtube_tutorial_evidence_v1',
     locale: 'en',
     analysisWindow: { startMs: 0, endMs: 2_000 },
@@ -197,6 +221,7 @@ function analysis(): ProcedureTutorialMediaAnalysisResult {
       artifactCount: 7,
       rootSha256: 'f'.repeat(64),
       generatedAt: completedAt,
+      source: mediaSource,
     },
     completedAt,
   };
@@ -205,6 +230,7 @@ function analysis(): ProcedureTutorialMediaAnalysisResult {
 function input(result = analysis()) {
   return {
     analysis: result,
+    source: result.source,
     request: {
       targetAdapterId: 'blender',
       actionCatalogVersion: blenderActionCatalog.catalogVersion,
@@ -216,20 +242,21 @@ function input(result = analysis()) {
     },
     video: {
       title: 'Eye tutorial',
-    },
-    rightsAuthorization: {
-      basis: 'rights_holder_permission' as const,
-      reference: 'rights-approval-1',
-      confirmedAt: completedAt,
+      uri: 'https://www.youtube.com/watch?v=abcdefghijk',
     },
     actionCatalog: blenderActionCatalog,
     interactionCatalog: blenderInteractionCatalog,
-    verifyAnalysis: vi.fn(async (value: ProcedureTutorialMediaAnalysisResult) => value),
+    verifyAnalysis: vi.fn(async (value: ProcedureTutorialMediaCurrentAnalysisResult) => value),
   };
 }
 
 function publicSchema(filename: string): object {
-  return JSON.parse(readFileSync(resolve('protocol/schemas/v1', filename), 'utf8')) as object;
+  return JSON.parse(
+    readFileSync(
+      resolve(process.env['OPERATINGLINE_SCHEMA_DIR'] ?? 'protocol/schemas/v1', filename),
+      'utf8',
+    ),
+  ) as object;
 }
 
 describe('procedure tutorial media authoring preparation', () => {
@@ -238,7 +265,7 @@ describe('procedure tutorial media authoring preparation', () => {
     const second = await prepareProcedureTutorialMediaAuthoring(input());
 
     expect(first.status).toBe('ready');
-    expect(first.packet?.formatVersion).toBe('1.5.0');
+    expect(first.packet?.formatVersion).toBe('1.6.0');
     expect(first.fingerprint).toBe(second.fingerprint);
     expect(first.quality).toEqual({
       semanticSegmentCount: 2,
@@ -278,14 +305,12 @@ describe('procedure tutorial media authoring preparation', () => {
           analysisRequestId: '88888888-8888-4888-8888-888888888888',
           analysisJobId: '99999999-9999-4999-8999-999999999999',
           analysisFingerprint: first.analysisFingerprint,
-          rightsAuthorization: {
-            basis: 'rights_holder_permission',
-            reference: 'rights-approval-1',
-          },
+          source: mediaSource,
           manifest: {
             artifactUri: `operatingline-media://sha256/${'7'.repeat(64)}`,
             sha256: '7'.repeat(64),
             rootSha256: 'f'.repeat(64),
+            source: mediaSource,
           },
           tools: [
             {
@@ -321,16 +346,31 @@ describe('procedure tutorial media authoring preparation', () => {
     });
     const preparedInput = input();
     const publicRequest = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       analysisRequestId: preparedInput.analysis.requestId,
       analysisJobId: preparedInput.analysis.jobId,
+      source: preparedInput.source,
       request: preparedInput.request,
       video: preparedInput.video,
     };
+    expect(
+      procedureTutorialMediaAuthoringPrepareStartRequestSchema.safeParse(publicRequest).success,
+    ).toBe(true);
+    expect(
+      procedureTutorialMediaAuthoringPrepareStartRequestSchema.safeParse({
+        ...publicRequest,
+        formatVersion: '1.0.0',
+        source: undefined,
+      }).success,
+    ).toBe(false);
     await validatePublicJsonSchemaCases(
       publicSchema('procedure-tutorial-media-authoring-prepare-request.schema.json'),
       [
         { value: publicRequest, accepted: true },
+        {
+          value: { ...publicRequest, formatVersion: '1.0.0', source: undefined },
+          accepted: false,
+        },
         { value: { ...publicRequest, analysisJobId: 'not-a-uuid' }, accepted: false },
         { value: { ...publicRequest, executablePath: '/tmp/forbidden' }, accepted: false },
         {
@@ -482,10 +522,14 @@ describe('procedure tutorial media authoring preparation', () => {
 
   it('derives local-media rights from verified analysis authorization without license text', async () => {
     const licensed = input();
-    licensed.rightsAuthorization = {
-      basis: 'license_verified',
-      reference: 'license-record-7',
-      confirmedAt: completedAt,
+    licensed.source = {
+      ...licensed.source,
+      rightsBasis: 'license_verified',
+    };
+    licensed.analysis = {
+      ...licensed.analysis,
+      source: licensed.source,
+      manifestIntegrity: { ...licensed.analysis.manifestIntegrity, source: licensed.source },
     };
     const prepared = await prepareProcedureTutorialMediaAuthoring(licensed);
 
@@ -495,11 +539,7 @@ describe('procedure tutorial media authoring preparation', () => {
       transcript: {
         origin: 'local_media_analysis',
         localMediaAnalysis: {
-          rightsAuthorization: {
-            basis: 'license_verified',
-            reference: 'license-record-7',
-            confirmedAt: completedAt,
-          },
+          source: { rightsBasis: 'license_verified' },
         },
       },
     });
@@ -516,17 +556,14 @@ describe('procedure tutorial media authoring preparation', () => {
     await expect(
       prepareProcedureTutorialMediaAuthoring({
         ...licensed,
-        rightsAuthorization: {
-          ...licensed.rightsAuthorization,
-          reference: 'contains spaces',
-        },
+        source: { ...licensed.source, sourceIdentitySha256: 'f'.repeat(64) },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('different from the input');
   });
 
   it('blocks low-signal segments without constructing a prompt packet', async () => {
     const result = analysis();
-    const lowSignal: ProcedureTutorialMediaAnalysisResult = {
+    const lowSignal: ProcedureTutorialMediaCurrentAnalysisResult = {
       ...result,
       semanticSegments: result.semanticSegments.map((segment) => ({
         ...segment,
@@ -563,7 +600,7 @@ describe('procedure tutorial media authoring preparation', () => {
 
   it('blocks ASR without overlap and visual candidates outside the semantic interval', async () => {
     const result = analysis();
-    const crossTimed: ProcedureTutorialMediaAnalysisResult = {
+    const crossTimed: ProcedureTutorialMediaCurrentAnalysisResult = {
       ...result,
       semanticSegments: [
         {

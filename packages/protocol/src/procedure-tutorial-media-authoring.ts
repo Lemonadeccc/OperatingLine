@@ -3,17 +3,30 @@ import { z } from 'zod';
 import { evalContentSha256Schema } from './eval-common.js';
 import { guideStepIdSchema } from './guide.js';
 import {
+  procedureAuthoringMediaSourceSchema,
   procedureAuthoringPromptPacketSchema,
   procedureAuthoringPromptRequestSchema,
 } from './procedure-authoring.js';
 import { procedureTutorialMediaEvidenceReferenceSchema } from './procedure-tutorial-media.js';
 
-export const procedureTutorialMediaAuthoringFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaAuthoringLegacyFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaAuthoringFormatVersion = '1.1.0' as const;
+export const procedureTutorialMediaAuthoringLegacyFormatVersionSchema = z.literal(
+  procedureTutorialMediaAuthoringLegacyFormatVersion,
+);
 export const procedureTutorialMediaAuthoringFormatVersionSchema = z.literal(
   procedureTutorialMediaAuthoringFormatVersion,
 );
 
 const videoTitleSchema = z.string().min(1).max(500).regex(/\S/);
+const videoUriSchema = z.union([
+  z
+    .string()
+    .min(1)
+    .max(2_048)
+    .regex(/^https:\/\/[^\s]+$/),
+  z.string().regex(/^operatingline-media:\/\/sha256\/[a-f0-9]{64}$/),
+]);
 export const procedureTutorialMediaAuthoringVideoSchema = z.strictObject({
   title: videoTitleSchema,
 });
@@ -21,13 +34,40 @@ export type ProcedureTutorialMediaAuthoringVideo = z.infer<
   typeof procedureTutorialMediaAuthoringVideoSchema
 >;
 
-export const procedureTutorialMediaAuthoringPrepareRequestSchema = z.strictObject({
-  formatVersion: procedureTutorialMediaAuthoringFormatVersionSchema,
+export const procedureTutorialMediaAuthoringLegacyPrepareRequestSchema = z.strictObject({
+  formatVersion: procedureTutorialMediaAuthoringLegacyFormatVersionSchema,
   analysisRequestId: z.uuid(),
   analysisJobId: z.uuid(),
   request: procedureAuthoringPromptRequestSchema.omit({ tutorial: true }),
   video: procedureTutorialMediaAuthoringVideoSchema,
 });
+export const procedureTutorialMediaAuthoringPrepareStartRequestSchema =
+  procedureTutorialMediaAuthoringLegacyPrepareRequestSchema
+    .extend({
+      formatVersion: procedureTutorialMediaAuthoringFormatVersionSchema,
+      source: procedureAuthoringMediaSourceSchema,
+      video: procedureTutorialMediaAuthoringVideoSchema.extend({ uri: videoUriSchema }),
+    })
+    .superRefine((request, context) => {
+      const expectedUri =
+        request.source.kind === 'authorized_youtube_download'
+          ? `https://www.youtube.com/watch?v=${request.source.videoId}`
+          : `operatingline-media://sha256/${request.source.contentSha256}`;
+      if (request.video.uri !== expectedUri) {
+        context.addIssue({
+          code: 'custom',
+          path: ['video', 'uri'],
+          message: 'Authoring video URI must explicitly match the declared media source identity',
+        });
+      }
+    });
+export type ProcedureTutorialMediaAuthoringPrepareStartRequest = z.infer<
+  typeof procedureTutorialMediaAuthoringPrepareStartRequestSchema
+>;
+export const procedureTutorialMediaAuthoringPrepareRequestSchema = z.union([
+  procedureTutorialMediaAuthoringLegacyPrepareRequestSchema,
+  procedureTutorialMediaAuthoringPrepareStartRequestSchema,
+]);
 export type ProcedureTutorialMediaAuthoringPrepareRequest = z.infer<
   typeof procedureTutorialMediaAuthoringPrepareRequestSchema
 >;
@@ -113,7 +153,7 @@ const sideEffectsSchema = z.strictObject({
 });
 
 const preparationCommonShape = {
-  formatVersion: procedureTutorialMediaAuthoringFormatVersionSchema,
+  formatVersion: procedureTutorialMediaAuthoringLegacyFormatVersionSchema,
   analysisRequestId: z.uuid(),
   analysisJobId: z.uuid(),
   analysisFingerprint: evalContentSha256Schema,
@@ -147,7 +187,7 @@ function sameOrderedEvidence(
   );
 }
 
-export const procedureTutorialMediaAuthoringPreparationSchema = z
+export const procedureTutorialMediaAuthoringLegacyPreparationSchema = z
   .discriminatedUnion('status', [
     z.strictObject({
       ...preparationCommonShape,
@@ -275,6 +315,105 @@ export const procedureTutorialMediaAuthoringPreparationSchema = z
       },
     ],
   });
+export const procedureTutorialMediaAuthoringLegacyReadyPreparationSchema =
+  procedureTutorialMediaAuthoringLegacyPreparationSchema.options[0];
+const currentPreparationCommon = {
+  analysisRequestId: z.uuid(),
+  analysisJobId: z.uuid(),
+  analysisFingerprint: evalContentSha256Schema,
+  fingerprint: evalContentSha256Schema,
+  quality: procedureTutorialMediaAuthoringQualityReportSchema,
+  sideEffects: sideEffectsSchema,
+  formatVersion: procedureTutorialMediaAuthoringFormatVersionSchema,
+  source: procedureAuthoringMediaSourceSchema,
+} as const;
+export const procedureTutorialMediaAuthoringCurrentReadyPreparationSchema = z.strictObject({
+  ...currentPreparationCommon,
+  status: z.literal('ready'),
+  evidenceBindings: z.array(readyEvidenceBindingSchema).min(1).max(2_000),
+  packet: procedureAuthoringPromptPacketSchema,
+});
+const procedureTutorialMediaAuthoringCurrentBlockedPreparationSchema = z.strictObject({
+  ...currentPreparationCommon,
+  status: z.literal('blocked'),
+  evidenceBindings: z.array(blockedEvidenceBindingSchema).max(2_000),
+  packet: z.null(),
+});
+export const procedureTutorialMediaAuthoringCurrentPreparationSchema = z
+  .discriminatedUnion('status', [
+    procedureTutorialMediaAuthoringCurrentReadyPreparationSchema,
+    procedureTutorialMediaAuthoringCurrentBlockedPreparationSchema,
+  ])
+  .superRefine((preparation, context) => {
+    const legacyPreparation = Object.fromEntries(
+      Object.entries(preparation).filter(([key]) => key !== 'source'),
+    );
+    if (
+      !procedureTutorialMediaAuthoringLegacyPreparationSchema.safeParse({
+        ...legacyPreparation,
+        formatVersion: procedureTutorialMediaAuthoringLegacyFormatVersion,
+      }).success
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'Current preparation must satisfy all persisted authoring invariants',
+      });
+    }
+    if (preparation.status !== 'ready') return;
+    const packetSource =
+      preparation.packet.context.tutorialProvenance?.transcript.localMediaAnalysis?.source;
+    if (
+      packetSource === undefined ||
+      JSON.stringify(packetSource) !== JSON.stringify(preparation.source)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: [
+          'packet',
+          'context',
+          'tutorialProvenance',
+          'transcript',
+          'localMediaAnalysis',
+          'source',
+        ],
+        message: 'Ready packet provenance must retain the exact preparation media source',
+      });
+    }
+  })
+  .meta({
+    allOf: [
+      {
+        if: { properties: { status: { const: 'ready' } }, required: ['status'] },
+        then: {
+          properties: {
+            quality: {
+              properties: { blockers: { maxItems: 0 } },
+              required: ['blockers'],
+            },
+          },
+        },
+      },
+      {
+        if: { properties: { status: { const: 'blocked' } }, required: ['status'] },
+        then: {
+          properties: {
+            quality: {
+              properties: { blockers: { minItems: 1 } },
+              required: ['blockers'],
+            },
+          },
+        },
+      },
+    ],
+  });
+export type ProcedureTutorialMediaAuthoringCurrentPreparation = z.infer<
+  typeof procedureTutorialMediaAuthoringCurrentPreparationSchema
+>;
+export const procedureTutorialMediaAuthoringPreparationSchema = z.union([
+  procedureTutorialMediaAuthoringLegacyPreparationSchema,
+  procedureTutorialMediaAuthoringCurrentPreparationSchema,
+]);
 export type ProcedureTutorialMediaAuthoringPreparation = z.infer<
   typeof procedureTutorialMediaAuthoringPreparationSchema
 >;

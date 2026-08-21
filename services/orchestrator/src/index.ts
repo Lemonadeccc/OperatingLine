@@ -90,17 +90,18 @@ import {
   procedureZeroBaselineSemanticStartRequestSchema,
   procedureTutorialTranscriptGenerateRequestSchema,
   procedureTutorialTranscriptImportRequestSchema,
-  procedureTutorialMediaAnalysisRequestSchema,
-  procedureTutorialMediaAuthoringPreparationSchema,
-  procedureTutorialMediaAuthoringPrepareRequestSchema,
+  procedureTutorialMediaAnalysisStartRequestSchema,
+  procedureTutorialMediaCurrentJobStatusSchema,
+  procedureTutorialMediaCurrentAnalysisResultSchema,
+  procedureTutorialMediaAuthoringCurrentPreparationSchema,
+  procedureTutorialMediaAuthoringPrepareStartRequestSchema,
   procedureTutorialMediaAuthoringResumeRequestSchema,
   procedureTutorialMediaAuthoringReviewRequestSchema,
   procedureTutorialMediaAuthoringRunCreateRequestSchema,
   procedureTutorialMediaAuthoringRunStatusRequestSchema,
-  procedureTutorialMediaAuthoringRunStatusSchema,
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
   procedureTutorialMediaCapabilitiesSchema,
   procedureTutorialMediaJobStatusRequestSchema,
-  procedureTutorialMediaJobStatusSchema,
   procedureTutorialMediaResumeRequestSchema,
   procedureTutorialAuthoringResumeRequestSchema,
   procedureTutorialAuthoringReviewRequestSchema,
@@ -457,7 +458,7 @@ function mcpStructuredResult<Value extends Record<string, unknown>>(value: Value
 
 class ProcedureTutorialMediaAuthoringPreparationError extends Error {
   constructor(
-    readonly code: 'analysis_not_completed',
+    readonly code: 'analysis_not_completed' | 'analysis_source_mismatch',
     readonly statusCode: 409,
     message: string,
   ) {
@@ -900,7 +901,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     };
 
     const executeTutorialMediaAuthoringPreparation = async (
-      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareRequestSchema.parse>,
+      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareStartRequestSchema.parse>,
     ) => {
       if (
         procedureTutorialMediaCoordinator === undefined ||
@@ -919,6 +920,16 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           'The referenced tutorial media analysis is not completed.',
         );
       }
+      if (
+        completed.result.formatVersion !== '1.1.0' ||
+        !isDeepStrictEqual(completed.result.source, request.source)
+      ) {
+        throw new ProcedureTutorialMediaAuthoringPreparationError(
+          'analysis_source_mismatch',
+          409,
+          'The completed analysis does not retain the exact requested media source.',
+        );
+      }
       const actionCatalog = actionCatalogRegistry.get({
         targetAdapterId: request.request.targetAdapterId,
         ...(request.request.actionCatalogVersion === undefined
@@ -934,12 +945,15 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
       return prepareProcedureTutorialMediaAuthoring({
         analysis: completed.result,
+        source: request.source,
         request: request.request,
         video: request.video,
-        rightsAuthorization: completed.request.rightsAuthorization,
         actionCatalog,
         interactionCatalog,
-        verifyAnalysis: (analysis) => tutorialMediaRuntime.pipeline!.verify(analysis),
+        verifyAnalysis: async (analysis) =>
+          procedureTutorialMediaCurrentAnalysisResultSchema.parse(
+            await tutorialMediaRuntime.pipeline!.verify(analysis),
+          ),
       });
     };
     tutorialMediaAuthoringPreparationCoordinator =
@@ -949,12 +963,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     const retainedTutorialMediaAuthoringPreparations = new Map<
       string,
-      ReturnType<typeof procedureTutorialMediaAuthoringPreparationSchema.parse>
+      ReturnType<typeof procedureTutorialMediaAuthoringCurrentPreparationSchema.parse>
     >();
     const tutorialMediaPreparationKey = (analysisRequestId: string, analysisJobId: string) =>
       `${analysisRequestId}:${analysisJobId}`;
     const prepareTutorialMediaAuthoring = async (
-      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareRequestSchema.parse>,
+      request: ReturnType<typeof procedureTutorialMediaAuthoringPrepareStartRequestSchema.parse>,
     ) => {
       const preparation = await tutorialMediaAuthoringPreparationCoordinator!.prepare(request);
       if (preparation.status === 'ready') {
@@ -3622,11 +3636,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         {
           description:
             'Start the complete authorized YouTube tutorial media evidence pipeline. Authorization references must already exist in the trusted server-side registry; this request never accepts credentials, executable paths, model paths, or arbitrary download URLs.',
-          inputSchema: deferMcpInputValidation(procedureTutorialMediaAnalysisRequestSchema),
-          outputSchema: procedureTutorialMediaJobStatusSchema,
+          inputSchema: deferMcpInputValidation(procedureTutorialMediaAnalysisStartRequestSchema),
+          outputSchema: procedureTutorialMediaCurrentJobStatusSchema,
         },
         async (requestInput) => {
-          const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.safeParse(requestInput);
+          const parsedRequest =
+            procedureTutorialMediaAnalysisStartRequestSchema.safeParse(requestInput);
           const requestId = requestIdFromUnknown(requestInput);
           if (!parsedRequest.success) {
             return mcpError({
@@ -3653,7 +3668,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Read the latest persisted state of one tutorial media analysis job. Both the original request id and server-generated job id are required.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaJobStatusRequestSchema),
-          outputSchema: procedureTutorialMediaJobStatusSchema,
+          outputSchema: procedureTutorialMediaCurrentJobStatusSchema,
         },
         async (requestInput) => {
           const parsedRequest =
@@ -3688,7 +3703,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Explicitly restart a recoverable tutorial media job from the download stage using the exact server recovery receipt and renewed network, download, and retention approvals. Partial artifact reuse is forbidden.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaResumeRequestSchema),
-          outputSchema: procedureTutorialMediaJobStatusSchema,
+          outputSchema: procedureTutorialMediaCurrentJobStatusSchema,
         },
         async (requestInput) => {
           const parsedRequest = procedureTutorialMediaResumeRequestSchema.safeParse(requestInput);
@@ -3718,12 +3733,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         {
           description:
             'Verify one completed authorized media-analysis manifest against local content-addressed artifacts, bind its ordered semantic, ASR, frame, OCR, UI, and shortcut evidence to a deterministic Procedure authoring packet, and return a quality gate. A blocked result contains no packet. This does not call a Provider, store a tree, create a Proposal, or execute Blender.',
-          inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringPrepareRequestSchema),
-          outputSchema: procedureTutorialMediaAuthoringPreparationSchema,
+          inputSchema: deferMcpInputValidation(
+            procedureTutorialMediaAuthoringPrepareStartRequestSchema,
+          ),
+          outputSchema: procedureTutorialMediaAuthoringCurrentPreparationSchema,
         },
         async (requestInput) => {
           const parsedRequest =
-            procedureTutorialMediaAuthoringPrepareRequestSchema.safeParse(requestInput);
+            procedureTutorialMediaAuthoringPrepareStartRequestSchema.safeParse(requestInput);
           const requestId = parsedRequest.success
             ? parsedRequest.data.analysisRequestId
             : tutorialMediaAnalysisRequestIdFromUnknown(requestInput);
@@ -3776,7 +3793,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           inputSchema: deferMcpInputValidation(
             procedureTutorialMediaAuthoringRunCreateRequestSchema,
           ),
-          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
         },
         async (requestInput) => {
           const parsed =
@@ -3807,7 +3824,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           inputSchema: deferMcpInputValidation(
             procedureTutorialMediaAuthoringRunStatusRequestSchema,
           ),
-          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
         },
         async (requestInput) => {
           const parsed =
@@ -3836,7 +3853,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Explicitly store or discard one awaiting media authoring result. Store requires the exact preparation, packet, candidate-tree, and materialized-tree hashes plus every confirmation; storage is atomic and never proposes or executes host work.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringReviewRequestSchema),
-          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialMediaAuthoringReviewRequestSchema.safeParse(requestInput);
@@ -3864,7 +3881,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           description:
             'Resume only an exact recovery-required deterministic materialization or storage stage. The media pipeline and Provider call are never replayed by this operation.',
           inputSchema: deferMcpInputValidation(procedureTutorialMediaAuthoringResumeRequestSchema),
-          outputSchema: procedureTutorialMediaAuthoringRunStatusSchema,
+          outputSchema: procedureTutorialMediaAuthoringCurrentRunStatusSchema,
         },
         async (requestInput) => {
           const parsed = procedureTutorialMediaAuthoringResumeRequestSchema.safeParse(requestInput);
@@ -6285,7 +6302,9 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       procedureTutorialMediaCapabilitiesSchema.parse(tutorialMediaRuntime.capabilities),
     );
     runtimeApp.post('/api/v1/procedure/tutorial/media/jobs', async (request, reply) => {
-      const parsedRequest = procedureTutorialMediaAnalysisRequestSchema.safeParse(request.body);
+      const parsedRequest = procedureTutorialMediaAnalysisStartRequestSchema.safeParse(
+        request.body,
+      );
       const requestId = requestIdFromUnknown(request.body);
       if (!parsedRequest.success) {
         return reply.code(400).send({
@@ -6362,7 +6381,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     runtimeApp.post(
       '/api/v1/procedure/tutorial/media/authoring/prepare',
       async (request, reply) => {
-        const parsedRequest = procedureTutorialMediaAuthoringPrepareRequestSchema.safeParse(
+        const parsedRequest = procedureTutorialMediaAuthoringPrepareStartRequestSchema.safeParse(
           request.body,
         );
         const requestId = parsedRequest.success
@@ -8562,3 +8581,5 @@ export {
   isStableVersionRangeSubset,
   satisfiesStableVersionRange,
 } from './stable-version-ranges.js';
+export * from './authority-verifier.js';
+export * from './authority-consumption.js';

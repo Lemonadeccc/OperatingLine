@@ -17,6 +17,7 @@ import {
   procedureTutorialAuthoringRunStatusSchema,
   procedureTutorialAuthoringStageEventSchema,
 } from '@operatingline/protocol';
+import { procedureAuthoringMediaSourceSchema } from '../../packages/protocol/src/procedure-authoring.js';
 
 import { validatePublicJsonSchemaCases } from '../../services/orchestrator/test-support/public-json-schema-validator.js';
 
@@ -181,6 +182,66 @@ function validBinding() {
 }
 
 describe('public Procedure tutorial authoring run JSON Schemas', () => {
+  it('keeps media source authority claims strict and receipt-content-only', () => {
+    const receipt = {
+      authorityId: 'rights-authority-fixture',
+      authorityKind: 'media_rights_authority',
+      sideEffect: 'rights_validation',
+      receiptContentSha256: '1'.repeat(64),
+      authorityContentSha256: '2'.repeat(64),
+    } as const;
+    const acquisitionReceipt = {
+      authorityId: 'youtube-platform-authority-fixture',
+      authorityKind: 'youtube_platform_authority',
+      sideEffect: 'youtube_media_download',
+      receiptContentSha256: '7'.repeat(64),
+      authorityContentSha256: '8'.repeat(64),
+    } as const;
+    const importReceipt = {
+      authorityId: 'local-import-authority-fixture',
+      authorityKind: 'local_import_authority',
+      sideEffect: 'local_media_import',
+      receiptContentSha256: '9'.repeat(64),
+      authorityContentSha256: 'a'.repeat(64),
+    } as const;
+    const youtube = {
+      kind: 'authorized_youtube_download',
+      videoId: 'dQw4w9WgXcQ',
+      sourceIdentitySha256: '3'.repeat(64),
+      contentSha256: '4'.repeat(64),
+      rightsBasis: 'rights_holder_permission',
+      rightsValidation: receipt,
+      platformDownloadValidation: acquisitionReceipt,
+    } as const;
+    const local = {
+      kind: 'user_supplied_local_file',
+      sourceIdentitySha256: '5'.repeat(64),
+      contentSha256: '6'.repeat(64),
+      rightsBasis: 'rights_holder_permission',
+      importValidation: importReceipt,
+      rightsValidation: receipt,
+    } as const;
+    expect(procedureAuthoringMediaSourceSchema.safeParse(youtube).success).toBe(true);
+    expect(procedureAuthoringMediaSourceSchema.safeParse(local).success).toBe(true);
+    expect(
+      procedureAuthoringMediaSourceSchema.safeParse({ ...local, rightsValidation: undefined })
+        .success,
+    ).toBe(false);
+    expect(
+      procedureAuthoringMediaSourceSchema.safeParse({
+        ...local,
+        videoId: youtube.videoId,
+        platformDownloadValidation: acquisitionReceipt,
+      }).success,
+    ).toBe(false);
+    expect(
+      procedureAuthoringMediaSourceSchema.safeParse({
+        ...youtube,
+        rightsValidation: { ...receipt, signature: 'forbidden' },
+      }).success,
+    ).toBe(false);
+  });
+
   it('accepts only the exact selected-caption create request and distinct lifecycle ids', async () => {
     const structuralCases = [
       { value: createRequest, accepted: true },

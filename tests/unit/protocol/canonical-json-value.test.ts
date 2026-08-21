@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canonicalizeProtocolJsonValue,
+  computeProtocolCanonicalJsonSha256,
   protocolJsonValueCanonicalization,
 } from '@operatingline/protocol';
 
@@ -35,6 +36,7 @@ describe('portable canonical JSON-value encoding', () => {
     [['😀', -0, 1e-7, 1e20], '6cf88735d4a75d91930a01aaaeaaece30f54a260d2e10362321a70e42c598b66'],
   ])('matches shared vector %#', (value, expected) => {
     expect(sha256(value)).toBe(expected);
+    expect(computeProtocolCanonicalJsonSha256(value)).toBe(expected);
   });
 
   it('sorts object keys by UTF-8 bytes rather than JavaScript key enumeration', () => {

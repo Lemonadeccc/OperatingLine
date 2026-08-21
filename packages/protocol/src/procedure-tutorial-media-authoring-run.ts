@@ -5,10 +5,18 @@ import { procedureAuthoringGenerationResultSchema } from './procedure-authoring-
 import { procedureAuthoringMaterializationResultSchema } from './procedure-materialization.js';
 import { procedureTreeStoreResultSchema } from './procedure-tree.js';
 import { computeProcedureTutorialAuthoringBindingContentSha256 } from './procedure-tutorial-authoring-run.js';
-import { procedureTutorialMediaAuthoringPreparationSchema } from './procedure-tutorial-media-authoring.js';
+import { procedureAuthoringMediaSourceSchema } from './procedure-authoring.js';
+import {
+  procedureTutorialMediaAuthoringCurrentReadyPreparationSchema,
+  procedureTutorialMediaAuthoringLegacyReadyPreparationSchema,
+} from './procedure-tutorial-media-authoring.js';
 import { plannerProviderDescriptorSchema } from './provider.js';
 
-export const procedureTutorialMediaAuthoringRunFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaAuthoringRunLegacyFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaAuthoringRunFormatVersion = '1.1.0' as const;
+export const procedureTutorialMediaAuthoringRunLegacyFormatVersionSchema = z.literal(
+  procedureTutorialMediaAuthoringRunLegacyFormatVersion,
+);
 export const procedureTutorialMediaAuthoringRunFormatVersionSchema = z.literal(
   procedureTutorialMediaAuthoringRunFormatVersion,
 );
@@ -25,7 +33,8 @@ export type ProcedureTutorialMediaAuthoringRunStage = z.infer<
 >;
 
 const timestampSchema = z.iso.datetime({ offset: true });
-const readyPreparationSchema = procedureTutorialMediaAuthoringPreparationSchema.options[0];
+const readyPreparationSchema = procedureTutorialMediaAuthoringCurrentReadyPreparationSchema;
+const legacyReadyPreparationSchema = procedureTutorialMediaAuthoringLegacyReadyPreparationSchema;
 const materializationOptions = procedureAuthoringMaterializationResultSchema.options;
 export const procedureTutorialMediaAuthoringMaterializationSummarySchema = z.discriminatedUnion(
   'formatVersion',
@@ -80,7 +89,7 @@ export type ProcedureTutorialMediaAuthoringRunCreateRequest = z.infer<
 >;
 
 const identityShape = {
-  formatVersion: procedureTutorialMediaAuthoringRunFormatVersionSchema,
+  formatVersion: procedureTutorialMediaAuthoringRunLegacyFormatVersionSchema,
   requestId: z.uuid(),
   requestFingerprint: evalContentSha256Schema,
   runId: z.uuid(),
@@ -170,7 +179,7 @@ export type ProcedureTutorialMediaAuthoringResumeRequest = z.infer<
   typeof procedureTutorialMediaAuthoringResumeRequestSchema
 >;
 
-export const procedureTutorialMediaAuthoringBindingSchema = z
+export const procedureTutorialMediaAuthoringLegacyBindingSchema = z
   .strictObject({
     ...identityShape,
     source: z.strictObject({
@@ -238,6 +247,43 @@ export const procedureTutorialMediaAuthoringBindingSchema = z
       });
     }
   });
+export const procedureTutorialMediaAuthoringBindingSchema = z
+  .strictObject({
+    ...procedureTutorialMediaAuthoringLegacyBindingSchema.shape,
+    formatVersion: procedureTutorialMediaAuthoringRunFormatVersionSchema,
+    source: procedureTutorialMediaAuthoringLegacyBindingSchema.shape.source.extend({
+      mediaSource: procedureAuthoringMediaSourceSchema,
+    }),
+  })
+  .superRefine((value, context) => {
+    if (
+      value.source.preparationFingerprint !== value.review.preparationFingerprint ||
+      value.source.packetContentSha256 !== value.review.packetContentSha256 ||
+      value.source.packetContentSha256 !== value.materialization.packetContentSha256 ||
+      value.generation.candidateTreeContentSha256 !== value.review.candidateTreeContentSha256 ||
+      value.generation.candidateTreeContentSha256 !==
+        value.materialization.inputTreeContentSha256 ||
+      value.materialization.outputTreeContentSha256 !==
+        value.review.materializedTreeContentSha256 ||
+      value.materialization.outputTreeContentSha256 !== value.storage.contentSha256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['review'],
+        message:
+          'Preparation, packet, candidate, materialized, review, and storage hashes must agree',
+      });
+    }
+    if (
+      value.integrity.contentSha256 !== computeProcedureTutorialAuthoringBindingContentSha256(value)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['integrity', 'contentSha256'],
+        message: 'Media authoring binding integrity must match its canonical content',
+      });
+    }
+  });
 export type ProcedureTutorialMediaAuthoringBinding = z.infer<
   typeof procedureTutorialMediaAuthoringBindingSchema
 >;
@@ -250,11 +296,11 @@ const errorSchema = z.strictObject({
 });
 const commonStatus = { ...identityShape, updatedAt: timestampSchema } as const;
 const previewSchema = z.strictObject({
-  preparation: readyPreparationSchema,
+  preparation: legacyReadyPreparationSchema,
   generation: procedureAuthoringGenerationResultSchema,
   materialization: procedureAuthoringMaterializationResultSchema,
 });
-export const procedureTutorialMediaAuthoringRunStatusSchema = z
+export const procedureTutorialMediaAuthoringLegacyRunStatusSchema = z
   .discriminatedUnion('status', [
     z.strictObject({
       ...commonStatus,
@@ -308,7 +354,7 @@ export const procedureTutorialMediaAuthoringRunStatusSchema = z
         z.literal('storage'),
       ]),
       result: z.strictObject({
-        binding: procedureTutorialMediaAuthoringBindingSchema,
+        binding: procedureTutorialMediaAuthoringLegacyBindingSchema,
         storage: procedureTreeStoreResultSchema,
         sideEffects: z.strictObject({
           providerCalled: z.literal(true),
@@ -385,11 +431,225 @@ export const procedureTutorialMediaAuthoringRunStatusSchema = z
     $comment:
       'Runtime-only invariants compare requestId, requestFingerprint, runId, tree id/revision, and content hashes across the completed status, binding, and stored record.',
   });
+const currentRunStatusIdentity = {
+  formatVersion: procedureTutorialMediaAuthoringRunFormatVersionSchema,
+  requestId: z.uuid(),
+  requestFingerprint: evalContentSha256Schema,
+  runId: z.uuid(),
+  mediaSource: procedureAuthoringMediaSourceSchema,
+} as const;
+const currentRunStatusCommon = { ...currentRunStatusIdentity, updatedAt: timestampSchema } as const;
+const currentCompletedStagePrefixSchema = z.union([
+  z.tuple([]),
+  z.tuple([z.literal('provider_generation')]),
+  z.tuple([z.literal('provider_generation'), z.literal('materialization')]),
+]);
+const currentRunningStatusSchema = z
+  .strictObject({
+    ...currentRunStatusCommon,
+    status: z.literal('running'),
+    currentStage: procedureTutorialMediaAuthoringRunStageSchema,
+    completedStages: currentCompletedStagePrefixSchema,
+    startedAt: timestampSchema,
+  })
+  .meta({
+    allOf: procedureTutorialMediaAuthoringRunStageValues.map((currentStage, index) => ({
+      if: { properties: { currentStage: { const: currentStage } }, required: ['currentStage'] },
+      then: {
+        properties: {
+          completedStages: {
+            type: 'array',
+            items: procedureTutorialMediaAuthoringRunStageValues
+              .slice(0, index)
+              .map((stage) => ({ const: stage })),
+            additionalItems: false,
+            minItems: index,
+            maxItems: index,
+          },
+        },
+        required: ['completedStages'],
+      },
+    })),
+  });
+export const procedureTutorialMediaAuthoringCurrentRunStatusSchema = z
+  .union([
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('accepted'),
+      completedStages: z.tuple([]),
+      acceptedAt: timestampSchema,
+    }),
+    currentRunningStatusSchema,
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('awaiting_review'),
+      completedStages: z.tuple([z.literal('provider_generation'), z.literal('materialization')]),
+      reviewId: z.uuid(),
+      preview: z.strictObject({
+        preparation: readyPreparationSchema,
+        generation: procedureAuthoringGenerationResultSchema,
+        materialization: procedureAuthoringMaterializationResultSchema,
+      }),
+      awaitingReviewSince: timestampSchema,
+    }),
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('recovery_required'),
+      completedStages: z.tuple([z.literal('provider_generation')]),
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('materialization'),
+      error: errorSchema.extend({
+        retryable: z.literal(true),
+        stage: z.literal('materialization'),
+      }),
+    }),
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('recovery_required'),
+      completedStages: z.tuple([z.literal('provider_generation'), z.literal('materialization')]),
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('storage'),
+      error: errorSchema.extend({ retryable: z.literal(true), stage: z.literal('storage') }),
+    }),
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('discarded'),
+      completedStages: z.tuple([z.literal('provider_generation'), z.literal('materialization')]),
+      reviewId: z.uuid(),
+      discardedAt: timestampSchema,
+    }),
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('failed'),
+      completedStages: currentCompletedStagePrefixSchema,
+      error: errorSchema.extend({ retryable: z.literal(false) }),
+      failedAt: timestampSchema,
+    }),
+    z.strictObject({
+      ...currentRunStatusCommon,
+      status: z.literal('completed'),
+      completedStages: z.tuple([
+        z.literal('provider_generation'),
+        z.literal('materialization'),
+        z.literal('storage'),
+      ]),
+      result: z.strictObject({
+        binding: procedureTutorialMediaAuthoringBindingSchema,
+        storage: procedureTreeStoreResultSchema,
+        sideEffects: z.strictObject({
+          providerCalled: z.literal(true),
+          procedureStored: z.literal(true),
+          proposalCreated: z.literal(false),
+          hostExecutionStarted: z.literal(false),
+        }),
+        completedAt: timestampSchema,
+      }),
+    }),
+  ])
+  .superRefine((status, context) => {
+    const expected = procedureTutorialMediaAuthoringRunStageValues.slice(
+      0,
+      status.completedStages.length,
+    );
+    if (!status.completedStages.every((stage, index) => stage === expected[index])) {
+      context.addIssue({
+        code: 'custom',
+        path: ['completedStages'],
+        message: 'Completed stages must be a canonical media authoring prefix',
+      });
+    }
+    if (
+      status.status === 'running' &&
+      status.currentStage !==
+        procedureTutorialMediaAuthoringRunStageValues[status.completedStages.length]
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['currentStage'],
+        message: 'Current stage must immediately follow completed stages',
+      });
+    }
+    if (status.requestId === status.runId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runId'],
+        message: 'Run id must differ from request id',
+      });
+    }
+    const statusTime =
+      status.status === 'accepted'
+        ? status.acceptedAt
+        : status.status === 'running'
+          ? status.startedAt
+          : status.status === 'awaiting_review'
+            ? status.awaitingReviewSince
+            : status.status === 'discarded'
+              ? status.discardedAt
+              : status.status === 'failed'
+                ? status.failedAt
+                : status.status === 'completed'
+                  ? status.result.completedAt
+                  : null;
+    if (statusTime !== null && Date.parse(status.updatedAt) < Date.parse(statusTime)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['updatedAt'],
+        message: 'Run status update cannot precede its status timestamp',
+      });
+    }
+    if (
+      status.status === 'failed' &&
+      status.completedStages.some(
+        (stage) =>
+          procedureTutorialMediaAuthoringRunStageValues.indexOf(stage) >=
+          procedureTutorialMediaAuthoringRunStageValues.indexOf(status.error.stage),
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['completedStages'],
+        message: 'Completed authoring stages must precede the failed stage',
+      });
+    }
+    if (
+      status.status === 'awaiting_review' &&
+      JSON.stringify(status.mediaSource) !== JSON.stringify(status.preview.preparation.source)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['preview', 'preparation', 'source'],
+        message: 'Review preview must retain the exact run media source',
+      });
+    }
+    if (status.status === 'completed') {
+      const { binding, storage } = status.result;
+      if (
+        binding.requestId !== status.requestId ||
+        binding.requestFingerprint !== status.requestFingerprint ||
+        binding.runId !== status.runId ||
+        JSON.stringify(binding.source.mediaSource) !== JSON.stringify(status.mediaSource) ||
+        storage.record.tree.id !== binding.storage.treeId ||
+        storage.record.tree.revision !== binding.storage.revision ||
+        storage.record.integrity.contentSha256 !== binding.storage.contentSha256
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['result'],
+          message:
+            'Completed run must retain the exact identity, media source, and storage binding',
+        });
+      }
+    }
+  });
+export const procedureTutorialMediaAuthoringRunStatusSchema = z.union([
+  procedureTutorialMediaAuthoringLegacyRunStatusSchema,
+  procedureTutorialMediaAuthoringCurrentRunStatusSchema,
+]);
 export type ProcedureTutorialMediaAuthoringRunStatus = z.infer<
   typeof procedureTutorialMediaAuthoringRunStatusSchema
 >;
 
-const eventScope = { ...identityShape, occurredAt: timestampSchema } as const;
+const eventScope = { ...currentRunStatusIdentity, occurredAt: timestampSchema } as const;
 export const procedureTutorialMediaAuthoringRequestedEventSchema = z.strictObject({
   ...eventScope,
   request: procedureTutorialMediaAuthoringRunCreateRequestSchema,

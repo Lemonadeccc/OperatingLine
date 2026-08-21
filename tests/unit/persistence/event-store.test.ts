@@ -42,10 +42,13 @@ function recordWorkSlotFromWorker(
   payload: unknown,
 ): Promise<string> {
   return new Promise((resolveWorker, rejectWorker) => {
-    const worker = new Worker(
-      `
-        const { parentPort, workerData } = require('node:worker_threads');
-        import('@operatingline/persistence').then(({ openOperatingLineDatabase }) => {
+    const persistenceModuleUrl = new URL(
+      '../../../packages/persistence/src/index.ts',
+      import.meta.url,
+    ).href;
+    const source = `
+        import { parentPort, workerData } from 'node:worker_threads';
+        import(workerData.persistenceModuleUrl).then(({ openOperatingLineDatabase }) => {
           const database = openOperatingLineDatabase(workerData.databasePath);
           try {
             const result = workerData.operation === 'goal'
@@ -58,12 +61,11 @@ function recordWorkSlotFromWorker(
             database.close();
           }
         }).catch((error) => parentPort.postMessage({ error: String(error) }));
-      `,
-      {
-        eval: true,
-        workerData: { databasePath, operation, payload },
-      },
-    );
+      `;
+    const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(source)}`), {
+      execArgv: ['--import', 'tsx'],
+      workerData: { databasePath, operation, payload, persistenceModuleUrl },
+    });
     worker.once('message', (result: unknown) => {
       if (typeof result === 'object' && result !== null && 'error' in result) {
         rejectWorker(new Error(String((result as { error: unknown }).error)));

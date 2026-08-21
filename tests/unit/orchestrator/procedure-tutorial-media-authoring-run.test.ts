@@ -15,10 +15,32 @@ const ids = {
   generation: '66666666-6666-4666-8666-666666666666',
 } as const;
 
+const mediaSource = {
+  kind: 'authorized_youtube_download' as const,
+  videoId: 'abcdefghijk',
+  sourceIdentitySha256: '0'.repeat(64),
+  contentSha256: '1'.repeat(64),
+  rightsBasis: 'rights_holder_permission' as const,
+  platformDownloadValidation: {
+    authorityId: 'youtube-platform-authority-fixture',
+    authorityKind: 'youtube_platform_authority',
+    sideEffect: 'youtube_media_download',
+    receiptContentSha256: '2'.repeat(64),
+    authorityContentSha256: '3'.repeat(64),
+  },
+  rightsValidation: {
+    authorityId: 'rights-authority-fixture',
+    authorityKind: 'media_rights_authority',
+    sideEffect: 'rights_validation',
+    receiptContentSha256: '4'.repeat(64),
+    authorityContentSha256: '5'.repeat(64),
+  },
+};
+
 describe('procedure tutorial media authoring run', () => {
   it('requires exact preparation, packet, candidate, and materialized hashes for store review', () => {
     const review = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId: ids.request,
       runId: ids.run,
       reviewId: ids.review,
@@ -65,14 +87,15 @@ describe('procedure tutorial media authoring run', () => {
       appendEvent: vi.fn(),
     });
     const blocked = {
-      formatVersion: '1.0.0',
+      formatVersion: '1.1.0',
       requestId: ids.request,
       preparation: {
-        formatVersion: '1.0.0',
+        formatVersion: '1.1.0',
         analysisRequestId: ids.analysis,
         analysisJobId: ids.job,
         analysisFingerprint: 'a'.repeat(64),
         fingerprint: 'b'.repeat(64),
+        source: mediaSource,
         status: 'blocked',
         quality: {
           semanticSegmentCount: 0,

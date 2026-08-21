@@ -1,6 +1,6 @@
 import {
-  procedureTutorialMediaAnalysisRequestSchema,
-  type ProcedureTutorialMediaAnalysisRequest,
+  procedureTutorialMediaLegacyAnalysisRequestSchema,
+  type ProcedureTutorialMediaLegacyAnalysisRequest,
 } from '@operatingline/protocol';
 import { z } from 'zod';
 
@@ -9,7 +9,7 @@ const opaqueReferenceSchema = z
   .min(1)
   .max(256)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u);
-const videoIdSchema = procedureTutorialMediaAnalysisRequestSchema.shape.videoId;
+const videoIdSchema = procedureTutorialMediaLegacyAnalysisRequestSchema.shape.videoId;
 const defaultMaximumConfirmationAgeMs = 24 * 60 * 60 * 1_000;
 const maximumClockSkewMs = 5 * 60 * 1_000;
 
@@ -99,7 +99,7 @@ export class YouTubeMediaAuthorizationError extends Error {
 }
 
 export interface YouTubeMediaAuthorizationVerifier {
-  verify(request: ProcedureTutorialMediaAnalysisRequest): Promise<void>;
+  verify(request: ProcedureTutorialMediaLegacyAnalysisRequest): Promise<void>;
 }
 
 export interface YouTubeMediaAuthorizationVerifierOptions {
@@ -125,7 +125,7 @@ export function createYouTubeMediaAuthorizationVerifier(
 
   return {
     async verify(requestInput) {
-      const request = procedureTutorialMediaAnalysisRequestSchema.parse(requestInput);
+      const request = procedureTutorialMediaLegacyAnalysisRequestSchema.parse(requestInput);
       const record = records.find(
         (candidate) =>
           candidate.videoId === request.videoId &&

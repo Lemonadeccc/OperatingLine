@@ -1,14 +1,24 @@
 import { z } from 'zod';
 
-import { procedureAuthoringYoutubeVideoIdSchema } from './procedure-authoring.js';
+import {
+  procedureAuthoringAuthorizedYoutubeMediaSourceSchema,
+  procedureAuthoringMediaSourceSchema,
+  procedureAuthoringUserSuppliedLocalMediaSourceSchema,
+  procedureAuthoringYoutubeVideoIdSchema,
+} from './procedure-authoring.js';
 
-export const procedureTutorialMediaFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaLegacyFormatVersion = '1.0.0' as const;
+export const procedureTutorialMediaFormatVersion = '1.1.0' as const;
+export const procedureTutorialMediaLegacyFormatVersionSchema = z.literal(
+  procedureTutorialMediaLegacyFormatVersion,
+);
 export const procedureTutorialMediaFormatVersionSchema = z.literal(
   procedureTutorialMediaFormatVersion,
 );
 
 export const procedureTutorialMediaStageSchema = z.enum([
   'download',
+  'import',
   'probe',
   'audio',
   'asr',
@@ -18,8 +28,9 @@ export const procedureTutorialMediaStageSchema = z.enum([
 ]);
 export type ProcedureTutorialMediaStage = z.infer<typeof procedureTutorialMediaStageSchema>;
 
-const stages = procedureTutorialMediaStageSchema.options;
-const stageIndex = new Map(stages.map((stage, index) => [stage, index]));
+const stages = ['download', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'] as const;
+const localStages = ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'] as const;
+const stageIndex = new Map<string, number>(stages.map((stage, index) => [stage, index]));
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const opaqueAuthorizationReferenceSchema = z
   .string()
@@ -67,6 +78,37 @@ const completeStageListSchema = z.tuple([
   z.literal('ocr'),
   z.literal('segmentation'),
 ]);
+const completeLocalStageListSchema = z.tuple([
+  z.literal('import'),
+  z.literal('probe'),
+  z.literal('audio'),
+  z.literal('asr'),
+  z.literal('frames'),
+  z.literal('ocr'),
+  z.literal('segmentation'),
+]);
+const completedLocalStageListSchema = z.union([
+  z.tuple([]),
+  z.tuple([z.literal('import')]),
+  z.tuple([z.literal('import'), z.literal('probe')]),
+  z.tuple([z.literal('import'), z.literal('probe'), z.literal('audio')]),
+  z.tuple([z.literal('import'), z.literal('probe'), z.literal('audio'), z.literal('asr')]),
+  z.tuple([
+    z.literal('import'),
+    z.literal('probe'),
+    z.literal('audio'),
+    z.literal('asr'),
+    z.literal('frames'),
+  ]),
+  z.tuple([
+    z.literal('import'),
+    z.literal('probe'),
+    z.literal('audio'),
+    z.literal('asr'),
+    z.literal('frames'),
+    z.literal('ocr'),
+  ]),
+]);
 const completedStageListSchema = z.union([
   z.tuple([]),
   z.tuple([z.literal('download')]),
@@ -95,9 +137,9 @@ const authorizationAttestationSchema = z.strictObject({
   confirmedAt: z.iso.datetime({ offset: true }),
 });
 
-export const procedureTutorialMediaAnalysisRequestSchema = z
+export const procedureTutorialMediaLegacyAnalysisRequestSchema = z
   .strictObject({
-    formatVersion: procedureTutorialMediaFormatVersionSchema,
+    formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
     requestId: z.uuid(),
     videoId: procedureAuthoringYoutubeVideoIdSchema,
     analysisProfile: z.literal('youtube_tutorial_evidence_v1'),
@@ -147,6 +189,56 @@ export const procedureTutorialMediaAnalysisRequestSchema = z
       });
     }
   });
+export type ProcedureTutorialMediaLegacyAnalysisRequest = z.infer<
+  typeof procedureTutorialMediaLegacyAnalysisRequestSchema
+>;
+const procedureTutorialMediaAnalysisStartRequestCommonShape = {
+  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  requestId: z.uuid(),
+  locale: localeSchema,
+  analysisWindow: z.strictObject({
+    startMs: millisecondsSchema,
+    endMs: millisecondsSchema.positive(),
+  }),
+} as const;
+export const procedureTutorialMediaAnalysisStartRequestSchema = z
+  .union([
+    z.strictObject({
+      ...procedureTutorialMediaAnalysisStartRequestCommonShape,
+      source: procedureAuthoringAuthorizedYoutubeMediaSourceSchema,
+      analysisProfile: z.literal('youtube_tutorial_evidence_v1'),
+      requestedStages: completeStageListSchema,
+      approvals: z.strictObject({
+        networkAccessApproved: z.literal(true),
+        mediaDownloadApproved: z.literal(true),
+        retentionApproved: z.literal(true),
+      }),
+    }),
+    z.strictObject({
+      ...procedureTutorialMediaAnalysisStartRequestCommonShape,
+      source: procedureAuthoringUserSuppliedLocalMediaSourceSchema,
+      analysisProfile: z.literal('local_tutorial_evidence_v1'),
+      requestedStages: completeLocalStageListSchema,
+      approvals: z.strictObject({
+        networkAccessApproved: z.literal(false),
+        mediaDownloadApproved: z.literal(false),
+        retentionApproved: z.literal(true),
+      }),
+    }),
+  ])
+  .superRefine((request, context) => {
+    if (request.analysisWindow.endMs <= request.analysisWindow.startMs) {
+      context.addIssue({
+        code: 'custom',
+        path: ['analysisWindow', 'endMs'],
+        message: 'Analysis window end must be greater than its start',
+      });
+    }
+  });
+export const procedureTutorialMediaAnalysisRequestSchema = z.union([
+  procedureTutorialMediaLegacyAnalysisRequestSchema,
+  procedureTutorialMediaAnalysisStartRequestSchema,
+]);
 export type ProcedureTutorialMediaAnalysisRequest = z.infer<
   typeof procedureTutorialMediaAnalysisRequestSchema
 >;
@@ -431,18 +523,28 @@ export const procedureTutorialMediaSideEffectsSchema = z.strictObject({
   proposalCreated: z.literal(false),
   hostExecutionStarted: z.literal(false),
 });
+const procedureTutorialMediaLocalSideEffectsSchema = procedureTutorialMediaSideEffectsSchema.extend(
+  {
+    networkFetched: z.literal(false),
+    mediaDownloaded: z.literal(false),
+  },
+);
 
-export const procedureTutorialMediaManifestIntegritySchema = z.strictObject({
+export const procedureTutorialMediaLegacyManifestIntegritySchema = z.strictObject({
   manifestArtifactUri: procedureTutorialMediaArtifactRefSchema.shape.uri,
   manifestSha256: sha256Schema,
   artifactCount: z.number().int().positive().max(procedureTutorialMediaArtifactMaxCount),
   rootSha256: sha256Schema,
   generatedAt: z.iso.datetime({ offset: true }),
 });
+export const procedureTutorialMediaManifestIntegritySchema =
+  procedureTutorialMediaLegacyManifestIntegritySchema.extend({
+    source: procedureAuthoringMediaSourceSchema,
+  });
 
-export const procedureTutorialMediaAnalysisResultSchema = z
+export const procedureTutorialMediaLegacyAnalysisResultSchema = z
   .strictObject({
-    formatVersion: procedureTutorialMediaFormatVersionSchema,
+    formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
     requestId: z.uuid(),
     jobId: z.uuid(),
     videoId: procedureAuthoringYoutubeVideoIdSchema,
@@ -489,7 +591,7 @@ export const procedureTutorialMediaAnalysisResultSchema = z
       outputSha256: sha256Schema,
     }),
     sideEffects: procedureTutorialMediaSideEffectsSchema,
-    manifestIntegrity: procedureTutorialMediaManifestIntegritySchema,
+    manifestIntegrity: procedureTutorialMediaLegacyManifestIntegritySchema,
     completedAt: z.iso.datetime({ offset: true }),
   })
   .superRefine((result, context) => {
@@ -553,9 +655,11 @@ export const procedureTutorialMediaAnalysisResultSchema = z
       });
     }
     const sourceHash = sourceArtifacts[0]?.sha256;
+    const sourceKind = (result as { source?: { kind?: string } }).source?.kind;
+    const expectedStages = sourceKind === 'user_supplied_local_file' ? localStages : stages;
     if (
-      result.completedStages.length !== stages.length ||
-      result.completedStages.some((stage, index) => stage !== stages[index])
+      result.completedStages.length !== expectedStages.length ||
+      result.completedStages.some((stage, index) => stage !== expectedStages[index])
     ) {
       context.addIssue({
         code: 'custom',
@@ -806,6 +910,108 @@ export const procedureTutorialMediaAnalysisResultSchema = z
       });
     }
   });
+export type ProcedureTutorialMediaLegacyAnalysisResult = z.infer<
+  typeof procedureTutorialMediaLegacyAnalysisResultSchema
+>;
+const authorizedYoutubeMediaSourceSchema = procedureAuthoringAuthorizedYoutubeMediaSourceSchema;
+const userSuppliedLocalMediaSourceSchema = procedureAuthoringUserSuppliedLocalMediaSourceSchema;
+const procedureTutorialMediaCurrentYoutubeAnalysisResultSchema = z.strictObject({
+  ...procedureTutorialMediaLegacyAnalysisResultSchema.shape,
+  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  source: authorizedYoutubeMediaSourceSchema,
+  analysisProfile: z.literal('youtube_tutorial_evidence_v1'),
+  completedStages: completeStageListSchema,
+  manifestIntegrity: procedureTutorialMediaManifestIntegritySchema.extend({
+    source: authorizedYoutubeMediaSourceSchema,
+  }),
+});
+const procedureTutorialMediaCurrentLocalAnalysisResultSchema = z.strictObject({
+  ...procedureTutorialMediaLegacyAnalysisResultSchema.shape,
+  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  videoId: z.never().optional(),
+  source: userSuppliedLocalMediaSourceSchema,
+  analysisProfile: z.literal('local_tutorial_evidence_v1'),
+  completedStages: completeLocalStageListSchema,
+  sideEffects: procedureTutorialMediaLocalSideEffectsSchema,
+  manifestIntegrity: procedureTutorialMediaManifestIntegritySchema.extend({
+    source: userSuppliedLocalMediaSourceSchema,
+  }),
+});
+export const procedureTutorialMediaCurrentAnalysisResultSchema = z
+  .union([
+    procedureTutorialMediaCurrentYoutubeAnalysisResultSchema,
+    procedureTutorialMediaCurrentLocalAnalysisResultSchema,
+  ])
+  .superRefine((result, context) => {
+    const legacyCandidate = Object.fromEntries(
+      Object.entries(result).filter(([key]) => key !== 'source' && key !== 'manifestIntegrity'),
+    );
+    const legacyManifestIntegrity = Object.fromEntries(
+      Object.entries(result.manifestIntegrity).filter(([key]) => key !== 'source'),
+    );
+    if (
+      !procedureTutorialMediaLegacyAnalysisResultSchema.safeParse({
+        ...legacyCandidate,
+        formatVersion: procedureTutorialMediaLegacyFormatVersion,
+        videoId:
+          result.source.kind === 'authorized_youtube_download'
+            ? result.source.videoId
+            : 'localfile00',
+        analysisProfile: 'youtube_tutorial_evidence_v1',
+        completedStages: [...stages],
+        sideEffects: {
+          ...result.sideEffects,
+          networkFetched: true,
+          mediaDownloaded: true,
+        },
+        manifestIntegrity: legacyManifestIntegrity,
+      }).success
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'Current analysis result must satisfy all persisted media evidence invariants',
+      });
+    }
+    if (JSON.stringify(result.source) !== JSON.stringify(result.manifestIntegrity.source)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['manifestIntegrity', 'source'],
+        message: 'Manifest binding must retain the exact analysis media source',
+      });
+    }
+    if (
+      result.source.contentSha256 !==
+      result.artifacts.find((artifact) => artifact.role === 'source_video')?.sha256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['source', 'contentSha256'],
+        message: 'Media source content hash must match the source video artifact',
+      });
+    }
+    if (
+      result.source.kind === 'authorized_youtube_download' &&
+      result.videoId !== result.source.videoId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['videoId'],
+        message: 'Result video id must equal the authorized YouTube source video id',
+      });
+    }
+  })
+  .meta({
+    $comment:
+      'Runtime Zod parsing additionally requires exact equality between source and manifest source and binds source.contentSha256 to the source_video artifact sha256. Standard JSON Schema cannot compare dynamic hash values across sibling records.',
+  });
+export type ProcedureTutorialMediaCurrentAnalysisResult = z.infer<
+  typeof procedureTutorialMediaCurrentAnalysisResultSchema
+>;
+export const procedureTutorialMediaAnalysisResultSchema = z.union([
+  procedureTutorialMediaLegacyAnalysisResultSchema,
+  procedureTutorialMediaCurrentAnalysisResultSchema,
+]);
 export type ProcedureTutorialMediaAnalysisResult = z.infer<
   typeof procedureTutorialMediaAnalysisResultSchema
 >;
@@ -837,13 +1043,13 @@ export const procedureTutorialMediaJobErrorSchema = z.strictObject({
 });
 
 const jobStatusCommonShape = {
-  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
   requestId: z.uuid(),
   jobId: z.uuid(),
   updatedAt: z.iso.datetime({ offset: true }),
 } as const;
 
-export const procedureTutorialMediaJobStatusSchema = z
+export const procedureTutorialMediaLegacyJobStatusSchema = z
   .discriminatedUnion('status', [
     z
       .strictObject({
@@ -981,30 +1187,270 @@ export const procedureTutorialMediaJobStatusSchema = z
       });
     }
   });
+export type ProcedureTutorialMediaLegacyJobStatus = z.infer<
+  typeof procedureTutorialMediaLegacyJobStatusSchema
+>;
+const currentJobStatusIdentityShape = {
+  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  requestId: z.uuid(),
+  jobId: z.uuid(),
+  updatedAt: z.iso.datetime({ offset: true }),
+} as const;
+
+function runningStageJsonSchemaConditions(stageValues: readonly ProcedureTutorialMediaStage[]) {
+  return stageValues.map((currentStage, index) => ({
+    if: { properties: { currentStage: { const: currentStage } }, required: ['currentStage'] },
+    then: {
+      properties: {
+        completedStages: {
+          type: 'array',
+          items: stageValues.slice(0, index).map((stage) => ({ const: stage })),
+          additionalItems: false,
+          minItems: index,
+          maxItems: index,
+        },
+      },
+      required: ['completedStages'],
+    },
+  }));
+}
+
+const currentYoutubeRunningStatusSchema = z
+  .strictObject({
+    ...currentJobStatusIdentityShape,
+    source: authorizedYoutubeMediaSourceSchema,
+    status: z.literal('running'),
+    currentStage: z.enum(stages),
+    completedStages: completedStageListSchema,
+    progress: z.number().min(0).max(1),
+    startedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ allOf: runningStageJsonSchemaConditions(stages) });
+const currentLocalRunningStatusSchema = z
+  .strictObject({
+    ...currentJobStatusIdentityShape,
+    source: userSuppliedLocalMediaSourceSchema,
+    status: z.literal('running'),
+    currentStage: z.enum(localStages),
+    completedStages: completedLocalStageListSchema,
+    progress: z.number().min(0).max(1),
+    startedAt: z.iso.datetime({ offset: true }),
+  })
+  .meta({ allOf: runningStageJsonSchemaConditions(localStages) });
+const currentYoutubeJobErrorSchema = procedureTutorialMediaJobErrorSchema.extend({
+  stage: z.union([z.enum(stages), z.null()]),
+});
+const currentLocalJobErrorSchema = procedureTutorialMediaJobErrorSchema.extend({
+  stage: z.union([z.enum(localStages), z.null()]),
+});
+export const procedureTutorialMediaCurrentJobStatusSchema = z
+  .union([
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: authorizedYoutubeMediaSourceSchema,
+      status: z.literal('accepted'),
+      acceptedAt: z.iso.datetime({ offset: true }),
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: userSuppliedLocalMediaSourceSchema,
+      status: z.literal('accepted'),
+      acceptedAt: z.iso.datetime({ offset: true }),
+    }),
+    currentYoutubeRunningStatusSchema,
+    currentLocalRunningStatusSchema,
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: authorizedYoutubeMediaSourceSchema,
+      status: z.literal('recovery_required'),
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('download'),
+      completedStages: z.tuple([]),
+      error: currentYoutubeJobErrorSchema.extend({
+        retryable: z.literal(true),
+        stage: z.literal('download'),
+      }),
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: userSuppliedLocalMediaSourceSchema,
+      status: z.literal('recovery_required'),
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('import'),
+      completedStages: z.tuple([]),
+      error: currentLocalJobErrorSchema.extend({
+        retryable: z.literal(true),
+        stage: z.literal('import'),
+      }),
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: authorizedYoutubeMediaSourceSchema,
+      status: z.literal('completed'),
+      result: procedureTutorialMediaCurrentYoutubeAnalysisResultSchema,
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: userSuppliedLocalMediaSourceSchema,
+      status: z.literal('completed'),
+      result: procedureTutorialMediaCurrentLocalAnalysisResultSchema,
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: authorizedYoutubeMediaSourceSchema,
+      status: z.literal('failed'),
+      completedStages: completedStageListSchema,
+      error: currentYoutubeJobErrorSchema.extend({ retryable: z.literal(false) }),
+      failedAt: z.iso.datetime({ offset: true }),
+    }),
+    z.strictObject({
+      ...currentJobStatusIdentityShape,
+      source: userSuppliedLocalMediaSourceSchema,
+      status: z.literal('failed'),
+      completedStages: completedLocalStageListSchema,
+      error: currentLocalJobErrorSchema.extend({ retryable: z.literal(false) }),
+      failedAt: z.iso.datetime({ offset: true }),
+    }),
+  ])
+  .superRefine((status, context) => {
+    if (status.requestId === status.jobId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['jobId'],
+        message: 'Job id must differ from request id',
+      });
+    }
+    if (
+      status.status === 'completed' &&
+      (status.requestId !== status.result.requestId ||
+        status.jobId !== status.result.jobId ||
+        JSON.stringify(status.source) !== JSON.stringify(status.result.source))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['result'],
+        message: 'Completed result must retain the exact outer job identity and media source',
+      });
+    }
+    if (
+      status.status === 'accepted' &&
+      Date.parse(status.updatedAt) < Date.parse(status.acceptedAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['updatedAt'],
+        message: 'Status update cannot precede acceptance',
+      });
+    }
+    if (
+      status.status === 'running' &&
+      Date.parse(status.updatedAt) < Date.parse(status.startedAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['updatedAt'],
+        message: 'Update time must not precede start time',
+      });
+    }
+    if (
+      status.status === 'completed' &&
+      Date.parse(status.updatedAt) < Date.parse(status.result.completedAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['updatedAt'],
+        message: 'Status update cannot precede result completion',
+      });
+    }
+    if (status.status === 'failed' && Date.parse(status.failedAt) > Date.parse(status.updatedAt)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['failedAt'],
+        message: 'Failure time cannot follow update time',
+      });
+    }
+    const expectedStages: readonly ProcedureTutorialMediaStage[] =
+      status.source.kind === 'user_supplied_local_file' ? localStages : stages;
+    if ('completedStages' in status) {
+      if (!status.completedStages.every((stage, index) => stage === expectedStages[index])) {
+        context.addIssue({
+          code: 'custom',
+          path: ['completedStages'],
+          message: 'Completed stages must be a prefix for the exact declared media source',
+        });
+      }
+    }
+    if (
+      status.status === 'running' &&
+      status.currentStage !== expectedStages[status.completedStages.length]
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['currentStage'],
+        message: 'Current stage must immediately follow the source-specific completed stages',
+      });
+    }
+    if (status.status === 'recovery_required' && status.retryFromStage !== expectedStages[0]) {
+      context.addIssue({
+        code: 'custom',
+        path: ['retryFromStage'],
+        message: 'Recovery must restart from the declared source acquisition stage',
+      });
+    }
+    if (
+      status.status === 'failed' &&
+      status.error.stage !== null &&
+      status.completedStages.some(
+        (stage) => expectedStages.indexOf(stage) >= expectedStages.indexOf(status.error.stage!),
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['completedStages'],
+        message: 'Completed stages must precede the failed stage',
+      });
+    }
+  });
+export const procedureTutorialMediaJobStatusSchema = z.union([
+  procedureTutorialMediaLegacyJobStatusSchema,
+  procedureTutorialMediaCurrentJobStatusSchema,
+]);
 export type ProcedureTutorialMediaJobStatus = z.infer<typeof procedureTutorialMediaJobStatusSchema>;
 
+function requireDistinctJobStatusIds(
+  request: { readonly requestId: string; readonly jobId: string },
+  context: z.RefinementCtx,
+): void {
+  if (request.requestId === request.jobId) {
+    context.addIssue({
+      code: 'custom',
+      path: ['jobId'],
+      message: 'Service-generated job id must differ from the client request id',
+    });
+  }
+}
+
+export const procedureTutorialMediaLegacyJobStatusRequestSchema = z
+  .strictObject({
+    formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
+    requestId: z.uuid(),
+    jobId: z.uuid(),
+  })
+  .superRefine(requireDistinctJobStatusIds);
 export const procedureTutorialMediaJobStatusRequestSchema = z
   .strictObject({
     formatVersion: procedureTutorialMediaFormatVersionSchema,
     requestId: z.uuid(),
     jobId: z.uuid(),
   })
-  .superRefine((request, context) => {
-    if (request.requestId === request.jobId) {
-      context.addIssue({
-        code: 'custom',
-        path: ['jobId'],
-        message: 'Service-generated job id must differ from the client request id',
-      });
-    }
-  });
+  .superRefine(requireDistinctJobStatusIds);
 export type ProcedureTutorialMediaJobStatusRequest = z.infer<
   typeof procedureTutorialMediaJobStatusRequestSchema
 >;
 
-export const procedureTutorialMediaResumeRequestSchema = z
+export const procedureTutorialMediaLegacyResumeRequestSchema = z
   .strictObject({
-    formatVersion: procedureTutorialMediaFormatVersionSchema,
+    formatVersion: procedureTutorialMediaLegacyFormatVersionSchema,
     requestId: z.uuid(),
     jobId: z.uuid(),
     recoveryId: z.uuid(),
@@ -1024,12 +1470,57 @@ export const procedureTutorialMediaResumeRequestSchema = z
       });
     }
   });
+export type ProcedureTutorialMediaLegacyResumeRequest = z.infer<
+  typeof procedureTutorialMediaLegacyResumeRequestSchema
+>;
+
+export const procedureTutorialMediaResumeRequestSchema = z
+  .union([
+    z.strictObject({
+      formatVersion: procedureTutorialMediaFormatVersionSchema,
+      requestId: z.uuid(),
+      jobId: z.uuid(),
+      source: authorizedYoutubeMediaSourceSchema,
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('download'),
+      approvals: z.strictObject({
+        networkAccessApproved: z.literal(true),
+        mediaDownloadApproved: z.literal(true),
+        retentionApproved: z.literal(true),
+      }),
+    }),
+    z.strictObject({
+      formatVersion: procedureTutorialMediaFormatVersionSchema,
+      requestId: z.uuid(),
+      jobId: z.uuid(),
+      source: userSuppliedLocalMediaSourceSchema,
+      recoveryId: z.uuid(),
+      retryFromStage: z.literal('import'),
+      approvals: z.strictObject({
+        networkAccessApproved: z.literal(false),
+        mediaDownloadApproved: z.literal(false),
+        retentionApproved: z.literal(true),
+      }),
+    }),
+  ])
+  .superRefine((request, context) => {
+    if (new Set([request.requestId, request.jobId, request.recoveryId]).size !== 3) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recoveryId'],
+        message: 'Resume request, job, and recovery ids must be distinct',
+      });
+    }
+  });
 export type ProcedureTutorialMediaResumeRequest = z.infer<
   typeof procedureTutorialMediaResumeRequestSchema
 >;
 
 const procedureTutorialMediaCapabilitiesCommonShape = {
-  formatVersion: procedureTutorialMediaFormatVersionSchema,
+  formatVersion: z.union([
+    procedureTutorialMediaLegacyFormatVersionSchema,
+    procedureTutorialMediaFormatVersionSchema,
+  ]),
   serviceId: z.literal('operatingline.youtube_tutorial_media'),
   serviceVersion: z
     .string()

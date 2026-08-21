@@ -29,6 +29,48 @@ const timestamp = '2026-08-18T00:00:00.000Z';
 const hash = (digit: string) => digit.repeat(64);
 const uri = (digit: string) => `operatingline-media://sha256/${hash(digit)}` as const;
 
+const currentYoutubeSource = {
+  kind: 'authorized_youtube_download' as const,
+  videoId: 'abcdefghijk',
+  sourceIdentitySha256: hash('0'),
+  contentSha256: hash('1'),
+  rightsBasis: 'rights_holder_permission' as const,
+  platformDownloadValidation: {
+    authorityId: 'youtube-platform-authority-fixture',
+    authorityKind: 'youtube_platform_authority' as const,
+    sideEffect: 'youtube_media_download' as const,
+    receiptContentSha256: hash('2'),
+    authorityContentSha256: hash('3'),
+  },
+  rightsValidation: {
+    authorityId: 'rights-authority-fixture',
+    authorityKind: 'media_rights_authority' as const,
+    sideEffect: 'rights_validation' as const,
+    receiptContentSha256: hash('4'),
+    authorityContentSha256: hash('5'),
+  },
+};
+const currentLocalSource = {
+  kind: 'user_supplied_local_file' as const,
+  sourceIdentitySha256: hash('6'),
+  contentSha256: hash('7'),
+  rightsBasis: 'rights_holder_permission' as const,
+  importValidation: {
+    authorityId: 'local-import-authority-fixture',
+    authorityKind: 'local_import_authority' as const,
+    sideEffect: 'local_media_import' as const,
+    receiptContentSha256: hash('8'),
+    authorityContentSha256: hash('9'),
+  },
+  rightsValidation: {
+    authorityId: 'rights-authority-local-fixture',
+    authorityKind: 'media_rights_authority' as const,
+    sideEffect: 'rights_validation' as const,
+    receiptContentSha256: hash('a'),
+    authorityContentSha256: hash('b'),
+  },
+};
+
 function analysisRequest(requestId = randomUUID()): ProcedureTutorialMediaAnalysisRequest {
   return {
     analysisProfile: 'youtube_tutorial_evidence_v1',
@@ -201,6 +243,72 @@ function successfulPipeline(): ProcedureTutorialMediaPipeline {
 }
 
 describe('procedure tutorial media coordinator', () => {
+  it('fails closed for both current source kinds before persistence or pipeline work', () => {
+    const events: ExecutionEventInput[] = [];
+    let analyzeCount = 0;
+    const coordinator = createProcedureTutorialMediaCoordinator({
+      appendEvent: (event) => events.push(event),
+      existingEvents: [],
+      pipeline: {
+        async analyze() {
+          analyzeCount += 1;
+          throw new Error('current sources must not reach the legacy pipeline');
+        },
+        async close() {},
+        async verify(result) {
+          return result;
+        },
+      },
+    });
+    const common = {
+      formatVersion: '1.1.0' as const,
+      locale: 'en',
+      analysisWindow: { startMs: 0, endMs: 1_000 },
+      approvals: {
+        networkAccessApproved: true as const,
+        mediaDownloadApproved: true as const,
+        retentionApproved: true as const,
+      },
+    };
+    const youtubeRequest = {
+      ...common,
+      requestId: randomUUID(),
+      source: currentYoutubeSource,
+      analysisProfile: 'youtube_tutorial_evidence_v1' as const,
+      requestedStages: [...stages],
+    };
+    const localRequest = {
+      ...common,
+      requestId: randomUUID(),
+      source: currentLocalSource,
+      analysisProfile: 'local_tutorial_evidence_v1' as const,
+      requestedStages: [
+        'import',
+        'probe',
+        'audio',
+        'asr',
+        'frames',
+        'ocr',
+        'segmentation',
+      ] as const,
+      approvals: {
+        networkAccessApproved: false as const,
+        mediaDownloadApproved: false as const,
+        retentionApproved: true as const,
+      },
+    };
+    for (const request of [youtubeRequest, localRequest]) {
+      expect(() => coordinator.create(request)).toThrowError(
+        expect.objectContaining({ code: 'source_not_supported' }),
+      );
+      expect(() => coordinator.status(request.requestId, randomUUID())).toThrowError(
+        expect.objectContaining({ code: 'not_found' }),
+      );
+    }
+    expect(analyzeCount).toBe(0);
+    expect(events).toEqual([]);
+  });
+
   it('returns immediately, completes asynchronously, and is idempotent for identical input', async () => {
     const events: ExecutionEventInput[] = [];
     const request = analysisRequest();

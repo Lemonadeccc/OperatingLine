@@ -4,13 +4,15 @@ import { join } from 'node:path';
 
 import {
   canonicalizeProtocolJsonValue,
-  procedureTutorialMediaAnalysisRequestSchema,
   procedureTutorialMediaAnalysisResultSchema,
+  procedureTutorialMediaLegacyAnalysisRequestSchema,
+  procedureTutorialMediaLegacyAnalysisResultSchema,
   procedureTutorialMediaAsrSegmentMaxCount,
   procedureTutorialMediaFrameMaxCount,
   procedureTutorialMediaSemanticSegmentMaxCount,
   procedureTutorialMediaVisualCandidateMaxCount,
-  type ProcedureTutorialMediaAnalysisRequest,
+  type ProcedureTutorialMediaLegacyAnalysisRequest,
+  type ProcedureTutorialMediaLegacyAnalysisResult,
   type ProcedureTutorialMediaAnalysisResult,
   type ProcedureTutorialMediaArtifactRef,
   type ProcedureTutorialMediaStage,
@@ -41,7 +43,8 @@ const defaultMaximumJobRuntimeMs = 2 * 60 * 60 * 1_000;
 const defaultMaximumStagingBytes = 8 * 1_024 * 1_024 * 1_024;
 const maximumStagingEntries = 20_000;
 const stagingPollIntervalMs = 25;
-const defaultStageTimeoutsMs: Readonly<Record<ProcedureTutorialMediaStage, number>> = {
+type LegacyProcedureTutorialMediaStage = Exclude<ProcedureTutorialMediaStage, 'import'>;
+const defaultStageTimeoutsMs: Readonly<Record<LegacyProcedureTutorialMediaStage, number>> = {
   download: 30 * 60 * 1_000,
   probe: 2 * 60 * 1_000,
   audio: 15 * 60 * 1_000,
@@ -51,7 +54,7 @@ const defaultStageTimeoutsMs: Readonly<Record<ProcedureTutorialMediaStage, numbe
   segmentation: 2 * 60 * 1_000,
 };
 
-type ToolProvenance = ProcedureTutorialMediaAnalysisResult['tools'][number];
+type ToolProvenance = ProcedureTutorialMediaLegacyAnalysisResult['tools'][number];
 
 export interface ProcedureTutorialMediaAdapters {
   readonly source: YouTubeMediaSource;
@@ -72,7 +75,7 @@ export interface ProcedureTutorialMediaPipelineOptions {
   readonly maximumJobRuntimeMs?: number | undefined;
   readonly maximumStagingBytes?: number | undefined;
   readonly stageTimeoutsMs?:
-    Partial<Readonly<Record<ProcedureTutorialMediaStage, number>>> | undefined;
+    Partial<Readonly<Record<LegacyProcedureTutorialMediaStage, number>>> | undefined;
   readonly supportedLocales?: readonly string[] | undefined;
   readonly frameIntervalMs?: number | undefined;
   readonly now?: (() => Date) | undefined;
@@ -90,10 +93,10 @@ export interface ProcedureTutorialMediaPipelineRunOptions {
 
 export interface ProcedureTutorialMediaPipeline {
   analyze(
-    request: ProcedureTutorialMediaAnalysisRequest,
+    request: ProcedureTutorialMediaLegacyAnalysisRequest,
     jobId: string,
     options?: ProcedureTutorialMediaPipelineRunOptions,
-  ): Promise<ProcedureTutorialMediaAnalysisResult>;
+  ): Promise<ProcedureTutorialMediaLegacyAnalysisResult>;
   verify(
     result: ProcedureTutorialMediaAnalysisResult,
   ): Promise<ProcedureTutorialMediaAnalysisResult>;
@@ -298,7 +301,8 @@ function manifestProjection(
     sideEffects: result.sideEffects,
     tools: result.tools,
     uiCandidates: result.uiCandidates,
-    videoId: result.videoId,
+    ...('source' in result ? { source: result.source } : {}),
+    ...('videoId' in result ? { videoId: result.videoId } : {}),
   };
 }
 
@@ -397,7 +401,8 @@ export function createProcedureTutorialMediaPipeline(
   return {
     async analyze(requestInput, jobId, runOptions = {}) {
       if (closing) throw abortError(null);
-      const requestResult = procedureTutorialMediaAnalysisRequestSchema.safeParse(requestInput);
+      const requestResult =
+        procedureTutorialMediaLegacyAnalysisRequestSchema.safeParse(requestInput);
       if (
         !requestResult.success ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
@@ -483,7 +488,7 @@ export function createProcedureTutorialMediaPipeline(
         deadlineStage ??= currentStage ?? 'download';
         controller.abort();
       }, maximumJobRuntimeMs);
-      const startStageDeadline = (name: ProcedureTutorialMediaStage) => {
+      const startStageDeadline = (name: LegacyProcedureTutorialMediaStage) => {
         clearTimeout(stageTimer);
         stageTimer = setTimeout(() => {
           deadlineStage ??= name;
@@ -495,7 +500,7 @@ export function createProcedureTutorialMediaPipeline(
         stageTimer = undefined;
       };
       const stage = async <Value>(
-        name: ProcedureTutorialMediaStage,
+        name: LegacyProcedureTutorialMediaStage,
         operation: () => Promise<Value>,
       ): Promise<Value> => {
         currentStage = name;
@@ -513,7 +518,7 @@ export function createProcedureTutorialMediaPipeline(
         }
       };
       let primaryError: ProcedureTutorialMediaPipelineError | undefined;
-      let completedResult: ProcedureTutorialMediaAnalysisResult | undefined;
+      let completedResult: ProcedureTutorialMediaLegacyAnalysisResult | undefined;
       let adapters: ProcedureTutorialMediaAdapters | undefined;
       try {
         const jobAdapters = options.createAdapters(staging.path);
@@ -744,7 +749,7 @@ export function createProcedureTutorialMediaPipeline(
           ],
           uiCandidates: [],
           videoId: request.videoId,
-        } satisfies Omit<ProcedureTutorialMediaAnalysisResult, 'manifestIntegrity'>;
+        } satisfies Omit<ProcedureTutorialMediaLegacyAnalysisResult, 'manifestIntegrity'>;
         const rootSha256 = sha256(canonicalizeProtocolJsonValue(manifestProjection(draft)));
         const manifestBytes = Buffer.from(
           JSON.stringify({
@@ -764,7 +769,7 @@ export function createProcedureTutorialMediaPipeline(
           completedAt,
           source.sha256,
         );
-        const result = procedureTutorialMediaAnalysisResultSchema.parse({
+        const result = procedureTutorialMediaLegacyAnalysisResultSchema.parse({
           ...draft,
           artifacts: [...nonManifestArtifacts, manifest],
           manifestIntegrity: {
@@ -780,7 +785,7 @@ export function createProcedureTutorialMediaPipeline(
         await enforceStagingQuota('segmentation');
         await runOptions.onStage?.({ stage: 'segmentation', state: 'completed' });
         clearStageDeadline();
-        completedResult = verified;
+        completedResult = procedureTutorialMediaLegacyAnalysisResultSchema.parse(verified);
       } catch (error) {
         primaryError =
           deadlineStage === null

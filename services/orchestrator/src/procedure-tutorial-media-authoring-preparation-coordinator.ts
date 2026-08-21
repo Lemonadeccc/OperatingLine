@@ -1,6 +1,6 @@
 import type {
-  ProcedureTutorialMediaAuthoringPreparation,
-  ProcedureTutorialMediaAuthoringPrepareRequest,
+  ProcedureTutorialMediaAuthoringCurrentPreparation,
+  ProcedureTutorialMediaAuthoringPrepareStartRequest,
 } from '@operatingline/protocol';
 
 import { plannerProviderRequestFingerprint } from './planner-provider-invocation.js';
@@ -45,21 +45,21 @@ export function procedureTutorialMediaAuthoringPreparationCoordinatorErrorRespon
 export interface ProcedureTutorialMediaAuthoringPreparationCoordinatorOptions {
   readonly maximumConcurrentPreparations?: number | undefined;
   readonly prepare: (
-    request: ProcedureTutorialMediaAuthoringPrepareRequest,
-  ) => Promise<ProcedureTutorialMediaAuthoringPreparation>;
+    request: ProcedureTutorialMediaAuthoringPrepareStartRequest,
+  ) => Promise<ProcedureTutorialMediaAuthoringCurrentPreparation>;
 }
 
 export interface ProcedureTutorialMediaAuthoringPreparationCoordinator {
   beginClose(): void;
   close(): Promise<void>;
   prepare(
-    request: ProcedureTutorialMediaAuthoringPrepareRequest,
-  ): Promise<ProcedureTutorialMediaAuthoringPreparation>;
+    request: ProcedureTutorialMediaAuthoringPrepareStartRequest,
+  ): Promise<ProcedureTutorialMediaAuthoringCurrentPreparation>;
 }
 
 interface InFlightPreparation {
   readonly fingerprint: string;
-  readonly promise: Promise<ProcedureTutorialMediaAuthoringPreparation>;
+  readonly promise: Promise<ProcedureTutorialMediaAuthoringCurrentPreparation>;
 }
 
 export function createProcedureTutorialMediaAuthoringPreparationCoordinator(
