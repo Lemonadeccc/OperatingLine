@@ -283,6 +283,28 @@ function binding() {
       transition: 'walkthrough_started',
       stepId: null,
       observationCount: 0,
+      nativeUndoCheckpoint: {
+        formatVersion: '1.0.0',
+        evidenceClass: 'companion_reported_native_undo_checkpoint',
+        checkpointId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        previousCheckpointId: null,
+        operation: 'start',
+        committedAt: '2026-08-22T10:00:03+08:00',
+        marker: { key: '_operating_line_native_history_v1', matched: true },
+        journal: {
+          entryPresent: true,
+          snapshotMatchesSession: true,
+          artifactsBackedUp: true,
+        },
+        session: {
+          plan: { id: record.proposal.plan.id, revision: 1 },
+          planContentSha256: record.planContentSha256,
+          executionId: ids.execution,
+          activeStepId: null,
+          completedStepIds: [],
+          receiptStepIds: [],
+        },
+      },
       occurredAt: '2026-08-22T10:00:03+08:00',
     },
     proofScope: {
@@ -348,6 +370,10 @@ describe('procedure menu-control proof protocol', () => {
     });
     expect(value.operationIds).toHaveLength(7);
     expect(value.nativeUndoDepth).toBe(8);
+    expect(value.startState.nativeUndoCheckpoint).toMatchObject({
+      operation: 'start',
+      previousCheckpointId: null,
+    });
   });
 
   it('rejects no-proof, reordered, foreign, historical, and tampered evidence', () => {
@@ -357,7 +383,6 @@ describe('procedure menu-control proof protocol', () => {
       throw new Error('expected menu proof leaf');
     }
     delete leaf.menuTracks[0].proofExecution;
-
     const reordered = structuredClone(fixture().record);
     const reorderedLeaf = reordered.materialization.tree.nodes[0];
     if (
@@ -377,6 +402,23 @@ describe('procedure menu-control proof protocol', () => {
     historical.integrity.contentSha256 =
       computeProcedureMenuControlProofBindingContentSha256(historical);
 
+    const foreignCheckpoint = structuredClone(binding());
+    foreignCheckpoint.startState.nativeUndoCheckpoint.operation = 'next';
+    foreignCheckpoint.integrity.contentSha256 =
+      computeProcedureMenuControlProofBindingContentSha256(foreignCheckpoint);
+
+    const foreignCheckpointSession = structuredClone(binding());
+    foreignCheckpointSession.startState.nativeUndoCheckpoint.session.planContentSha256 = 'e'.repeat(
+      64,
+    );
+    foreignCheckpointSession.integrity.contentSha256 =
+      computeProcedureMenuControlProofBindingContentSha256(foreignCheckpointSession);
+
+    const lateCheckpoint = structuredClone(binding());
+    lateCheckpoint.startState.nativeUndoCheckpoint.committedAt = '2026-08-22T10:00:03.001+08:00';
+    lateCheckpoint.integrity.contentSha256 =
+      computeProcedureMenuControlProofBindingContentSha256(lateCheckpoint);
+
     const tampered = structuredClone(binding());
     tampered.materialization.menuTrackContentSha256 = 'f'.repeat(64);
 
@@ -391,6 +433,9 @@ describe('procedure menu-control proof protocol', () => {
       [procedureMenuControlProofProposalRecordSchema, reordered],
       [procedureMenuControlProofBindingSchema, foreign],
       [procedureMenuControlProofBindingSchema, historical],
+      [procedureMenuControlProofBindingSchema, foreignCheckpoint],
+      [procedureMenuControlProofBindingSchema, foreignCheckpointSession],
+      [procedureMenuControlProofBindingSchema, lateCheckpoint],
       [procedureMenuControlProofBindingSchema, tampered],
       [procedureMenuControlProofProposalRecordSchema, stalePacketIntegrity],
     ] as const) {
@@ -416,10 +461,36 @@ describe('procedure menu-control proof protocol', () => {
       if (filename !== 'procedure-menu-control-proof-proposal-request.schema.json') {
         expect(schema['$comment']).toContain('Zod/service semantic validation gate');
       }
-      await validatePublicJsonSchemaCases(schema, [
+      const cases: Array<{ value: unknown; accepted: boolean }> = [
         { value: valid, accepted: true },
         { value: { ...valid, forbidden: true }, accepted: false },
-      ]);
+      ];
+      if (filename === 'procedure-menu-control-proof-binding.schema.json') {
+        const invalidOperation = structuredClone(binding());
+        invalidOperation.startState.nativeUndoCheckpoint.operation = 'next';
+        const nonNullPrevious = structuredClone(binding());
+        nonNullPrevious.startState.nativeUndoCheckpoint.previousCheckpointId =
+          'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+        const activeCheckpoint = structuredClone(binding());
+        activeCheckpoint.startState.nativeUndoCheckpoint.session.activeStepId =
+          activeCheckpoint.leafId;
+        const completedCheckpoint = structuredClone(binding());
+        completedCheckpoint.startState.nativeUndoCheckpoint.session.completedStepIds = [
+          completedCheckpoint.leafId,
+        ];
+        const receiptedCheckpoint = structuredClone(binding());
+        receiptedCheckpoint.startState.nativeUndoCheckpoint.session.receiptStepIds = [
+          receiptedCheckpoint.leafId,
+        ];
+        cases.push(
+          { value: invalidOperation, accepted: false },
+          { value: nonNullPrevious, accepted: false },
+          { value: activeCheckpoint, accepted: false },
+          { value: completedCheckpoint, accepted: false },
+          { value: receiptedCheckpoint, accepted: false },
+        );
+      }
+      await validatePublicJsonSchemaCases(schema, cases);
     }
   });
 });

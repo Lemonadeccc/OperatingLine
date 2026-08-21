@@ -4,6 +4,7 @@ import {
   computeProtocolCanonicalJsonSha256,
   protocolJsonValueCanonicalization,
 } from './canonical-json-value.js';
+import { companionNativeUndoCheckpointSchema } from './companion.js';
 import { guideStepIdSchema } from './guide.js';
 import { menuProofExecutionSchema } from './interaction-catalog.js';
 import {
@@ -30,6 +31,17 @@ const exactArgumentsSchema = z.strictObject({
   objectName: z.literal('OperatingLine.TutorialEye'),
   radius: z.literal(1.5),
   location: z.tuple([z.literal(1.25), z.literal(-2), z.literal(0.75)]),
+});
+const pristineStartCheckpointSessionSchema =
+  companionNativeUndoCheckpointSchema.shape.session.safeExtend({
+    activeStepId: z.null(),
+    completedStepIds: z.tuple([]),
+    receiptStepIds: z.tuple([]),
+  });
+const pristineStartNativeUndoCheckpointSchema = companionNativeUndoCheckpointSchema.safeExtend({
+  previousCheckpointId: z.null(),
+  operation: z.literal('start'),
+  session: pristineStartCheckpointSessionSchema,
 });
 
 export const uvSphereMenuControlProofOperationIds = [
@@ -279,6 +291,7 @@ const bindingContentSchema = z.strictObject({
     transition: z.literal('walkthrough_started'),
     stepId: z.null(),
     observationCount: z.literal(0),
+    nativeUndoCheckpoint: pristineStartNativeUndoCheckpointSchema,
     occurredAt: timestampSchema,
   }),
   proofScope: z.strictObject({
@@ -311,6 +324,7 @@ export const procedureMenuControlProofBindingSchema = bindingContentSchema
   .superRefine((binding, context) => {
     const decisionTime = Date.parse(binding.acceptedDecision.decidedAt);
     const startTime = Date.parse(binding.startState.occurredAt);
+    const checkpoint = binding.startState.nativeUndoCheckpoint;
     if (
       binding.acceptedDecision.proposalId !== binding.proposalId ||
       binding.acceptedDecision.instanceId !== binding.target.instanceId ||
@@ -319,7 +333,12 @@ export const procedureMenuControlProofBindingSchema = bindingContentSchema
       binding.startState.plan.id !== binding.plan.id ||
       binding.startState.plan.revision !== binding.plan.revision ||
       binding.startState.planContentSha256 !== binding.plan.contentSha256 ||
-      decisionTime > startTime ||
+      checkpoint.session.plan.id !== binding.plan.id ||
+      checkpoint.session.plan.revision !== binding.plan.revision ||
+      checkpoint.session.planContentSha256 !== binding.plan.contentSha256 ||
+      checkpoint.session.executionId !== binding.executionId ||
+      decisionTime > Date.parse(checkpoint.committedAt) ||
+      Date.parse(checkpoint.committedAt) > startTime ||
       startTime > Date.parse(binding.createdAt)
     ) {
       context.addIssue({
