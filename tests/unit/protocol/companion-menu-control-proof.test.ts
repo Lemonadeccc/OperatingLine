@@ -346,6 +346,22 @@ function queuedStatus() {
   return { ...base, status: 'queued', updatedAt: '2026-08-22T10:00:03+08:00' } as const;
 }
 
+function recoveryPendingStatus(priorStatus: 'dispatched' | 'in_progress' = 'dispatched') {
+  return {
+    ...delivery(),
+    status: 'recovery_pending',
+    recovery: {
+      kind: 'runtime_restart_after_delivery',
+      detectedAt: '2026-08-22T10:06:00+08:00',
+      priorStatus,
+      requiresExplicitRecovery: true,
+      automaticReplayAllowed: false,
+      retainsTargetLock: true,
+    },
+    updatedAt: '2026-08-22T10:06:01+08:00',
+  } as const;
+}
+
 describe('companion menu-control proof protocol', () => {
   it('keeps the caller request opaque and rejects native input injection', () => {
     const request = {
@@ -649,6 +665,105 @@ describe('companion menu-control proof protocol', () => {
     expect(companionMenuControlProofStatusSchema.safeParse(foreignRequestedAt).success).toBe(false);
   });
 
+  it('represents a post-delivery runtime restart without fabricating progress or a result', () => {
+    for (const priorStatus of ['dispatched', 'in_progress'] as const) {
+      const pending = recoveryPendingStatus(priorStatus);
+      expect(companionMenuControlProofStatusSchema.parse(pending)).toEqual(pending);
+      expect(Date.parse(pending.recovery.detectedAt)).toBeGreaterThan(
+        Date.parse(pending.lease.expiresAt),
+      );
+    }
+
+    const missingRecovery = structuredClone(recoveryPendingStatus());
+    delete (missingRecovery as { recovery?: unknown }).recovery;
+    expect(companionMenuControlProofStatusSchema.safeParse(missingRecovery).success).toBe(false);
+
+    for (const evidenceKey of [
+      'kind',
+      'detectedAt',
+      'priorStatus',
+      'requiresExplicitRecovery',
+      'automaticReplayAllowed',
+      'retainsTargetLock',
+    ] as const) {
+      const incomplete = structuredClone(recoveryPendingStatus());
+      delete (incomplete.recovery as Record<string, unknown>)[evidenceKey];
+      expect(companionMenuControlProofStatusSchema.safeParse(incomplete).success).toBe(false);
+    }
+
+    for (const evidenceKey of [
+      'sceneFingerprintSha256',
+      'receipt',
+      'currentCursor',
+      'companionClaim',
+    ]) {
+      expect(
+        companionMenuControlProofStatusSchema.safeParse({
+          ...recoveryPendingStatus(),
+          recovery: { ...recoveryPendingStatus().recovery, [evidenceKey]: 'fabricated' },
+        }).success,
+      ).toBe(false);
+    }
+
+    const statusesWithoutRecovery = [
+      queuedStatus(),
+      {
+        ...delivery(),
+        status: 'dispatched' as const,
+        updatedAt: '2026-08-22T10:00:04+08:00',
+      },
+      {
+        ...delivery(),
+        status: 'in_progress' as const,
+        progress: progress(),
+        updatedAt: '2026-08-22T10:06:01+08:00',
+      },
+      {
+        ...delivery(),
+        status: 'succeeded' as const,
+        result: result(),
+        updatedAt: '2026-08-22T10:06:01+08:00',
+      },
+    ];
+    for (const status of statusesWithoutRecovery) {
+      expect(companionMenuControlProofStatusSchema.parse(status)).toEqual(status);
+      expect(
+        companionMenuControlProofStatusSchema.safeParse({
+          ...status,
+          recovery: recoveryPendingStatus().recovery,
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...recoveryPendingStatus(),
+        progress: progress(),
+      }).success,
+    ).toBe(false);
+    expect(
+      companionMenuControlProofStatusSchema.safeParse({
+        ...recoveryPendingStatus(),
+        result: result(),
+      }).success,
+    ).toBe(false);
+
+    const predeliveryDetection = structuredClone(recoveryPendingStatus());
+    predeliveryDetection.recovery.detectedAt = '2026-08-22T10:00:03+08:00';
+    expect(companionMenuControlProofStatusSchema.safeParse(predeliveryDetection).success).toBe(
+      false,
+    );
+    const staleUpdate = structuredClone(recoveryPendingStatus());
+    staleUpdate.updatedAt = '2026-08-22T10:05:59+08:00';
+    expect(companionMenuControlProofStatusSchema.safeParse(staleUpdate).success).toBe(false);
+
+    const partialDelivery = structuredClone(recoveryPendingStatus());
+    delete (partialDelivery as { deliveryId?: unknown }).deliveryId;
+    expect(companionMenuControlProofStatusSchema.safeParse(partialDelivery).success).toBe(false);
+    const foreignLeaseTarget = structuredClone(recoveryPendingStatus());
+    foreignLeaseTarget.lease.target.instanceId = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+    expect(companionMenuControlProofStatusSchema.safeParse(foreignLeaseTarget).success).toBe(false);
+  });
+
   it('publishes strict Draft-7 Fastify/Ajv-compatible public schemas', async () => {
     const cases = [
       [
@@ -666,7 +781,7 @@ describe('companion menu-control proof protocol', () => {
       ['companion-menu-control-proof-poll-request.schema.json', delivery().target],
       ['companion-menu-control-proof-poll-delivery.schema.json', { request: delivery() }],
       ['companion-menu-control-proof-status-request.schema.json', { requestId: ids.request }],
-      ['companion-menu-control-proof-status.schema.json', queuedStatus()],
+      ['companion-menu-control-proof-status.schema.json', recoveryPendingStatus()],
       ['companion-menu-control-proof-progress-ack.schema.json', { result: 'accepted' }],
       ['companion-menu-control-proof-result-ack.schema.json', { result: 'accepted' }],
     ] as const;

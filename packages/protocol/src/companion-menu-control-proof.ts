@@ -619,12 +619,34 @@ const statusValueSchema = z.enum([
   'queued',
   'dispatched',
   'in_progress',
+  'recovery_pending',
   'succeeded',
   'failed_no_mutation',
   'failed_restored',
   'failed_checkpointed',
   'recovery_required',
 ]);
+const terminalResultStatusValues = [
+  'succeeded',
+  'failed_no_mutation',
+  'failed_restored',
+  'failed_checkpointed',
+  'recovery_required',
+] as const;
+const terminalResultStatuses = new Set<string>(terminalResultStatusValues);
+
+export const companionMenuControlProofRecoveryEvidenceSchema = z.strictObject({
+  kind: z.literal('runtime_restart_after_delivery'),
+  detectedAt: timestampSchema,
+  priorStatus: z.enum(['dispatched', 'in_progress']),
+  requiresExplicitRecovery: z.literal(true),
+  automaticReplayAllowed: z.literal(false),
+  retainsTargetLock: z.literal(true),
+});
+export type CompanionMenuControlProofRecoveryEvidence = z.infer<
+  typeof companionMenuControlProofRecoveryEvidenceSchema
+>;
+
 export const companionMenuControlProofStatusSchema = z
   .strictObject({
     ...baseIdentityShape,
@@ -634,6 +656,7 @@ export const companionMenuControlProofStatusSchema = z
     status: statusValueSchema,
     progress: companionMenuControlProofProgressSchema.optional(),
     result: companionMenuControlProofResultSchema.optional(),
+    recovery: companionMenuControlProofRecoveryEvidenceSchema.optional(),
     updatedAt: timestampSchema,
   })
   .superRefine((status, context) => {
@@ -651,13 +674,14 @@ export const companionMenuControlProofStatusSchema = z
       (value) => value !== undefined,
     ).length;
     const delivered = deliveryFieldCount === 3;
-    const terminal = !['queued', 'dispatched', 'in_progress'].includes(status.status);
+    const terminalResult = terminalResultStatuses.has(status.status);
     if (
       (deliveryFieldCount !== 0 && !delivered) ||
       (status.status === 'queued' && delivered) ||
       (status.status !== 'queued' && !delivered) ||
       (status.status === 'in_progress') !== (status.progress !== undefined) ||
-      terminal !== (status.result !== undefined) ||
+      terminalResult !== (status.result !== undefined) ||
+      (status.status === 'recovery_pending') !== (status.recovery !== undefined) ||
       (status.result !== undefined && status.result.status !== status.status)
     ) {
       context.addIssue({
@@ -713,7 +737,21 @@ export const companionMenuControlProofStatusSchema = z
         message: 'Nested menu-control proof evidence must mirror immutable status identity',
       });
     }
-    const latestEvidenceAt = nested?.occurredAt ?? status.dispatchedAt ?? status.requestedAt;
+    if (
+      status.recovery !== undefined &&
+      Date.parse(status.recovery.detectedAt) < Date.parse(status.dispatchedAt ?? '')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recovery', 'detectedAt'],
+        message: 'Runtime restart detection must not predate delivery',
+      });
+    }
+    const latestEvidenceAt =
+      status.recovery?.detectedAt ??
+      nested?.occurredAt ??
+      status.dispatchedAt ??
+      status.requestedAt;
     if (Date.parse(status.updatedAt) < Date.parse(latestEvidenceAt)) {
       context.addIssue({
         code: 'custom',
