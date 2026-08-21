@@ -31,10 +31,12 @@ import {
   companionMenuControlProofPollRequestSchema,
   companionMenuControlProofProgressAckSchema,
   companionMenuControlProofProgressSchema,
+  companionMenuControlProofRecoveryAckResponseSchema,
   companionMenuControlProofResultAckSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusRequestSchema,
   companionMenuControlProofStatusSchema,
+  companionMenuControlProofTerminalReconciliationAckSchema,
   companionShortcutProofCreateRequestSchema,
   companionShortcutProofPollDeliverySchema,
   companionShortcutProofPollRequestSchema,
@@ -8516,7 +8518,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           adapterId: 'blender' as const,
           instanceId: session.hello.instanceId,
         };
-        const delivery = menuControlProofExecutionCoordinator.poll({
+        const authority = {
           target,
           documentAuthoritySha256: menuDocumentAuthorityFor(session),
           lease: {
@@ -8526,8 +8528,13 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             documentIncarnationId: session.hello.documentIncarnationId,
             expiresAt: session.lease.expiresAt,
           },
+        };
+        const recovery = menuControlProofExecutionCoordinator.pollTerminalReconciliation(authority);
+        const delivery =
+          recovery === null ? menuControlProofExecutionCoordinator.poll(authority) : null;
+        return companionMenuControlProofPollDeliverySchema.parse({
+          request: recovery ?? delivery,
         });
-        return companionMenuControlProofPollDeliverySchema.parse({ request: delivery });
       } catch (error) {
         if (error instanceof CompanionLeaseError) {
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });
@@ -8614,6 +8621,63 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           menuDocumentAuthorityFor(session),
         );
         return companionMenuControlProofResultAckSchema.parse({ result });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderMenuControlProofExecutionError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post('/api/v1/companion/menu-control-proof-recovery', async (request, reply) => {
+      const parsedAck = companionMenuControlProofTerminalReconciliationAckSchema.safeParse(
+        request.body,
+      );
+      if (!parsedAck.success) {
+        return reply.code(400).send({
+          error: 'invalid_menu_control_proof_recovery_ack',
+          message:
+            'Menu-control proof terminal reconciliation acknowledgement violates the strict public contract',
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Menu-control proof recovery requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedAck.data.result.target.adapterId,
+          parsedAck.data.result.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+          return reply.code(409).send({
+            error: 'menu_control_proof_protocol_unsupported',
+            message:
+              'Menu-control proof recovery requires Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+          });
+        }
+        const target = {
+          adapterId: 'blender' as const,
+          instanceId: session.hello.instanceId,
+        };
+        const result = menuControlProofExecutionCoordinator.reconcileTerminal(parsedAck.data, {
+          target,
+          documentAuthoritySha256: menuDocumentAuthorityFor(session),
+          lease: {
+            leaseId: session.lease.leaseId,
+            sessionId: session.hello.sessionId,
+            target,
+            documentIncarnationId: session.hello.documentIncarnationId,
+            expiresAt: session.lease.expiresAt,
+          },
+        });
+        return companionMenuControlProofRecoveryAckResponseSchema.parse({ result });
       } catch (error) {
         if (error instanceof CompanionLeaseError) {
           return reply.code(error.statusCode).send({ error: error.code, message: error.message });

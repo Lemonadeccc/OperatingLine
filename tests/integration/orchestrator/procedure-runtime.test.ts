@@ -8158,10 +8158,13 @@ describe('procedure compilation runtime', () => {
       );
       const restartDeliveryResponse = await fetch(pollUrl, { headers: leaseHeaders });
       expect(restartDeliveryResponse.status).toBe(200);
-      expect(
-        companionMenuControlProofPollDeliverySchema.parse(await restartDeliveryResponse.json())
-          .request,
-      ).not.toBeNull();
+      const restartDelivery = companionMenuControlProofPollDeliverySchema.parse(
+        await restartDeliveryResponse.json(),
+      ).request;
+      expect(restartDelivery).not.toBeNull();
+      if (restartDelivery === null || 'kind' in restartDelivery) {
+        throw new Error('Expected ordinary menu-control proof delivery');
+      }
 
       const deliveredDocumentChangeResponse = await fetch(
         `${runtime.baseUrl}/api/v1/companion/session`,
@@ -8245,7 +8248,21 @@ describe('procedure compilation runtime', () => {
         },
       });
       expect(recoveryPoll.status).toBe(200);
-      await expect(recoveryPoll.json()).resolves.toEqual({ request: null });
+      const recoveryChallenge = companionMenuControlProofPollDeliverySchema.parse(
+        await recoveryPoll.json(),
+      ).request;
+      expect(recoveryChallenge).toMatchObject({
+        kind: 'native_terminal_reconcile',
+        requestId: recoveryRequest.requestId,
+        lease: restartDelivery.lease,
+        replacementLease: {
+          leaseId: restoredAfterRestart.leaseId,
+          sessionId: hello.sessionId,
+          documentIncarnationId: hello.documentIncarnationId,
+          target: { adapterId: 'blender', instanceId: targetInstanceId },
+        },
+        acknowledgedProgressReceiptChainHeads: [],
+      });
 
       const replacementHello = blenderDocumentCompanionHello(targetInstanceId);
       const replacementSessionResponse = await fetch(

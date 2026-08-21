@@ -5,14 +5,20 @@ import type { OperatingLineDatabase } from '@operatingline/persistence';
 import {
   companionMenuControlProofCreateRequestSchema,
   companionMenuControlProofDeliverySchema,
+  companionMenuControlProofExecutionWindowMs,
   companionMenuControlProofProgressSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusSchema,
+  companionMenuControlProofTerminalReconciliationAckMatchesDelivery,
+  companionMenuControlProofTerminalReconciliationAckSchema,
+  companionMenuControlProofTerminalReconciliationDeliverySchema,
   type CompanionMenuControlProofCreateRequest,
   type CompanionMenuControlProofDelivery,
   type CompanionMenuControlProofProgress,
   type CompanionMenuControlProofResult,
   type CompanionMenuControlProofStatus,
+  type CompanionMenuControlProofTerminalReconciliationAck,
+  type CompanionMenuControlProofTerminalReconciliationDelivery,
 } from '@operatingline/protocol';
 import { z } from 'zod';
 
@@ -33,6 +39,7 @@ const menuProofEventTypes = [
   'blender.menu-control-proof.failed-restored',
   'blender.menu-control-proof.failed-checkpointed',
   'blender.menu-control-proof.recovery-required',
+  'blender.menu-control-proof.terminal-reconciled',
 ] as const;
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -60,6 +67,7 @@ const storedMenuProofEventSchema = z.strictObject({
   sessionAuthoritySha256: contentSha256Schema,
   documentAuthoritySha256: contentSha256Schema,
   progressReceiptChainHeads: z.array(contentSha256Schema).max(7),
+  terminalReconciliationAck: companionMenuControlProofTerminalReconciliationAckSchema.optional(),
 });
 const legacyPhaseSchema = z.enum([
   'queued',
@@ -139,6 +147,7 @@ function parseStoredMenuProofEventPayload(payload: unknown): {
         legacy.sessionFingerprintSha256,
       ),
       progressReceiptChainHeads: legacy.progressReceiptChainHeads,
+      terminalReconciliationAck: undefined,
     }),
     legacy: true,
   };
@@ -298,7 +307,28 @@ function eventTypeFor(stored: StoredMenuProof): MenuProofEventType {
 }
 
 function eventIdFor(stored: StoredMenuProof): string {
+  if (stored.terminalReconciliationAck !== undefined) {
+    return `blender-menu-control-proof:${stored.execution.requestId}:terminal-reconciled:${stored.terminalReconciliationAck.recoveryId}`;
+  }
   return `blender-menu-control-proof:${stored.execution.requestId}:${stored.phase}`;
+}
+
+function terminalReceiptChainHeads(result: CompanionMenuControlProofResult): readonly string[] {
+  return result.terminalEvidence.kind === 'succeeded_locked'
+    ? result.terminalEvidence.operationReceipts.map((receipt) => receipt.contentSha256)
+    : result.terminalEvidence.receiptPrefix.map((receipt) => receipt.contentSha256);
+}
+
+function sameLeaseIdentity(
+  left: BlenderMenuControlProofPollInput['lease'],
+  right: BlenderMenuControlProofPollInput['lease'],
+): boolean {
+  return (
+    left.leaseId === right.leaseId &&
+    left.sessionId === right.sessionId &&
+    left.documentIncarnationId === right.documentIncarnationId &&
+    isDeepStrictEqual(left.target, right.target)
+  );
 }
 
 function assertPhaseEvidence(stored: StoredMenuProof): void {
@@ -388,7 +418,10 @@ function assertStoredTransition(
   eventType: string,
 ): void {
   assertPhaseEvidence(next);
-  if (eventType !== eventTypeFor(next)) {
+  if (
+    eventType !== eventTypeFor(next) &&
+    eventType !== 'blender.menu-control-proof.terminal-reconciled'
+  ) {
     throw new Error(
       `Menu-control proof ${next.execution.requestId} event type does not match its phase`,
     );
@@ -399,10 +432,43 @@ function assertStoredTransition(
     }
     return;
   }
+  if (eventType === 'blender.menu-control-proof.terminal-reconciled') {
+    const ack = next.terminalReconciliationAck;
+    const terminalPhase = next.phase === 'succeeded' || next.phase === 'failed_checkpointed';
+    const eligiblePrevious =
+      previous.phase === 'dispatched' ||
+      previous.phase.startsWith('progress_') ||
+      previous.phase === 'recovery_pending' ||
+      previous.phase === next.phase;
+    if (
+      ack === undefined ||
+      previous.terminalReconciliationAck !== undefined ||
+      !terminalPhase ||
+      !eligiblePrevious ||
+      !sameImmutableExecution(previous.execution, next.execution) ||
+      previous.sessionAuthoritySha256 !== next.sessionAuthoritySha256 ||
+      previous.documentAuthoritySha256 !== next.documentAuthoritySha256 ||
+      !isDeepStrictEqual(next.execution.result, ack.result) ||
+      next.execution.updatedAt !== ack.occurredAt ||
+      Date.parse(next.execution.updatedAt) < Date.parse(previous.execution.updatedAt) ||
+      next.progressReceiptChainHeads.length < previous.progressReceiptChainHeads.length ||
+      !isDeepStrictEqual(
+        next.progressReceiptChainHeads.slice(0, previous.progressReceiptChainHeads.length),
+        previous.progressReceiptChainHeads,
+      )
+    ) {
+      throw new Error(
+        `Menu-control proof ${next.execution.requestId} has invalid terminal reconciliation evidence`,
+      );
+    }
+    return;
+  }
   if (
     !sameImmutableExecution(previous.execution, next.execution) ||
     previous.sessionAuthoritySha256 !== next.sessionAuthoritySha256 ||
     previous.documentAuthoritySha256 !== next.documentAuthoritySha256 ||
+    previous.terminalReconciliationAck !== undefined ||
+    next.terminalReconciliationAck !== undefined ||
     !expectedTransition(previous.phase, next.phase) ||
     Date.parse(next.execution.updatedAt) < Date.parse(previous.execution.updatedAt)
   ) {
@@ -464,6 +530,13 @@ export function createBlenderMenuControlProofExecutionCoordinator(
   const createId = options.createId ?? randomUUID;
   const executions = new Map<string, StoredMenuProof>();
   const latestPayloadWasLegacy = new Map<string, boolean>();
+  const pendingTerminalReconciliations = new Map<
+    string,
+    {
+      readonly delivery: CompanionMenuControlProofTerminalReconciliationDelivery;
+      readonly documentAuthoritySha256: string;
+    }
+  >();
 
   for (const event of options.database.listExecutionEventsByTypes(menuProofEventTypes)) {
     const { stored: parsed, legacy } = parseStoredMenuProofEventPayload(event.payload);
@@ -639,6 +712,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       sessionAuthoritySha256: sessionAuthority,
       documentAuthoritySha256: documentAuthority,
       progressReceiptChainHeads: [],
+      terminalReconciliationAck: undefined,
     });
   };
 
@@ -792,6 +866,174 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return delivery;
   };
 
+  const pollTerminalReconciliation = (
+    input: BlenderMenuControlProofPollInput,
+  ): CompanionMenuControlProofTerminalReconciliationDelivery | null => {
+    const documentAuthority = contentSha256Schema.parse(input.documentAuthoritySha256);
+    const recoveryRequestedAt = now();
+    const candidate = [...executions.values()]
+      .filter((stored) => {
+        const lockedTerminal =
+          (stored.phase === 'succeeded' || stored.phase === 'failed_checkpointed') &&
+          stored.execution.result !== undefined;
+        return (
+          stored.execution.deliveryId !== undefined &&
+          stored.execution.lease !== undefined &&
+          stored.execution.dispatchedAt !== undefined &&
+          stored.documentAuthoritySha256 === documentAuthority &&
+          isDeepStrictEqual(stored.execution.target, input.target) &&
+          stored.execution.lease.leaseId !== input.lease.leaseId &&
+          (stored.phase === 'dispatched' ||
+            stored.phase.startsWith('progress_') ||
+            stored.phase === 'recovery_pending' ||
+            lockedTerminal)
+        );
+      })
+      .sort(
+        (left, right) =>
+          left.execution.requestedAt.localeCompare(right.execution.requestedAt) ||
+          left.execution.requestId.localeCompare(right.execution.requestId),
+      )[0];
+    if (candidate === undefined) return null;
+    if (Date.parse(recoveryRequestedAt) < Date.parse(candidate.execution.updatedAt)) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_reconciliation_time_regression',
+        500,
+        'Terminal reconciliation challenge predates accepted menu-control proof evidence',
+      );
+    }
+    if (
+      !isDeepStrictEqual(input.lease.target, input.target) ||
+      Date.parse(input.lease.expiresAt) <= Date.parse(recoveryRequestedAt)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_recovery_authority_mismatch',
+        409,
+        'Terminal reconciliation requires a current replacement lease for the same target',
+      );
+    }
+    const existing = pendingTerminalReconciliations.get(candidate.execution.requestId);
+    if (
+      existing !== undefined &&
+      existing.documentAuthoritySha256 === documentAuthority &&
+      sameLeaseIdentity(existing.delivery.replacementLease, input.lease)
+    ) {
+      return existing.delivery;
+    }
+    const delivery = companionMenuControlProofTerminalReconciliationDeliverySchema.parse({
+      ...deliveryIdentity(candidate.execution),
+      kind: 'native_terminal_reconcile',
+      recoveryId: createId(),
+      replacementLease: input.lease,
+      acknowledgedProgressReceiptChainHeads: candidate.progressReceiptChainHeads,
+      recoveryRequestedAt,
+    });
+    pendingTerminalReconciliations.set(candidate.execution.requestId, {
+      delivery,
+      documentAuthoritySha256: documentAuthority,
+    });
+    return delivery;
+  };
+
+  const reconcileTerminal = (
+    input: CompanionMenuControlProofTerminalReconciliationAck,
+    authority: BlenderMenuControlProofPollInput,
+  ): 'accepted' | 'duplicate' => {
+    const ack = companionMenuControlProofTerminalReconciliationAckSchema.parse(input);
+    const documentAuthority = contentSha256Schema.parse(authority.documentAuthoritySha256);
+    const stored = executions.get(ack.result.requestId);
+    if (stored === undefined) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_not_found',
+        404,
+        'The menu-control proof request was not found',
+      );
+    }
+    if (
+      stored.terminalReconciliationAck !== undefined &&
+      stored.documentAuthoritySha256 === documentAuthority &&
+      isDeepStrictEqual(stored.terminalReconciliationAck, ack) &&
+      isDeepStrictEqual(stored.execution.result, ack.result)
+    ) {
+      return 'duplicate';
+    }
+    const pending = pendingTerminalReconciliations.get(stored.execution.requestId);
+    if (
+      pending === undefined ||
+      pending.documentAuthoritySha256 !== documentAuthority ||
+      stored.documentAuthoritySha256 !== documentAuthority ||
+      !sameLeaseIdentity(pending.delivery.replacementLease, authority.lease) ||
+      !isDeepStrictEqual(authority.target, stored.execution.target) ||
+      !companionMenuControlProofTerminalReconciliationAckMatchesDelivery(ack, pending.delivery)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_terminal_reconciliation_identity_mismatch',
+        409,
+        'The terminal result does not match its original delivery and current replacement document lease',
+      );
+    }
+    const eligible =
+      stored.phase === 'dispatched' ||
+      stored.phase.startsWith('progress_') ||
+      stored.phase === 'recovery_pending' ||
+      stored.phase === ack.result.status;
+    if (
+      !eligible ||
+      (ack.result.status !== 'succeeded' && ack.result.status !== 'failed_checkpointed')
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_terminal_reconciliation_not_allowed',
+        409,
+        'Only an indeterminate proof or the exact already-locked terminal may be reconciled',
+      );
+    }
+    if (
+      (stored.phase === 'succeeded' || stored.phase === 'failed_checkpointed') &&
+      !isDeepStrictEqual(stored.execution.result, ack.result)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_result_conflict',
+        409,
+        'The menu-control proof already has a different locked terminal result',
+      );
+    }
+    const terminalHeads = terminalReceiptChainHeads(ack.result);
+    if (
+      terminalHeads.length < stored.progressReceiptChainHeads.length ||
+      !isDeepStrictEqual(
+        terminalHeads.slice(0, stored.progressReceiptChainHeads.length),
+        stored.progressReceiptChainHeads,
+      )
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_receipt_chain_conflict',
+        409,
+        'The reconciled terminal receipt chain does not extend the server-acknowledged prefix',
+      );
+    }
+    if (
+      stored.terminalReconciliationAck !== undefined &&
+      isDeepStrictEqual(stored.execution.result, ack.result)
+    ) {
+      return 'duplicate';
+    }
+    append('blender.menu-control-proof.terminal-reconciled', {
+      ...stored,
+      phase: ack.result.status,
+      progressReceiptChainHeads: [...terminalHeads],
+      terminalReconciliationAck: ack,
+      execution: companionMenuControlProofStatusSchema.parse({
+        ...stored.execution,
+        status: ack.result.status,
+        progress: undefined,
+        recovery: undefined,
+        result: ack.result,
+        updatedAt: ack.occurredAt,
+      }),
+    });
+    return 'accepted';
+  };
+
   const assertDelivery = (
     evidence: CompanionMenuControlProofProgress | CompanionMenuControlProofResult,
     fingerprint: string,
@@ -815,15 +1057,17 @@ export function createBlenderMenuControlProofExecutionCoordinator(
         'Evidence does not match the accepted delivery, lease, binding, and Companion session',
       );
     }
+    const executionDeadline =
+      Date.parse(evidence.dispatchedAt) + companionMenuControlProofExecutionWindowMs;
     if (
       Date.parse(evidence.occurredAt) < Date.parse(stored.execution.updatedAt) ||
       Date.parse(evidence.occurredAt) > serverNow ||
-      serverNow >= Date.parse(evidence.lease.expiresAt)
+      serverNow > executionDeadline
     ) {
       throw new BlenderMenuControlProofExecutionError(
         'menu_control_proof_evidence_time_invalid',
         409,
-        'Evidence is expired or predates the previously accepted evidence',
+        'Evidence falls outside the bounded execution window or predates accepted evidence',
       );
     }
     return stored;
@@ -886,6 +1130,20 @@ export function createBlenderMenuControlProofExecutionCoordinator(
   ): 'accepted' | 'duplicate' => {
     const result = companionMenuControlProofResultSchema.parse(input);
     const fingerprint = contentSha256Schema.parse(documentAuthoritySha256);
+    const existing = executions.get(result.requestId);
+    if (
+      existing !== undefined &&
+      existing.documentAuthoritySha256 === fingerprint &&
+      (existing.phase === 'succeeded' ||
+        existing.phase === 'failed_no_mutation' ||
+        existing.phase === 'failed_restored' ||
+        existing.phase === 'failed_checkpointed' ||
+        (existing.phase === 'recovery_required' &&
+          existing.execution.status === 'recovery_required')) &&
+      isDeepStrictEqual(existing.execution.result, result)
+    ) {
+      return 'duplicate';
+    }
     const stored = assertDelivery(result, fingerprint);
     if (
       stored.phase === 'succeeded' ||
@@ -961,8 +1219,10 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     queue,
     reconcileSessionAuthority,
     poll,
+    pollTerminalReconciliation,
     progress,
     complete,
+    reconcileTerminal,
     ownsTarget,
   };
 }
