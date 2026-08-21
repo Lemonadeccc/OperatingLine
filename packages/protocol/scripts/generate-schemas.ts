@@ -110,6 +110,7 @@ import {
   procedureTutorialMediaCapabilitiesSchema,
   procedureTutorialMediaCurrentJobStatusSchema,
   procedureTutorialMediaJobStatusRequestSchema,
+  procedureTutorialMediaRecognitionArtifactSchema,
   procedureTutorialMediaResumeRequestSchema,
   procedureTutorialMediaAuthoringCurrentPreparationSchema,
   procedureTutorialMediaAuthoringPrepareStartRequestSchema,
@@ -1049,6 +1050,11 @@ const schemas = [
     procedureTutorialMediaCapabilitiesSchema,
   ],
   [
+    'procedure-tutorial-media-ui-recognition-artifact.schema.json',
+    'https://operatingline.dev/schema/v1/procedure-tutorial-media-ui-recognition-artifact.json',
+    procedureTutorialMediaRecognitionArtifactSchema,
+  ],
+  [
     'procedure-tutorial-youtube-track-list-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tutorial-youtube-track-list-request.json',
     procedureTutorialYoutubeTrackListRequestSchema,
@@ -1631,6 +1637,16 @@ function documentExecutionDecisionSemanticGate(
   }
 }
 
+function documentTutorialMediaRecognitionSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (filename === 'procedure-tutorial-media-ui-recognition-artifact.schema.json') {
+    schema['$comment'] =
+      'Candidate and frame id uniqueness, candidate frame/timestamp references, normalized labels and key chords, normalized bounds containment, UTF-8 byte limits, and contentSha256 integrity require the exported Zod/service semantic validation gates; standard JSON Schema covers the strict structural contract.';
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
   if (onlyFilename !== undefined && filename !== onlyFilename) continue;
   const draft7TupleSchema =
@@ -1645,6 +1661,7 @@ for (const [filename, id, schema] of schemas) {
   hardenProcedureTreeEditorSchema(filename, jsonSchema);
   hardenCompoundReplaySchema(filename, jsonSchema);
   documentExecutionDecisionSemanticGate(filename, jsonSchema);
+  documentTutorialMediaRecognitionSemanticGate(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

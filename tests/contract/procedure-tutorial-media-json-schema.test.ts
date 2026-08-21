@@ -10,6 +10,7 @@ import {
   procedureTutorialMediaCurrentAnalysisResultSchema,
   procedureTutorialMediaCurrentJobStatusSchema,
   procedureTutorialMediaJobStatusRequestSchema,
+  procedureTutorialMediaRecognitionArtifactSchema,
   procedureTutorialMediaResumeRequestSchema,
 } from '@operatingline/protocol';
 import { procedureTutorialMediaAnalysisStartRequestSchema } from '../../packages/protocol/src/procedure-tutorial-media.js';
@@ -335,8 +336,170 @@ const localCapabilities = {
   stages: ['import', 'probe', 'audio', 'asr', 'frames', 'ocr', 'segmentation'],
 } as const;
 
+const recognitionArtifact = {
+  formatVersion: '1.0.0',
+  artifactKind: 'ui_recognition_observations',
+  stage: 'recognition',
+  input: {
+    frames: [
+      {
+        frameId,
+        frameSha256,
+        ocrArtifactSha256: '6'.repeat(64),
+        ocrCandidatesSha256: '7'.repeat(64),
+        timestampMs: 2_000,
+      },
+    ],
+  },
+  observations: {
+    uiCandidates: [
+      {
+        candidateId: uiCandidateId,
+        kind: 'menu',
+        frameId,
+        timestampMs: 2_000,
+        label: 'Add',
+        normalizedLabel: 'add',
+        menuId: 'add',
+        controlId: null,
+        bounds: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 },
+        confidence: 0.9,
+      },
+    ],
+    keyCandidates: [
+      {
+        candidateId: shortcutCandidateId,
+        kind: 'key_chord',
+        frameId,
+        timestampMs: 2_000,
+        label: 'Shift A',
+        normalizedKeys: ['Shift', 'A'],
+        confidence: 0.85,
+      },
+    ],
+  },
+  provenance: {
+    adapterId: 'fixture-recognizer',
+    adapterVersion: '1.0.0',
+    modelId: 'fixture-model',
+    modelVersion: '1.0.0',
+    executableSha256: '1'.repeat(64),
+    modelSha256: '2'.repeat(64),
+    licenseId: 'Apache-2.0',
+    licenseSha256: '3'.repeat(64),
+    configSha256: '4'.repeat(64),
+    versionOutputSha256: '5'.repeat(64),
+    locale: 'en-US',
+    platform: 'test',
+    isolationBackendId: 'fixture-isolator',
+    isolationBackendVersion: '1.0.0',
+    isolationBackendVersionSha256: '8'.repeat(64),
+    supervisorSha256: '9'.repeat(64),
+    isolationPolicySha256: 'a'.repeat(64),
+    isolationAttestationSha256: 'b'.repeat(64),
+  },
+  contentSha256: 'c'.repeat(64),
+} as const;
 
 describe('public tutorial media analysis JSON Schemas', () => {
+  it('publishes strict structural recognition artifacts and documents runtime semantic gates', async () => {
+    const structuralCases = [
+      { value: recognitionArtifact, accepted: true },
+      { value: { ...recognitionArtifact, token: 'forbidden' }, accepted: false },
+      {
+        value: {
+          ...recognitionArtifact,
+          observations: { ...recognitionArtifact.observations, debug: true },
+        },
+        accepted: false,
+      },
+      {
+        value: {
+          ...recognitionArtifact,
+          observations: {
+            ...recognitionArtifact.observations,
+            uiCandidates: [
+              { ...recognitionArtifact.observations.uiCandidates[0], confidence: 1.01 },
+            ],
+          },
+        },
+        accepted: false,
+      },
+      {
+        value: { ...recognitionArtifact, contentSha256: 'not-a-sha256' },
+        accepted: false,
+      },
+      {
+        value: {
+          ...recognitionArtifact,
+          observations: {
+            ...recognitionArtifact.observations,
+            keyCandidates: [
+              { ...recognitionArtifact.observations.keyCandidates[0], kind: 'keypress' },
+            ],
+          },
+        },
+        accepted: false,
+      },
+    ] as const;
+    for (const contractCase of structuralCases)
+      expect(
+        procedureTutorialMediaRecognitionArtifactSchema.safeParse(contractCase.value).success,
+      ).toBe(contractCase.accepted);
+    const generatedSchema = publicSchema(
+      'procedure-tutorial-media-ui-recognition-artifact.schema.json',
+    );
+    expect(generatedSchema).toMatchObject({
+      $comment: expect.stringContaining('id uniqueness'),
+    });
+    await validatePublicJsonSchemaCases(generatedSchema, structuralCases);
+
+    const semanticCases = [
+      {
+        ...recognitionArtifact,
+        input: {
+          frames: [recognitionArtifact.input.frames[0], recognitionArtifact.input.frames[0]],
+        },
+      },
+      {
+        ...recognitionArtifact,
+        observations: {
+          ...recognitionArtifact.observations,
+          keyCandidates: [
+            {
+              ...recognitionArtifact.observations.keyCandidates[0],
+              candidateId: uiCandidateId,
+            },
+          ],
+        },
+      },
+      {
+        ...recognitionArtifact,
+        observations: {
+          ...recognitionArtifact.observations,
+          uiCandidates: [
+            { ...recognitionArtifact.observations.uiCandidates[0], frameId: 'missing-frame' },
+          ],
+        },
+      },
+      {
+        ...recognitionArtifact,
+        observations: {
+          ...recognitionArtifact.observations,
+          uiCandidates: [
+            { ...recognitionArtifact.observations.uiCandidates[0], timestampMs: 2_001 },
+          ],
+        },
+      },
+    ] as const;
+    for (const value of semanticCases)
+      expect(procedureTutorialMediaRecognitionArtifactSchema.safeParse(value).success).toBe(false);
+    await validatePublicJsonSchemaCases(
+      generatedSchema,
+      semanticCases.map((value) => ({ value, accepted: true })),
+    );
+  });
+
   it('round-trips exact YouTube and local sources and rejects loss or simultaneous claims', () => {
     expect(
       procedureTutorialMediaAnalysisStartRequestSchema.safeParse(youtubeStartRequest).success,

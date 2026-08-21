@@ -43,6 +43,7 @@ export * from './procedure-semantic-retrieval.js';
 export * from './procedure-tutorial-authoring-run.js';
 export * from './procedure-tutorial-import.js';
 export * from './procedure-tutorial-media.js';
+export * from './procedure-tutorial-media-recognition.js';
 export * from './procedure-tutorial-media-authoring.js';
 export {
   procedureTutorialMediaAuthoringRunLegacyFormatVersion,
