@@ -1,6 +1,7 @@
 """Focused pure-Python coverage for Blender's initial goal request."""
 
 from copy import deepcopy
+from dataclasses import replace
 from importlib import import_module
 from queue import Empty
 from pathlib import Path
@@ -34,7 +35,13 @@ transport_module = import_module(
 
 GoalRequestState = goal_request_module.GoalRequestState
 build_goal_request = goal_request_module.build_goal_request
-CompanionTransport = transport_module.CompanionTransport
+
+
+class CompanionTransport(transport_module.CompanionTransport):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("session_id", str(uuid.uuid4()))
+        kwargs.setdefault("document_incarnation_id", str(uuid.uuid4()))
+        super().__init__(*args, **kwargs)
 
 
 class GoalRequestPayloadTests(unittest.TestCase):
@@ -157,8 +164,10 @@ class GoalRequestTransportTests(unittest.TestCase):
 
     def _session_response(self, path, body):
         if path == "/api/v1/companion/session":
-            self.assertEqual(body["contractVersion"], "1.0.0")
+            self.assertEqual(body["contractVersion"], "1.1.0")
             self.assertEqual(body["adapterId"], "blender")
+            uuid.UUID(body["sessionId"])
+            uuid.UUID(body["documentIncarnationId"])
             self.assertEqual(
                 body["catalogVersion"], domain.BLENDER_ACTION_CATALOG_VERSION
             )
@@ -167,8 +176,10 @@ class GoalRequestTransportTests(unittest.TestCase):
                 sorted(domain.SUPPORTED_PROTOCOL_VERSIONS),
             )
             return {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "leaseId": str(uuid.uuid4()),
+                "sessionId": body["sessionId"],
+                "documentIncarnationId": body["documentIncarnationId"],
                 "negotiatedGuideProtocolVersion": domain.PROTOCOL_VERSION,
                 "catalogVersion": body["catalogVersion"],
                 "capabilities": body["capabilities"],
@@ -178,8 +189,10 @@ class GoalRequestTransportTests(unittest.TestCase):
             }
         if path == "/api/v1/companion/heartbeat":
             return {
-                "contractVersion": "1.0.0",
+                "contractVersion": "1.1.0",
                 "leaseId": body["leaseId"],
+                "sessionId": body["sessionId"],
+                "documentIncarnationId": body["documentIncarnationId"],
                 "sequence": body["sequence"],
                 "expiresAt": "2099-01-01T00:00:00Z",
             }
@@ -210,8 +223,10 @@ class GoalRequestTransportTests(unittest.TestCase):
                     (current.heartbeat_sequence, current.expires_at)
                 )
                 return {
-                    "contractVersion": "1.0.0",
+                    "contractVersion": "1.1.0",
                     "leaseId": body["leaseId"],
+                    "sessionId": body["sessionId"],
+                    "documentIncarnationId": body["documentIncarnationId"],
                     "sequence": body["sequence"],
                     "expiresAt": "2000-01-01T00:00:01+00:00",
                 }
@@ -222,6 +237,18 @@ class GoalRequestTransportTests(unittest.TestCase):
         established = transport.session_snapshot
         self.assertIsNotNone(established)
         self.assertEqual(established.heartbeat_sequence, 0)
+        self.assertEqual(established.session_id, transport._session_id)
+        self.assertEqual(
+            established.document_incarnation_id,
+            transport._document_incarnation_id,
+        )
+        event = transport.incoming.get_nowait()
+        self.assertEqual(event["kind"], "session_established")
+        self.assertEqual(event["sessionId"], established.session_id)
+        self.assertEqual(
+            event["documentIncarnationId"],
+            established.document_incarnation_id,
+        )
 
         transport._send_heartbeat()
         renewed = transport.session_snapshot
@@ -234,6 +261,129 @@ class GoalRequestTransportTests(unittest.TestCase):
         transport._clear_session()
         self.assertIsNone(transport.session_snapshot)
         self.assertEqual(established.heartbeat_sequence, 0)
+
+    def test_session_and_heartbeat_fail_closed_on_identity_or_shape_mismatch(
+        self,
+    ) -> None:
+        session_id = str(uuid.uuid4())
+        document_incarnation_id = str(uuid.uuid4())
+
+        for mutate in (
+            lambda response: response.update(contractVersion="1.0.0"),
+            lambda response: response.update(sessionId=str(uuid.uuid4())),
+            lambda response: response.pop("documentIncarnationId"),
+            lambda response: response.update(extra=True),
+        ):
+            transport = CompanionTransport(
+                "http://127.0.0.1:43123",
+                "0123456789abcdef",
+                str(uuid.uuid4()),
+                session_id=session_id,
+                document_incarnation_id=document_incarnation_id,
+            )
+
+            def request_json(
+                _method,
+                path,
+                body=None,
+                _mutate=mutate,
+                **_kwargs,
+            ):
+                response = self._session_response(path, body)
+                _mutate(response)
+                return response
+
+            transport._request_json = request_json
+            with self.assertRaises(ValueError):
+                transport._establish_session()
+            self.assertIsNone(transport.session_snapshot)
+            self.assertTrue(transport.incoming.empty())
+
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+            session_id=session_id,
+            document_incarnation_id=document_incarnation_id,
+        )
+        transport._request_json = (
+            lambda _method, path, body=None, **_kwargs: self._session_response(
+                path, body
+            )
+        )
+        transport._establish_session()
+        established = transport.session_snapshot
+        transport.incoming.get_nowait()
+
+        for mutate in (
+            lambda response: response.update(contractVersion="1.0.0"),
+            lambda response: response.update(sessionId=str(uuid.uuid4())),
+            lambda response: response.pop("documentIncarnationId"),
+            lambda response: response.update(extra=True),
+        ):
+            def heartbeat_response(
+                _method,
+                path,
+                body=None,
+                _mutate=mutate,
+                **_kwargs,
+            ):
+                response = self._session_response(path, body)
+                _mutate(response)
+                return response
+
+            transport._request_json = heartbeat_response
+            with self.assertRaises(ValueError):
+                transport._send_heartbeat()
+            self.assertIs(transport.session_snapshot, established)
+
+    def test_transport_requires_canonical_controller_owned_session_identity(
+        self,
+    ) -> None:
+        for field, value in (
+            ("session_id", "not-a-uuid"),
+            ("session_id", str(uuid.uuid4()).upper()),
+            ("document_incarnation_id", "not-a-uuid"),
+            ("document_incarnation_id", str(uuid.uuid4()).upper()),
+        ):
+            kwargs = {
+                "session_id": str(uuid.uuid4()),
+                "document_incarnation_id": str(uuid.uuid4()),
+                field: value,
+            }
+            with self.assertRaisesRegex(ValueError, "canonical UUID|must be a UUID"):
+                transport_module.CompanionTransport(
+                    "http://127.0.0.1:43123",
+                    "0123456789abcdef",
+                    str(uuid.uuid4()),
+                    **kwargs,
+                )
+
+    def test_old_heartbeat_response_cannot_overwrite_a_new_lease_snapshot(self) -> None:
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            str(uuid.uuid4()),
+        )
+        transport._request_json = (
+            lambda _method, path, body=None, **_kwargs: self._session_response(
+                path, body
+            )
+        )
+        transport._establish_session()
+        old_snapshot = transport.session_snapshot
+        assert old_snapshot is not None
+        replacement = replace(old_snapshot, lease_id=str(uuid.uuid4()))
+
+        def delayed_heartbeat(_method, path, body=None, **_kwargs):
+            self.assertEqual(path, "/api/v1/companion/heartbeat")
+            transport._session_snapshot = replacement
+            return self._session_response(path, body)
+
+        transport._request_json = delayed_heartbeat
+        transport._send_heartbeat()
+        self.assertIs(transport.session_snapshot, replacement)
+        self.assertEqual(transport.session_snapshot.heartbeat_sequence, 0)
 
     def test_poll_delivers_each_replay_current_state_request_once(self) -> None:
         instance_id = str(uuid.uuid4())

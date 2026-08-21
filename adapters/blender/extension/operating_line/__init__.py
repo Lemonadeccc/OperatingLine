@@ -34,6 +34,11 @@ from .presentation.native_menu_guidance import interaction_guidance_snapshot
 _session: DemoSession | None = None
 _companion: CompanionController | None = None
 _COMPANION_INSTANCE_ID_SLOT = "operating_line_companion_instance_id"
+_COMPANION_SESSION_ID_SLOT = "operating_line_companion_session_id"
+_COMPANION_DOCUMENT_INCARNATION_ID_SLOT = (
+    "operating_line_companion_document_incarnation_id"
+)
+_process_session_id = str(uuid.uuid4())
 
 
 def _runtime_namespace() -> dict:
@@ -43,17 +48,41 @@ def _runtime_namespace() -> dict:
     return namespace
 
 
-def _companion_instance_id(*, rotate: bool = False) -> str:
+def _companion_runtime_id(slot: str, *, rotate: bool = False) -> str:
     namespace = _runtime_namespace()
-    candidate = None if rotate else namespace.get(_COMPANION_INSTANCE_ID_SLOT)
+    candidate = None if rotate else namespace.get(slot)
     try:
         parsed = uuid.UUID(str(candidate))
         if str(parsed) != candidate:
             raise ValueError
     except (AttributeError, TypeError, ValueError):
         candidate = str(uuid.uuid4())
-        namespace[_COMPANION_INSTANCE_ID_SLOT] = candidate
+        namespace[slot] = candidate
     return candidate
+
+
+def _companion_instance_id(*, rotate: bool = False) -> str:
+    return _companion_runtime_id(_COMPANION_INSTANCE_ID_SLOT, rotate=rotate)
+
+
+def _companion_session_id() -> str:
+    global _process_session_id
+    try:
+        parsed = uuid.UUID(_process_session_id)
+        if str(parsed) != _process_session_id:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        _process_session_id = str(uuid.uuid4())
+    namespace = _runtime_namespace()
+    namespace[_COMPANION_SESSION_ID_SLOT] = _process_session_id
+    return _process_session_id
+
+
+def _companion_document_incarnation_id(*, rotate: bool = False) -> str:
+    return _companion_runtime_id(
+        _COMPANION_DOCUMENT_INCARNATION_ID_SLOT,
+        rotate=rotate,
+    )
 
 
 def get_session() -> DemoSession:
@@ -85,7 +114,11 @@ def replace_session(replacement: DemoSession) -> None:
 def get_companion() -> CompanionController:
     global _companion
     if _companion is None:
-        _companion = CompanionController(_companion_instance_id())
+        _companion = CompanionController(
+            _companion_instance_id(),
+            session_id=_companion_session_id(),
+            document_incarnation_id=_companion_document_incarnation_id(),
+        )
     return _companion
 
 
@@ -148,14 +181,22 @@ def _native_history_restored(restore: NativeHistoryRestore) -> None:
 
 def _native_history_file_loaded() -> None:
     global _companion
+    session_id = _companion_session_id()
     rotated_instance_id = _companion_instance_id(rotate=True)
+    rotated_document_incarnation_id = _companion_document_incarnation_id(
+        rotate=True
+    )
     disable_native_menu_guidance()
     disable_overlay()
     reset_native_menu_guidance()
     if _companion is not None:
         previous = _companion
         previous.unregister_timer(document_replaced=True)
-        _companion = CompanionController(rotated_instance_id)
+        _companion = CompanionController(
+            rotated_instance_id,
+            session_id=session_id,
+            document_incarnation_id=rotated_document_incarnation_id,
+        )
         _companion.register_timer()
 
 

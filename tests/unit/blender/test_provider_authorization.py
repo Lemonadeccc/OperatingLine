@@ -223,6 +223,8 @@ class ProviderAuthorizationParityTests(unittest.TestCase):
             "http://127.0.0.1:43123",
             "0123456789abcdef",
             instance_id,
+            session_id=str(uuid.uuid4()),
+            document_incarnation_id=str(uuid.uuid4()),
         )
         value = authorization(
             provider_id="providers/acme",

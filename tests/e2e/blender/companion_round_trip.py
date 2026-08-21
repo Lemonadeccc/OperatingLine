@@ -24,6 +24,10 @@ operating_line = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = operating_line
 spec.loader.exec_module(operating_line)
 
+from operating_line_companion_e2e.operating_line.domain import (  # noqa: E402
+    BLENDER_ACTION_CATALOG_VERSION,
+)
+
 
 def required_environment(name: str) -> str:
     value = os.environ.get(name)
@@ -208,7 +212,10 @@ def main() -> None:
         assert not session.started and not session.receipts
         assert {item.as_pointer() for item in bpy.data.objects} == objects_before_revision
         assert controller.proposed_plan["targetInstanceId"] == controller.instance_id
-        assert controller.proposed_plan["catalogVersion"] == "1.12.0"
+        assert (
+            controller.proposed_plan["catalogVersion"]
+            == BLENDER_ACTION_CATALOG_VERSION
+        )
         first_thread = controller.proposed_plan["revisionThread"]
         assert first_thread == {
             "threadId": revision_request_id,

@@ -35,13 +35,16 @@ operating_line = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = operating_line
 spec.loader.exec_module(operating_line)
 
+import operating_line_extension.operating_line as operating_line_core  # noqa: E402
+
 from operating_line_extension.operating_line.infrastructure import (  # noqa: E402
-    CompanionTransport,
+    CompanionTransport as _CompanionTransport,
     action_registry,
     overlay_enabled,
     remove_factory_startup_objects,
     validate_companion_url,
 )
+
 from operating_line_extension.operating_line.infrastructure.companion_transport import (  # noqa: E402
     CompanionSessionSnapshot,
 )
@@ -98,6 +101,13 @@ from operating_line_extension.operating_line.domain import (  # noqa: E402
     load_task_tree,
     load_task_tree_data,
 )
+
+
+class CompanionTransport(_CompanionTransport):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("session_id", str(uuid.uuid4()))
+        kwargs.setdefault("document_incarnation_id", str(uuid.uuid4()))
+        super().__init__(*args, **kwargs)
 
 
 def begin_authorized_replan(state, target_instance_id: str) -> dict:
@@ -5250,6 +5260,8 @@ def assert_companion_and_plan_semantics() -> None:
     delivery_transport._request_json = delivery_request
     delivery_transport._session_snapshot = CompanionSessionSnapshot(
         lease_id=str(uuid.uuid4()),
+        session_id=delivery_transport._session_id,
+        document_incarnation_id=delivery_transport._document_incarnation_id,
         negotiated_guide_protocol_version="1.1.0",
         heartbeat_interval_seconds=60.0,
         expires_at="2099-01-01T00:00:00Z",
@@ -5504,8 +5516,12 @@ def assert_companion_and_plan_semantics() -> None:
                 companion_sessions.append(payload)
                 self._reply(
                     {
-                        "contractVersion": "1.0.0",
+                        "contractVersion": "1.1.0",
                         "leaseId": str(uuid.uuid4()),
+                        "sessionId": payload["sessionId"],
+                        "documentIncarnationId": payload[
+                            "documentIncarnationId"
+                        ],
                         "negotiatedGuideProtocolVersion": "1.1.0",
                         "catalogVersion": ACTION_CATALOG["catalogVersion"],
                         "capabilities": payload["capabilities"],
@@ -5519,8 +5535,12 @@ def assert_companion_and_plan_semantics() -> None:
                 companion_heartbeats.append(payload)
                 self._reply(
                     {
-                        "contractVersion": "1.0.0",
+                        "contractVersion": "1.1.0",
                         "leaseId": payload["leaseId"],
+                        "sessionId": payload["sessionId"],
+                        "documentIncarnationId": payload[
+                            "documentIncarnationId"
+                        ],
                         "sequence": payload["sequence"],
                         "expiresAt": "2099-01-01T00:00:00Z",
                     }
@@ -5616,6 +5636,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id=BUNDLED_PLAN["id"],
             known_revision=PLAN_REVISION,
             known_plan_content_sha256=canonical_plan_content_sha256(BUNDLED_PLAN),
@@ -5638,6 +5660,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id=session.plan_id,
             known_revision=session.revision,
             known_plan_content_sha256=session.plan_content_sha256,
@@ -5676,9 +5700,11 @@ def assert_companion_and_plan_semantics() -> None:
         assert all(query["instanceId"] == [companion.instance_id] for query in requests)
         assert companion_sessions
         assert companion_sessions[0] == {
-            "contractVersion": "1.0.0",
+            "contractVersion": "1.1.0",
             "adapterId": "blender",
             "instanceId": companion.instance_id,
+            "sessionId": companion.session_id,
+            "documentIncarnationId": companion.document_incarnation_id,
             "companionVersion": "0.1.0",
             "hostVersion": "unknown",
             "supportedGuideProtocolVersions": sorted(SUPPORTED_PROTOCOL_VERSIONS),
@@ -5708,6 +5734,11 @@ def assert_companion_and_plan_semantics() -> None:
         assert companion_heartbeats
         assert companion_heartbeats[0]["adapterId"] == "blender"
         assert companion_heartbeats[0]["instanceId"] == companion.instance_id
+        assert companion_heartbeats[0]["sessionId"] == companion.session_id
+        assert (
+            companion_heartbeats[0]["documentIncarnationId"]
+            == companion.document_incarnation_id
+        )
         assert companion_heartbeats[0]["sequence"] == 1
         assert server_thread.ident != main_thread_id
 
@@ -6157,6 +6188,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
             known_plan_content_sha256=dynamic_plan_content_sha256,
@@ -6859,6 +6892,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
             known_plan_content_sha256=dynamic_plan_content_sha256,
@@ -6894,6 +6929,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
             known_plan_content_sha256=dynamic_plan_content_sha256,
@@ -6955,6 +6992,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
             known_plan_content_sha256=dynamic_plan_content_sha256,
@@ -6983,6 +7022,8 @@ def assert_companion_and_plan_semantics() -> None:
             runtime_url,
             token,
             companion.instance_id,
+            session_id=companion.session_id,
+            document_incarnation_id=companion.document_incarnation_id,
             known_plan_id="live-snowman",
             known_revision=DYNAMIC_REVISION,
             known_plan_content_sha256=dynamic_plan_content_sha256,
@@ -9226,6 +9267,52 @@ def assert_action_level_uv_sphere_companion_execution() -> None:
 
 
 def main() -> None:
+    namespace = bpy.app.driver_namespace
+    namespace[operating_line_core._COMPANION_SESSION_ID_SLOT] = "INVALID"
+    namespace[operating_line_core._COMPANION_INSTANCE_ID_SLOT] = str(
+        uuid.uuid4()
+    ).upper()
+    namespace[operating_line_core._COMPANION_DOCUMENT_INCARNATION_ID_SLOT] = ""
+    session_id = operating_line_core._companion_session_id()
+    instance_id = operating_line_core._companion_instance_id()
+    document_incarnation_id = (
+        operating_line_core._companion_document_incarnation_id()
+    )
+    assert str(uuid.UUID(session_id)) == session_id
+    assert str(uuid.UUID(instance_id)) == instance_id
+    assert str(uuid.UUID(document_incarnation_id)) == document_incarnation_id
+    operating_line_core._native_history_file_loaded()
+    first_loaded_session_id = operating_line_core._companion_session_id()
+    first_loaded_instance_id = operating_line_core._companion_instance_id()
+    first_loaded_document_id = (
+        operating_line_core._companion_document_incarnation_id()
+    )
+    assert first_loaded_session_id == session_id
+    assert first_loaded_instance_id != instance_id
+    assert first_loaded_document_id != document_incarnation_id
+    operating_line_core._native_history_file_loaded()
+    assert operating_line_core._companion_session_id() == session_id
+    assert operating_line_core._companion_instance_id() != first_loaded_instance_id
+    assert (
+        operating_line_core._companion_document_incarnation_id()
+        != first_loaded_document_id
+    )
+    identity_slots = {
+        operating_line_core._COMPANION_SESSION_ID_SLOT,
+        operating_line_core._COMPANION_INSTANCE_ID_SLOT,
+        operating_line_core._COMPANION_DOCUMENT_INCARNATION_ID_SLOT,
+    }
+    assert all(slot not in bpy.context.scene for slot in identity_slots)
+    assert all(slot not in bpy.context.window_manager for slot in identity_slots)
+    for field in ("instance_id", "session_id", "document_incarnation_id"):
+        kwargs = {field: str(uuid.uuid4()).upper()}
+        try:
+            CompanionController(**kwargs)
+        except ValueError as error:
+            assert "canonical UUID" in str(error)
+        else:
+            raise AssertionError(f"Controller accepted noncanonical {field}")
+
     original_editor_draw = bpy.types.VIEW3D_MT_editor_menus.draw
     original_add_draw = bpy.types.VIEW3D_MT_add.draw
     original_mesh_draw = bpy.types.VIEW3D_MT_mesh_add.draw

@@ -64,7 +64,7 @@ TERMINAL_DIALOGUE_RUN_STATUSES = DIALOGUE_RUN_STATUSES - {
 }
 CONTENT_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 PORTABLE_AUTHORITY_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
-COMPANION_SESSION_CONTRACT_VERSION = "1.0.0"
+COMPANION_SESSION_CONTRACT_VERSION = "1.1.0"
 BLENDER_ADAPTER_CAPABILITIES = {
     "presentation": {
         "taskTree": "native",
@@ -90,6 +90,8 @@ class CompanionSessionSnapshot:
     """Immutable worker-owned view of one negotiated companion lease."""
 
     lease_id: str
+    session_id: str
+    document_incarnation_id: str
     negotiated_guide_protocol_version: str
     heartbeat_interval_seconds: float
     expires_at: str
@@ -139,6 +141,8 @@ class CompanionTransport:
         token: str,
         instance_id: str,
         *,
+        session_id: str,
+        document_incarnation_id: str,
         known_plan_id: str | None = None,
         known_revision: int | None = None,
         known_plan_content_sha256: str | None = None,
@@ -154,6 +158,11 @@ class CompanionTransport:
             raise ValueError("Bearer token must contain at least 16 characters")
         self._token = token
         self._instance_id = instance_id
+        self._session_id = self._validated_uuid(session_id, "Companion session id")
+        self._document_incarnation_id = self._validated_uuid(
+            document_incarnation_id,
+            "Companion document incarnation id",
+        )
         if not isinstance(companion_version, str) or not companion_version.strip():
             raise ValueError("Companion version must be non-empty text")
         if not isinstance(host_version, str) or not host_version.strip():
@@ -315,6 +324,15 @@ class CompanionTransport:
                 "planContentSha256": plan_content_sha256,
             }
         )
+
+    @staticmethod
+    def _validated_uuid(value: str, label: str) -> str:
+        validated = CompanionTransport._validated_optional_uuid(value, label)
+        if validated is None:
+            raise ValueError(f"{label} must be a UUID")
+        if str(uuid.UUID(validated)) != validated:
+            raise ValueError(f"{label} must be a canonical UUID")
+        return validated
 
     @staticmethod
     def _validated_optional_uuid(value: str | None, label: str) -> str | None:
@@ -582,6 +600,8 @@ class CompanionTransport:
                 "contractVersion": COMPANION_SESSION_CONTRACT_VERSION,
                 "adapterId": "blender",
                 "instanceId": self._instance_id,
+                "sessionId": self._session_id,
+                "documentIncarnationId": self._document_incarnation_id,
                 "companionVersion": self._companion_version,
                 "hostVersion": self._host_version,
                 "supportedGuideProtocolVersions": sorted(SUPPORTED_PROTOCOL_VERSIONS),
@@ -600,11 +620,17 @@ class CompanionTransport:
                 "heartbeatIntervalMs",
                 "leaseTtlMs",
                 "expiresAt",
+                "sessionId",
+                "documentIncarnationId",
             },
             "Companion session response",
         )
         if response["contractVersion"] != COMPANION_SESSION_CONTRACT_VERSION:
             raise ValueError("Unsupported companion session contract version")
+        if response["sessionId"] != self._session_id:
+            raise ValueError("Runtime echoed the wrong companion session id")
+        if response["documentIncarnationId"] != self._document_incarnation_id:
+            raise ValueError("Runtime echoed the wrong document incarnation id")
         lease_id = self._validated_optional_uuid(
             response["leaseId"], "Companion lease id"
         )
@@ -635,6 +661,8 @@ class CompanionTransport:
         heartbeat_interval_seconds = heartbeat_interval_ms / 1000.0
         self._session_snapshot = CompanionSessionSnapshot(
             lease_id=lease_id,
+            session_id=self._session_id,
+            document_incarnation_id=self._document_incarnation_id,
             negotiated_guide_protocol_version=negotiated_version,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
             expires_at=expires_at,
@@ -647,6 +675,8 @@ class CompanionTransport:
                 "leaseId": lease_id,
                 "negotiatedGuideProtocolVersion": negotiated_version,
                 "expiresAt": expires_at,
+                "sessionId": self._session_id,
+                "documentIncarnationId": self._document_incarnation_id,
             }
         )
 
@@ -663,19 +693,32 @@ class CompanionTransport:
                 "leaseId": session.lease_id,
                 "adapterId": "blender",
                 "instanceId": self._instance_id,
+                "sessionId": session.session_id,
+                "documentIncarnationId": session.document_incarnation_id,
                 "sequence": sequence,
             },
             abort_on_stop=True,
         )
         self._validate_exact_keys(
             response,
-            {"contractVersion", "leaseId", "sequence", "expiresAt"},
+            {
+                "contractVersion",
+                "leaseId",
+                "sequence",
+                "expiresAt",
+                "sessionId",
+                "documentIncarnationId",
+            },
             "Companion heartbeat response",
         )
         if response["contractVersion"] != COMPANION_SESSION_CONTRACT_VERSION:
             raise ValueError("Unsupported companion heartbeat contract version")
         if response["leaseId"] != session.lease_id:
             raise ValueError("Runtime acknowledged the wrong companion lease")
+        if response["sessionId"] != session.session_id:
+            raise ValueError("Runtime acknowledged the wrong companion session id")
+        if response["documentIncarnationId"] != session.document_incarnation_id:
+            raise ValueError("Runtime acknowledged the wrong document incarnation id")
         if response["sequence"] != sequence:
             raise ValueError("Runtime acknowledged the wrong heartbeat sequence")
         expires_at = self._validate_expiry(response["expiresAt"], "Lease expiry")

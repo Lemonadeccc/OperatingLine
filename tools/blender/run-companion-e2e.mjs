@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { startRuntime } from '@operatingline/orchestrator';
-import { blenderActionCatalogs } from '@operatingline/blender-action-catalog';
+import { blenderActionCatalog, blenderActionCatalogs } from '@operatingline/blender-action-catalog';
 
 import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
@@ -207,6 +207,7 @@ async function runBlender(blender, script, environment) {
 
 syncBlenderExtensionResources();
 const [blender] = requireBlenderBinaries();
+await runBlender(blender, resolve('tests/e2e/blender/companion_identity_lifecycle.py'), {});
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-companion-e2e-'));
 const resultPath = join(temporaryDirectory, 'result.json');
 const databasePath = join(temporaryDirectory, 'events.db');
@@ -218,6 +219,7 @@ const runtime = await startRuntime({
 const reportsById = new Map();
 const mcpVisibleReportIds = new Set();
 const establishedLeaseIds = new Set();
+const companionSessions = [];
 const leaseProtectedRequests = [];
 const heartbeatRequests = [];
 const proposalDecisions = [];
@@ -253,11 +255,17 @@ const proxy = createServer(async (request, response) => {
     });
     const upstreamBody = Buffer.from(await upstream.arrayBuffer());
     if (request.method === 'POST' && request.url === '/api/v1/companion/session') {
+      const hello = JSON.parse(body.toString('utf8'));
       assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
       const session = JSON.parse(upstreamBody.toString('utf8'));
+      assert.equal(hello.contractVersion, '1.1.0');
+      assert.equal(session.contractVersion, '1.1.0');
+      assert.equal(session.sessionId, hello.sessionId);
+      assert.equal(session.documentIncarnationId, hello.documentIncarnationId);
       assert.equal(typeof session.leaseId, 'string');
       assert.ok(session.leaseId.length > 0);
       establishedLeaseIds.add(session.leaseId);
+      companionSessions.push(hello);
     }
     if (request.method === 'POST' && request.url === '/api/v1/companion/heartbeat') {
       const heartbeat = JSON.parse(body.toString('utf8'));
@@ -266,6 +274,8 @@ const proxy = createServer(async (request, response) => {
       const acknowledgement = JSON.parse(upstreamBody.toString('utf8'));
       assert.equal(acknowledgement.leaseId, heartbeat.leaseId);
       assert.equal(acknowledgement.sequence, heartbeat.sequence);
+      assert.equal(acknowledgement.sessionId, heartbeat.sessionId);
+      assert.equal(acknowledgement.documentIncarnationId, heartbeat.documentIncarnationId);
       heartbeatRequests.push(heartbeat);
     }
     if (
@@ -308,7 +318,7 @@ const proxy = createServer(async (request, response) => {
       goalWork = goalWork.then(async () => {
         assert.equal(goalRequest.goal, goal);
         assert.equal(goalRequest.adapterId, 'blender');
-        assert.equal(goalRequest.catalogVersion, '1.12.0');
+        assert.equal(goalRequest.catalogVersion, blenderActionCatalog.catalogVersion);
 
         const pending = await callMcpTool(
           runtime,
@@ -486,7 +496,7 @@ try {
   assert.equal(revisionRequests.length, 2);
   assert.equal(revisionRequests[0].requestId, result.revisionRequestId);
   assert.equal(revisionRequests[1].requestId, result.secondRevisionRequestId);
-  assert.equal(revisionRequests[0].catalogVersion, '1.12.0');
+  assert.equal(revisionRequests[0].catalogVersion, blenderActionCatalog.catalogVersion);
   assert.deepEqual(revisionRequests[0].references, [
     { nodeId: 'snowman.model.head', nodeNumber: '1.2.3' },
   ]);
@@ -568,7 +578,16 @@ try {
   }
   assert.equal(mcpVisibleReportIds.size, reportsById.size);
   assert.ok(establishedLeaseIds.size > 0);
+  assert.ok(companionSessions.length > 0);
+  assert.ok(companionSessions.every((session) => session.contractVersion === '1.1.0'));
   assert.ok(heartbeatRequests.length > 0);
+  assert.ok(
+    heartbeatRequests.every(
+      (heartbeat) =>
+        heartbeat.sessionId === companionSessions[0].sessionId &&
+        heartbeat.documentIncarnationId === companionSessions[0].documentIncarnationId,
+    ),
+  );
   assert.ok(heartbeatRequests.every((heartbeat, index) => heartbeat.sequence === index + 1));
   assert.equal(
     leaseProtectedRequests.filter((request) => request.url === '/api/v1/companion/state').length,
@@ -620,7 +639,7 @@ try {
     instanceId: revisionRequests[0].instanceId,
   });
   assert.equal(evalBundle.catalogs.length, 1);
-  assert.equal(evalBundle.catalogs[0].catalogVersion, '1.12.0');
+  assert.equal(evalBundle.catalogs[0].catalogVersion, blenderActionCatalog.catalogVersion);
   assert.equal(evalBundle.page.hasMore, false);
   assert.equal(evalBundle.summary.matchedEventCount, 21 + 2 * result.stepCount);
   assert.deepEqual(evalBundle.summary.decisionCounts, { accepted: 3 });

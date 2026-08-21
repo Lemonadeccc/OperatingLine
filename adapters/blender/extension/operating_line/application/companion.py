@@ -53,15 +53,20 @@ class ProposalQueueFullError(ValueError):
 
 
 class CompanionController:
-    def __init__(self, instance_id: str | None = None) -> None:
-        candidate = str(uuid.uuid4()) if instance_id is None else instance_id
-        try:
-            parsed_instance_id = uuid.UUID(candidate)
-        except (AttributeError, TypeError, ValueError) as error:
-            raise ValueError("Companion instance id must be a UUID") from error
-        if str(parsed_instance_id) != candidate:
-            raise ValueError("Companion instance id must be a canonical UUID")
-        self.instance_id = candidate
+    def __init__(
+        self,
+        instance_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        document_incarnation_id: str | None = None,
+    ) -> None:
+        self.instance_id = self._canonical_uuid(instance_id, "Companion instance id")
+        self.session_id = self._canonical_uuid(session_id, "Companion session id")
+        self.document_incarnation_id = self._canonical_uuid(
+            document_incarnation_id,
+            "Companion document incarnation id",
+        )
+
         self.status = "Offline"
         self.error = ""
         self._transport: CompanionTransport | None = None
@@ -114,6 +119,17 @@ class CompanionController:
         self._shortcut_proof_delivery: dict[str, Any] | None = None
         self._shortcut_proof_checkpoint: dict[str, Any] | None = None
         self._seen_shortcut_proof_request_ids: set[str] = set()
+
+    @staticmethod
+    def _canonical_uuid(candidate: str | None, label: str) -> str:
+        candidate = str(uuid.uuid4()) if candidate is None else candidate
+        try:
+            parsed_instance_id = uuid.UUID(candidate)
+        except (AttributeError, TypeError, ValueError) as error:
+            raise ValueError(f"{label} must be a UUID") from error
+        if str(parsed_instance_id) != candidate:
+            raise ValueError(f"{label} must be a canonical UUID")
+        return candidate
 
     @property
     def connected(self) -> bool:
@@ -202,6 +218,8 @@ class CompanionController:
             base_url,
             token,
             self.instance_id,
+            session_id=self.session_id,
+            document_incarnation_id=self.document_incarnation_id,
             known_plan_id=session.plan_id,
             known_revision=session.revision,
             known_plan_content_sha256=session.plan_content_sha256,

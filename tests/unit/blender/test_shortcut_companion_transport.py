@@ -21,7 +21,13 @@ infrastructure = ModuleType(f"{PACKAGE_NAME}.infrastructure")
 infrastructure.__path__ = [str(PACKAGE_ROOT / "infrastructure")]
 sys.modules[infrastructure.__name__] = infrastructure
 transport_module = import_module(f"{PACKAGE_NAME}.infrastructure.companion_transport")
-CompanionTransport = transport_module.CompanionTransport
+
+
+class CompanionTransport(transport_module.CompanionTransport):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("session_id", str(uuid.uuid4()))
+        kwargs.setdefault("document_incarnation_id", str(uuid.uuid4()))
+        super().__init__(*args, **kwargs)
 
 
 NOW = "2026-08-20T12:00:00Z"
@@ -634,8 +640,10 @@ class ShortcutCompanionTransportTests(unittest.TestCase):
         def request_json(_method, path, body=None, **_kwargs):
             if path == "/api/v1/companion/session":
                 return {
-                    "contractVersion": "1.0.0",
+                    "contractVersion": "1.1.0",
                     "leaseId": str(uuid.uuid4()),
+                    "sessionId": body["sessionId"],
+                    "documentIncarnationId": body["documentIncarnationId"],
                     "negotiatedGuideProtocolVersion": domain.PROTOCOL_VERSION,
                     "catalogVersion": domain.BLENDER_ACTION_CATALOG_VERSION,
                     "capabilities": body["capabilities"],
