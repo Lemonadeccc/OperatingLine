@@ -58,6 +58,7 @@ export interface BlenderActionExecutionCoordinatorOptions {
   readonly now?: () => string;
   readonly createId?: () => string;
   readonly onTerminalFailure?: (handoff: BlenderTerminalFailureHandoff) => Promise<void>;
+  readonly externalHistoryLockOwner?: (adapterId: 'blender', instanceId: string) => string | null;
 }
 
 export interface BlenderTerminalFailureHandoff {
@@ -320,6 +321,18 @@ export function createBlenderActionExecutionCoordinator(
       expectedState: execution.expectedState,
     });
     if (existing !== null) return existing;
+
+    const externalOwner = options.externalHistoryLockOwner?.(
+      execution.target.adapterId,
+      execution.target.instanceId,
+    );
+    if (externalOwner !== undefined && externalOwner !== null) {
+      throw new BlenderActionExecutionError(
+        'action_execution_history_locked',
+        409,
+        `Compound replay ${externalOwner} owns the target native history lock`,
+      );
+    }
 
     const conflicting = [...executions.values()].find(
       ({ execution: candidate }) =>

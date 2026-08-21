@@ -85,6 +85,22 @@ function queuedExecution(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Blender action execution coordinator', () => {
+  it('rejects composable action execution while a compound replay owns native history', () => {
+    const database = createEventDatabase();
+    const queued = queuedExecution();
+    const compoundId = randomUUID();
+    const coordinator = createBlenderActionExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: (_adapterId, instanceId) =>
+        instanceId === queued.target.instanceId ? compoundId : null,
+    });
+
+    expect(() => coordinator.queue(queued, '1'.repeat(64))).toThrowError(
+      BlenderActionExecutionError,
+    );
+    expect(database.events).toHaveLength(0);
+  });
+
   it('persists an at-most-once queue, dispatch, and terminal result', async () => {
     const database = createEventDatabase();
     const times = ['2026-08-20T10:00:01Z', '2026-08-20T10:00:02Z'];

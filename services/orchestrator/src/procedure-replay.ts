@@ -1,10 +1,19 @@
 import {
   canonicalizeProtocolJsonValue,
+  blenderExecutionDecisionReceiptSchema,
+  blenderHistoryTransitionDecisionReceiptSchema,
+  computeProtocolCanonicalJsonSha256,
+  decisionConsumptionEventSchema,
   computeProcedureLeafReplayAttestationContentSha256,
   computeProcedureLeafReplayBindingContentSha256,
   computeProcedureLeafReplayCurrentStateVerificationContentSha256,
   computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
   computeProcedureLeafReplayObservationContentSha256,
+  procedureCompoundReplaySchema,
+  procedureCompoundCurrentStateSchema,
+  verifyProcedureCompoundCurrentStateIntegrity,
+  verifyProcedureCompoundReplayIntegrity,
+  verifyProcedureCompoundRecipeIntegrity,
   protocolJsonValueCanonicalization,
   procedureLeafReplayActionNameSchema,
   procedureLeafReplayAttestationSchema,
@@ -26,10 +35,285 @@ import {
   type ProcedureLeafReplayCurrentStateVerification,
   type ProcedureLeafReplayFailureRecoveryAttestation,
   type ProcedureLeafReplayProposalRequest,
+  type ProcedureCompoundCurrentState,
+  type ProcedureCompoundReplay,
+  type ProcedureCompoundReplayEvidenceResolver,
 } from '@operatingline/protocol';
 import type { StoredManagedReplayReceipt } from '@operatingline/persistence';
+import { isDeepStrictEqual } from 'node:util';
 
 import { satisfiesStableVersionRange } from './stable-version-ranges.js';
+import {
+  AuthorityConsumptionCoordinator,
+  blenderExecutionBindingSchema,
+  blenderHistoryTransitionBindingSchema,
+  InMemoryAuthorityConsumptionStore,
+} from './authority-consumption.js';
+
+export const pokeCompoundHistoryLockEventType = 'procedure.poke-compound.history-lock-state';
+
+interface PokeCompoundHistoryLockDatabase {
+  listExecutionEventsByTypes(eventTypes: readonly string[]): readonly {
+    readonly sequence: number;
+    readonly payload: unknown;
+  }[];
+}
+
+/** One durable reader is shared by every coordinator that can touch Blender native history. */
+export function createPokeCompoundHistoryLockOwnerReader(
+  database: PokeCompoundHistoryLockDatabase,
+): (adapterId: 'blender', instanceId: string) => string | null {
+  return (adapterId, instanceId) => {
+    const latest = [...database.listExecutionEventsByTypes([pokeCompoundHistoryLockEventType])]
+      .sort((left, right) => right.sequence - left.sequence)
+      .find((event) => {
+        if (typeof event.payload !== 'object' || event.payload === null) return false;
+        const target = (event.payload as { readonly target?: unknown }).target;
+        return (
+          typeof target === 'object' &&
+          target !== null &&
+          (target as { readonly adapterId?: unknown }).adapterId === adapterId &&
+          (target as { readonly instanceId?: unknown }).instanceId === instanceId
+        );
+      });
+    if (latest === undefined) return null;
+    const parsed = procedureCompoundReplaySchema.safeParse(latest.payload);
+    if (
+      !parsed.success ||
+      !verifyProcedureCompoundRecipeIntegrity(parsed.data.recipe) ||
+      !verifyProcedureCompoundCurrentStateIntegrity(parsed.data.currentState)
+    ) {
+      const rawRecipe =
+        typeof latest.payload === 'object' && latest.payload !== null
+          ? (latest.payload as { readonly recipe?: unknown }).recipe
+          : undefined;
+      const rawCompoundId =
+        typeof rawRecipe === 'object' && rawRecipe !== null
+          ? (rawRecipe as { readonly compoundId?: unknown }).compoundId
+          : undefined;
+      return typeof rawCompoundId === 'string' ? rawCompoundId : 'poke-compound-history-quarantine';
+    }
+    return parsed.data.currentState.historyLock === 'released'
+      ? null
+      : parsed.data.recipe.compoundId;
+  };
+}
+
+/** Revalidate Blender-emitted decision evidence against the exact protocol/current-state binding. */
+export function validatePokeCompoundDecisionEvidence(input: {
+  readonly transition: 'forward' | 'back' | 'redo' | 'unlock_final' | 'abandon_baseline';
+  readonly receipt: unknown;
+  readonly binding: unknown;
+  readonly consumption: unknown;
+  readonly currentState: unknown;
+  readonly planContentSha256: string;
+  readonly target: { readonly adapterId: 'blender'; readonly instanceId: string };
+  readonly actionCatalogVersion: string;
+  readonly interactionCatalogVersion: string;
+}): void {
+  const currentState = procedureCompoundCurrentStateSchema.parse(input.currentState);
+  if (!verifyProcedureCompoundCurrentStateIntegrity(currentState)) {
+    throw new Error('Poke compound decision current-state integrity is invalid');
+  }
+  const consumption = decisionConsumptionEventSchema.parse(input.consumption);
+  const receipt =
+    input.transition === 'forward'
+      ? blenderExecutionDecisionReceiptSchema.parse(input.receipt)
+      : blenderHistoryTransitionDecisionReceiptSchema.parse(input.receipt);
+  const binding =
+    input.transition === 'forward'
+      ? blenderExecutionBindingSchema.parse(input.binding)
+      : blenderHistoryTransitionBindingSchema.parse(input.binding);
+  const expectedBinding =
+    receipt.kind === 'BlenderExecutionDecisionReceipt'
+      ? {
+          acceptedContentSha256: input.planContentSha256,
+          acceptedContentKind: 'plan' as const,
+          replayId: currentState.replayId,
+          adapterId: input.target.adapterId,
+          instanceId: input.target.instanceId,
+          blenderSessionId: currentState.blenderSessionUid,
+          documentFingerprintSha256: currentState.documentFingerprintSha256,
+          actionCatalogVersion: input.actionCatalogVersion,
+          interactionCatalogVersion: input.interactionCatalogVersion,
+        }
+      : {
+          compoundId: currentState.compoundId,
+          replayId: currentState.replayId,
+          adapterId: input.target.adapterId,
+          instanceId: input.target.instanceId,
+          blenderProcessIdentitySha256: currentState.blenderProcessIdentitySha256,
+          blenderSessionUid: currentState.blenderSessionUid,
+          documentFingerprintSha256: currentState.documentFingerprintSha256,
+          compoundContentSha256: currentState.compoundContentSha256,
+          historyLockTokenSha256: currentState.historyLockTokenSha256,
+          currentStateSha256: currentState.integritySha256,
+          expectedHistoryHeadSha256: currentState.historyHeadSha256,
+          transition: input.transition,
+          expectedStatus: currentState.status,
+          terminalObservationSha256: receipt.terminalObservationSha256,
+          nativeHistoryLossRecorded: currentState.nativeHistoryLossRecorded,
+          actionCatalogVersion: input.actionCatalogVersion,
+          interactionCatalogVersion: input.interactionCatalogVersion,
+        };
+  if (!isDeepStrictEqual(binding, expectedBinding)) {
+    throw new Error('Poke compound decision binding does not match current state');
+  }
+  if (
+    receipt.replayId !== currentState.replayId ||
+    receipt.target.adapterId !== input.target.adapterId ||
+    receipt.target.instanceId !== input.target.instanceId ||
+    receipt.actionCatalogVersion !== input.actionCatalogVersion ||
+    receipt.interactionCatalogVersion !== input.interactionCatalogVersion ||
+    (receipt.kind === 'BlenderExecutionDecisionReceipt'
+      ? receipt.acceptedContentSha256 !== input.planContentSha256 ||
+        receipt.blenderSessionId !== currentState.blenderSessionUid ||
+        receipt.documentFingerprintSha256 !== currentState.documentFingerprintSha256
+      : receipt.compoundId !== currentState.compoundId ||
+        receipt.currentStateSha256 !== currentState.integritySha256 ||
+        receipt.transition !== input.transition)
+  ) {
+    throw new Error('Poke compound decision receipt does not match its host context');
+  }
+  const expectedConsumptionKind =
+    receipt.kind === 'BlenderExecutionDecisionReceipt'
+      ? 'blender_decision_consumed'
+      : 'blender_history_transition_consumed';
+  const singleUseKeySha256 = computeProtocolCanonicalJsonSha256({ nonce: receipt.nonce });
+  const bindingSha256 = computeProtocolCanonicalJsonSha256({
+    decisionSha256: computeProtocolCanonicalJsonSha256(receipt),
+    binding,
+  });
+  if (
+    consumption.kind !== expectedConsumptionKind ||
+    consumption.credentialId !== receipt.decisionId ||
+    consumption.singleUseKeySha256 !== singleUseKeySha256 ||
+    consumption.bindingSha256 !== bindingSha256 ||
+    Date.parse(consumption.consumedAt) < Date.parse(receipt.issuedAt) ||
+    Date.parse(consumption.consumedAt) >= Date.parse(receipt.expiresAt)
+  ) {
+    throw new Error('Poke compound trusted consumption event is invalid');
+  }
+  const trustedHistoryTransitionBinding =
+    receipt.kind === 'BlenderHistoryTransitionDecisionReceipt'
+      ? blenderHistoryTransitionBindingSchema.parse(binding)
+      : null;
+  const reconstructionConsumption = { ...consumption, sequence: 0 };
+  const consumptionCoordinator = new AuthorityConsumptionCoordinator(
+    new InMemoryAuthorityConsumptionStore([reconstructionConsumption]),
+    {
+      now: () => new Date(consumption.consumedAt),
+      isTrustedLocalDecision: (candidate) => isDeepStrictEqual(candidate, receipt),
+      resolveTrustedHistoryTransitionBinding: () => trustedHistoryTransitionBinding,
+    },
+  );
+  const reconstructed =
+    receipt.kind === 'BlenderExecutionDecisionReceipt'
+      ? consumptionCoordinator.consumeBlenderDecision({
+          decision: receipt,
+          operationId: consumption.operationId,
+          binding: blenderExecutionBindingSchema.parse(binding),
+        })
+      : consumptionCoordinator.consumeBlenderHistoryTransitionDecision({
+          decision: receipt,
+          operationId: consumption.operationId,
+          binding: trustedHistoryTransitionBinding!,
+        });
+  if (!isDeepStrictEqual(reconstructed.consumption, reconstructionConsumption)) {
+    throw new Error('Poke compound authority consumption could not be reconstructed');
+  }
+}
+
+export type PokeCompoundHistoryContinuity =
+  'same_live_session' | 'history_conflict' | 'history_lost';
+
+/**
+ * Verify the one supported compound shape without widening historical single-leaf replay.
+ * The protocol verifier binds the consumed decision, three intent/receipt pairs, trusted host
+ * attestations, and the middle leaf's Edit-only native checkpoint/Undo/Redo proof.
+ */
+export function validatePokeFacesCompoundReplayProof(input: {
+  readonly replay: ProcedureCompoundReplay;
+  readonly evidence: ProcedureCompoundReplayEvidenceResolver;
+}): ProcedureCompoundReplay {
+  const replay = procedureCompoundReplaySchema.parse(input.replay);
+  const expectedLeaves =
+    replay.recipe.kind === 'forward'
+      ? ['enter_edit', 'poke', 'exit_edit']
+      : replay.recipe.kind === 'back'
+        ? ['enter_edit', 'native_undo_once', 'exit_edit']
+        : ['enter_edit', 'native_redo_once', 'exit_edit'];
+  if (
+    replay.target.adapterId !== 'blender' ||
+    replay.recipe.objectModeUndoRedoTransactionProven ||
+    replay.recipe.leaves.some((leaf, index) => leaf.kind !== expectedLeaves[index]) ||
+    replay.recipe.leaves[0].modelChanging ||
+    !replay.recipe.leaves[1].modelChanging ||
+    replay.recipe.leaves[2].modelChanging ||
+    replay.recipe.leaves[0].nativeUndoRedoOperationCount !== 0 ||
+    replay.recipe.leaves[2].nativeUndoRedoOperationCount !== 0 ||
+    replay.recipe.leaves[1].nativeUndoRedoOperationCount !==
+      (replay.recipe.kind === 'forward' ? 0 : 1) ||
+    !verifyProcedureCompoundReplayIntegrity(replay, input.evidence)
+  ) {
+    throw new ProcedureLeafReplayError(
+      'Poke Faces compound replay lacks the exact three-leaf native history proof',
+      409,
+    );
+  }
+  return replay;
+}
+
+/** Classify reconnect evidence without treating snapshots or managed compensation as history. */
+export function classifyPokeCompoundHistoryContinuity(
+  recorded: ProcedureCompoundCurrentState,
+  observed: Partial<ProcedureCompoundCurrentState> | null,
+): PokeCompoundHistoryContinuity {
+  if (
+    observed === null ||
+    observed.blenderProcessIdentitySha256 === undefined ||
+    observed.blenderSessionUid === undefined ||
+    observed.nativeHistoryMarkerSha256 === undefined
+  ) {
+    return 'history_lost';
+  }
+  if (
+    observed.blenderProcessIdentitySha256 !== recorded.blenderProcessIdentitySha256 ||
+    observed.blenderSessionUid !== recorded.blenderSessionUid ||
+    observed.nativeHistoryMarkerSha256 !== recorded.nativeHistoryMarkerSha256
+  ) {
+    return 'history_lost';
+  }
+  if (
+    observed.compoundId !== recorded.compoundId ||
+    observed.replayId !== recorded.replayId ||
+    observed.compoundContentSha256 !== recorded.compoundContentSha256 ||
+    observed.historyLockTokenSha256 !== recorded.historyLockTokenSha256 ||
+    observed.documentFingerprintSha256 !== recorded.documentFingerprintSha256 ||
+    observed.historyHeadSha256 !== recorded.historyHeadSha256 ||
+    observed.objectIdentitySha256 !== recorded.objectIdentitySha256 ||
+    observed.meshIdentitySha256 !== recorded.meshIdentitySha256 ||
+    observed.objectPointerSha256 !== recorded.objectPointerSha256 ||
+    observed.meshPointerSha256 !== recorded.meshPointerSha256 ||
+    observed.meshDatablockSha256 !== recorded.meshDatablockSha256 ||
+    observed.topologySha256 !== recorded.topologySha256 ||
+    observed.selectionSha256 !== recorded.selectionSha256 ||
+    observed.stateSha256 !== recorded.stateSha256 ||
+    observed.status !== recorded.status ||
+    observed.lifecycleState !== recorded.lifecycleState ||
+    observed.mode !== recorded.mode ||
+    observed.historyLock !== recorded.historyLock ||
+    observed.historyContinuity !== recorded.historyContinuity ||
+    observed.nativeHistoryLossRecorded !== recorded.nativeHistoryLossRecorded ||
+    observed.inProgressLeafId !== recorded.inProgressLeafId ||
+    observed.integritySha256 !== recorded.integritySha256 ||
+    JSON.stringify(observed.permittedHistoryTransitions) !==
+      JSON.stringify(recorded.permittedHistoryTransitions)
+  ) {
+    return 'history_conflict';
+  }
+  return 'same_live_session';
+}
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);

@@ -280,6 +280,7 @@ import {
   buildProcedureLeafReplayAttestation,
   buildProcedureLeafReplayBinding,
   buildProcedureLeafReplayFailureRecoveryAttestation,
+  createPokeCompoundHistoryLockOwnerReader,
   prepareProcedureLeafReplay,
   ProcedureLeafReplayError,
   sameProcedureLeafReplayValue,
@@ -2699,9 +2700,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       });
     };
 
-    const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({ database });
+    const compoundHistoryLockOwner = createPokeCompoundHistoryLockOwnerReader(database);
+    const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: compoundHistoryLockOwner,
+    });
     const shortcutProofExecutionCoordinator = createBlenderShortcutProofExecutionCoordinator({
       database,
+      externalHistoryLockOwner: compoundHistoryLockOwner,
     });
 
     const shortcutProofExecutionRejected = (

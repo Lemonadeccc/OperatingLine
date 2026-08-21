@@ -514,6 +514,21 @@ function reappliedResult(
 }
 
 describe('Blender shortcut proof execution coordinator', () => {
+  it('rejects a shortcut proof while a compound replay owns native history', () => {
+    const database = createEventDatabase();
+    const compoundId = randomUUID();
+    const queued = queuedProof();
+    const coordinator = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: (_adapterId, instanceId) =>
+        instanceId === queued.target.instanceId ? compoundId : null,
+    });
+
+    expect(() => coordinator.queue(queued, '1'.repeat(64))).toThrowError(
+      BlenderShortcutProofExecutionError,
+    );
+    expect(database.events).toHaveLength(0);
+  });
   it('persists the exact four-operation chain before one authoritative success event', () => {
     const database = createEventDatabase();
     const ids = [randomUUID()];

@@ -182,6 +182,7 @@ export interface BlenderShortcutProofExecutionCoordinatorOptions {
   readonly database: ShortcutProofDatabase;
   readonly now?: () => string;
   readonly createId?: () => string;
+  readonly externalHistoryLockOwner?: (adapterId: 'blender', instanceId: string) => string | null;
 }
 
 function sameCreateRequest(
@@ -930,6 +931,17 @@ export function createBlenderShortcutProofExecutionCoordinator(
       expectedState: execution.expectedState,
     });
     if (existing !== null) return existing;
+    const externalOwner = options.externalHistoryLockOwner?.(
+      execution.target.adapterId,
+      execution.target.instanceId,
+    );
+    if (externalOwner !== undefined && externalOwner !== null) {
+      throw new BlenderShortcutProofExecutionError(
+        'shortcut_proof_history_locked',
+        409,
+        `Compound replay ${externalOwner} owns the target native history lock`,
+      );
+    }
     const conflicting = [...executions.values()].find(
       ({ execution: candidate, phase }) =>
         candidate.target.adapterId === execution.target.adapterId &&
