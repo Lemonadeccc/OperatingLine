@@ -9785,10 +9785,19 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         'replay_proposal',
         parsedDecision.data.proposalId,
       );
-      if (leaseHeader === undefined && replayProposalReceipt !== null) {
+      const proposalInput = database.getGuideProposal(parsedDecision.data.proposalId);
+      const storedProposal =
+        proposalInput === null ? null : guideProposalSchema.safeParse(proposalInput);
+      const storedGuideProposal = storedProposal?.success === true ? storedProposal.data : null;
+      const executionTrackProposal =
+        storedGuideProposal !== null &&
+        storedGuideProposal.plan.steps.some((step) => step.executionTrackOverride !== undefined);
+      if (leaseHeader === undefined && (replayProposalReceipt !== null || executionTrackProposal)) {
         return reply.code(409).send({
           error: 'companion_lease_required',
-          message: 'Managed replay proposal decisions require a negotiated Companion lease',
+          message: executionTrackProposal
+            ? 'Reviewed execution-track proposal decisions require a negotiated Companion lease'
+            : 'Managed replay proposal decisions require a negotiated Companion lease',
         });
       }
       let authenticatedSessionProvenance: { sessionFingerprintSha256: string } | undefined;
@@ -9810,6 +9819,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               message: 'Proposal decision protocol differs from its negotiated session',
             });
           }
+          if (
+            executionTrackProposal &&
+            (storedGuideProposal === null ||
+              storedGuideProposal.targetInstanceId === undefined ||
+              storedGuideProposal.targetInstanceId !== parsedDecision.data.instanceId ||
+              storedGuideProposal.targetAdapterId !== parsedDecision.data.adapterId ||
+              storedGuideProposal.protocolVersion !== guideProtocolVersion ||
+              storedGuideProposal.plan.protocolVersion !== guideProtocolVersion ||
+              session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion)
+          ) {
+            return reply.code(409).send({
+              error: 'companion_session_identity_mismatch',
+              message:
+                'Reviewed execution-track proposal decision requires its exact current Guide 1.6 target session',
+            });
+          }
           authenticatedSessionProvenance = {
             sessionFingerprintSha256: createHash('sha256').update(leaseHeader).digest('hex'),
           };
@@ -9821,7 +9846,6 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         }
       }
       if (parsedDecision.data.decision === 'accepted') {
-        const proposalInput = database.getGuideProposal(parsedDecision.data.proposalId);
         if (proposalInput !== null) {
           try {
             const proposal = guideProposalSchema.parse(proposalInput);

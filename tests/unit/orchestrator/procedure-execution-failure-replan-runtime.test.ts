@@ -1045,6 +1045,175 @@ describe('procedure execution failure replan runtime resolver', () => {
     }
   });
 
+  it('requires the exact current Guide 1.6 Companion lease before writing an execution-track decision', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-lease-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const reviewed = await reviewStrategyProposal(runtime);
+      const authorizationHeaders = {
+        authorization: 'Bearer failure-replan-strategy-token',
+        'content-type': 'application/json',
+      };
+
+      const noLeaseDecision = acceptedTrackDecision(reviewed.guideProposalId);
+      const noLeaseResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers: authorizationHeaders,
+        body: JSON.stringify(noLeaseDecision),
+      });
+      expect(noLeaseResponse.status).toBe(409);
+      await expect(noLeaseResponse.json()).resolves.toMatchObject({
+        error: 'companion_lease_required',
+      });
+
+      const wrongInstanceId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      const wrongSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: authorizationHeaders,
+        body: JSON.stringify(companionHello(wrongInstanceId)),
+      });
+      expect(wrongSessionResponse.status).toBe(200);
+      const wrongSession = (await wrongSessionResponse.json()) as { leaseId: string };
+      const wrongInstanceDecision = {
+        ...acceptedTrackDecision(reviewed.guideProposalId),
+        instanceId: wrongInstanceId,
+      };
+      const wrongInstanceResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: {
+            ...authorizationHeaders,
+            'x-operatingline-companion-lease': wrongSession.leaseId,
+          },
+          body: JSON.stringify(wrongInstanceDecision),
+        },
+      );
+      expect(wrongInstanceResponse.status).toBe(409);
+      await expect(wrongInstanceResponse.json()).resolves.toMatchObject({
+        error: 'companion_session_identity_mismatch',
+      });
+
+      const wrongProtocolDecision = {
+        ...acceptedTrackDecision(reviewed.guideProposalId),
+        protocolVersion: '1.5.0' as const,
+      };
+      const wrongProtocolResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/proposal-decision`,
+        {
+          method: 'POST',
+          headers: reviewed.leaseHeaders,
+          body: JSON.stringify(wrongProtocolDecision),
+        },
+      );
+      expect(wrongProtocolResponse.status).toBe(409);
+      await expect(wrongProtocolResponse.json()).resolves.toMatchObject({
+        error: 'companion_session_identity_mismatch',
+      });
+
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.getGuideProposalDecision(reviewed.guideProposalId, 'blender', ids.instance),
+        ).toBeNull();
+        expect(
+          database.getGuideProposalDecision(reviewed.guideProposalId, 'blender', wrongInstanceId),
+        ).toBeNull();
+        for (const decisionId of [
+          noLeaseDecision.decisionId,
+          wrongInstanceDecision.decisionId,
+          wrongProtocolDecision.decisionId,
+        ]) {
+          expect(
+            database.getManagedReplayReceipt('guide_proposal_decision', decisionId),
+          ).toBeNull();
+        }
+        expect(
+          database
+            .listExecutionEventsByTypes(['guide.proposal.decided'])
+            .filter((event) =>
+              [
+                noLeaseDecision.decisionId,
+                wrongInstanceDecision.decisionId,
+                wrongProtocolDecision.decisionId,
+              ].includes((event.payload as { decisionId?: string } | null)?.decisionId ?? ''),
+            ),
+        ).toHaveLength(0);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('requires a Companion lease before persisting rejection of an execution-track proposal', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-reject-lease-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const reviewed = await reviewStrategyProposal(runtime);
+      const decision = {
+        ...acceptedTrackDecision(reviewed.guideProposalId),
+        decision: 'rejected' as const,
+      };
+      const inspectedBefore = openOperatingLineDatabase(databasePath);
+      const decisionEventsBefore = inspectedBefore.listExecutionEventsByTypes([
+        'guide.proposal.decided',
+      ]);
+      inspectedBefore.close();
+
+      const response = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(decision),
+      });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ error: 'companion_lease_required' });
+
+      const inspectedAfter = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          inspectedAfter.getGuideProposalDecision(
+            reviewed.guideProposalId,
+            'blender',
+            ids.instance,
+          ),
+        ).toBeNull();
+        expect(
+          inspectedAfter.getManagedReplayReceipt('guide_proposal_decision', decision.decisionId),
+        ).toBeNull();
+        expect(inspectedAfter.listExecutionEventsByTypes(['guide.proposal.decided'])).toEqual(
+          decisionEventsBefore,
+        );
+      } finally {
+        inspectedAfter.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('rejects a reviewed execution-track proposal when the current Companion Plan has drifted', async () => {
     const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-strategy-plan-drift-'));
     const databasePath = join(temporaryDirectory, 'runtime.sqlite');
