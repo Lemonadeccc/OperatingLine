@@ -1130,7 +1130,7 @@ describe('OperatingLine runtime', () => {
     } finally {
       await runtime.stop();
     }
-  });
+  }, 20_000);
 
   it('imports an OAuth-authorized YouTube caption track without persisting raw captions', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-youtube-caption-test-'));

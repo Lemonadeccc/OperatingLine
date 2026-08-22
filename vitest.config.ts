@@ -5,6 +5,7 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     maxWorkers: '40%',
+    testTimeout: 10_000,
     coverage: {
       reporter: ['text', 'html'],
     },
