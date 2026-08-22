@@ -26,6 +26,22 @@ import {
   companionExecutionTrackPreflightResultSchema,
   companionExecutionTrackPreflightStatusRequestSchema,
   companionExecutionTrackPreflightStatusSchema,
+  companionExecutionTrackExecutionBaselineIdentitySchema,
+  companionExecutionTrackExecutionBindingSchema,
+  companionExecutionTrackExecutionCreateRequestSchema,
+  companionExecutionTrackExecutionDeliverySchema,
+  companionExecutionTrackExecutionPollDeliverySchema,
+  companionExecutionTrackExecutionPollRequestSchema,
+  companionExecutionTrackExecutionProgressAckSchema,
+  companionExecutionTrackExecutionProgressChainSchema,
+  companionExecutionTrackExecutionProgressSchema,
+  companionExecutionTrackExecutionProgressTransitionSchema,
+  companionExecutionTrackExecutionRecoveryAckSchema,
+  companionExecutionTrackExecutionRecoveryRequestSchema,
+  companionExecutionTrackExecutionResultAckSchema,
+  companionExecutionTrackExecutionResultSchema,
+  companionExecutionTrackExecutionStatusRequestSchema,
+  companionExecutionTrackExecutionStatusSchema,
   companionDialogueRunCreateRequestSchema,
   companionDialogueRunSchema,
   companionDialogueRunStatusRequestSchema,
@@ -620,6 +636,33 @@ const schemas = [
     'https://operatingline.dev/schema/v1/companion-execution-track-preflight-result-ack.json',
     companionExecutionTrackPreflightResultAckSchema,
   ],
+  ...(
+    [
+      ['create-request', companionExecutionTrackExecutionCreateRequestSchema],
+      ['binding', companionExecutionTrackExecutionBindingSchema],
+      ['baseline-identity', companionExecutionTrackExecutionBaselineIdentitySchema],
+      ['delivery', companionExecutionTrackExecutionDeliverySchema],
+      ['progress', companionExecutionTrackExecutionProgressSchema],
+      ['progress-transition', companionExecutionTrackExecutionProgressTransitionSchema],
+      ['progress-chain', companionExecutionTrackExecutionProgressChainSchema],
+      ['progress-ack', companionExecutionTrackExecutionProgressAckSchema],
+      ['result', companionExecutionTrackExecutionResultSchema],
+      ['result-ack', companionExecutionTrackExecutionResultAckSchema],
+      ['status-request', companionExecutionTrackExecutionStatusRequestSchema],
+      ['status', companionExecutionTrackExecutionStatusSchema],
+      ['poll-request', companionExecutionTrackExecutionPollRequestSchema],
+      ['poll-delivery', companionExecutionTrackExecutionPollDeliverySchema],
+      ['recovery-request', companionExecutionTrackExecutionRecoveryRequestSchema],
+      ['recovery-ack', companionExecutionTrackExecutionRecoveryAckSchema],
+    ] as const
+  ).map(
+    ([kind, schema]) =>
+      [
+        `companion-execution-track-execution-${kind}.schema.json`,
+        `https://operatingline.dev/schema/v1/companion-execution-track-execution-${kind}.json`,
+        schema,
+      ] as const,
+  ),
   [
     'procedure-tree-editor-branch-create-request.schema.json',
     'https://operatingline.dev/schema/v1/procedure-tree-editor-branch-create-request.json',
@@ -1870,11 +1913,296 @@ function documentExecutionTrackPreflightSemanticGate(
   }
 }
 
+function documentExecutionTrackExecutionSemanticGate(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (filename.startsWith('companion-execution-track-execution-')) {
+    schema['$comment'] =
+      'Canonical binding/progress/baseline integrity, exact proof and native-Undo prefixes, immutable delivery identity, managed-only success, chronology, and lifecycle ordering require the exported Zod/coordinator semantic gates; standard JSON Schema covers the strict structural contract.';
+  }
+}
+
+function hardenExecutionTrackExecutionLifecycle(
+  filename: string,
+  schema: Record<string, unknown>,
+): void {
+  if (filename === 'companion-execution-track-execution-status.schema.json') {
+    const activePhases = [
+      'baseline_attested',
+      'proof_in_progress',
+      'proof_observed_locked',
+      'restore_in_progress',
+      'baseline_restored',
+      'commit_intent_recorded',
+    ];
+    const forbid = (fields: string[]) => ({
+      not: { anyOf: fields.map((field) => ({ required: [field] })) },
+    });
+    const progressPhase = (phase: string) => ({
+      properties: {
+        progress: { properties: { phase: { const: phase } }, required: ['phase'] },
+      },
+    });
+    const resultStatus = (status: string) => ({
+      properties: {
+        result: { properties: { status: { const: status } }, required: ['status'] },
+      },
+    });
+    const allOf = (schema['allOf'] ?? []) as unknown[];
+    allOf.push(
+      {
+        if: { properties: { status: { const: 'queued' } }, required: ['status'] },
+        then: forbid([
+          'deliveryId',
+          'lease',
+          'dispatchedAt',
+          'progress',
+          'managedStart',
+          'result',
+          'serverRecoveryEvidence',
+        ]),
+        else: { required: ['deliveryId', 'lease', 'dispatchedAt'] },
+      },
+      {
+        if: { properties: { status: { const: 'dispatched' } }, required: ['status'] },
+        then: forbid(['progress', 'managedStart', 'result', 'serverRecoveryEvidence']),
+      },
+      ...activePhases.map((phase) => ({
+        if: { properties: { status: { const: phase } }, required: ['status'] },
+        then: {
+          required: ['progress'],
+          ...progressPhase(phase),
+          ...forbid(['managedStart', 'result', 'serverRecoveryEvidence']),
+        },
+      })),
+      {
+        if: {
+          properties: { status: { const: 'managed_action_in_progress' } },
+          required: ['status'],
+        },
+        then: {
+          required: ['progress', 'managedStart'],
+          ...progressPhase('commit_intent_recorded'),
+          ...forbid(['result', 'serverRecoveryEvidence']),
+        },
+      },
+      ...(['succeeded', 'failed_managed'] as const).map((status) => ({
+        if: { properties: { status: { const: status } }, required: ['status'] },
+        then: {
+          required: ['progress', 'result'],
+          allOf: [
+            progressPhase('commit_intent_recorded'),
+            resultStatus(status),
+            forbid(['managedStart', 'serverRecoveryEvidence']),
+          ],
+        },
+      })),
+      ...(['failed_no_mutation', 'failed_restored', 'recovery_required'] as const).map(
+        (status) => ({
+          if: { properties: { status: { const: status } }, required: ['status'] },
+          then: {
+            ...forbid(['managedStart']),
+            oneOf: [
+              {
+                required: ['result'],
+                allOf: [resultStatus(status), forbid(['serverRecoveryEvidence'])],
+              },
+              {
+                required: ['serverRecoveryEvidence'],
+                allOf: [forbid(['result'])],
+              },
+            ],
+          },
+        }),
+      ),
+      {
+        if: {
+          properties: {
+            status: { const: 'failed_no_mutation' },
+            result: { type: 'object' },
+          },
+          required: ['status', 'result'],
+        },
+        then: { required: ['progress'], ...progressPhase('baseline_attested') },
+      },
+      {
+        if: { properties: { status: { const: 'failed_restored' } }, required: ['status'] },
+        then: { required: ['progress'], ...progressPhase('baseline_restored') },
+      },
+      {
+        if: {
+          properties: { status: { const: 'recovery_required' }, result: { type: 'object' } },
+          required: ['status', 'result'],
+        },
+        then: { required: ['progress'] },
+      },
+      {
+        if: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: { source: { const: 'document_authority_drift' } },
+              required: ['source'],
+            },
+          },
+          required: ['serverRecoveryEvidence'],
+        },
+        then: {
+          properties: {
+            status: { const: 'recovery_required' },
+            serverRecoveryEvidence: {
+              properties: {
+                resolution: { const: 'recovery_required' },
+                retainsTargetLock: { const: true },
+              },
+            },
+          },
+        },
+      },
+      ...(['dispatched', 'baseline_restored'] as const).map((priorStatus) => {
+        const resolution = priorStatus === 'dispatched' ? 'failed_no_mutation' : 'failed_restored';
+        return {
+          if: {
+            properties: {
+              serverRecoveryEvidence: {
+                properties: {
+                  source: { const: 'coordinator_restart' },
+                  priorStatus: { const: priorStatus },
+                },
+                required: ['source', 'priorStatus'],
+              },
+            },
+            required: ['serverRecoveryEvidence'],
+          },
+          then: {
+            properties: {
+              status: { const: resolution },
+              serverRecoveryEvidence: {
+                properties: {
+                  resolution: { const: resolution },
+                  retainsTargetLock: { const: false },
+                },
+              },
+            },
+          },
+        };
+      }),
+      {
+        if: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: {
+                source: { const: 'coordinator_restart' },
+                priorStatus: {
+                  enum: [
+                    'baseline_attested',
+                    'proof_in_progress',
+                    'proof_observed_locked',
+                    'restore_in_progress',
+                    'commit_intent_recorded',
+                    'managed_action_in_progress',
+                  ],
+                },
+              },
+              required: ['source', 'priorStatus'],
+            },
+          },
+          required: ['serverRecoveryEvidence'],
+        },
+        then: {
+          properties: {
+            status: { const: 'recovery_required' },
+            serverRecoveryEvidence: {
+              properties: {
+                resolution: { const: 'recovery_required' },
+                retainsTargetLock: { const: true },
+              },
+            },
+          },
+        },
+      },
+    );
+    schema['allOf'] = allOf;
+  } else if (filename === 'companion-execution-track-execution-result.schema.json') {
+    const allOf = (schema['allOf'] ?? []) as unknown[];
+    allOf.push(
+      {
+        if: {
+          properties: {
+            status: { const: 'failed_managed' },
+            observationGate: {
+              properties: { status: { const: 'repair_required' } },
+              required: ['status'],
+            },
+          },
+          required: ['status', 'observationGate'],
+        },
+        then: {
+          properties: {
+            observationGate: {
+              properties: { failureStrategy: { const: 'retain_for_repair' } },
+              required: ['failureStrategy'],
+            },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            status: { const: 'failed_managed' },
+            observationGate: {
+              properties: { status: { const: 'rollback_failed' } },
+              required: ['status'],
+            },
+          },
+          required: ['status', 'observationGate'],
+        },
+        then: {
+          properties: {
+            observationGate: {
+              properties: { failureStrategy: { const: 'rollback_step' } },
+              required: ['failureStrategy'],
+            },
+          },
+        },
+      },
+    );
+    schema['allOf'] = allOf;
+  } else if (filename === 'companion-execution-track-execution-recovery-ack.schema.json') {
+    const allOf = (schema['allOf'] ?? []) as unknown[];
+    allOf.push({
+      if: { properties: { outcome: { const: 'reconciled' } }, required: ['outcome'] },
+      then: {
+        properties: {
+          evidence: {
+            properties: {
+              kind: { enum: ['persisted_managed_terminal', 'baseline_terminal'] },
+            },
+            required: ['kind'],
+          },
+          retainsTargetLock: { const: false },
+        },
+      },
+      else: {
+        properties: {
+          evidence: {
+            properties: { kind: { const: 'unresolved_current_state' } },
+            required: ['kind'],
+          },
+          retainsTargetLock: { const: true },
+        },
+      },
+    });
+    schema['allOf'] = allOf;
+  }
+}
+
 for (const [filename, id, schema] of schemas) {
   if (onlyFilename !== undefined && filename !== onlyFilename) continue;
   const draft7TupleSchema =
     filename.startsWith('procedure-tutorial-media-') ||
     filename.startsWith('procedure-tutorial-authoring-') ||
+    filename.startsWith('companion-execution-track-execution-') ||
     filename === 'procedure-compound-replay.schema.json' ||
     filename.includes('shortcut-proof') ||
     filename.includes('menu-control-proof');
@@ -1888,6 +2216,8 @@ for (const [filename, id, schema] of schemas) {
   documentTutorialMediaRecognitionSemanticGate(filename, jsonSchema);
   documentMenuControlProofSemanticGate(filename, jsonSchema);
   documentExecutionTrackPreflightSemanticGate(filename, jsonSchema);
+  documentExecutionTrackExecutionSemanticGate(filename, jsonSchema);
+  hardenExecutionTrackExecutionLifecycle(filename, jsonSchema);
   const outputPath = resolve(outputDirectory, filename);
   const expected = `${JSON.stringify({ ...jsonSchema, $id: id }, null, 2)}\n`;
   if (checkOnly) {

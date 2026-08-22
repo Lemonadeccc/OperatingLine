@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "duplicate"
+      ]
+    }
+  },
+  "required": [
+    "result"
+  ],
+  "additionalProperties": false,
+  "$comment": "Canonical binding/progress/baseline integrity, exact proof and native-Undo prefixes, immutable delivery identity, managed-only success, chronology, and lifecycle ordering require the exported Zod/coordinator semantic gates; standard JSON Schema covers the strict structural contract.",
+  "$id": "https://operatingline.dev/schema/v1/companion-execution-track-execution-progress-ack.json"
+}

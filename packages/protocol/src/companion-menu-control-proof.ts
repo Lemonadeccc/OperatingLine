@@ -440,21 +440,22 @@ const failureEvidenceCommonShape = {
   currentSceneFingerprintSha256: sha256Schema,
   automaticReplay: z.literal(false),
 } as const;
+const succeededLockedEvidenceSchema = z.strictObject({
+  kind: z.literal('succeeded_locked'),
+  operationSummaries: z
+    .array(
+      z.strictObject({
+        operationId: z.enum(uvSphereMenuControlProofOperationIds),
+        summaryContentSha256: sha256Schema,
+      }),
+    )
+    .length(7),
+  operationReceipts: z.array(companionMenuControlProofOperationReceiptSchema).length(7),
+  strongObservation: strongObservationSchema,
+  nativeUndoCheckpoint: checkpointSchema,
+});
 const terminalEvidenceSchema = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('succeeded_locked'),
-    operationSummaries: z
-      .array(
-        z.strictObject({
-          operationId: z.enum(uvSphereMenuControlProofOperationIds),
-          summaryContentSha256: sha256Schema,
-        }),
-      )
-      .length(7),
-    operationReceipts: z.array(companionMenuControlProofOperationReceiptSchema).length(7),
-    strongObservation: strongObservationSchema,
-    nativeUndoCheckpoint: checkpointSchema,
-  }),
+  succeededLockedEvidenceSchema,
   z.strictObject({
     kind: z.literal('failed_no_mutation'),
     receiptPrefix: z.tuple([]),
@@ -471,6 +472,13 @@ const terminalEvidenceSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ ...failureEvidenceCommonShape, kind: z.literal('recovery_required') }),
 ]);
+
+// Public aliases for v2 composition. These aliases intentionally reuse the
+// existing v1 schema instances so the v1 wire contract and generated schemas
+// remain byte-for-byte unchanged.
+export const companionMenuControlProofStrongObservationSchema = strongObservationSchema;
+export const companionMenuControlProofNativeUndoCheckpointSchema = checkpointSchema;
+export const companionMenuControlProofSucceededLockedEvidenceSchema = succeededLockedEvidenceSchema;
 const resultStatusSchema = z.enum([
   'succeeded',
   'failed_no_mutation',

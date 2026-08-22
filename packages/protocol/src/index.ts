@@ -6,6 +6,7 @@ export * from './canonical-json-value.js';
 export * from './companion.js';
 export * from './companion-action.js';
 export * from './companion-execution-track.js';
+export * from './companion-execution-track-execution.js';
 export * from './companion-dialogue-run.js';
 export * from './companion-initial-plan-run.js';
 export * from './companion-replan-run.js';
