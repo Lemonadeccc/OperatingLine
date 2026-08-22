@@ -13,6 +13,7 @@ import {
   companionActionExecutionStatusSchema,
   compileProcedureTreeToGuidePlan,
   computeProcedureLeafReplayFailureRecoveryAttestationContentSha256,
+  guideProposalSchema,
   procedureAuthoringCandidateTreeSchema,
   procedureLeafReplayFailureRecoveryAttestationSchema,
   type ProcedureAuthoringCandidateTree,
@@ -399,9 +400,11 @@ function fixture(
 
 function companionHello(instanceId: string) {
   return {
-    contractVersion: '1.0.0',
+    contractVersion: '1.1.0',
     adapterId: 'blender',
     instanceId,
+    sessionId: randomUUID(),
+    documentIncarnationId: randomUUID(),
     companionVersion: '0.1.0',
     hostVersion: '4.5.3',
     supportedGuideProtocolVersions: [blenderActionCatalog.protocolVersion, '1.6.0'],
@@ -513,10 +516,11 @@ function seedFinalizedFailure(databasePath: string, base: ReturnType<typeof fixt
 async function reviewStrategyProposal(runtime: { readonly baseUrl: string }) {
   const authorization = 'Bearer failure-replan-strategy-token';
   const headers = { authorization, 'content-type': 'application/json' };
+  const sessionHello = companionHello(ids.instance);
   const sessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
     method: 'POST',
     headers,
-    body: JSON.stringify(companionHello(ids.instance)),
+    body: JSON.stringify(sessionHello),
   });
   expect(sessionResponse.status).toBe(200);
   const session = (await sessionResponse.json()) as { leaseId: string };
@@ -597,6 +601,7 @@ async function reviewStrategyProposal(runtime: { readonly baseUrl: string }) {
   return {
     guideProposalId: preview.preview.acceptance.artifacts.guideProposal.proposalId,
     leaseHeaders,
+    sessionHello,
   };
 }
 
@@ -624,6 +629,114 @@ function acceptedTrackDecision(proposalId: string) {
     instanceId: ids.instance,
     decision: 'accepted',
     occurredAt: new Date().toISOString(),
+  } as const;
+}
+
+async function acceptTrackAndReportReadyState(
+  runtime: { readonly baseUrl: string },
+  databasePath: string,
+  decisionKind: 'accepted' | 'rejected' = 'accepted',
+) {
+  const reviewed = await reviewStrategyProposal(runtime);
+  const decision = {
+    ...acceptedTrackDecision(reviewed.guideProposalId),
+    decision: decisionKind,
+  } as const;
+  const decisionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/proposal-decision`, {
+    method: 'POST',
+    headers: reviewed.leaseHeaders,
+    body: JSON.stringify(decision),
+  });
+  expect(decisionResponse.status, JSON.stringify(await decisionResponse.clone().json())).toBe(200);
+
+  const database = openOperatingLineDatabase(databasePath);
+  let proposal;
+  try {
+    proposal = guideProposalSchema.parse(database.getGuideProposal(reviewed.guideProposalId));
+  } finally {
+    database.close();
+  }
+  const step = proposal.plan.steps.find(
+    (candidateStep) => candidateStep.executionTrackOverride !== undefined,
+  );
+  if (step?.executionTrackOverride === undefined)
+    throw new Error('Expected reviewed override step');
+  const planContentSha256 = hash(proposal.plan);
+  const executionId = randomUUID();
+  const reportId = randomUUID();
+  const reportedAt = new Date().toISOString();
+  const report = {
+    protocolVersion: '1.6.0',
+    reportId,
+    sequence: 9,
+    adapterId: 'blender',
+    instanceId: ids.instance,
+    companionVersion: '0.1.0',
+    hostVersion: '4.5.3',
+    plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+    planContentSha256,
+    executionId,
+    phase: 'running',
+    activeStepId: null,
+    completedStepIds: [],
+    transition: 'walkthrough_started',
+    stepId: null,
+    observations: [],
+    observationGate: null,
+    artifactAttestation: null,
+    nativeUndoCheckpoint: {
+      formatVersion: '1.0.0',
+      evidenceClass: 'companion_reported_native_undo_checkpoint',
+      checkpointId: randomUUID(),
+      previousCheckpointId: null,
+      operation: 'start',
+      committedAt: reportedAt,
+      marker: { key: '_operating_line_native_history_v1', matched: true },
+      journal: {
+        entryPresent: true,
+        snapshotMatchesSession: true,
+        artifactsBackedUp: true,
+      },
+      session: {
+        plan: { id: proposal.plan.id, revision: proposal.plan.revision },
+        planContentSha256,
+        executionId,
+        activeStepId: null,
+        completedStepIds: [],
+        receiptStepIds: [],
+      },
+    },
+    error: null,
+    occurredAt: reportedAt,
+  } as const;
+  const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+    method: 'POST',
+    headers: reviewed.leaseHeaders,
+    body: JSON.stringify(report),
+  });
+  expect(stateResponse.status, JSON.stringify(await stateResponse.clone().json())).toBe(200);
+  await expect(stateResponse.json()).resolves.toEqual({ result: 'accepted' });
+  return {
+    headers: reviewed.leaseHeaders,
+    sessionHello: reviewed.sessionHello,
+    proposal,
+    report,
+    request: {
+      formatVersion: '1.0.0',
+      requestId: randomUUID(),
+      target: { adapterId: 'blender', instanceId: ids.instance },
+      proposalId: proposal.proposalId,
+      plan: {
+        protocolVersion: '1.6.0',
+        id: proposal.plan.id,
+        revision: proposal.plan.revision,
+        contentSha256: planContentSha256,
+      },
+      executionId,
+      leafId: step.id,
+      override: step.executionTrackOverride,
+      expectedState: { reportId, sequence: report.sequence },
+    },
   } as const;
 }
 
@@ -1036,6 +1149,430 @@ describe('procedure execution failure replan runtime resolver', () => {
         expect(
           database.getGuideProposalDecision(reviewed.guideProposalId, 'blender', ids.instance),
         ).toMatchObject({ decisionId: decision.decisionId, decision: 'accepted' });
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('preflights an accepted reviewed execution track without executing a Blender action', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-preflight-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath);
+      const createUrl = `${runtime.baseUrl}/api/v1/companion/execution-track-preflight`;
+      const invalidResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify({ ...ready.request, replayBindingContentSha256: 'a'.repeat(64) }),
+      });
+      expect(invalidResponse.status).toBe(400);
+      await expect(invalidResponse.json()).resolves.toMatchObject({
+        error: 'invalid_execution_track_preflight_request',
+      });
+      for (const changedRequest of [
+        {
+          ...ready.request,
+          expectedState: { ...ready.request.expectedState, sequence: 10 },
+        },
+        { ...ready.request, executionId: randomUUID() },
+        { ...ready.request, leafId: 'tutorial.execution-track-preflight.wrong-leaf' },
+      ]) {
+        const rejected = await fetch(createUrl, {
+          method: 'POST',
+          headers: ready.headers,
+          body: JSON.stringify(changedRequest),
+        });
+        expect(rejected.status).toBe(409);
+      }
+      const wrongInstanceId = randomUUID();
+      const wrongSessionResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(companionHello(wrongInstanceId)),
+      });
+      expect(wrongSessionResponse.status).toBe(200);
+      const wrongSession = (await wrongSessionResponse.json()) as { leaseId: string };
+      const wrongTargetResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+          'x-operatingline-companion-lease': wrongSession.leaseId,
+        },
+        body: JSON.stringify({
+          ...ready.request,
+          target: { adapterId: 'blender', instanceId: wrongInstanceId },
+        }),
+      });
+      expect(wrongTargetResponse.status).toBe(409);
+      await expect(wrongTargetResponse.json()).resolves.toMatchObject({
+        error: 'execution_track_preflight_proposal_target_mismatch',
+      });
+      const beforeCreate = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          beforeCreate.listExecutionEventsByTypes(['blender.execution-track-preflight.queued']),
+        ).toHaveLength(0);
+      } finally {
+        beforeCreate.close();
+      }
+
+      const createResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(ready.request),
+      });
+      expect(createResponse.status, JSON.stringify(await createResponse.clone().json())).toBe(200);
+      const queued = (await createResponse.json()) as {
+        status: string;
+        binding: {
+          replayId: string;
+          bindingContentSha256: string;
+          proposal: { id: string };
+          plan: { id: string; revision: number };
+          executionId: string;
+          leafId: string;
+          target: { adapterId: 'blender'; instanceId: string };
+        };
+      };
+      expect(queued).toMatchObject({
+        status: 'queued',
+        binding: {
+          proposal: { id: ready.proposal.proposalId },
+          plan: { id: ready.proposal.plan.id, revision: ready.proposal.plan.revision },
+          executionId: ready.request.executionId,
+          leafId: ready.request.leafId,
+        },
+      });
+      const duplicateResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(ready.request),
+      });
+      expect(duplicateResponse.status).toBe(200);
+      await expect(duplicateResponse.json()).resolves.toEqual(queued);
+
+      const statusUrl = new URL(createUrl);
+      statusUrl.searchParams.set('requestId', ready.request.requestId);
+      const unauthenticatedStatusResponse = await fetch(statusUrl, {
+        headers: { authorization: 'Bearer failure-replan-strategy-token' },
+      });
+      expect(unauthenticatedStatusResponse.status).toBe(409);
+      const queuedStatusResponse = await fetch(statusUrl, { headers: ready.headers });
+      expect(queuedStatusResponse.status).toBe(200);
+      await expect(queuedStatusResponse.json()).resolves.toMatchObject({ status: 'queued' });
+
+      const pollUrl = new URL(`${createUrl}/poll`);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', ids.instance);
+      const pollResponse = await fetch(pollUrl, { headers: ready.headers });
+      expect(pollResponse.status, JSON.stringify(await pollResponse.clone().json())).toBe(200);
+      const polled = (await pollResponse.json()) as {
+        request: {
+          deliveryId: string;
+          lease: { leaseId: string };
+          dispatchedAt: string;
+          binding: typeof queued.binding;
+        };
+      };
+      expect(polled.request).toMatchObject({ binding: queued.binding });
+
+      const result = {
+        formatVersion: '1.0.0',
+        requestId: ready.request.requestId,
+        replayId: queued.binding.replayId,
+        deliveryId: polled.request.deliveryId,
+        bindingContentSha256: queued.binding.bindingContentSha256,
+        target: queued.binding.target,
+        leaseId: polled.request.lease.leaseId,
+        proposalId: queued.binding.proposal.id,
+        planId: queued.binding.plan.id,
+        planRevision: queued.binding.plan.revision,
+        executionId: queued.binding.executionId,
+        leafId: queued.binding.leafId,
+        status: 'verified_unavailable',
+        authorityVerified: true,
+        capability: 'preflight_only',
+        reasonCode: 'executor_unavailable',
+        error: 'No execution-track action executor is installed.',
+        occurredAt: new Date().toISOString(),
+      } as const;
+      const resultResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(result),
+      });
+      expect(resultResponse.status, JSON.stringify(await resultResponse.clone().json())).toBe(200);
+      await expect(resultResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const duplicateResultResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(result),
+      });
+      expect(duplicateResultResponse.status).toBe(200);
+      await expect(duplicateResultResponse.json()).resolves.toEqual({ result: 'duplicate' });
+
+      const terminalStatusResponse = await fetch(statusUrl, { headers: ready.headers });
+      expect(terminalStatusResponse.status).toBe(200);
+      await expect(terminalStatusResponse.json()).resolves.toMatchObject({
+        status: 'verified_unavailable',
+        result,
+      });
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.listExecutionEventsByTypes([
+            'blender.execution-track-preflight.queued',
+            'blender.execution-track-preflight.dispatched',
+            'blender.execution-track-preflight.completed',
+          ]),
+        ).toHaveLength(3);
+        expect(
+          database.listExecutionEventsByTypes(['blender.action-execution.queued']),
+        ).toHaveLength(1);
+        expect(
+          database.listExecutionEventsByTypes(['blender.action-execution.completed']),
+        ).toHaveLength(1);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not dispatch a queued binding after the target document rotates', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-document-drift-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath);
+      const createUrl = `${runtime.baseUrl}/api/v1/companion/execution-track-preflight`;
+      const createResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(ready.request),
+      });
+      expect(createResponse.status).toBe(200);
+
+      const rotatedResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...ready.sessionHello,
+          documentIncarnationId: randomUUID(),
+        }),
+      });
+      expect(rotatedResponse.status).toBe(200);
+      const rotated = (await rotatedResponse.json()) as { leaseId: string };
+      const pollUrl = new URL(`${createUrl}/poll`);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', ids.instance);
+      const pollResponse = await fetch(pollUrl, {
+        headers: {
+          authorization: 'Bearer failure-replan-strategy-token',
+          'x-operatingline-companion-lease': rotated.leaseId,
+        },
+      });
+      expect(pollResponse.status).toBe(409);
+      await expect(pollResponse.json()).resolves.toMatchObject({
+        error: 'execution_track_preflight_document_session_not_current',
+      });
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.listExecutionEventsByTypes(['blender.execution-track-preflight.dispatched']),
+        ).toHaveLength(0);
+      } finally {
+        database.close();
+      }
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('revalidates verified authority after dispatch but still records a local rejection', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-result-drift-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath);
+      const createUrl = `${runtime.baseUrl}/api/v1/companion/execution-track-preflight`;
+      const createResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(ready.request),
+      });
+      const queued = (await createResponse.json()) as {
+        binding: {
+          replayId: string;
+          bindingContentSha256: string;
+          target: { adapterId: 'blender'; instanceId: string };
+          proposal: { id: string };
+          plan: { id: string; revision: number };
+          executionId: string;
+          leafId: string;
+        };
+      };
+      const pollUrl = new URL(`${createUrl}/poll`);
+      pollUrl.searchParams.set('adapterId', 'blender');
+      pollUrl.searchParams.set('instanceId', ids.instance);
+      const pollResponse = await fetch(pollUrl, { headers: ready.headers });
+      const delivery = (await pollResponse.json()) as {
+        request: { deliveryId: string; lease: { leaseId: string } };
+      };
+
+      const changedExecutionId = randomUUID();
+      const changedAt = new Date().toISOString();
+      const changedReport = {
+        ...ready.report,
+        reportId: randomUUID(),
+        sequence: ready.report.sequence + 1,
+        executionId: changedExecutionId,
+        occurredAt: changedAt,
+        nativeUndoCheckpoint: {
+          ...ready.report.nativeUndoCheckpoint,
+          checkpointId: randomUUID(),
+          committedAt: changedAt,
+          session: {
+            ...ready.report.nativeUndoCheckpoint.session,
+            executionId: changedExecutionId,
+          },
+        },
+      };
+      const stateResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/state`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify(changedReport),
+      });
+      expect(stateResponse.status).toBe(200);
+
+      const identity = {
+        formatVersion: '1.0.0',
+        requestId: ready.request.requestId,
+        replayId: queued.binding.replayId,
+        deliveryId: delivery.request.deliveryId,
+        bindingContentSha256: queued.binding.bindingContentSha256,
+        target: queued.binding.target,
+        leaseId: delivery.request.lease.leaseId,
+        proposalId: queued.binding.proposal.id,
+        planId: queued.binding.plan.id,
+        planRevision: queued.binding.plan.revision,
+        executionId: queued.binding.executionId,
+        leafId: queued.binding.leafId,
+      } as const;
+      const verifiedResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify({
+          ...identity,
+          status: 'verified_unavailable',
+          authorityVerified: true,
+          capability: 'preflight_only',
+          reasonCode: 'executor_unavailable',
+          error: 'No execution-track action executor is installed.',
+          occurredAt: new Date().toISOString(),
+        }),
+      });
+      expect(verifiedResponse.status).toBe(409);
+      const inspectedBeforeReject = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          inspectedBeforeReject.listExecutionEventsByTypes([
+            'blender.execution-track-preflight.completed',
+          ]),
+        ).toHaveLength(0);
+      } finally {
+        inspectedBeforeReject.close();
+      }
+
+      const rejectedResponse = await fetch(`${createUrl}/result`, {
+        method: 'POST',
+        headers: ready.headers,
+        body: JSON.stringify({
+          ...identity,
+          status: 'rejected',
+          authorityVerified: false,
+          capability: 'preflight_only',
+          reasonCode: 'authority_invalid',
+          error: 'Current execution-track authority changed after dispatch.',
+          occurredAt: new Date().toISOString(),
+        }),
+      });
+      expect(rejectedResponse.status, JSON.stringify(await rejectedResponse.clone().json())).toBe(
+        200,
+      );
+      await expect(rejectedResponse.json()).resolves.toEqual({ result: 'accepted' });
+    } finally {
+      await runtime.stop();
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a reviewed track whose Guide proposal decision was rejected without queueing', async () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), 'operatingline-track-unaccepted-'));
+    const databasePath = join(temporaryDirectory, 'runtime.sqlite');
+    const actionCatalog = strategyActionCatalog();
+    seedFinalizedFailure(databasePath, fixture({ proofBackedStrategy: true, actionCatalog }));
+    const runtime = await startRuntime({
+      databasePath,
+      accessToken: 'failure-replan-strategy-token',
+      actionCatalogs: [actionCatalog],
+      interactionCatalogs: [blenderInteractionCatalog],
+    });
+    try {
+      const ready = await acceptTrackAndReportReadyState(runtime, databasePath, 'rejected');
+      const response = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/execution-track-preflight`,
+        {
+          method: 'POST',
+          headers: ready.headers,
+          body: JSON.stringify(ready.request),
+        },
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: 'execution_track_preflight_acceptance_missing',
+      });
+      const database = openOperatingLineDatabase(databasePath);
+      try {
+        expect(
+          database.listExecutionEventsByTypes(['blender.execution-track-preflight.queued']),
+        ).toHaveLength(0);
       } finally {
         database.close();
       }

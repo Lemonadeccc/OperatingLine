@@ -26,6 +26,14 @@ import {
   companionActionPollDeliverySchema,
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
+  companionExecutionTrackPreflightBindingSchema,
+  companionExecutionTrackPreflightCreateRequestSchema,
+  companionExecutionTrackPreflightPollDeliverySchema,
+  companionExecutionTrackPreflightPollRequestSchema,
+  companionExecutionTrackPreflightResultAckSchema,
+  companionExecutionTrackPreflightResultSchema,
+  companionExecutionTrackPreflightStatusRequestSchema,
+  companionExecutionTrackPreflightStatusSchema,
   companionMenuControlProofCreateRequestSchema,
   companionMenuControlProofHistoryTransitionReportSchema,
   companionMenuControlProofPollDeliverySchema,
@@ -215,6 +223,10 @@ import {
   BlenderActionExecutionError,
   createBlenderActionExecutionCoordinator,
 } from './blender-action-execution.js';
+import {
+  BlenderExecutionTrackPreflightError,
+  createBlenderExecutionTrackPreflightCoordinator,
+} from './blender-execution-track-preflight.js';
 import {
   BlenderMenuControlProofExecutionError,
   createBlenderMenuControlProofExecutionCoordinator,
@@ -2974,9 +2986,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       action: ReturnType<typeof createBlenderActionExecutionCoordinator> | null;
       shortcut: ReturnType<typeof createBlenderShortcutProofExecutionCoordinator> | null;
       menuControl: ReturnType<typeof createBlenderMenuControlProofExecutionCoordinator> | null;
-    } = { action: null, shortcut: null, menuControl: null };
+      executionTrack: ReturnType<typeof createBlenderExecutionTrackPreflightCoordinator> | null;
+    } = { action: null, shortcut: null, menuControl: null, executionTrack: null };
     const externalTargetLockOwner = (
-      excluding: 'action' | 'shortcut' | 'menu-control',
+      excluding: 'action' | 'shortcut' | 'menu-control' | 'execution-track',
       adapterId: 'blender',
       instanceId: string,
     ): string | null => {
@@ -3000,6 +3013,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       ) {
         return 'blender.menu-control-proof';
       }
+      if (
+        excluding !== 'execution-track' &&
+        executionCoordinatorRefs.executionTrack?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.execution-track-preflight';
+      }
       return null;
     };
     const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({
@@ -3020,6 +3039,12 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         externalTargetLockOwner('menu-control', adapterId, instanceId),
     });
     executionCoordinatorRefs.menuControl = menuControlProofExecutionCoordinator;
+    const executionTrackPreflightCoordinator = createBlenderExecutionTrackPreflightCoordinator({
+      database,
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('execution-track', adapterId, instanceId),
+    });
+    executionCoordinatorRefs.executionTrack = executionTrackPreflightCoordinator;
 
     const procedureExecutionFailureReplanResolver =
       createProcedureExecutionFailureReplanRuntimeResolver({
@@ -3146,7 +3171,10 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         trustedEvidence: { resolve: resolveProcedureExecutionFailureReplanReviewEvidence },
         resolveTargetRevision: resolveNextGuideRevision,
       });
-    const validateExecutionTrackProposalAuthority = (proposal: GuideProposal): void => {
+    const validateExecutionTrackProposalAuthority = (
+      proposal: GuideProposal,
+      expectedCurrentPlan: 'reviewed_base' | 'accepted_proposal' = 'reviewed_base',
+    ) => {
       const overriddenSteps = proposal.plan.steps.filter(
         (step) => step.executionTrackOverride !== undefined,
       );
@@ -3187,15 +3215,31 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           report.adapterId === proposal.targetAdapterId &&
           report.instanceId === proposal.targetInstanceId,
       );
+      const expectedCurrentPlanIdentity =
+        expectedCurrentPlan === 'reviewed_base'
+          ? {
+              id: review.data.reviewBinding.basePlanId,
+              revision: review.data.reviewBinding.basePlanRevision,
+              contentSha256: review.data.reviewBinding.basePlanContentSha256,
+            }
+          : {
+              id: proposal.plan.id,
+              revision: proposal.plan.revision,
+              contentSha256: computePlanContentSha256(proposal.plan),
+            };
       if (
         currentState?.plan === null ||
         currentState?.plan === undefined ||
         currentState.planContentSha256 === null ||
-        currentState.plan.id !== review.data.reviewBinding.basePlanId ||
-        currentState.plan.revision !== review.data.reviewBinding.basePlanRevision ||
-        currentState.planContentSha256 !== review.data.reviewBinding.basePlanContentSha256
+        currentState.plan.id !== expectedCurrentPlanIdentity.id ||
+        currentState.plan.revision !== expectedCurrentPlanIdentity.revision ||
+        currentState.planContentSha256 !== expectedCurrentPlanIdentity.contentSha256
       ) {
-        throw new Error('Execution-track proposal base Plan is no longer current');
+        throw new Error(
+          expectedCurrentPlan === 'reviewed_base'
+            ? 'Execution-track proposal base Plan is no longer current'
+            : 'Accepted execution-track proposal Plan is not the current Companion Plan',
+        );
       }
       const revisionInput = database.getGuideRevisionRequest(proposal.revisionRequestId);
       const revision = guideRevisionRequestSchema.safeParse(revisionInput);
@@ -3314,6 +3358,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       );
       if (
         !replayBinding.success ||
+        replayLeaf?.kind !== 'leaf' ||
         replayBinding.data.integrity.contentSha256 !==
           review.data.reviewBinding.replayBindingContentSha256 ||
         exactStrategy?.currentTrackId !== reviewedTrack.currentTrackId ||
@@ -3326,6 +3371,380 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
       ) {
         throw new Error('Execution-track proposal no longer matches its immutable replay proof');
       }
+      const selectedTracks =
+        override.modality === 'menu' ? replayLeaf.menuTracks : replayLeaf.shortcutTracks;
+      const selectedTrack = selectedTracks.find((candidate) => candidate.id === override.trackId);
+      if (
+        selectedTrack?.availability !== 'available' ||
+        selectedTrack.proofExecution === undefined ||
+        computeProcedureTreeContentSha256(selectedTrack) !== override.trackContentSha256 ||
+        computeProcedureTreeContentSha256(selectedTrack.proofExecution) !==
+          override.proofExecutionContentSha256
+      ) {
+        throw new Error('Execution-track proposal selected track lost its immutable replay proof');
+      }
+      return {
+        actionCatalog,
+        currentState,
+        interactionCatalog,
+        override,
+        proposal,
+        replayBinding: replayBinding.data,
+        replayLeaf,
+        review: review.data,
+        revision: revision.data,
+        selectedTrack,
+        step,
+        storedFailure,
+      };
+    };
+    const executionTrackPreflightRejected = (
+      message: string,
+      statusCode: number = 409,
+      code = 'execution_track_preflight_not_authorized',
+    ): never => {
+      throw new BlenderExecutionTrackPreflightError(code, statusCode, message);
+    };
+    const requireCurrentExecutionTrackDocumentReceipt = (
+      session: ActiveCompanionDocumentSession,
+      sessionFingerprintSha256: string,
+    ): void => {
+      try {
+        const receiptSession = companionLeaseManager.authorizeDocumentSessionForReceiptFingerprint(
+          sessionFingerprintSha256,
+          'blender',
+          session.hello.instanceId,
+        );
+        if (
+          receiptSession.hello.sessionId !== session.hello.sessionId ||
+          receiptSession.hello.documentIncarnationId !== session.hello.documentIncarnationId
+        ) {
+          executionTrackPreflightRejected(
+            'Execution-track authority belongs to a different Companion process or document',
+            409,
+            'execution_track_preflight_document_session_not_current',
+          );
+        }
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          executionTrackPreflightRejected(
+            'Execution-track authority is not bound to the current Companion process and document',
+            409,
+            'execution_track_preflight_document_session_not_current',
+          );
+        }
+        throw error;
+      }
+    };
+    const pendingExecutionTrackPreflightForTarget = (adapterId: 'blender', instanceId: string) => {
+      const latestByRequest = new Map<
+        string,
+        ReturnType<typeof companionExecutionTrackPreflightStatusSchema.parse>
+      >();
+      for (const event of database.listExecutionEventsByTypes([
+        'blender.execution-track-preflight.queued',
+        'blender.execution-track-preflight.dispatched',
+        'blender.execution-track-preflight.completed',
+        'blender.execution-track-preflight.recovery-required',
+      ])) {
+        const payload =
+          event.payload !== null &&
+          typeof event.payload === 'object' &&
+          !Array.isArray(event.payload)
+            ? (event.payload as Record<string, unknown>)['preflight']
+            : undefined;
+        const parsed = companionExecutionTrackPreflightStatusSchema.safeParse(payload);
+        if (parsed.success) latestByRequest.set(parsed.data.binding.requestId, parsed.data);
+      }
+      return (
+        [...latestByRequest.values()]
+          .filter(
+            (preflight) =>
+              preflight.status === 'queued' &&
+              preflight.binding.target.adapterId === adapterId &&
+              preflight.binding.target.instanceId === instanceId,
+          )
+          .sort(
+            (left, right) =>
+              left.binding.requestedAt.localeCompare(right.binding.requestedAt) ||
+              left.binding.requestId.localeCompare(right.binding.requestId),
+          )[0] ?? null
+      );
+    };
+    const authorizeExecutionTrackPreflight = (
+      request: ReturnType<typeof companionExecutionTrackPreflightCreateRequestSchema.parse>,
+      session: ActiveCompanionDocumentSession,
+      requestedAt = new Date().toISOString(),
+    ) => {
+      if (
+        session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion ||
+        request.plan.protocolVersion !== guideProtocolVersion ||
+        request.target.adapterId !== session.hello.adapterId ||
+        request.target.instanceId !== session.hello.instanceId
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight requires the exact current Guide 1.6 document session',
+          409,
+          'execution_track_preflight_session_identity_mismatch',
+        );
+      }
+      const proposalInput = database.getGuideProposal(request.proposalId);
+      const proposal = guideProposalSchema.safeParse(proposalInput);
+      if (!proposal.success) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight proposal was not found',
+          404,
+          'execution_track_preflight_proposal_not_found',
+        );
+      }
+      if (
+        proposal.data.targetAdapterId !== request.target.adapterId ||
+        proposal.data.targetInstanceId === undefined ||
+        proposal.data.targetInstanceId !== request.target.instanceId
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight proposal targets a different Companion instance',
+          409,
+          'execution_track_preflight_proposal_target_mismatch',
+        );
+      }
+      let authority: ReturnType<typeof validateExecutionTrackProposalAuthority>;
+      try {
+        authority = validateExecutionTrackProposalAuthority(proposal.data, 'accepted_proposal');
+      } catch (error) {
+        return executionTrackPreflightRejected(
+          error instanceof Error
+            ? error.message
+            : 'Execution-track proposal authority could not be verified',
+        );
+      }
+      if (authority === undefined) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight proposal contains no reviewed execution-track override',
+        );
+      }
+      const {
+        actionCatalog,
+        currentState,
+        interactionCatalog,
+        override,
+        replayBinding,
+        replayLeaf,
+        review,
+        revision,
+        selectedTrack,
+        step,
+        storedFailure,
+      } = authority;
+      const proposalContentSha256 = computeProcedureTreeContentSha256(proposal.data);
+      const planContentSha256 = computePlanContentSha256(proposal.data.plan);
+      if (
+        request.plan.id !== proposal.data.plan.id ||
+        request.plan.revision !== proposal.data.plan.revision ||
+        request.plan.contentSha256 !== planContentSha256 ||
+        request.leafId !== step.id ||
+        !isDeepStrictEqual(request.override, override)
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight request differs from the accepted revised Plan',
+          409,
+          'execution_track_preflight_request_identity_mismatch',
+        );
+      }
+      const decisionInput = database.getGuideProposalDecision(
+        proposal.data.proposalId,
+        'blender',
+        request.target.instanceId,
+      );
+      const decision = guideProposalDecisionSchema.safeParse(decisionInput);
+      const decisionReceipt = decision.success
+        ? database.getManagedReplayReceipt('guide_proposal_decision', decision.data.decisionId)
+        : null;
+      if (
+        !decision.success ||
+        decision.data.protocolVersion !== guideProtocolVersion ||
+        decision.data.decision !== 'accepted' ||
+        decision.data.proposalId !== proposal.data.proposalId ||
+        decision.data.adapterId !== 'blender' ||
+        decision.data.instanceId !== request.target.instanceId ||
+        decisionReceipt === null ||
+        decisionReceipt.subjectType !== 'guide_proposal_decision' ||
+        decisionReceipt.subjectId !== decision.data.decisionId ||
+        decisionReceipt.authentication !== 'negotiated_companion_lease' ||
+        decisionReceipt.adapterId !== 'blender' ||
+        decisionReceipt.instanceId !== request.target.instanceId ||
+        decisionReceipt.sessionFingerprintSha256 === null ||
+        Date.parse(decision.data.occurredAt) > Date.parse(decisionReceipt.receivedAt)
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight lacks its exact accepted decision and managed receipt',
+          409,
+          'execution_track_preflight_acceptance_missing',
+        );
+      }
+      requireCurrentExecutionTrackDocumentReceipt(
+        session,
+        decisionReceipt.sessionFingerprintSha256,
+      );
+      const latest = listCompanionStates().find(
+        (report) =>
+          report.adapterId === request.target.adapterId &&
+          report.instanceId === request.target.instanceId,
+      );
+      const reportReceipt =
+        latest === undefined
+          ? null
+          : database.getManagedReplayReceipt('companion_state_report', latest.reportId);
+      const completedStepIds = new Set(currentState.completedStepIds);
+      const nextExecutableStep = proposal.data.plan.steps.find(
+        (candidate) =>
+          candidate.action !== null &&
+          !completedStepIds.has(candidate.id) &&
+          candidate.dependsOn.every((dependency) => completedStepIds.has(dependency)),
+      );
+      const lastCompletedStepId = currentState.completedStepIds.at(-1) ?? null;
+      const expectedTransition =
+        lastCompletedStepId === null ? 'walkthrough_started' : 'step_succeeded';
+      const expectedCheckpointOperation = lastCompletedStepId === null ? 'start' : 'next';
+      if (
+        latest === undefined ||
+        latest.reportId !== request.expectedState.reportId ||
+        latest.sequence !== request.expectedState.sequence ||
+        latest.reportId !== currentState.reportId ||
+        latest.sequence !== currentState.sequence ||
+        latest.protocolVersion !== guideProtocolVersion ||
+        latest.plan?.id !== proposal.data.plan.id ||
+        latest.plan.revision !== proposal.data.plan.revision ||
+        latest.planContentSha256 !== planContentSha256 ||
+        latest.executionId === null ||
+        latest.executionId !== request.executionId ||
+        latest.phase !== 'running' ||
+        latest.transition !== expectedTransition ||
+        latest.activeStepId !== lastCompletedStepId ||
+        (lastCompletedStepId !== null && latest.stepId !== lastCompletedStepId) ||
+        nextExecutableStep?.id !== step.id ||
+        latest.completedStepIds.includes(step.id) ||
+        latest.observationGate !== null ||
+        latest.error !== null ||
+        latest.nativeUndoCheckpoint?.operation !== expectedCheckpointOperation ||
+        latest.nativeUndoCheckpoint.session.plan.id !== proposal.data.plan.id ||
+        latest.nativeUndoCheckpoint.session.plan.revision !== proposal.data.plan.revision ||
+        latest.nativeUndoCheckpoint.session.planContentSha256 !== planContentSha256 ||
+        latest.nativeUndoCheckpoint.session.executionId !== request.executionId ||
+        latest.nativeUndoCheckpoint.session.activeStepId !== lastCompletedStepId ||
+        !isDeepStrictEqual(
+          latest.nativeUndoCheckpoint.session.completedStepIds,
+          latest.completedStepIds,
+        ) ||
+        reportReceipt === null ||
+        reportReceipt.subjectType !== 'companion_state_report' ||
+        reportReceipt.subjectId !== latest.reportId ||
+        reportReceipt.authentication !== 'negotiated_companion_lease' ||
+        reportReceipt.adapterId !== 'blender' ||
+        reportReceipt.instanceId !== request.target.instanceId ||
+        reportReceipt.sessionFingerprintSha256 !==
+          createHash('sha256').update(session.lease.leaseId).digest('hex') ||
+        decisionReceipt.sequence >= reportReceipt.sequence ||
+        Date.parse(decisionReceipt.receivedAt) > Date.parse(reportReceipt.receivedAt) ||
+        Date.parse(decision.data.occurredAt) > Date.parse(latest.occurredAt)
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight expected Companion state is stale or not at the accepted next leaf',
+          409,
+          'execution_track_preflight_state_changed',
+        );
+      }
+      if (
+        storedFailure.envelope === null ||
+        storedFailure.envelope.replayId !== replayBinding.replayId ||
+        review.acceptedArtifacts === undefined ||
+        review.acceptedArtifacts.guideProposalContentSha256 !== proposalContentSha256 ||
+        review.acceptedArtifacts.revisionRequestContentSha256 !==
+          computeProcedureTreeContentSha256(revision) ||
+        review.acceptedArtifacts.executionTrackOverrideContentSha256 !==
+          computeProcedureTreeContentSha256(override) ||
+        proposal.data.planDiff === null ||
+        proposal.data.planDiff === undefined ||
+        !isDeepStrictEqual(
+          proposal.data.planDiff,
+          computeGuidePlanDiff(revision.basePlan, proposal.data.plan),
+        )
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight reviewed revision artifacts have drifted',
+        );
+      }
+      const interactionRecipe = interactionCatalog.recipes.find(
+        (recipe) => recipe.id === override.recipeId,
+      );
+      if (
+        interactionRecipe?.actionName !== step.action?.name ||
+        computeProcedureTreeContentSha256(actionCatalog) !==
+          review.reviewBinding.actionCatalogContentSha256 ||
+        computeProcedureTreeContentSha256(interactionCatalog) !==
+          override.interactionCatalogContentSha256
+      ) {
+        return executionTrackPreflightRejected(
+          'Execution-track preflight live catalog authority has drifted',
+          409,
+          'execution_track_preflight_catalog_drift',
+        );
+      }
+      const content = {
+        formatVersion: request.formatVersion,
+        requestId: request.requestId,
+        target: request.target,
+        proposal: { id: proposal.data.proposalId, contentSha256: proposalContentSha256 },
+        plan: request.plan,
+        executionId: request.executionId,
+        leafId: request.leafId,
+        override,
+        expectedState: request.expectedState,
+        replayId: replayBinding.replayId,
+        step,
+        review: {
+          id: review.reviewId,
+          contentSha256: computeProcedureTreeContentSha256(review),
+        },
+        revision: {
+          requestContentSha256: computeProcedureTreeContentSha256(revision),
+          diffContentSha256: computeProcedureTreeContentSha256(proposal.data.planDiff),
+        },
+        replay: {
+          id: replayBinding.replayId,
+          bindingContentSha256: replayBinding.integrity.contentSha256,
+        },
+        artifacts: {
+          procedureTreeContentSha256: computeProcedureTreeContentSha256(
+            replayBinding.materialization.tree,
+          ),
+          sourceLeafContentSha256: computeProcedureTreeContentSha256(replayLeaf),
+        },
+        catalogs: {
+          action: {
+            version: actionCatalog.catalogVersion,
+            contentSha256: computeProcedureTreeContentSha256(actionCatalog),
+          },
+          interaction: {
+            version: interactionCatalog.catalogVersion,
+            contentSha256: computeProcedureTreeContentSha256(interactionCatalog),
+            recipeId: override.recipeId,
+          },
+        },
+        acceptance: {
+          decision: decision.data,
+          decisionContentSha256: computeProcedureTreeContentSha256(decision.data),
+          receipt: decisionReceipt,
+        },
+        action: replayLeaf.action,
+        sourceLeaf: replayLeaf,
+        selectedTrack,
+        requestedAt,
+      };
+      return companionExecutionTrackPreflightBindingSchema.parse({
+        ...content,
+        bindingContentSha256: computeProcedureTreeContentSha256(content),
+      });
     };
     const getProcedureExecutionFailureReplanReviewStatus = (requestId: string) => {
       const storedReview = database.getProcedureExecutionFailureReplanReview(requestId);
@@ -9177,6 +9596,259 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           : { procedureReplayCurrentStateRequest: replayCurrentStateRequest }),
       });
     });
+    runtimeApp.post('/api/v1/companion/execution-track-preflight', async (request, reply) => {
+      const parsedRequest = companionExecutionTrackPreflightCreateRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_execution_track_preflight_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Execution-track preflight creation requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.target.adapterId,
+          parsedRequest.data.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'execution_track_preflight_protocol_unsupported',
+            message: 'Execution-track preflight requires a current Guide 1.6 document session',
+          });
+        }
+        const existing = executionTrackPreflightCoordinator.findForCreate(parsedRequest.data);
+        if (existing !== null) {
+          requireCurrentExecutionTrackDocumentReceipt(
+            session,
+            existing.binding.acceptance.receipt.sessionFingerprintSha256,
+          );
+          return companionExecutionTrackPreflightStatusSchema.parse(existing);
+        }
+        const binding = authorizeExecutionTrackPreflight(parsedRequest.data, session);
+        return companionExecutionTrackPreflightStatusSchema.parse(
+          executionTrackPreflightCoordinator.queue(
+            binding,
+            createHash('sha256').update(leaseHeader).digest('hex'),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderExecutionTrackPreflightError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/execution-track-preflight', async (request, reply) => {
+      const parsedRequest = companionExecutionTrackPreflightStatusRequestSchema.safeParse(
+        request.query,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_execution_track_preflight_status_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Execution-track preflight status requires a negotiated Companion lease',
+        });
+      }
+      const preflight = executionTrackPreflightCoordinator.get(parsedRequest.data.requestId);
+      if (preflight === null) {
+        return reply.code(404).send({
+          error: 'execution_track_preflight_not_found',
+          message: 'The execution-track preflight request was not found',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          preflight.binding.target.adapterId,
+          preflight.binding.target.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'execution_track_preflight_protocol_unsupported',
+            message: 'Execution-track preflight status requires Guide 1.6',
+          });
+        }
+        requireCurrentExecutionTrackDocumentReceipt(
+          session,
+          preflight.binding.acceptance.receipt.sessionFingerprintSha256,
+        );
+        return companionExecutionTrackPreflightStatusSchema.parse(preflight);
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderExecutionTrackPreflightError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.get('/api/v1/companion/execution-track-preflight/poll', async (request, reply) => {
+      const parsedRequest = companionExecutionTrackPreflightPollRequestSchema.safeParse(
+        request.query,
+      );
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_execution_track_preflight_poll_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const leaseHeader = request.headers['x-operatingline-companion-lease'];
+      if (typeof leaseHeader !== 'string') {
+        return reply.code(409).send({
+          error: 'companion_lease_required',
+          message: 'Execution-track preflight polling requires a negotiated Companion lease',
+        });
+      }
+      try {
+        const session = companionLeaseManager.authorizeDocumentSession(
+          leaseHeader,
+          parsedRequest.data.adapterId,
+          parsedRequest.data.instanceId,
+        );
+        if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+          return reply.code(409).send({
+            error: 'execution_track_preflight_protocol_unsupported',
+            message: 'Execution-track preflight polling requires Guide 1.6',
+          });
+        }
+        const target = {
+          adapterId: 'blender' as const,
+          instanceId: session.hello.instanceId,
+        };
+        const pending = pendingExecutionTrackPreflightForTarget(
+          target.adapterId,
+          target.instanceId,
+        );
+        if (pending !== null) {
+          requireCurrentExecutionTrackDocumentReceipt(
+            session,
+            pending.binding.acceptance.receipt.sessionFingerprintSha256,
+          );
+        }
+        const delivery = executionTrackPreflightCoordinator.poll(
+          target.adapterId,
+          target.instanceId,
+          createHash('sha256').update(leaseHeader).digest('hex'),
+          {
+            leaseId: session.lease.leaseId,
+            sessionId: session.hello.sessionId,
+            target,
+            documentIncarnationId: session.hello.documentIncarnationId,
+            expiresAt: session.lease.expiresAt,
+          },
+        );
+        return companionExecutionTrackPreflightPollDeliverySchema.parse({ request: delivery });
+      } catch (error) {
+        if (error instanceof CompanionLeaseError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        if (error instanceof BlenderExecutionTrackPreflightError) {
+          return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+        }
+        throw error;
+      }
+    });
+    runtimeApp.post(
+      '/api/v1/companion/execution-track-preflight/result',
+      async (request, reply) => {
+        const parsedResult = companionExecutionTrackPreflightResultSchema.safeParse(request.body);
+        if (!parsedResult.success) {
+          return reply.code(400).send({
+            error: 'invalid_execution_track_preflight_result',
+            issues: parsedResult.error.issues,
+          });
+        }
+        const leaseHeader = request.headers['x-operatingline-companion-lease'];
+        if (typeof leaseHeader !== 'string') {
+          return reply.code(409).send({
+            error: 'companion_lease_required',
+            message: 'Execution-track preflight results require a negotiated Companion lease',
+          });
+        }
+        try {
+          const session = companionLeaseManager.authorizeDocumentSession(
+            leaseHeader,
+            parsedResult.data.target.adapterId,
+            parsedResult.data.target.instanceId,
+          );
+          if (session.lease.negotiatedGuideProtocolVersion !== guideProtocolVersion) {
+            return reply.code(409).send({
+              error: 'execution_track_preflight_protocol_unsupported',
+              message: 'Execution-track preflight results require Guide 1.6',
+            });
+          }
+          const completion = executionTrackPreflightCoordinator.complete(
+            parsedResult.data,
+            createHash('sha256').update(leaseHeader).digest('hex'),
+            (_result, preflight) => {
+              if (
+                preflight.lease?.leaseId !== session.lease.leaseId ||
+                preflight.lease.sessionId !== session.hello.sessionId ||
+                preflight.lease.documentIncarnationId !== session.hello.documentIncarnationId
+              ) {
+                executionTrackPreflightRejected(
+                  'Execution-track preflight result lease is no longer the current document lease',
+                  409,
+                  'execution_track_preflight_delivery_lease_not_current',
+                );
+              }
+              if (_result.status === 'rejected') return;
+              const binding = preflight.binding;
+              const revalidated = authorizeExecutionTrackPreflight(
+                companionExecutionTrackPreflightCreateRequestSchema.parse({
+                  formatVersion: binding.formatVersion,
+                  requestId: binding.requestId,
+                  target: binding.target,
+                  proposalId: binding.proposal.id,
+                  plan: binding.plan,
+                  executionId: binding.executionId,
+                  leafId: binding.leafId,
+                  override: binding.override,
+                  expectedState: binding.expectedState,
+                }),
+                session,
+                binding.requestedAt,
+              );
+              if (!isDeepStrictEqual(revalidated, binding)) {
+                executionTrackPreflightRejected(
+                  'Execution-track preflight binding changed before completion',
+                  409,
+                  'execution_track_preflight_authority_drift',
+                );
+              }
+            },
+          );
+          return companionExecutionTrackPreflightResultAckSchema.parse({ result: completion });
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          if (error instanceof BlenderExecutionTrackPreflightError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      },
+    );
     runtimeApp.get('/api/v1/companion/action', async (request, reply) => {
       const parsedRequest = companionActionPollRequestSchema.safeParse(request.query);
       if (!parsedRequest.success) {
