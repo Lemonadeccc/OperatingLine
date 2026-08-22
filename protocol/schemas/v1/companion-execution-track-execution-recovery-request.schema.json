@@ -31791,6 +31791,17 @@
             }
           ]
         },
+        "managedStartContentSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "baselineContentSha256": {
           "anyOf": [
             {
@@ -31828,6 +31839,7 @@
       },
       "required": [
         "terminalMarkerContentSha256",
+        "managedStartContentSha256",
         "baselineContentSha256",
         "commitIntentId",
         "commitIntentContentSha256"
@@ -31838,7 +31850,8 @@
       "type": "string",
       "enum": [
         "coordinator_restart",
-        "document_authority_drift"
+        "document_authority_drift",
+        "companion_reported"
       ]
     },
     "mode": {

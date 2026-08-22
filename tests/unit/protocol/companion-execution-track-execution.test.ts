@@ -5,10 +5,13 @@ import {
   companionExecutionTrackExecutionBindingSchema,
   companionExecutionTrackExecutionCreateRequestSchema,
   companionExecutionTrackExecutionDeliverySchema,
+  companionExecutionTrackExecutionManagedStartAckSchema,
+  companionExecutionTrackExecutionManagedStartSubmissionSchema,
   companionExecutionTrackExecutionProgressChainSchema,
   companionExecutionTrackExecutionProgressSchema,
   companionExecutionTrackExecutionProgressTransitionMatches,
   companionExecutionTrackExecutionRecoveryAckSchema,
+  companionExecutionTrackExecutionRecoveryPollDeliverySchema,
   companionExecutionTrackExecutionRecoveryRequestSchema,
   companionExecutionTrackExecutionResultSchema,
   companionExecutionTrackExecutionStatusSchema,
@@ -974,6 +977,7 @@ describe('Companion execution-track v2 protocol', () => {
         progress.phase === 'baseline_restored'
           ? {
               terminalMarkerContentSha256: null,
+              managedStartContentSha256: null,
               baselineContentSha256: progress.baseline.contentSha256,
               commitIntentId: null,
               commitIntentContentSha256: null,
@@ -981,12 +985,14 @@ describe('Companion execution-track v2 protocol', () => {
           : progress.phase === 'commit_intent_recorded'
             ? {
                 terminalMarkerContentSha256: null,
+                managedStartContentSha256: null,
                 baselineContentSha256: progress.baseline.contentSha256,
                 commitIntentId: progress.intent.intentId,
                 commitIntentContentSha256: progress.intent.contentSha256,
               }
             : {
                 terminalMarkerContentSha256: null,
+                managedStartContentSha256: null,
                 baselineContentSha256: null,
                 commitIntentId: null,
                 commitIntentContentSha256: null,
@@ -1180,6 +1186,133 @@ describe('Companion execution-track v2 protocol', () => {
     }
   });
 
+  it('binds managed-start persistence to the exact commit delivery before mutation', () => {
+    const commit = sixPhaseChain()[5];
+    if (commit?.phase !== 'commit_intent_recorded') throw new Error('expected commit');
+    const managedStart = hashContent({
+      managedStartId: ids.managedStart,
+      commitIntentId: commit.intent.intentId,
+      commitIntentContentSha256: commit.intent.contentSha256,
+      baselineContentSha256: commit.baseline.contentSha256,
+      proofEvidenceContentSha256: commit.proofEvidenceContentSha256,
+      previousProgressContentSha256: commit.contentSha256,
+      startedAt: '2026-08-22T10:00:21Z',
+    });
+    const submission = {
+      formatVersion: '2.0.0',
+      requestId: commit.binding.requestId,
+      deliveryId: commit.deliveryId,
+      bindingContentSha256: commit.binding.bindingContentSha256,
+      currentLease: commit.currentLease,
+      commitProgress: commit,
+      managedStart,
+    } as const;
+    expect(companionExecutionTrackExecutionManagedStartSubmissionSchema.parse(submission)).toEqual(
+      submission,
+    );
+    expect(
+      companionExecutionTrackExecutionManagedStartAckSchema.parse({ result: 'duplicate' }),
+    ).toEqual({ result: 'duplicate' });
+
+    const rehashStart = (patch: Record<string, unknown>) =>
+      hashContent({
+        ...Object.fromEntries(
+          Object.entries(managedStart).filter(([key]) => key !== 'contentSha256'),
+        ),
+        ...patch,
+      });
+    const hostile = [
+      { ...submission, requestId: ids.proof },
+      { ...submission, deliveryId: ids.proof },
+      { ...submission, bindingContentSha256: 'f'.repeat(64) },
+      {
+        ...submission,
+        currentLease: { ...submission.currentLease, leaseId: ids.replacementLease },
+      },
+      {
+        ...submission,
+        currentLease: { ...submission.currentLease, sessionId: ids.replacementLease },
+      },
+      {
+        ...submission,
+        currentLease: {
+          ...submission.currentLease,
+          documentIncarnationId: ids.replacementLease,
+        },
+      },
+      {
+        ...submission,
+        currentLease: {
+          ...submission.currentLease,
+          target: { ...submission.currentLease.target, instanceId: ids.replacementLease },
+        },
+      },
+      {
+        ...submission,
+        currentLease: { ...submission.currentLease, expiresAt: '2026-08-22T10:00:24Z' },
+      },
+      { ...submission, commitProgress: { ...commit, contentSha256: 'f'.repeat(64) } },
+      { ...submission, commitProgress: { ...commit, sequence: 5 } },
+      {
+        ...submission,
+        commitProgress: { ...commit, previousProgressContentSha256: null },
+      },
+      { ...submission, commitProgress: { ...commit, deliveryId: ids.proof } },
+      {
+        ...submission,
+        commitProgress: {
+          ...commit,
+          currentLease: { ...commit.currentLease, leaseId: ids.replacementLease },
+        },
+      },
+      {
+        ...submission,
+        commitProgress: {
+          ...commit,
+          intent: { ...commit.intent, contentSha256: 'f'.repeat(64) },
+        },
+      },
+      {
+        ...submission,
+        commitProgress: {
+          ...commit,
+          intent: {
+            ...commit.intent,
+            redoBarrier: { ...commit.intent.redoBarrier, contentSha256: 'f'.repeat(64) },
+          },
+        },
+      },
+      { ...submission, managedStart: rehashStart({ commitIntentId: ids.proof }) },
+      {
+        ...submission,
+        managedStart: rehashStart({ commitIntentContentSha256: 'f'.repeat(64) }),
+      },
+      { ...submission, managedStart: rehashStart({ baselineContentSha256: 'f'.repeat(64) }) },
+      {
+        ...submission,
+        managedStart: rehashStart({ proofEvidenceContentSha256: 'f'.repeat(64) }),
+      },
+      {
+        ...submission,
+        managedStart: rehashStart({ previousProgressContentSha256: 'f'.repeat(64) }),
+      },
+      { ...submission, managedStart: { ...managedStart, contentSha256: 'f'.repeat(64) } },
+      { ...submission, managedStart: rehashStart({ startedAt: '2026-08-22T10:00:19Z' }) },
+      { ...submission, managedStart: rehashStart({ startedAt: commit.currentLease.expiresAt }) },
+    ];
+    for (const value of hostile) {
+      expect(
+        companionExecutionTrackExecutionManagedStartSubmissionSchema.safeParse(value).success,
+      ).toBe(false);
+    }
+    expect(
+      companionExecutionTrackExecutionManagedStartAckSchema.safeParse({
+        result: 'accepted',
+        extra: true,
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires complete delivery/progress status and exact managed terminal references', async () => {
     const { binding, delivery, lease } = fixture();
     const chain = sixPhaseChain();
@@ -1199,6 +1332,61 @@ describe('Companion execution-track v2 protocol', () => {
         updatedAt: '2026-08-22T10:00:01Z',
       }).success,
     ).toBe(false);
+    const preDispatchAuthorityExpirationEvidence = {
+      source: 'document_authority_drift',
+      requestId: binding.requestId,
+      bindingContentSha256: binding.bindingContentSha256,
+      target: binding.target,
+      priorStatus: 'queued',
+      detectedAt: '2026-08-22T10:00:01Z',
+      resolution: 'pre_dispatch_authority_expired',
+      retainsTargetLock: false,
+      automaticReplay: false,
+    } as const;
+    const preDispatchExpired = {
+      binding,
+      status: 'pre_dispatch_authority_expired',
+      preDispatchAuthorityExpirationEvidence,
+      updatedAt: preDispatchAuthorityExpirationEvidence.detectedAt,
+    } as const;
+    expect(companionExecutionTrackExecutionStatusSchema.parse(preDispatchExpired)).toEqual(
+      preDispatchExpired,
+    );
+    for (const value of [
+      { ...preDispatchExpired, deliveryId: delivery.deliveryId },
+      {
+        ...preDispatchExpired,
+        preDispatchAuthorityExpirationEvidence: {
+          ...preDispatchAuthorityExpirationEvidence,
+          source: 'coordinator_restart',
+        },
+      },
+      {
+        ...preDispatchExpired,
+        preDispatchAuthorityExpirationEvidence: {
+          ...preDispatchAuthorityExpirationEvidence,
+          requestId: ids.proof,
+        },
+      },
+      {
+        ...preDispatchExpired,
+        preDispatchAuthorityExpirationEvidence: {
+          ...preDispatchAuthorityExpirationEvidence,
+          bindingContentSha256: 'f'.repeat(64),
+        },
+      },
+      {
+        ...preDispatchExpired,
+        preDispatchAuthorityExpirationEvidence: {
+          ...preDispatchAuthorityExpirationEvidence,
+          detectedAt: '2026-08-22T09:59:59Z',
+        },
+        updatedAt: '2026-08-22T09:59:59Z',
+      },
+      { ...preDispatchExpired, updatedAt: '2026-08-22T10:00:02Z' },
+    ]) {
+      expect(companionExecutionTrackExecutionStatusSchema.safeParse(value).success).toBe(false);
+    }
     expect(
       companionExecutionTrackExecutionStatusSchema.safeParse({
         binding,
@@ -1238,6 +1426,29 @@ describe('Companion execution-track v2 protocol', () => {
         updatedAt: '2026-08-22T10:00:21Z',
       }).status,
     ).toBe('managed_action_in_progress');
+    for (const managedStartPatch of [
+      { baselineContentSha256: 'f'.repeat(64) },
+      { proofEvidenceContentSha256: 'f'.repeat(64) },
+    ]) {
+      const hostileManagedStart = hashContent({
+        ...Object.fromEntries(
+          Object.entries(managedStart).filter(([key]) => key !== 'contentSha256'),
+        ),
+        ...managedStartPatch,
+      });
+      expect(
+        companionExecutionTrackExecutionStatusSchema.safeParse({
+          binding,
+          deliveryId: delivery.deliveryId,
+          lease,
+          dispatchedAt: delivery.dispatchedAt,
+          status: 'managed_action_in_progress',
+          progress: commit,
+          managedStart: hostileManagedStart,
+          updatedAt: '2026-08-22T10:00:21Z',
+        }).success,
+      ).toBe(false);
+    }
     const commonManaged = {
       ...resultIdentity('2026-08-22T10:00:21Z', commit.currentLease),
       status: 'succeeded',
@@ -1426,6 +1637,7 @@ describe('Companion execution-track v2 protocol', () => {
       acceptedProgressChainHeadContentSha256: baselineProgress.contentSha256,
       durableReferences: {
         terminalMarkerContentSha256: null,
+        managedStartContentSha256: null,
         baselineContentSha256: null,
         commitIntentId: null,
         commitIntentContentSha256: null,
@@ -1448,6 +1660,89 @@ describe('Companion execution-track v2 protocol', () => {
         updatedAt: serverEvidence.detectedAt,
       }).status,
     ).toBe('recovery_required');
+    const preparedMarkerRecoveryEvidence = {
+      source: 'coordinator_restart',
+      requestId: binding.requestId,
+      deliveryId: delivery.deliveryId,
+      bindingContentSha256: binding.bindingContentSha256,
+      target: binding.target,
+      leaseId: lease.leaseId,
+      sessionId: lease.sessionId,
+      documentIncarnationId: lease.documentIncarnationId,
+      acceptedProgressChainHeadContentSha256: commit.contentSha256,
+      durableReferences: {
+        terminalMarkerContentSha256: 'f'.repeat(64),
+        managedStartContentSha256: managedStart.contentSha256,
+        baselineContentSha256: commit.baseline.contentSha256,
+        commitIntentId: commit.intent.intentId,
+        commitIntentContentSha256: commit.intent.contentSha256,
+      },
+      priorStatus: 'managed_action_in_progress',
+      detectedAt: '2026-08-22T10:00:22Z',
+      resolution: 'recovery_required',
+      retainsTargetLock: true,
+      automaticReplay: false,
+    } as const;
+    expect(
+      companionExecutionTrackExecutionStatusSchema.parse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'recovery_required',
+        progress: commit,
+        serverRecoveryEvidence: preparedMarkerRecoveryEvidence,
+        updatedAt: preparedMarkerRecoveryEvidence.detectedAt,
+      }).status,
+    ).toBe('recovery_required');
+    expect(
+      companionExecutionTrackExecutionStatusSchema.safeParse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'recovery_required',
+        progress: commit,
+        serverRecoveryEvidence: {
+          ...preparedMarkerRecoveryEvidence,
+          priorStatus: 'commit_intent_recorded',
+        },
+        updatedAt: preparedMarkerRecoveryEvidence.detectedAt,
+      }).success,
+    ).toBe(false);
+    expect(
+      companionExecutionTrackExecutionStatusSchema.safeParse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'recovery_required',
+        progress: commit,
+        serverRecoveryEvidence: {
+          ...preparedMarkerRecoveryEvidence,
+          detectedAt: '2026-08-22T10:00:19Z',
+        },
+        updatedAt: '2026-08-22T10:00:19Z',
+      }).success,
+    ).toBe(false);
+    expect(
+      companionExecutionTrackExecutionStatusSchema.safeParse({
+        binding,
+        deliveryId: delivery.deliveryId,
+        lease,
+        dispatchedAt: delivery.dispatchedAt,
+        status: 'recovery_required',
+        progress: baselineProgress,
+        serverRecoveryEvidence: {
+          ...serverEvidence,
+          durableReferences: {
+            ...serverEvidence.durableReferences,
+            terminalMarkerContentSha256: 'f'.repeat(64),
+          },
+        },
+        updatedAt: serverEvidence.detectedAt,
+      }).success,
+    ).toBe(false);
     expect(
       companionExecutionTrackExecutionStatusSchema.safeParse({
         binding,
@@ -1526,6 +1821,7 @@ describe('Companion execution-track v2 protocol', () => {
       acceptedProgressChainHeadContentSha256: restored.contentSha256,
       durableReferences: {
         terminalMarkerContentSha256: null,
+        managedStartContentSha256: null,
         baselineContentSha256: restored.baseline.contentSha256,
         commitIntentId: null,
         commitIntentContentSha256: null,
@@ -1535,6 +1831,18 @@ describe('Companion execution-track v2 protocol', () => {
       automaticReplay: false,
       requestedAt: '2026-08-22T10:05:00Z',
     });
+    expect(companionExecutionTrackExecutionRecoveryPollDeliverySchema.parse({ request })).toEqual({
+      request,
+    });
+    expect(
+      companionExecutionTrackExecutionRecoveryPollDeliverySchema.parse({ request: null }),
+    ).toEqual({ request: null });
+    expect(
+      companionExecutionTrackExecutionRecoveryPollDeliverySchema.safeParse({
+        request,
+        extra: true,
+      }).success,
+    ).toBe(false);
     const terminalResult = companionExecutionTrackExecutionResultSchema.parse({
       ...resultIdentity('2026-08-22T10:00:20Z', restored.currentLease),
       status: 'failed_restored',
@@ -1599,6 +1907,129 @@ describe('Companion execution-track v2 protocol', () => {
       companionExecutionTrackExecutionRecoveryAckSchema.safeParse(semanticallyInvalidTerminalAck)
         .success,
     ).toBe(false);
+    expect(
+      companionExecutionTrackExecutionRecoveryAckSchema.safeParse({
+        ...ack,
+        evidence: {
+          ...ack.evidence,
+          progress: {
+            ...restored,
+            baseline: { ...restored.baseline, objectIdentitySha256: 'f'.repeat(64) },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    const withRestoredResult = (mutatedResult: typeof terminalResult) => ({
+      ...ack,
+      evidence: {
+        ...ack.evidence,
+        terminalResult: mutatedResult,
+        terminalResultContentSha256: computeProtocolCanonicalJsonSha256(mutatedResult),
+      },
+    });
+    for (const mutatedResult of [
+      { ...terminalResult, baselineContentSha256: 'f'.repeat(64) },
+      { ...terminalResult, proofEvidenceContentSha256: 'f'.repeat(64) },
+      { ...terminalResult, leaseId: ids.replacementLease },
+      { ...terminalResult, requestId: ids.proof },
+    ]) {
+      expect(
+        companionExecutionTrackExecutionRecoveryAckSchema.safeParse(
+          withRestoredResult(mutatedResult),
+        ).success,
+      ).toBe(false);
+    }
+    const renewedTerminalLease = {
+      ...terminalResult.currentLease,
+      expiresAt: '2026-08-22T10:10:00Z',
+    };
+    for (const mutatedResult of [
+      { ...terminalResult, occurredAt: '2026-08-22T10:00:18.500Z' },
+      {
+        ...terminalResult,
+        currentLease: renewedTerminalLease,
+        occurredAt: '2026-08-22T10:05:00.500Z',
+      },
+      {
+        ...terminalResult,
+        currentLease: renewedTerminalLease,
+        occurredAt: '2026-08-22T10:05:02Z',
+      },
+    ]) {
+      expect(companionExecutionTrackExecutionResultSchema.safeParse(mutatedResult).success).toBe(
+        true,
+      );
+      expect(
+        companionExecutionTrackExecutionRecoveryAckSchema.safeParse(
+          withRestoredResult(mutatedResult),
+        ).success,
+      ).toBe(false);
+    }
+    const baseline = chain[0];
+    if (baseline?.phase !== 'baseline_attested') throw new Error('expected baseline');
+    const noMutationRequest = companionExecutionTrackExecutionRecoveryRequestSchema.parse({
+      ...request,
+      acceptedProgress: baseline,
+      acceptedProgressChainHeadContentSha256: baseline.contentSha256,
+      durableReferences: {
+        terminalMarkerContentSha256: null,
+        managedStartContentSha256: null,
+        baselineContentSha256: null,
+        commitIntentId: null,
+        commitIntentContentSha256: null,
+      },
+    });
+    const noMutationResult = companionExecutionTrackExecutionResultSchema.parse({
+      ...resultIdentity('2026-08-22T10:00:03Z', baseline.currentLease),
+      status: 'failed_no_mutation',
+      startCheckpointId: baseline.startCheckpoint.checkpointId,
+      baselineAttestationContentSha256: baseline.startAttestation.contentSha256,
+      lastProgressContentSha256: baseline.contentSha256,
+      error: 'No mutation before restart.',
+    });
+    const noMutationState = hashContent({
+      replacementLeaseId: replacementLease.leaseId,
+      sessionId: replacementLease.sessionId,
+      documentIncarnationId: replacementLease.documentIncarnationId,
+      reportId: baseline.startAttestation.reportId,
+      sequence: baseline.startAttestation.sequence,
+      sceneFingerprintSha256: baseline.startAttestation.sceneFingerprintSha256,
+      ...baseline.startAttestation.identitySnapshot,
+      observedAt: '2026-08-22T10:05:01Z',
+    });
+    const noMutationAck = {
+      ...ack,
+      request: noMutationRequest,
+      acceptedProgressChainHeadContentSha256: baseline.contentSha256,
+      durableReferences: noMutationRequest.durableReferences,
+      evidence: {
+        kind: 'baseline_terminal',
+        terminalResult: noMutationResult,
+        terminalResultContentSha256: computeProtocolCanonicalJsonSha256(noMutationResult),
+        progress: baseline,
+        currentState: noMutationState,
+      },
+    } as const;
+    expect(companionExecutionTrackExecutionRecoveryAckSchema.parse(noMutationAck)).toEqual(
+      noMutationAck,
+    );
+    for (const mutatedResult of [
+      { ...noMutationResult, startCheckpointId: ids.proof },
+      { ...noMutationResult, baselineAttestationContentSha256: 'f'.repeat(64) },
+      { ...noMutationResult, lastProgressContentSha256: 'f'.repeat(64) },
+      { ...noMutationResult, leaseId: ids.replacementLease },
+    ]) {
+      expect(
+        companionExecutionTrackExecutionRecoveryAckSchema.safeParse({
+          ...noMutationAck,
+          evidence: {
+            ...noMutationAck.evidence,
+            terminalResult: mutatedResult,
+            terminalResultContentSha256: computeProtocolCanonicalJsonSha256(mutatedResult),
+          },
+        }).success,
+      ).toBe(false);
+    }
     const unresolved = {
       ...ack,
       outcome: 'recovery_required',
@@ -1612,6 +2043,18 @@ describe('Companion execution-track v2 protocol', () => {
     expect(companionExecutionTrackExecutionRecoveryAckSchema.parse(unresolved).outcome).toBe(
       'recovery_required',
     );
+    const companionReportedRequest = companionExecutionTrackExecutionRecoveryRequestSchema.parse({
+      ...request,
+      source: 'companion_reported',
+    });
+    expect(companionReportedRequest.mode).toBe('read_only_reconcile');
+    expect(companionReportedRequest.automaticReplay).toBe(false);
+    expect(
+      companionExecutionTrackExecutionRecoveryAckSchema.parse({
+        ...unresolved,
+        request: companionReportedRequest,
+      }).outcome,
+    ).toBe('recovery_required');
     expect(
       companionExecutionTrackExecutionRecoveryAckSchema.safeParse({
         ...unresolved,
@@ -1630,6 +2073,10 @@ describe('Companion execution-track v2 protocol', () => {
     await validatePublicJsonSchemaCases(recoveryAckJsonSchema, [
       { value: ack, accepted: true },
       { value: unresolved, accepted: true },
+      {
+        value: { ...ack, evidence: { ...ack.evidence, progress: chain[0] } },
+        accepted: false,
+      },
       {
         value: { ...unresolved, outcome: 'reconciled', retainsTargetLock: false },
         accepted: false,
@@ -1759,7 +2206,8 @@ describe('Companion execution-track v2 protocol', () => {
       expiresAt: '2026-08-22T10:10:00Z',
     };
     const durableReferences = {
-      terminalMarkerContentSha256: terminalMarker.contentSha256,
+      terminalMarkerContentSha256: null,
+      managedStartContentSha256: managedStart.contentSha256,
       baselineContentSha256: commit.baseline.contentSha256,
       commitIntentId: commit.intent.intentId,
       commitIntentContentSha256: commit.intent.contentSha256,
@@ -1846,8 +2294,75 @@ describe('Companion execution-track v2 protocol', () => {
         },
       };
     };
+    const equalSequenceResult = {
+      ...terminalResult,
+      managedReport: {
+        ...terminalResult.managedReport,
+        sequence: binding.expectedState.sequence,
+      },
+    };
+    const equalSequenceResultHash = computeProtocolCanonicalJsonSha256(equalSequenceResult);
+    const equalSequenceAck = withTerminalMarker(
+      rehashTerminalMarker({
+        terminalResultContentSha256: equalSequenceResultHash,
+        managedReportSequence: binding.expectedState.sequence,
+      }),
+    );
+    const equalSequenceCurrentState = hashContent({
+      ...Object.fromEntries(
+        Object.entries(currentState).filter(([key]) => key !== 'contentSha256'),
+      ),
+      sequence: binding.expectedState.sequence,
+    });
 
     const hostileAcks: Array<{ name: string; value: unknown }> = [
+      {
+        name: 'managed report did not advance expected state',
+        value: {
+          ...equalSequenceAck,
+          evidence: {
+            ...equalSequenceAck.evidence,
+            terminalResult: equalSequenceResult,
+            terminalResultContentSha256: equalSequenceResultHash,
+            currentState: equalSequenceCurrentState,
+          },
+        },
+      },
+      {
+        name: 'terminal produced after recovery challenge',
+        value: {
+          ...ack,
+          request: { ...request, requestedAt: '2026-08-22T10:00:21.500Z' },
+        },
+      },
+      {
+        name: 'persisted terminal without accepted managed start',
+        value: {
+          ...ack,
+          request: {
+            ...request,
+            durableReferences: { ...durableReferences, managedStartContentSha256: null },
+          },
+          durableReferences: { ...durableReferences, managedStartContentSha256: null },
+        },
+      },
+      {
+        name: 'wrong accepted managed start',
+        value: {
+          ...ack,
+          request: {
+            ...request,
+            durableReferences: {
+              ...durableReferences,
+              managedStartContentSha256: 'f'.repeat(64),
+            },
+          },
+          durableReferences: {
+            ...durableReferences,
+            managedStartContentSha256: 'f'.repeat(64),
+          },
+        },
+      },
       {
         name: 'terminal marker hash',
         value: {
@@ -2067,6 +2582,7 @@ describe('Companion execution-track v2 protocol', () => {
       acceptedProgressChainHeadContentSha256: chain[0]!.contentSha256,
       durableReferences: {
         terminalMarkerContentSha256: null,
+        managedStartContentSha256: null,
         baselineContentSha256: null,
         commitIntentId: null,
         commitIntentContentSha256: null,
@@ -2088,11 +2604,35 @@ describe('Companion execution-track v2 protocol', () => {
       ...recoveryStart.startAttestation.identitySnapshot,
       observedAt: '2026-08-22T10:05:01Z',
     });
+    const commit = chain[5];
+    if (commit?.phase !== 'commit_intent_recorded') throw new Error('expected commit');
+    const managedStart = hashContent({
+      managedStartId: ids.managedStart,
+      commitIntentId: commit.intent.intentId,
+      commitIntentContentSha256: commit.intent.contentSha256,
+      baselineContentSha256: commit.baseline.contentSha256,
+      proofEvidenceContentSha256: commit.proofEvidenceContentSha256,
+      previousProgressContentSha256: commit.contentSha256,
+      startedAt: '2026-08-22T10:00:21Z',
+    });
     const cases = [
       ['create-request', request],
       ['binding', binding],
       ['baseline-identity', chain[4]!.phase === 'baseline_restored' ? chain[4].baseline : {}],
       ['delivery', delivery],
+      [
+        'managed-start-submission',
+        {
+          formatVersion: '2.0.0',
+          requestId: binding.requestId,
+          deliveryId: delivery.deliveryId,
+          bindingContentSha256: binding.bindingContentSha256,
+          currentLease: commit.currentLease,
+          commitProgress: commit,
+          managedStart,
+        },
+      ],
+      ['managed-start-ack', { result: 'accepted' }],
       ['progress', chain[0]],
       ['progress-transition', { previous: chain[0], next: chain[1] }],
       ['progress-chain', chain],
@@ -2116,6 +2656,8 @@ describe('Companion execution-track v2 protocol', () => {
       ['poll-request', binding.target],
       ['poll-delivery', { request: delivery }],
       ['recovery-request', recoveryRequest],
+      ['recovery-poll-delivery', { request: recoveryRequest }],
+      ['recovery-poll-delivery', { request: null }],
       [
         'recovery-ack',
         {
@@ -2153,13 +2695,66 @@ describe('Companion execution-track v2 protocol', () => {
         { value: { ...value, extra: true }, accepted: false },
       ]);
     }
+    const managedStartSubmissionJsonSchema = JSON.parse(
+      readFileSync(
+        resolve(
+          'protocol/schemas/v1',
+          'companion-execution-track-execution-managed-start-submission.schema.json',
+        ),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    await validatePublicJsonSchemaCases(managedStartSubmissionJsonSchema, [
+      {
+        value: {
+          formatVersion: '2.0.0',
+          requestId: binding.requestId,
+          deliveryId: delivery.deliveryId,
+          bindingContentSha256: binding.bindingContentSha256,
+          currentLease: commit.currentLease,
+          commitProgress: chain[0],
+          managedStart,
+        },
+        accepted: false,
+      },
+    ]);
     const statusJsonSchema = JSON.parse(
       readFileSync(
         resolve('protocol/schemas/v1', 'companion-execution-track-execution-status.schema.json'),
         'utf8',
       ),
     ) as Record<string, unknown>;
+    const preDispatchAuthorityExpirationEvidence = {
+      source: 'document_authority_drift',
+      requestId: binding.requestId,
+      bindingContentSha256: binding.bindingContentSha256,
+      target: binding.target,
+      priorStatus: 'queued',
+      detectedAt: '2026-08-22T10:00:01Z',
+      resolution: 'pre_dispatch_authority_expired',
+      retainsTargetLock: false,
+      automaticReplay: false,
+    } as const;
     await validatePublicJsonSchemaCases(statusJsonSchema, [
+      {
+        value: {
+          binding,
+          status: 'pre_dispatch_authority_expired',
+          preDispatchAuthorityExpirationEvidence,
+          updatedAt: preDispatchAuthorityExpirationEvidence.detectedAt,
+        },
+        accepted: true,
+      },
+      {
+        value: {
+          binding,
+          deliveryId: delivery.deliveryId,
+          status: 'pre_dispatch_authority_expired',
+          preDispatchAuthorityExpirationEvidence,
+          updatedAt: preDispatchAuthorityExpirationEvidence.detectedAt,
+        },
+        accepted: false,
+      },
       {
         value: {
           binding,
@@ -2226,6 +2821,7 @@ describe('Companion execution-track v2 protocol', () => {
             acceptedProgressChainHeadContentSha256: chain[0]!.contentSha256,
             durableReferences: {
               terminalMarkerContentSha256: null,
+              managedStartContentSha256: null,
               baselineContentSha256: null,
               commitIntentId: null,
               commitIntentContentSha256: null,

@@ -4709,6 +4709,7 @@
         "baseline_restored",
         "commit_intent_recorded",
         "managed_action_in_progress",
+        "pre_dispatch_authority_expired",
         "succeeded",
         "failed_no_mutation",
         "failed_restored",
@@ -37763,6 +37764,17 @@
                 }
               ]
             },
+            "managedStartContentSha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "baselineContentSha256": {
               "anyOf": [
                 {
@@ -37800,6 +37812,7 @@
           },
           "required": [
             "terminalMarkerContentSha256",
+            "managedStartContentSha256",
             "baselineContentSha256",
             "commitIntentId",
             "commitIntentContentSha256"
@@ -37851,6 +37864,76 @@
         "documentIncarnationId",
         "acceptedProgressChainHeadContentSha256",
         "durableReferences",
+        "priorStatus",
+        "detectedAt",
+        "resolution",
+        "retainsTargetLock",
+        "automaticReplay"
+      ],
+      "additionalProperties": false
+    },
+    "preDispatchAuthorityExpirationEvidence": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "document_authority_drift"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "bindingContentSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "adapterId": {
+              "type": "string",
+              "const": "blender"
+            },
+            "instanceId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "required": [
+            "adapterId",
+            "instanceId"
+          ],
+          "additionalProperties": false
+        },
+        "priorStatus": {
+          "type": "string",
+          "const": "queued"
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "resolution": {
+          "type": "string",
+          "const": "pre_dispatch_authority_expired"
+        },
+        "retainsTargetLock": {
+          "type": "boolean",
+          "const": false
+        },
+        "automaticReplay": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "source",
+        "requestId",
+        "bindingContentSha256",
+        "target",
         "priorStatus",
         "detectedAt",
         "resolution",
@@ -38171,16 +38254,33 @@
               "required": [
                 "serverRecoveryEvidence"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         }
       },
       "else": {
-        "required": [
-          "deliveryId",
-          "lease",
-          "dispatchedAt"
-        ]
+        "if": {
+          "properties": {
+            "status": {
+              "const": "pre_dispatch_authority_expired"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        "else": {
+          "required": [
+            "deliveryId",
+            "lease",
+            "dispatchedAt"
+          ]
+        }
       }
     },
     {
@@ -38197,6 +38297,67 @@
       "then": {
         "not": {
           "anyOf": [
+            {
+              "required": [
+                "progress"
+              ]
+            },
+            {
+              "required": [
+                "managedStart"
+              ]
+            },
+            {
+              "required": [
+                "result"
+              ]
+            },
+            {
+              "required": [
+                "serverRecoveryEvidence"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "pre_dispatch_authority_expired"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "preDispatchAuthorityExpirationEvidence"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "deliveryId"
+              ]
+            },
+            {
+              "required": [
+                "lease"
+              ]
+            },
+            {
+              "required": [
+                "dispatchedAt"
+              ]
+            },
             {
               "required": [
                 "progress"
@@ -38264,6 +38425,11 @@
               "required": [
                 "serverRecoveryEvidence"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         }
@@ -38311,6 +38477,11 @@
             {
               "required": [
                 "serverRecoveryEvidence"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
               ]
             }
           ]
@@ -38360,6 +38531,11 @@
               "required": [
                 "serverRecoveryEvidence"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         }
@@ -38407,6 +38583,11 @@
             {
               "required": [
                 "serverRecoveryEvidence"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
               ]
             }
           ]
@@ -38456,6 +38637,11 @@
               "required": [
                 "serverRecoveryEvidence"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         }
@@ -38504,6 +38690,11 @@
               "required": [
                 "serverRecoveryEvidence"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         }
@@ -38547,6 +38738,11 @@
             {
               "required": [
                 "serverRecoveryEvidence"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
               ]
             }
           ]
@@ -38609,6 +38805,11 @@
                 {
                   "required": [
                     "serverRecoveryEvidence"
+                  ]
+                },
+                {
+                  "required": [
+                    "preDispatchAuthorityExpirationEvidence"
                   ]
                 }
               ]
@@ -38674,6 +38875,11 @@
                   "required": [
                     "serverRecoveryEvidence"
                   ]
+                },
+                {
+                  "required": [
+                    "preDispatchAuthorityExpirationEvidence"
+                  ]
                 }
               ]
             }
@@ -38698,6 +38904,11 @@
             {
               "required": [
                 "managedStart"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
               ]
             }
           ]
@@ -38774,6 +38985,11 @@
               "required": [
                 "managedStart"
               ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
+              ]
             }
           ]
         },
@@ -38848,6 +39064,11 @@
             {
               "required": [
                 "managedStart"
+              ]
+            },
+            {
+              "required": [
+                "preDispatchAuthorityExpirationEvidence"
               ]
             }
           ]
@@ -39019,6 +39240,134 @@
               },
               "retainsTargetLock": {
                 "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "serverRecoveryEvidence": {
+            "properties": {
+              "durableReferences": {
+                "properties": {
+                  "terminalMarkerContentSha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "terminalMarkerContentSha256"
+                ]
+              }
+            },
+            "required": [
+              "durableReferences"
+            ]
+          }
+        },
+        "required": [
+          "serverRecoveryEvidence"
+        ]
+      },
+      "then": {
+        "required": [
+          "progress"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "progress": {
+                "properties": {
+                  "phase": {
+                    "const": "commit_intent_recorded"
+                  }
+                },
+                "required": [
+                  "phase"
+                ]
+              }
+            }
+          }
+        ],
+        "properties": {
+          "status": {
+            "const": "recovery_required"
+          },
+          "serverRecoveryEvidence": {
+            "properties": {
+              "source": {
+                "const": "coordinator_restart"
+              },
+              "priorStatus": {
+                "const": "managed_action_in_progress"
+              },
+              "resolution": {
+                "const": "recovery_required"
+              }
+            },
+            "required": [
+              "source",
+              "priorStatus",
+              "resolution"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "serverRecoveryEvidence": {
+            "properties": {
+              "priorStatus": {
+                "const": "managed_action_in_progress"
+              }
+            },
+            "required": [
+              "priorStatus"
+            ]
+          }
+        },
+        "required": [
+          "serverRecoveryEvidence"
+        ]
+      },
+      "then": {
+        "properties": {
+          "serverRecoveryEvidence": {
+            "properties": {
+              "durableReferences": {
+                "properties": {
+                  "managedStartContentSha256": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "managedStartContentSha256"
+                ]
+              }
+            },
+            "required": [
+              "durableReferences"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "serverRecoveryEvidence": {
+            "properties": {
+              "durableReferences": {
+                "properties": {
+                  "managedStartContentSha256": {
+                    "type": "null"
+                  }
+                },
+                "required": [
+                  "managedStartContentSha256"
+                ]
               }
             }
           }

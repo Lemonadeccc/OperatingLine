@@ -30,6 +30,8 @@ import {
   companionExecutionTrackExecutionBindingSchema,
   companionExecutionTrackExecutionCreateRequestSchema,
   companionExecutionTrackExecutionDeliverySchema,
+  companionExecutionTrackExecutionManagedStartAckSchema,
+  companionExecutionTrackExecutionManagedStartSubmissionSchema,
   companionExecutionTrackExecutionPollDeliverySchema,
   companionExecutionTrackExecutionPollRequestSchema,
   companionExecutionTrackExecutionProgressAckSchema,
@@ -37,6 +39,7 @@ import {
   companionExecutionTrackExecutionProgressSchema,
   companionExecutionTrackExecutionProgressTransitionSchema,
   companionExecutionTrackExecutionRecoveryAckSchema,
+  companionExecutionTrackExecutionRecoveryPollDeliverySchema,
   companionExecutionTrackExecutionRecoveryRequestSchema,
   companionExecutionTrackExecutionResultAckSchema,
   companionExecutionTrackExecutionResultSchema,
@@ -642,6 +645,8 @@ const schemas = [
       ['binding', companionExecutionTrackExecutionBindingSchema],
       ['baseline-identity', companionExecutionTrackExecutionBaselineIdentitySchema],
       ['delivery', companionExecutionTrackExecutionDeliverySchema],
+      ['managed-start-submission', companionExecutionTrackExecutionManagedStartSubmissionSchema],
+      ['managed-start-ack', companionExecutionTrackExecutionManagedStartAckSchema],
       ['progress', companionExecutionTrackExecutionProgressSchema],
       ['progress-transition', companionExecutionTrackExecutionProgressTransitionSchema],
       ['progress-chain', companionExecutionTrackExecutionProgressChainSchema],
@@ -653,6 +658,7 @@ const schemas = [
       ['poll-request', companionExecutionTrackExecutionPollRequestSchema],
       ['poll-delivery', companionExecutionTrackExecutionPollDeliverySchema],
       ['recovery-request', companionExecutionTrackExecutionRecoveryRequestSchema],
+      ['recovery-poll-delivery', companionExecutionTrackExecutionRecoveryPollDeliverySchema],
       ['recovery-ack', companionExecutionTrackExecutionRecoveryAckSchema],
     ] as const
   ).map(
@@ -1927,7 +1933,19 @@ function hardenExecutionTrackExecutionLifecycle(
   filename: string,
   schema: Record<string, unknown>,
 ): void {
-  if (filename === 'companion-execution-track-execution-status.schema.json') {
+  if (filename === 'companion-execution-track-execution-managed-start-submission.schema.json') {
+    const allOf = (schema['allOf'] ?? []) as unknown[];
+    allOf.push({
+      properties: {
+        commitProgress: {
+          properties: { phase: { const: 'commit_intent_recorded' } },
+          required: ['phase'],
+        },
+      },
+      required: ['commitProgress'],
+    });
+    schema['allOf'] = allOf;
+  } else if (filename === 'companion-execution-track-execution-status.schema.json') {
     const activePhases = [
       'baseline_attested',
       'proof_in_progress',
@@ -1961,19 +1979,55 @@ function hardenExecutionTrackExecutionLifecycle(
           'managedStart',
           'result',
           'serverRecoveryEvidence',
+          'preDispatchAuthorityExpirationEvidence',
         ]),
-        else: { required: ['deliveryId', 'lease', 'dispatchedAt'] },
+        else: {
+          if: {
+            properties: { status: { const: 'pre_dispatch_authority_expired' } },
+            required: ['status'],
+          },
+          else: { required: ['deliveryId', 'lease', 'dispatchedAt'] },
+        },
       },
       {
         if: { properties: { status: { const: 'dispatched' } }, required: ['status'] },
-        then: forbid(['progress', 'managedStart', 'result', 'serverRecoveryEvidence']),
+        then: forbid([
+          'progress',
+          'managedStart',
+          'result',
+          'serverRecoveryEvidence',
+          'preDispatchAuthorityExpirationEvidence',
+        ]),
+      },
+      {
+        if: {
+          properties: { status: { const: 'pre_dispatch_authority_expired' } },
+          required: ['status'],
+        },
+        then: {
+          required: ['preDispatchAuthorityExpirationEvidence'],
+          ...forbid([
+            'deliveryId',
+            'lease',
+            'dispatchedAt',
+            'progress',
+            'managedStart',
+            'result',
+            'serverRecoveryEvidence',
+          ]),
+        },
       },
       ...activePhases.map((phase) => ({
         if: { properties: { status: { const: phase } }, required: ['status'] },
         then: {
           required: ['progress'],
           ...progressPhase(phase),
-          ...forbid(['managedStart', 'result', 'serverRecoveryEvidence']),
+          ...forbid([
+            'managedStart',
+            'result',
+            'serverRecoveryEvidence',
+            'preDispatchAuthorityExpirationEvidence',
+          ]),
         },
       })),
       {
@@ -1984,7 +2038,7 @@ function hardenExecutionTrackExecutionLifecycle(
         then: {
           required: ['progress', 'managedStart'],
           ...progressPhase('commit_intent_recorded'),
-          ...forbid(['result', 'serverRecoveryEvidence']),
+          ...forbid(['result', 'serverRecoveryEvidence', 'preDispatchAuthorityExpirationEvidence']),
         },
       },
       ...(['succeeded', 'failed_managed'] as const).map((status) => ({
@@ -1994,7 +2048,11 @@ function hardenExecutionTrackExecutionLifecycle(
           allOf: [
             progressPhase('commit_intent_recorded'),
             resultStatus(status),
-            forbid(['managedStart', 'serverRecoveryEvidence']),
+            forbid([
+              'managedStart',
+              'serverRecoveryEvidence',
+              'preDispatchAuthorityExpirationEvidence',
+            ]),
           ],
         },
       })),
@@ -2002,7 +2060,7 @@ function hardenExecutionTrackExecutionLifecycle(
         (status) => ({
           if: { properties: { status: { const: status } }, required: ['status'] },
           then: {
-            ...forbid(['managedStart']),
+            ...forbid(['managedStart', 'preDispatchAuthorityExpirationEvidence']),
             oneOf: [
               {
                 required: ['result'],
@@ -2054,6 +2112,73 @@ function hardenExecutionTrackExecutionLifecycle(
               properties: {
                 resolution: { const: 'recovery_required' },
                 retainsTargetLock: { const: true },
+              },
+            },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: {
+                durableReferences: {
+                  properties: { terminalMarkerContentSha256: { type: 'string' } },
+                  required: ['terminalMarkerContentSha256'],
+                },
+              },
+              required: ['durableReferences'],
+            },
+          },
+          required: ['serverRecoveryEvidence'],
+        },
+        then: {
+          required: ['progress'],
+          allOf: [progressPhase('commit_intent_recorded')],
+          properties: {
+            status: { const: 'recovery_required' },
+            serverRecoveryEvidence: {
+              properties: {
+                source: { const: 'coordinator_restart' },
+                priorStatus: { const: 'managed_action_in_progress' },
+                resolution: { const: 'recovery_required' },
+              },
+              required: ['source', 'priorStatus', 'resolution'],
+            },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: { priorStatus: { const: 'managed_action_in_progress' } },
+              required: ['priorStatus'],
+            },
+          },
+          required: ['serverRecoveryEvidence'],
+        },
+        then: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: {
+                durableReferences: {
+                  properties: { managedStartContentSha256: { type: 'string' } },
+                  required: ['managedStartContentSha256'],
+                },
+              },
+              required: ['durableReferences'],
+            },
+          },
+        },
+        else: {
+          properties: {
+            serverRecoveryEvidence: {
+              properties: {
+                durableReferences: {
+                  properties: { managedStartContentSha256: { type: 'null' } },
+                  required: ['managedStartContentSha256'],
+                },
               },
             },
           },
@@ -2170,29 +2295,66 @@ function hardenExecutionTrackExecutionLifecycle(
     schema['allOf'] = allOf;
   } else if (filename === 'companion-execution-track-execution-recovery-ack.schema.json') {
     const allOf = (schema['allOf'] ?? []) as unknown[];
-    allOf.push({
-      if: { properties: { outcome: { const: 'reconciled' } }, required: ['outcome'] },
-      then: {
-        properties: {
-          evidence: {
-            properties: {
-              kind: { enum: ['persisted_managed_terminal', 'baseline_terminal'] },
+    allOf.push(
+      {
+        if: { properties: { outcome: { const: 'reconciled' } }, required: ['outcome'] },
+        then: {
+          properties: {
+            evidence: {
+              properties: {
+                kind: { enum: ['persisted_managed_terminal', 'baseline_terminal'] },
+              },
+              required: ['kind'],
             },
-            required: ['kind'],
+            retainsTargetLock: { const: false },
           },
-          retainsTargetLock: { const: false },
+        },
+        else: {
+          properties: {
+            evidence: {
+              properties: { kind: { const: 'unresolved_current_state' } },
+              required: ['kind'],
+            },
+            retainsTargetLock: { const: true },
+          },
         },
       },
-      else: {
-        properties: {
-          evidence: {
-            properties: { kind: { const: 'unresolved_current_state' } },
-            required: ['kind'],
+      ...(['failed_no_mutation', 'failed_restored'] as const).map((status) => ({
+        if: {
+          properties: {
+            evidence: {
+              properties: {
+                kind: { const: 'baseline_terminal' },
+                terminalResult: {
+                  properties: { status: { const: status } },
+                  required: ['status'],
+                },
+              },
+              required: ['kind', 'terminalResult'],
+            },
           },
-          retainsTargetLock: { const: true },
+          required: ['evidence'],
         },
-      },
-    });
+        then: {
+          properties: {
+            evidence: {
+              properties: {
+                progress: {
+                  properties: {
+                    phase: {
+                      const:
+                        status === 'failed_no_mutation' ? 'baseline_attested' : 'baseline_restored',
+                    },
+                  },
+                  required: ['phase'],
+                },
+              },
+              required: ['progress'],
+            },
+          },
+        },
+      })),
+    );
     schema['allOf'] = allOf;
   }
 }

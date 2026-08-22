@@ -31798,6 +31798,17 @@
                 }
               ]
             },
+            "managedStartContentSha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "baselineContentSha256": {
               "anyOf": [
                 {
@@ -31835,6 +31846,7 @@
           },
           "required": [
             "terminalMarkerContentSha256",
+            "managedStartContentSha256",
             "baselineContentSha256",
             "commitIntentId",
             "commitIntentContentSha256"
@@ -31845,7 +31857,8 @@
           "type": "string",
           "enum": [
             "coordinator_restart",
-            "document_authority_drift"
+            "document_authority_drift",
+            "companion_reported"
           ]
         },
         "mode": {
@@ -31930,6 +31943,17 @@
             }
           ]
         },
+        "managedStartContentSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "baselineContentSha256": {
           "anyOf": [
             {
@@ -31967,6 +31991,7 @@
       },
       "required": [
         "terminalMarkerContentSha256",
+        "managedStartContentSha256",
         "baselineContentSha256",
         "commitIntentId",
         "commitIntentContentSha256"
@@ -43420,6 +43445,108 @@
           },
           "retainsTargetLock": {
             "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "kind": {
+                "const": "baseline_terminal"
+              },
+              "terminalResult": {
+                "properties": {
+                  "status": {
+                    "const": "failed_no_mutation"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "terminalResult"
+            ]
+          }
+        },
+        "required": [
+          "evidence"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "progress": {
+                "properties": {
+                  "phase": {
+                    "const": "baseline_attested"
+                  }
+                },
+                "required": [
+                  "phase"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "kind": {
+                "const": "baseline_terminal"
+              },
+              "terminalResult": {
+                "properties": {
+                  "status": {
+                    "const": "failed_restored"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "terminalResult"
+            ]
+          }
+        },
+        "required": [
+          "evidence"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "progress": {
+                "properties": {
+                  "phase": {
+                    "const": "baseline_restored"
+                  }
+                },
+                "required": [
+                  "phase"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
           }
         }
       }

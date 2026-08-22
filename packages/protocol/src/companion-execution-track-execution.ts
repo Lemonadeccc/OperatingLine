@@ -593,6 +593,24 @@ export type CompanionExecutionTrackExecutionProgress = z.infer<
   typeof companionExecutionTrackExecutionProgressSchema
 >;
 
+function addCanonicalProgressIssue(
+  progress: unknown,
+  context: z.core.$RefinementCtx<unknown>,
+): void {
+  if (!companionExecutionTrackExecutionProgressSchema.safeParse(progress).success) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Embedded progress must pass the public execution progress semantic gate',
+    });
+  }
+}
+
+const canonicalCommitIntentProgressSchema =
+  commitIntentSchema.superRefine(addCanonicalProgressIssue);
+const canonicalRecoveryBaselineProgressSchema = z
+  .union([baselineAttestedSchema, baselineRestoredSchema])
+  .superRefine(addCanonicalProgressIssue);
+
 function undoPrefixMatches(
   transitions: z.infer<typeof undoTransitionSchema>[],
   cursor: number,
@@ -801,6 +819,69 @@ export const companionExecutionTrackExecutionManagedStartSchema = z.strictObject
   startedAt: timestampSchema,
   contentSha256: sha256Schema,
 });
+export type CompanionExecutionTrackExecutionManagedStart = z.infer<
+  typeof companionExecutionTrackExecutionManagedStartSchema
+>;
+
+function managedStartIsCanonical(start: CompanionExecutionTrackExecutionManagedStart): boolean {
+  const { contentSha256, ...content } = start;
+  return contentSha256 === computeProtocolCanonicalJsonSha256(content);
+}
+
+export const companionExecutionTrackExecutionManagedStartSubmissionSchema = z
+  .strictObject({
+    formatVersion: companionExecutionTrackExecutionFormatVersionSchema,
+    requestId: z.uuid(),
+    deliveryId: z.uuid(),
+    bindingContentSha256: sha256Schema,
+    currentLease: companionExecutionTrackPreflightLeaseSchema,
+    commitProgress: canonicalCommitIntentProgressSchema,
+    managedStart: companionExecutionTrackExecutionManagedStartSchema,
+  })
+  .superRefine((submission, context) => {
+    const progress = submission.commitProgress;
+    const start = submission.managedStart;
+    if (progress.phase !== 'commit_intent_recorded') {
+      context.addIssue({
+        code: 'custom',
+        path: ['commitProgress', 'phase'],
+        message: 'Managed-start submission requires canonical commit intent progress',
+      });
+      return;
+    }
+    if (
+      submission.requestId !== progress.binding.requestId ||
+      submission.deliveryId !== progress.deliveryId ||
+      submission.bindingContentSha256 !== progress.binding.bindingContentSha256 ||
+      submission.currentLease.leaseId !== progress.currentLease.leaseId ||
+      submission.currentLease.sessionId !== progress.currentLease.sessionId ||
+      submission.currentLease.documentIncarnationId !==
+        progress.currentLease.documentIncarnationId ||
+      computeProtocolCanonicalJsonSha256(submission.currentLease.target) !==
+        computeProtocolCanonicalJsonSha256(progress.currentLease.target) ||
+      Date.parse(progress.currentLease.expiresAt) > Date.parse(submission.currentLease.expiresAt) ||
+      start.commitIntentId !== progress.intent.intentId ||
+      start.commitIntentContentSha256 !== progress.intent.contentSha256 ||
+      start.baselineContentSha256 !== progress.baseline.contentSha256 ||
+      start.proofEvidenceContentSha256 !== progress.proofEvidenceContentSha256 ||
+      start.previousProgressContentSha256 !== progress.contentSha256 ||
+      !managedStartIsCanonical(start) ||
+      Date.parse(progress.occurredAt) > Date.parse(start.startedAt) ||
+      Date.parse(start.startedAt) >= Date.parse(submission.currentLease.expiresAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Managed-start submission is not canonical or lease-current',
+      });
+    }
+  });
+export type CompanionExecutionTrackExecutionManagedStartSubmission = z.infer<
+  typeof companionExecutionTrackExecutionManagedStartSubmissionSchema
+>;
+
+export const companionExecutionTrackExecutionManagedStartAckSchema = z.strictObject({
+  result: z.enum(['accepted', 'duplicate']),
+});
 const managedResultReferenceShape = {
   startCheckpointId: z.uuid(),
   commitIntentId: z.uuid(),
@@ -899,14 +980,13 @@ export const companionExecutionTrackExecutionResultSchema = z
       Date.parse(result.occurredAt) < Date.parse(result.currentLease.expiresAt);
     if (result.status === 'succeeded' || result.status === 'failed_managed') {
       const start = result.managedStart;
-      const { contentSha256, ...content } = start;
       valid &&=
         start.commitIntentId === result.commitIntentId &&
         start.commitIntentContentSha256 === result.commitIntentContentSha256 &&
         start.baselineContentSha256 === result.baselineContentSha256 &&
         start.proofEvidenceContentSha256 === result.proofEvidenceContentSha256 &&
         start.previousProgressContentSha256 === result.lastProgressContentSha256 &&
-        contentSha256 === computeProtocolCanonicalJsonSha256(content) &&
+        managedStartIsCanonical(start) &&
         Date.parse(start.startedAt) <= Date.parse(result.occurredAt);
       valid &&=
         result.managedReport.stepId === result.leafId &&
@@ -935,12 +1015,11 @@ export const companionExecutionTrackExecutionResultSchema = z
         result.managedStart !== undefined;
       valid &&= managed === hasManagedReferences;
       if (managed && result.managedStart !== undefined) {
-        const { contentSha256, ...content } = result.managedStart;
         valid &&=
           result.managedStart.commitIntentId === result.commitIntentId &&
           result.managedStart.commitIntentContentSha256 === result.commitIntentContentSha256 &&
           result.managedStart.previousProgressContentSha256 === result.lastProgressContentSha256 &&
-          contentSha256 === computeProtocolCanonicalJsonSha256(content);
+          managedStartIsCanonical(result.managedStart);
       }
       if (!managed) {
         valid &&=
@@ -966,6 +1045,7 @@ export const companionExecutionTrackExecutionStatusValueSchema = z.enum([
   'baseline_restored',
   'commit_intent_recorded',
   'managed_action_in_progress',
+  'pre_dispatch_authority_expired',
   'succeeded',
   'failed_no_mutation',
   'failed_restored',
@@ -975,6 +1055,7 @@ export const companionExecutionTrackExecutionStatusValueSchema = z.enum([
 
 const recoveryDurableReferencesSchema = z.strictObject({
   terminalMarkerContentSha256: sha256Schema.nullable(),
+  managedStartContentSha256: sha256Schema.nullable(),
   baselineContentSha256: sha256Schema.nullable(),
   commitIntentId: z.uuid().nullable(),
   commitIntentContentSha256: sha256Schema.nullable(),
@@ -999,6 +1080,7 @@ function durableReferencesMatchProgress(
   if (progress.phase === 'baseline_restored') {
     return (
       references.terminalMarkerContentSha256 === null &&
+      references.managedStartContentSha256 === null &&
       references.baselineContentSha256 === progress.baseline.contentSha256 &&
       references.commitIntentId === null &&
       references.commitIntentContentSha256 === null
@@ -1038,6 +1120,20 @@ const companionExecutionTrackExecutionServerRecoveryEvidenceSchema = z.strictObj
   automaticReplay: z.literal(false),
 });
 
+const companionExecutionTrackExecutionPreDispatchAuthorityExpirationEvidenceSchema = z.strictObject(
+  {
+    source: z.literal('document_authority_drift'),
+    requestId: z.uuid(),
+    bindingContentSha256: sha256Schema,
+    target: targetSchema,
+    priorStatus: z.literal('queued'),
+    detectedAt: timestampSchema,
+    resolution: z.literal('pre_dispatch_authority_expired'),
+    retainsTargetLock: z.literal(false),
+    automaticReplay: z.literal(false),
+  },
+);
+
 export const companionExecutionTrackExecutionStatusSchema = z
   .strictObject({
     binding: companionExecutionTrackExecutionBindingSchema,
@@ -1049,6 +1145,8 @@ export const companionExecutionTrackExecutionStatusSchema = z
     managedStart: companionExecutionTrackExecutionManagedStartSchema.optional(),
     result: companionExecutionTrackExecutionResultSchema.optional(),
     serverRecoveryEvidence: companionExecutionTrackExecutionServerRecoveryEvidenceSchema.optional(),
+    preDispatchAuthorityExpirationEvidence:
+      companionExecutionTrackExecutionPreDispatchAuthorityExpirationEvidenceSchema.optional(),
     updatedAt: timestampSchema,
   })
   .superRefine((status, context) => {
@@ -1070,8 +1168,24 @@ export const companionExecutionTrackExecutionStatusSchema = z
       valid &&=
         !delivered &&
         status.updatedAt === status.binding.requestedAt &&
-        status.progress === undefined;
-    } else valid &&= delivered;
+        status.progress === undefined &&
+        status.preDispatchAuthorityExpirationEvidence === undefined;
+    } else if (status.status === 'pre_dispatch_authority_expired') {
+      const evidence = status.preDispatchAuthorityExpirationEvidence;
+      valid &&=
+        !delivered &&
+        status.progress === undefined &&
+        status.managedStart === undefined &&
+        status.result === undefined &&
+        status.serverRecoveryEvidence === undefined &&
+        evidence !== undefined &&
+        evidence.requestId === status.binding.requestId &&
+        evidence.bindingContentSha256 === status.binding.bindingContentSha256 &&
+        computeProtocolCanonicalJsonSha256(evidence.target) ===
+          computeProtocolCanonicalJsonSha256(status.binding.target) &&
+        Date.parse(status.binding.requestedAt) <= Date.parse(evidence.detectedAt) &&
+        status.updatedAt === evidence.detectedAt;
+    } else valid &&= delivered && status.preDispatchAuthorityExpirationEvidence === undefined;
     if (activePhases.has(status.status)) valid &&= status.progress?.phase === status.status;
     if (status.progress !== undefined) {
       valid &&=
@@ -1097,6 +1211,9 @@ export const companionExecutionTrackExecutionStatusSchema = z
         status.progress?.phase === 'commit_intent_recorded' &&
         status.managedStart.commitIntentId === status.progress.intent.intentId &&
         status.managedStart.commitIntentContentSha256 === status.progress.intent.contentSha256 &&
+        status.managedStart.baselineContentSha256 === status.progress.baseline.contentSha256 &&
+        status.managedStart.proofEvidenceContentSha256 ===
+          status.progress.proofEvidenceContentSha256 &&
         status.managedStart.previousProgressContentSha256 === status.progress.contentSha256 &&
         status.managedStart.contentSha256 ===
           computeProtocolCanonicalJsonSha256(managedStartContent) &&
@@ -1110,7 +1227,9 @@ export const companionExecutionTrackExecutionStatusSchema = z
       'failed_managed',
       'recovery_required',
     ].includes(status.status);
-    if (!terminal)
+    if (status.status === 'pre_dispatch_authority_expired') {
+      valid &&= status.result === undefined && status.serverRecoveryEvidence === undefined;
+    } else if (!terminal)
       valid &&= status.result === undefined && status.serverRecoveryEvidence === undefined;
     else if (status.status === 'succeeded' || status.status === 'failed_managed') {
       valid &&=
@@ -1230,7 +1349,16 @@ export const companionExecutionTrackExecutionStatusSchema = z
         evidence.acceptedProgressChainHeadContentSha256 ===
           (status.progress?.contentSha256 ?? null) &&
         durableReferencesMatchProgress(evidence.durableReferences, status.progress ?? null) &&
-        evidence.durableReferences.terminalMarkerContentSha256 === null &&
+        (status.progress === undefined ||
+          Date.parse(status.progress.occurredAt) <= Date.parse(evidence.detectedAt)) &&
+        (evidence.priorStatus === 'managed_action_in_progress'
+          ? evidence.durableReferences.managedStartContentSha256 !== null
+          : evidence.durableReferences.managedStartContentSha256 === null) &&
+        (evidence.durableReferences.terminalMarkerContentSha256 === null ||
+          (evidence.source === 'coordinator_restart' &&
+            evidence.priorStatus === 'managed_action_in_progress' &&
+            status.status === 'recovery_required' &&
+            status.progress?.phase === 'commit_intent_recorded')) &&
         (evidence.priorStatus === 'dispatched'
           ? status.progress === undefined
           : evidence.priorStatus === 'managed_action_in_progress'
@@ -1287,7 +1415,7 @@ export const companionExecutionTrackExecutionRecoveryRequestSchema = z
     acceptedProgress: companionExecutionTrackExecutionProgressSchema.nullable(),
     acceptedProgressChainHeadContentSha256: sha256Schema.nullable(),
     durableReferences: recoveryDurableReferencesSchema,
-    source: z.enum(['coordinator_restart', 'document_authority_drift']),
+    source: z.enum(['coordinator_restart', 'document_authority_drift', 'companion_reported']),
     mode: z.literal('read_only_reconcile'),
     automaticReplay: z.literal(false),
     requestedAt: timestampSchema,
@@ -1324,6 +1452,10 @@ export const companionExecutionTrackExecutionRecoveryRequestSchema = z
     }
   });
 
+export const companionExecutionTrackExecutionRecoveryPollDeliverySchema = z.strictObject({
+  request: companionExecutionTrackExecutionRecoveryRequestSchema.nullable(),
+});
+
 const recoveryCurrentStateAttestationSchema = z.strictObject({
   replacementLeaseId: z.uuid(),
   sessionId: z.uuid(),
@@ -1341,7 +1473,7 @@ const recoveryCurrentStateAttestationSchema = z.strictObject({
   observedAt: timestampSchema,
   contentSha256: sha256Schema,
 });
-const persistedManagedTerminalMarkerSchema = z.strictObject({
+export const companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema = z.strictObject({
   kind: z.literal('persisted_managed_terminal'),
   terminalStatus: z.literal('succeeded'),
   terminalResultContentSha256: sha256Schema,
@@ -1358,19 +1490,22 @@ const persistedManagedTerminalMarkerSchema = z.strictObject({
   linksAndSelectionSha256: sha256Schema,
   contentSha256: sha256Schema,
 });
+export type CompanionExecutionTrackExecutionPersistedManagedTerminalMarker = z.infer<
+  typeof companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema
+>;
 const recoveryReconciliationEvidenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('persisted_managed_terminal'),
     terminalResult: successResultSchema,
     terminalResultContentSha256: sha256Schema,
-    terminalMarker: persistedManagedTerminalMarkerSchema,
+    terminalMarker: companionExecutionTrackExecutionPersistedManagedTerminalMarkerSchema,
     currentState: recoveryCurrentStateAttestationSchema,
   }),
   z.strictObject({
     kind: z.literal('baseline_terminal'),
     terminalResult: z.union([noMutationResultSchema, restoredResultSchema]),
     terminalResultContentSha256: sha256Schema,
-    progress: z.union([baselineAttestedSchema, baselineRestoredSchema]),
+    progress: canonicalRecoveryBaselineProgressSchema,
     currentState: recoveryCurrentStateAttestationSchema,
   }),
   z.strictObject({
@@ -1383,6 +1518,32 @@ const recoveryReconciliationEvidenceSchema = z.discriminatedUnion('kind', [
     currentState: recoveryCurrentStateAttestationSchema,
   }),
 ]);
+
+function recoveryResultIdentityMatchesRequest(
+  result: CompanionExecutionTrackExecutionResult,
+  request: z.infer<typeof companionExecutionTrackExecutionRecoveryRequestSchema>,
+): boolean {
+  const binding = request.acceptedProgress?.binding;
+  return (
+    binding !== undefined &&
+    result.requestId === request.requestId &&
+    result.deliveryId === request.originalDeliveryId &&
+    result.bindingContentSha256 === request.bindingContentSha256 &&
+    computeProtocolCanonicalJsonSha256(result.target) ===
+      computeProtocolCanonicalJsonSha256(request.target) &&
+    result.leaseId === request.originalLease.leaseId &&
+    result.currentLease.leaseId === request.originalLease.leaseId &&
+    result.currentLease.sessionId === request.originalLease.sessionId &&
+    result.currentLease.documentIncarnationId === request.originalLease.documentIncarnationId &&
+    computeProtocolCanonicalJsonSha256(result.currentLease.target) ===
+      computeProtocolCanonicalJsonSha256(request.originalLease.target) &&
+    result.proposalId === binding.proposalId &&
+    result.planId === binding.plan.id &&
+    result.planRevision === binding.plan.revision &&
+    result.executionId === binding.executionId &&
+    result.leafId === binding.leafId
+  );
+}
 
 export const companionExecutionTrackExecutionRecoveryAckSchema = z
   .strictObject({
@@ -1447,21 +1608,20 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
         marker.managedReportSequence === result.managedReport.sequence &&
         marker.managedCheckpointId === result.managedCheckpoint.checkpointId &&
         markerHash === computeProtocolCanonicalJsonSha256(markerContent) &&
-        request.durableReferences.terminalMarkerContentSha256 === marker.contentSha256 &&
+        (request.durableReferences.terminalMarkerContentSha256 === null ||
+          request.durableReferences.terminalMarkerContentSha256 === marker.contentSha256) &&
+        request.durableReferences.managedStartContentSha256 !== null &&
+        request.durableReferences.managedStartContentSha256 === result.managedStart.contentSha256 &&
         request.durableReferences.baselineContentSha256 === result.baselineContentSha256 &&
         request.durableReferences.commitIntentId === result.commitIntentId &&
         request.durableReferences.commitIntentContentSha256 === result.commitIntentContentSha256 &&
         request.acceptedProgress?.phase === 'commit_intent_recorded' &&
         request.acceptedProgress.contentSha256 === result.lastProgressContentSha256 &&
-        result.requestId === request.requestId &&
-        result.deliveryId === request.originalDeliveryId &&
-        result.bindingContentSha256 === request.bindingContentSha256 &&
-        result.leaseId === request.originalLease.leaseId &&
-        result.currentLease.leaseId === request.originalLease.leaseId &&
-        result.currentLease.sessionId === request.originalLease.sessionId &&
-        result.currentLease.documentIncarnationId === request.originalLease.documentIncarnationId &&
+        recoveryResultIdentityMatchesRequest(result, request) &&
         Date.parse(request.acceptedProgress.currentLease.expiresAt) <=
           Date.parse(result.currentLease.expiresAt) &&
+        Date.parse(result.managedStart.startedAt) <= Date.parse(request.requestedAt) &&
+        Date.parse(result.occurredAt) <= Date.parse(request.requestedAt) &&
         state.sceneFingerprintSha256 === marker.sceneFingerprintSha256 &&
         state.viewLayerIdentitySha256 === marker.viewLayerIdentitySha256 &&
         state.objectIdentitySha256 === marker.objectIdentitySha256 &&
@@ -1472,6 +1632,7 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
         state.linksAndSelectionSha256 === marker.linksAndSelectionSha256 &&
         state.reportId === result.managedReport.reportId &&
         state.sequence === result.managedReport.sequence &&
+        result.managedReport.sequence > request.acceptedProgress.binding.expectedState.sequence &&
         Date.parse(result.occurredAt) <= Date.parse(state.observedAt);
     } else if (ack.evidence.kind === 'baseline_terminal') {
       const parsedResult = companionExecutionTrackExecutionResultSchema.safeParse(
@@ -1489,25 +1650,34 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
               sceneFingerprintSha256: progress.startAttestation.sceneFingerprintSha256,
               ...progress.startAttestation.identitySnapshot,
             }
-          : progress.baseline;
+          : progress.phase === 'baseline_restored'
+            ? progress.baseline
+            : null;
       evidenceValid =
         request.source !== 'document_authority_drift' &&
         ack.outcome === 'reconciled' &&
         !ack.retainsTargetLock &&
         request.durableReferences.terminalMarkerContentSha256 === null &&
+        request.durableReferences.managedStartContentSha256 === null &&
         ack.evidence.terminalResultContentSha256 === computeProtocolCanonicalJsonSha256(result) &&
+        computeProtocolCanonicalJsonSha256(progress) ===
+          computeProtocolCanonicalJsonSha256(request.acceptedProgress) &&
         progress.contentSha256 === request.acceptedProgressChainHeadContentSha256 &&
         progress.contentSha256 === request.acceptedProgress?.contentSha256 &&
         result.lastProgressContentSha256 === progress.contentSha256 &&
-        ((result.status === 'failed_no_mutation' && progress.phase === 'baseline_attested') ||
-          (result.status === 'failed_restored' && progress.phase === 'baseline_restored')) &&
-        result.requestId === request.requestId &&
-        result.deliveryId === request.originalDeliveryId &&
-        result.bindingContentSha256 === request.bindingContentSha256 &&
-        result.currentLease.leaseId === request.originalLease.leaseId &&
-        result.currentLease.sessionId === request.originalLease.sessionId &&
-        result.currentLease.documentIncarnationId === request.originalLease.documentIncarnationId &&
+        ((result.status === 'failed_no_mutation' &&
+          progress.phase === 'baseline_attested' &&
+          result.startCheckpointId === progress.startCheckpoint.checkpointId &&
+          result.baselineAttestationContentSha256 === progress.startAttestation.contentSha256) ||
+          (result.status === 'failed_restored' &&
+            progress.phase === 'baseline_restored' &&
+            result.baselineContentSha256 === progress.baseline.contentSha256 &&
+            result.proofEvidenceContentSha256 === progress.proofEvidenceContentSha256)) &&
+        recoveryResultIdentityMatchesRequest(result, request) &&
         Date.parse(progress.currentLease.expiresAt) <= Date.parse(result.currentLease.expiresAt) &&
+        Date.parse(progress.occurredAt) <= Date.parse(result.occurredAt) &&
+        Date.parse(result.occurredAt) <= Date.parse(request.requestedAt) &&
+        baselineIdentity !== null &&
         state.reportId === progress.binding.expectedState.reportId &&
         state.sequence === progress.binding.expectedState.sequence &&
         state.sceneFingerprintSha256 === baselineIdentity.sceneFingerprintSha256 &&
@@ -1534,7 +1704,8 @@ export const companionExecutionTrackExecutionRecoveryAckSchema = z
         ack.outcome === 'recovery_required' &&
         ack.retainsTargetLock &&
         (ack.evidence.reason !== 'proof_or_restore_indeterminate' ||
-          request.durableReferences.terminalMarkerContentSha256 === null) &&
+          (request.durableReferences.terminalMarkerContentSha256 === null &&
+            request.durableReferences.managedStartContentSha256 === null)) &&
         reasonMatchesPhase;
     }
     if (!mirrors || !evidenceValid) {
