@@ -19,6 +19,7 @@ versioned Eval snapshot
   -> reviewer B annotation
   -> independent adjudicator, only when judgments disagree
   -> eval:check
+  -> eval:release-check, only after the suite is reviewed and marked released
   -> eval:report
 ```
 
@@ -31,7 +32,8 @@ versioned Eval snapshot
 
 ## 凭据、网络与费用边界
 
-`eval:manifest`、`eval:capture`、`eval:blind`、`eval:review`、`eval:check` 和 `eval:report` 默认完全离线：
+`eval:manifest`、`eval:capture`、`eval:blind`、`eval:review`、`eval:check`、`eval:release-check` 和
+`eval:report` 默认完全离线：
 它们不读取模型 Provider 凭据、不调用模型 API，也不产生模型 API 费用。
 
 `eval:snapshot` 只访问 `127.0.0.1`、`localhost` 或 `::1` 上的 OperatingLine Runtime。它从
@@ -421,6 +423,7 @@ annotation；系统不做平均、投票或数值评分。
 
 ```bash
 pnpm eval:check "$EVAL_DATASET"
+pnpm eval:release-check "$EVAL_DATASET" --repo-root "$EVAL_REPO_ROOT"
 pnpm eval:report "$EVAL_DATASET"
 ```
 
@@ -443,6 +446,17 @@ Reviewer/adjudicator 会话不接收这些全局计数，以避免暴露同伴�
 `eval:check` 必须成功后才能使用 report 作为审计产物。`eval:report` 生成 published-audience、内容寻址、
 无分数 comparison；它会保留 failed、`needs_revision`、`unable_to_judge`、缺失 annotation 和未裁决分歧，
 不会输出 Provider 排名。
+
+`eval:release-check` 是更严格的只读发布候选门。它只接受经目录加载器验证真实 artifact 字节、且
+`suite.status` 已由人工流程明确改为 `released` 的完整数据集；输出确定性
+`HumanEvalReleaseCandidateManifest` 及其内容哈希。清单绑定全部 Run、历史 annotation、adjudication、
+provider-blind sign-off、case/run artifact 和 runtime attestation 摘要，不包含生成时间、绝对路径、原始
+Provider 内容或 reviewer 自由文本。相同数据集重复检查得到相同 candidate hash。
+
+该命令不会修改目录、上传或公开数据，也不消费发布授权。candidate hash 只是未来
+`DatasetReleaseAuthorization.releaseCandidateManifestSha256` 的精确目标；所有记录及输出仍保持
+`trainingUse: not_authorized`，后续训练必须另行取得绑定最终 released manifest 的
+`TrainingUseAuthorization`。默认 `collecting` fixture 按设计返回不合格。
 
 当前仓库默认 fixture 的已验证基线仍是：
 
@@ -504,7 +518,8 @@ symlink/非普通 ticket、畸形 JSON 或无效 PID 都会 fail closed。唯一
 - [ ] 浏览器数据不含 Provider profile、alias、sidecar 或真实 Run ID。
 - [ ] 达到 suite policy 最低人数的 reviewer 都覆盖所有适用 criterion，并引用允许的 evidence。
 - [ ] 只有真实分歧进入 adjudication；原始 annotation 仍保留。
-- [ ] `eval:check` 成功；`eval:report` 如实显示所有缺口且没有分数或排名。
+- [ ] `eval:check` 成功；若 suite 已完成发布审核并标为 `released`，`eval:release-check` 确定性成功；
+      `eval:report` 如实显示所有缺口且没有分数或排名。
 - [ ] `trainingUse` 保持 `not_authorized`，公开发布仍经过逐记录人工审核。
 
 协议记录与 release readiness 见

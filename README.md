@@ -1226,6 +1226,10 @@ pnpm eval:report
 annotation 和 0 个 adjudication；report 会把全部案例标记为缺少 live Run，而不会伪造分数或排名。完整记录布局与采集
 规则见 [Human Eval scenarios](tests/scenarios/eval/README.md)。
 
+`eval:release-check [dataset] [--repo-root <directory>]` 只接受 artifact-verified、人工标为 `released` 的
+完整目录并输出确定性发布候选清单；默认 `collecting` fixture 会诚实失败。该命令不修改或发布数据，
+candidate hash 仅供后续发布授权绑定，且不会把 `trainingUse: not_authorized` 升级为训练许可。
+
 运行 Blender Extension 集成测试并构建安装包：
 
 ```bash
@@ -1348,7 +1352,8 @@ Codex/Claude 本地配置、Claude Desktop MCPB、签名授权的 Replan Run 边
 并通过服务端 preview、immutable revision 分支与 fail-closed 三方合并保存。
 当前仍未完成：
 
-1. 把已完成的 Human Eval 协议、`@operatingline/eval-kit` 和 7 个 `collecting` Blender 案例推进为真实
+1. 把已完成的 Human Eval 协议、确定性 `eval:release-check` 发布候选门、`@operatingline/eval-kit` 和
+   7 个 `collecting` Blender 案例推进为真实
    Provider 对照数据集。当前还没有 live Run、人工 annotation、adjudication 或 released comparison；
    每个 Run 仍需至少两名独立 reviewer 盲审，并附加真实宿主执行与渲染 artifact。首个可选 OpenAI
    Responses 插件、类型化局部重规划后端、原生 Revision Workspace，以及 Provider/Blender 运行时

@@ -226,6 +226,10 @@
       `pnpm eval:check` 与 `pnpm eval:report` 可验证和报告目录数据集。首个 Blender suite 处于
       `collecting`，包含 7 个案例、6 条 lineage，并禁止 synthetic Run 进入 published comparison。
       见 [ADR 0018](adr/0018-versioned-human-eval-evidence.md)。
+  - [x] 确定性 Human Eval 发布候选门：`pnpm eval:release-check` 只读接受 artifact-verified、状态为
+        `released` 的完整目录，绑定全部 Run、annotation 历史、adjudication、blind sign-off、artifact 与
+        runtime attestation 摘要，不含运行时时间或路径。candidate 只作为后续
+        `DatasetReleaseAuthorization` 的精确目标，不执行发布，也不改变 `trainingUse: not_authorized`。
 - [x] 本地 Human Eval 采集与 provider-blind 评审面：实现冻结 snapshot、`provider_only` /
       `host_execution_with_manual_artifacts` capture、每 Run 必需的独立 preparer sign-off sidecar，以及只监听回环地址的
       headless review service。普通浏览器只接收 opaque Run ID 和签署后的盲审投影，不接收 Provider
@@ -702,6 +706,8 @@
         也不构成发布级 treatment/artifact attestation。`eval:manifest` 从冻结 runtime proof 派生
         provider-only `best_effort` 输入；四个宿主参数完整提供时也可从精确终态证明派生 runtime-attested
         artifact 输入。两种路径都要求显式 case/request/run，且不读取 Provider credential。
+  - [x] 实现只读、确定性的 `eval:release-check`：只对已通过 released readiness 与 artifact 字节验证的
+        数据集生成发布候选 identity；不消费发布/训练授权，不上传数据，也不把测试 fixture 声称为真实采集。
   - [ ] 按明确的数据披露与可能费用确认，为 7 个案例采集真实 Provider Run；当前 `runCount` 为 0。
   - [ ] 为每个 Run 取得至少两名校准 reviewer 的 provider-blind annotation，保留并按需 adjudicate
         分歧；当前 `blindSignoffCount`、`annotationCount` 与 `adjudicationCount` 均为 0。

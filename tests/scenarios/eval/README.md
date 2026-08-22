@@ -225,6 +225,7 @@ pnpm eval:report
 ```bash
 pnpm eval:check path/to/dataset
 pnpm eval:check path/to/dataset --worklist
+pnpm eval:release-check path/to/dataset --repo-root path/to/repository
 pnpm eval:report path/to/dataset
 ```
 
@@ -237,6 +238,11 @@ readiness。`eval:report` 向标准输出生成 published-audience、内容寻�
 Provider 分配或真人审查。Review 是全数据集 sign-off 门：任一 Run 未签署时，`reviewStage`
 明示列出阻断 Run 且 review/adjudication 队列为空。`collectionPolicyMinimumsMet` 与
 `releaseReadiness: "not_assessed"` 分开，因此队列为空也不表示公开数据审核等 release readiness 已经完成。
+
+`eval:release-check` 不使用 worklist 推测发布就绪。它只读加载一个已经标为 `released` 的 artifact-verified
+目录，确定性输出绑定全部源记录、盲审 sign-off、artifact 与 runtime attestation 摘要的发布候选清单。
+它不写文件、不发布、不上传、不调用 Provider，也不授予训练权；默认 `collecting` fixture 会失败。
+候选哈希只供后续 `DatasetReleaseAuthorization` 精确绑定，`trainingUse` 仍固定为 `not_authorized`。
 
 当前默认数据集的已验证状态为：
 

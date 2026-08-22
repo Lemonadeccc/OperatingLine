@@ -28,6 +28,7 @@
     "eval:status": "tsx services/eval-review/src/status-cli.ts",
     "eval:recover-lock": "tsx tools/eval/recover-lock.ts",
     "eval:check": "tsx tools/eval/check.ts",
+    "eval:release-check": "tsx tools/eval/release-check.ts",
     "eval:report": "tsx tools/eval/report.ts",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
