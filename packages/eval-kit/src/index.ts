@@ -9,6 +9,7 @@ export * from './filesystem-transaction.js';
 export * from './integrity.js';
 export * from './records.js';
 export * from './release-candidate.js';
+export * from './released-manifest.js';
 export * from './review-policy.js';
 export * from './worklist.js';
 export * from './tutorial-media-recognition-dataset.js';
