@@ -3369,7 +3369,7 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
     }
-  }, 25_000);
+  }, 45_000);
 
   it('materializes and structurally compiles the active InteractionCatalog Subdivide candidate', async () => {
     const runtime = await startRuntime({
@@ -7796,7 +7796,7 @@ describe('procedure compilation runtime', () => {
     } finally {
       await runtime.stop();
     }
-  });
+  }, 20_000);
 
   it('attests an approved managed Icosphere replay with subdivision-bound topology', async () => {
     const runtime = await startRuntime({

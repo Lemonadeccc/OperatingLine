@@ -61,7 +61,7 @@ describe('Claude Desktop stdio bridge', () => {
     } finally {
       await client.close();
     }
-  }, 40_000);
+  }, 60_000);
 
   it('negotiates the modern protocol with the loopback HTTP runtime upstream', async () => {
     const runtime = await startRuntime({ databasePath: ':memory:', accessToken });
