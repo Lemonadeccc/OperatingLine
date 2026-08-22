@@ -436,6 +436,7 @@ describe('OperatingLine runtime', () => {
             { name: 'operatingline.procedure.menu-control-proof.propose' },
             { name: 'operatingline.procedure.replay.finalize' },
             { name: 'operatingline.procedure.replay.failure-recovery.finalize' },
+            { name: 'operatingline.procedure.failure-replan.get' },
             { name: 'operatingline.procedure.replay.current-state.request' },
             { name: 'operatingline.procedure.replay.current-state.get' },
             { name: 'operatingline.procedure.compile' },

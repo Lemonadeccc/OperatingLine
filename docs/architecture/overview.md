@@ -574,6 +574,11 @@ unavailable。该 managed Action 入口不把 menu/shortcut grounding 升级为�
 [ADR 0101](../adr/0101-solidify-action-level-mcp.md)。
 `action.status=succeeded` 已通过完整 action-specific Observation 校验，但不是追加式 provenance attestation；后续
 replay finalize 复用同一 validator 并固化认证 receipt，二者都不证明报告之后的当前宿主状态。
+终态 action failure 只有在同一 replay 的 finalized automatic-rollback attestation 已证明宿主回到安全基线后，
+才进入确定性 failure-replan 推导。Resolver 从 durable action event、replay binding、attestation 与精确安装目录
+重建证据，要求 execution/Plan/step/report 唯一一致；参数候选来自服务端 schema policy，备用策略只来自同叶
+携带 `proofExecution` 的轨迹。结果是可过期、只读、待审候选，不调用 Provider、不创建 Proposal、也不执行
+Blender。见 [ADR 0102](../adr/0102-trusted-execution-failure-replan.md)。
 Track/operation ID 结合树顶层 catalog version 可重建 provenance。结果带已安装目录 digest、输入/输出 tree
 hash 与逐 leaf coverage；Icosphere、Subdivide、Edit Mode Bevel、Individual Inset Faces、Poke Faces 与 Subdivision Surface shortcut 物化为显式 surface operation 链。leaf 仍为 `candidate` 且
 `validatedHostVersions` 为空，通用 compile 仍只报告 `structural_only`。Subdivision Surface `1.39.0` 的执行权

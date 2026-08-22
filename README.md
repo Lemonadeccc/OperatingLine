@@ -1132,8 +1132,13 @@ revision 6 使用 `resource_exists`、`material_assigned`、`armature_ready`、
 Guide/Companion `1.5.0` 还允许 `rollback_step` 显式声明 `automatic_bounded`，总尝试次数只能为二或三。
 一次 `Next` 中每次失败都必须先成功补偿并报告 attempt/remaining；成功只提交一个最终原生 Undo
 checkpoint，全部耗尽则报告带 `exhausted` 证据的 `failed_rolled_back`。回退失败、保留现场和 Action
-异常不会自动重试；这也不是改参数或修改树的语义重规划。见
-[ADR 0074](docs/adr/0074-bounded-observation-retries.md)。
+异常不会自动重试。若同一 managed action 的终态失败随后以可信 attestation 证明已经自动回退，Runtime 会
+唯一关联不可变 replay/action/report 证据，并从精确目录和同一叶节点生成一个待审的参数修复或 proof-backed
+策略切换候选；`operatingline.procedure.failure-replan.get` 只能读取它。该阶段不调用 Provider、不创建或接受
+GuideProposal，也不再次执行 Blender；保留现场、回退失败、证据歧义和目录漂移都会 fail closed。语义局部
+重规划及候选审查/应用仍需要后续显式授权和事务门。见
+[ADR 0074](docs/adr/0074-bounded-observation-retries.md) 与
+[ADR 0102](docs/adr/0102-trusted-execution-failure-replan.md)。
 
 `guide.publish` 直接发布路径在运行中收到更高 revision 时，Extension 不会因为“收到计划”而
 自动回退场景。该受信任更新会显示为 pending，用户 Back 到起点后才会安装。`guide.propose`

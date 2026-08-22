@@ -650,8 +650,14 @@
           crash/restart、`.blend` file-load 与 transport disconnect/reconnect；这些目前只做 marker mismatch 分类，
           所以完整 Wave 1B gate 未关闭。未发布或修改任何 catalog，production Poke 继续 unavailable，等待上述
           host 边界与 Wave 2 catalog publication/composition。见 [ADR 0063](adr/0063-bounded-edit-mode-poke-faces.md)。
-    - [ ] 真实逐控件 menu/shortcut executor，以及九种已证明 managed action 之外的复合与编辑叶节点覆盖；根据失败
-          分类改参数、切换策略或触发语义局部重规划仍未完成。
+    - [ ] 真实逐控件 menu/shortcut executor，以及九种已证明 managed action 之外的复合与编辑叶节点覆盖。
+    - [x] 可信 action failure 的确定性候选：只有唯一终态失败与 finalized automatic-rollback attestation、不可变
+          replay binding 和精确目录全部一致时，Runtime 才按服务端 schema policy 生成待审参数修复，或从同一叶
+          选择携带 `proofExecution` 的备用轨迹；启动可幂等补齐，只读查询不接受 caller evidence，不调用 Provider、
+          不创建/接受 Proposal、不执行 Blender。见
+          [ADR 0102](adr/0102-trusted-execution-failure-replan.md)。
+    - [ ] 将失败候选经带人工身份的一次性审查事务转为 GuideProposal，并在确定性候选耗尽后复用签名
+          Provider authority 触发语义局部重规划；自动应用或自动执行仍禁止。
   - [x] 已存 ProcedureTree 的语义 RAG 与交互局部精修：真实 embedding 从 latest verified leaf 产生带完整
         证据的 vector-free RAG context；显式授权的 coordinator 把精确 receipt 绑定进流式 Procedure 对话，
         仅在固定 `0.8` 阈值后进行第二次自动局部树 refinement。完整 Provider tree 经过 scope sanitization、

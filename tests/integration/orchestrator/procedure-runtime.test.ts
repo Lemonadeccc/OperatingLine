@@ -7091,6 +7091,91 @@ describe('procedure compilation runtime', () => {
       const rolledBack = await prepareReplay('rollback_step', rollbackPacket);
       const rolledBackExecutionId = randomUUID();
       const rolledBackPlanSha256 = computePlanContentSha256(rolledBack.proposal.plan);
+      const rolledBackStartedAt = new Date().toISOString();
+      const rolledBackStartReport = {
+        protocolVersion: guideProtocolVersion,
+        reportId: randomUUID(),
+        sequence: ++reportSequence,
+        adapterId: 'blender',
+        instanceId: targetInstanceId,
+        companionVersion: '0.1.0',
+        hostVersion: '4.5.3 LTS',
+        plan: { id: rolledBack.proposal.plan.id, revision: rolledBack.proposal.plan.revision },
+        planContentSha256: rolledBackPlanSha256,
+        executionId: rolledBackExecutionId,
+        phase: 'running',
+        activeStepId: null,
+        completedStepIds: [],
+        transition: 'walkthrough_started',
+        stepId: null,
+        observations: [],
+        observationGate: null,
+        artifactAttestation: null,
+        nativeUndoCheckpoint: {
+          formatVersion: '1.0.0',
+          evidenceClass: 'companion_reported_native_undo_checkpoint',
+          checkpointId: randomUUID(),
+          previousCheckpointId: null,
+          operation: 'start',
+          committedAt: rolledBackStartedAt,
+          marker: { key: '_operating_line_native_history_v1', matched: true },
+          journal: {
+            entryPresent: true,
+            snapshotMatchesSession: true,
+            artifactsBackedUp: true,
+          },
+          session: {
+            plan: {
+              id: rolledBack.proposal.plan.id,
+              revision: rolledBack.proposal.plan.revision,
+            },
+            planContentSha256: rolledBackPlanSha256,
+            executionId: rolledBackExecutionId,
+            activeStepId: null,
+            completedStepIds: [],
+            receiptStepIds: [],
+          },
+        },
+        error: null,
+        occurredAt: rolledBackStartedAt,
+      } as const;
+      await postState(rolledBackStartReport);
+      const rolledBackActionRequest = {
+        formatVersion: '1.0.0' as const,
+        requestId: randomUUID(),
+        replayId: rolledBack.replayRequest.replayId,
+        expectedState: {
+          reportId: rolledBackStartReport.reportId,
+          sequence: rolledBackStartReport.sequence,
+        },
+      };
+      const queuedRolledBackAction = await callMcpTool(
+        runtime,
+        921,
+        'operatingline.blender.action.execute',
+        rolledBackActionRequest,
+      );
+      expect(
+        queuedRolledBackAction.result?.isError,
+        queuedRolledBackAction.result?.content?.[0]?.text,
+      ).not.toBe(true);
+      expect(
+        companionActionExecutionStatusSchema.parse(
+          queuedRolledBackAction.result?.structuredContent,
+        ),
+      ).toMatchObject({ status: 'queued', requestId: rolledBackActionRequest.requestId });
+      const rolledBackActionPollUrl = new URL('/api/v1/companion/action', runtime.baseUrl);
+      rolledBackActionPollUrl.searchParams.set('adapterId', 'blender');
+      rolledBackActionPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const rolledBackDeliveryResponse = await fetch(rolledBackActionPollUrl, {
+        headers: leaseHeaders,
+      });
+      expect(rolledBackDeliveryResponse.status).toBe(200);
+      const rolledBackDelivery = companionActionPollDeliverySchema.parse(
+        await rolledBackDeliveryResponse.json(),
+      ).request;
+      expect(rolledBackDelivery).not.toBeNull();
+      await waitUntilAfter(rolledBackDelivery!.dispatchedAt);
       const rolledBackOccurredAt = new Date().toISOString();
       const rolledBackFailureReport = {
         protocolVersion: guideProtocolVersion,
@@ -7130,6 +7215,37 @@ describe('procedure compilation runtime', () => {
         occurredAt: rolledBackOccurredAt,
       } as const;
       await postState(rolledBackFailureReport);
+      const rolledBackActionResultResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/action-result`,
+        {
+          method: 'POST',
+          headers: leaseHeaders,
+          body: JSON.stringify({
+            formatVersion: '1.0.0',
+            requestId: rolledBackDelivery!.requestId,
+            replayId: rolledBackDelivery!.replayId,
+            deliveryId: rolledBackDelivery!.deliveryId,
+            target: rolledBackDelivery!.target,
+            proposalId: rolledBackDelivery!.proposalId,
+            plan: rolledBackDelivery!.plan,
+            planContentSha256: rolledBackDelivery!.planContentSha256,
+            executionId: rolledBackDelivery!.executionId,
+            expectedState: rolledBackDelivery!.expectedState,
+            stepId: rolledBackDelivery!.step.id,
+            status: 'failed',
+            report: {
+              reportId: rolledBackFailureReport.reportId,
+              sequence: rolledBackFailureReport.sequence,
+            },
+            error: 'The managed Observation failed and the step was rolled back.',
+            occurredAt: rolledBackFailureReport.occurredAt,
+          }),
+        },
+      );
+      expect(
+        rolledBackActionResultResponse.status,
+        JSON.stringify(await rolledBackActionResultResponse.clone().json()),
+      ).toBe(200);
       const rolledBackFinalizeResponse = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
         {
@@ -7159,6 +7275,63 @@ describe('procedure compilation runtime', () => {
           },
         },
       });
+      const failureReplanUrl = new URL('/api/v1/procedure/failure-replan', runtime.baseUrl);
+      failureReplanUrl.searchParams.set('requestId', rolledBackActionRequest.requestId);
+      const automaticFailureReplanResponse = await fetch(failureReplanUrl, { headers });
+      expect(automaticFailureReplanResponse.status).toBe(200);
+      const automaticFailureReplan = await automaticFailureReplanResponse.json();
+      expect(automaticFailureReplan).toMatchObject({
+        kind: 'parameter_repair_proposed',
+        proposal: {
+          status: 'pending',
+          base: {
+            planId: rolledBack.proposal.plan.id,
+            revision: rolledBack.proposal.plan.revision,
+            planContentSha256: rolledBackPlanSha256,
+          },
+          diff: { argument: 'radius' },
+        },
+      });
+      expect(automaticFailureReplan.proposal.diff.before).not.toEqual(
+        automaticFailureReplan.proposal.diff.after,
+      );
+      const missingFailureReplanRequest = await fetch(
+        new URL('/api/v1/procedure/failure-replan', runtime.baseUrl),
+        { headers },
+      );
+      expect(missingFailureReplanRequest.status).toBe(400);
+      const injectedFailureReplanUrl = new URL(failureReplanUrl);
+      injectedFailureReplanUrl.searchParams.set('actionCatalogVersion', 'caller-controlled');
+      const injectedFailureReplanRequest = await fetch(injectedFailureReplanUrl, { headers });
+      expect(injectedFailureReplanRequest.status).toBe(400);
+      const unknownFailureReplanUrl = new URL('/api/v1/procedure/failure-replan', runtime.baseUrl);
+      unknownFailureReplanUrl.searchParams.set('requestId', randomUUID());
+      const unknownFailureReplanRequest = await fetch(unknownFailureReplanUrl, { headers });
+      expect(unknownFailureReplanRequest.status).toBe(404);
+      const automaticFailureReplanMcp = await callMcpTool(
+        runtime,
+        922,
+        'operatingline.procedure.failure-replan.get',
+        { requestId: rolledBackActionRequest.requestId },
+      );
+      expect(
+        automaticFailureReplanMcp.result?.isError,
+        automaticFailureReplanMcp.result?.content?.[0]?.text,
+      ).not.toBe(true);
+      expect(automaticFailureReplanMcp.result?.structuredContent).toEqual(automaticFailureReplan);
+      const injectedFailureReplanMcp = await callMcpTool(
+        runtime,
+        923,
+        'operatingline.procedure.failure-replan.get',
+        {
+          requestId: rolledBackActionRequest.requestId,
+          repairableArguments: [{ argument: 'radius' }],
+        },
+      );
+      expect(injectedFailureReplanMcp.result?.isError).toBe(true);
+      expect(injectedFailureReplanMcp.result?.content?.[0]?.text).toContain(
+        'invalid_procedure_execution_failure_replan_request',
+      );
       const duplicateRolledBack = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/replay/failure-recovery/finalize`,
         {
@@ -7173,6 +7346,20 @@ describe('procedure compilation runtime', () => {
       );
       expect(duplicateRolledBack.status).toBe(200);
       await expect(duplicateRolledBack.json()).resolves.toMatchObject({ status: 'duplicate' });
+      await expect((await fetch(failureReplanUrl, { headers })).json()).resolves.toEqual(
+        automaticFailureReplan,
+      );
+      const rolledBackActionStatus = await callMcpTool(
+        runtime,
+        924,
+        'operatingline.blender.action.status',
+        { requestId: rolledBackActionRequest.requestId },
+      );
+      expect(
+        companionActionExecutionStatusSchema.parse(
+          rolledBackActionStatus.result?.structuredContent,
+        ),
+      ).toMatchObject({ status: 'failed' });
       const currentStateAfterRollback = await fetch(
         `${runtime.baseUrl}/api/v1/procedure/replay/current-state/request`,
         {

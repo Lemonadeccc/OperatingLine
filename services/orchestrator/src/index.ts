@@ -254,6 +254,12 @@ import { deferMcpInputValidation } from './mcp-input-validation.js';
 import { createInteractionCatalogRegistry } from './interaction-catalogs.js';
 import { buildPlanningPromptPacket } from './planning-prompt.js';
 import {
+  createProcedureExecutionFailureReplanCoordinator,
+  procedureExecutionFailureReplanOutcomeSchema,
+  procedureExecutionFailureReplanRequestSchema,
+} from './procedure-execution-failure-replan.js';
+import { createProcedureExecutionFailureReplanRuntimeResolver } from './procedure-execution-failure-replan-runtime.js';
+import {
   materializeProcedureAuthoringCandidate,
   validateProcedureTreeParameterProjectionCatalog,
 } from './procedure-authoring-materialization.js';
@@ -2991,6 +2997,48 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     });
     executionCoordinatorRefs.menuControl = menuControlProofExecutionCoordinator;
 
+    const procedureExecutionFailureReplanResolver =
+      createProcedureExecutionFailureReplanRuntimeResolver({
+        database,
+        actionCatalogRegistry,
+        interactionCatalogRegistry,
+        resolveCurrentAcceptedPlan: (adapterId, instanceId) => {
+          const latest = listKnownCompanionStates().find(
+            (report) => report.adapterId === adapterId && report.instanceId === instanceId,
+          );
+          return latest?.plan === null ||
+            latest?.plan === undefined ||
+            latest.planContentSha256 === null
+            ? null
+            : {
+                id: latest.plan.id,
+                revision: latest.plan.revision,
+                contentSha256: latest.planContentSha256,
+              };
+        },
+      });
+    const procedureExecutionFailureReplanCoordinator =
+      createProcedureExecutionFailureReplanCoordinator({
+        database,
+        trustedResolver: procedureExecutionFailureReplanResolver,
+      });
+    for (const requestId of procedureExecutionFailureReplanResolver.listResolvableRequestIds()) {
+      procedureExecutionFailureReplanCoordinator.derive({ requestId });
+    }
+
+    const finalizeProcedureLeafReplayFailureRecoveryWithReplan = (
+      request: ReturnType<typeof procedureLeafReplayFailureRecoveryFinalizeRequestSchema.parse>,
+    ) => {
+      const result = finalizeProcedureLeafReplayFailureRecovery(request);
+      const requestId = procedureExecutionFailureReplanResolver.findRequestIdForAttestation(
+        result.attestation,
+      );
+      if (requestId !== null) {
+        procedureExecutionFailureReplanCoordinator.derive({ requestId });
+      }
+      return result;
+    };
+
     const menuControlProofExecutionRejected = (
       message: string,
       statusCode: number = 409,
@@ -5691,7 +5739,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             };
           }
           try {
-            const result = finalizeProcedureLeafReplayFailureRecovery(parsedRequest.data);
+            const result = finalizeProcedureLeafReplayFailureRecoveryWithReplan(parsedRequest.data);
             return {
               content: [{ type: 'text' as const, text: JSON.stringify(result) }],
               structuredContent: result,
@@ -5713,6 +5761,55 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
               ],
             };
           }
+        },
+      );
+
+      server.registerTool(
+        'operatingline.procedure.failure-replan.get',
+        {
+          description:
+            'Return the durable proposal-only recovery candidate derived automatically after one authenticated managed action failure was proven rolled back. This tool is read-only: it accepts no evidence or parameters, calls no Provider, creates no GuideProposal, and executes no Blender action.',
+          inputSchema: deferMcpInputValidation(procedureExecutionFailureReplanRequestSchema),
+          outputSchema: procedureExecutionFailureReplanOutcomeSchema,
+        },
+        async (requestInput) => {
+          const parsedRequest =
+            procedureExecutionFailureReplanRequestSchema.safeParse(requestInput);
+          if (!parsedRequest.success) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'invalid_procedure_execution_failure_replan_request',
+                    message: 'Failure replan status request violates the strict public contract',
+                  }),
+                },
+              ],
+            };
+          }
+          const outcome = procedureExecutionFailureReplanCoordinator.get(
+            parsedRequest.data.requestId,
+          );
+          if (outcome === null) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({
+                    error: 'procedure_execution_failure_replan_not_found',
+                    message: 'No trusted automatic failure replan exists for this request',
+                  }),
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+            structuredContent: outcome,
+          };
         },
       );
 
@@ -7795,7 +7892,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           });
         }
         try {
-          return finalizeProcedureLeafReplayFailureRecovery(parsedRequest.data);
+          return finalizeProcedureLeafReplayFailureRecoveryWithReplan(parsedRequest.data);
         } catch (error) {
           const statusCode = error instanceof ProcedureLeafReplayError ? error.statusCode : 500;
           return reply.code(statusCode).send({
@@ -7808,6 +7905,22 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         }
       },
     );
+    runtimeApp.get('/api/v1/procedure/failure-replan', async (request, reply) => {
+      const parsedRequest = procedureExecutionFailureReplanRequestSchema.safeParse(request.query);
+      if (!parsedRequest.success) {
+        return reply.code(400).send({
+          error: 'invalid_procedure_execution_failure_replan_request',
+          issues: parsedRequest.error.issues,
+        });
+      }
+      const outcome = procedureExecutionFailureReplanCoordinator.get(parsedRequest.data.requestId);
+      return outcome === null
+        ? reply.code(404).send({
+            error: 'procedure_execution_failure_replan_not_found',
+            message: 'No trusted automatic failure replan exists for this request',
+          })
+        : outcome;
+    });
     runtimeApp.post('/api/v1/procedure/replay/current-state/request', async (request, reply) => {
       const parsedRequest = procedureLeafReplayCurrentStateRequestSchema.safeParse(request.body);
       if (!parsedRequest.success) {

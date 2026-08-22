@@ -196,7 +196,7 @@ export type ProcedureExecutionFailureReplanOutcome =
       readonly proposal: ProcedureExecutionFailureProposal;
     };
 
-const procedureExecutionFailureReplanOutcomeSchema = z.discriminatedUnion('kind', [
+export const procedureExecutionFailureReplanOutcomeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('no_repair_available'), reason: noRepairReasonSchema }),
   z.strictObject({
     kind: z.literal('parameter_repair_proposed'),
@@ -360,7 +360,9 @@ export interface ProcedureExecutionFailureReplanRequest {
   readonly requestId: string;
 }
 
-const procedureExecutionFailureReplanRequestSchema = z.strictObject({ requestId: z.uuid() });
+export const procedureExecutionFailureReplanRequestSchema = z.strictObject({
+  requestId: z.uuid(),
+});
 
 export interface TrustedProcedureExecutionFailureReplanResolution {
   readonly failureEvidence: CanonicalProcedureExecutionFailureEvidence;
@@ -383,17 +385,13 @@ export interface ProcedureExecutionFailurePolicyEvidenceResolver {
   resolve(requestId: string): TrustedProcedureExecutionFailureReplanResolution | null;
 }
 
-interface StoredFailureReplan {
-  readonly requestSha256: string;
-  readonly envelope: ProcedureExecutionFailureEnvelope | null;
-  readonly outcome: ProcedureExecutionFailureReplanOutcome;
-}
-
 const storedFailureReplanSchema = z.strictObject({
   requestSha256: sha256Schema,
+  sourceBindingSha256: sha256Schema.optional(),
   envelope: procedureExecutionFailureEnvelopeSchema.nullable(),
   outcome: procedureExecutionFailureReplanOutcomeSchema,
 });
+type StoredFailureReplan = z.infer<typeof storedFailureReplanSchema>;
 
 type FailureReplanDatabase = Pick<
   OperatingLineDatabase,
@@ -1043,7 +1041,28 @@ export function createProcedureExecutionFailureReplanCoordinator(
       ),
     );
     const payload = deepFreeze(
-      storedFailureReplanSchema.parse({ requestSha256, envelope, outcome }),
+      storedFailureReplanSchema.parse({
+        requestSha256,
+        sourceBindingSha256: sha256({
+          request,
+          envelope,
+          actionCatalogSha256: resolution === null ? null : sha256(resolution.actionCatalog),
+          interactionCatalogSha256:
+            resolution === null ? null : sha256(resolution.interactionCatalog),
+          repairPolicy:
+            resolution === null
+              ? null
+              : {
+                  repairableArguments: resolution.repairableArguments,
+                  parameterRepairCandidates: resolution.parameterRepairCandidates,
+                  strategy: resolution.strategy,
+                },
+          semanticCandidateSha256:
+            resolution?.semanticCandidate == null ? null : sha256(resolution.semanticCandidate),
+        }),
+        envelope,
+        outcome,
+      }),
     );
     options.database.appendEvent({
       id: `procedure-execution-failure-replan:${request.requestId}`,

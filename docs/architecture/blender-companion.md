@@ -215,6 +215,10 @@ session/step/observation/checkpoint mismatch；直接成功与 `recovered_after_
 新 checkpoint。Guide/Companion `1.5.0` 可把 `rollback_step` 限定为两次或三次总尝试：每次失败先补偿并
 发出 `retry_scheduled`，Session 只接受连续 attempt；最终成功才把整轮作为一个 `next` checkpoint 提交，
 耗尽则取消准备中的历史事务并报告 `failed_rolled_back + exhausted`。回退失败或保留现场不会进入自动循环。
+Runtime 只会把唯一匹配 terminal managed-action failure 的 `failed_rolled_back` attestation 交给本地
+failure-replan resolver；它以精确 replay/catalog 证据生成 proposal-only 参数或 proof-backed 轨迹候选，且
+不会向 Companion 下发新的 action。只读查询和重启回填见
+[ADR 0102](../adr/0102-trusted-execution-failure-replan.md)。
 见
 [ADR 0065](../adr/0065-managed-procedure-leaf-replay-attestation.md) 与
 [ADR 0066](../adr/0066-icosphere-managed-replay-attestation.md) 与
