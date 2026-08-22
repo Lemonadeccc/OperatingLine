@@ -213,6 +213,9 @@ class CompanionTransport:
         self.execution_track_preflight_creates: Queue[dict[str, Any]] = Queue()
         self.execution_track_preflight_status_requests: Queue[str] = Queue()
         self.execution_track_preflight_results: Queue[dict[str, Any]] = Queue()
+        self.execution_track_execution_progress: Queue[dict[str, Any]] = Queue()
+        self.execution_track_execution_results: Queue[dict[str, Any]] = Queue()
+        self.execution_track_execution_recovery_acks: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_progress: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_results: Queue[dict[str, Any]] = Queue()
         self.shortcut_proof_recovery_acks: Queue[dict[str, Any]] = Queue()
@@ -230,6 +233,9 @@ class CompanionTransport:
         self._seen_replay_current_state_verification_ids: set[str] = set()
         self._seen_action_request_ids: set[str] = set()
         self._seen_execution_track_preflight_request_ids: set[str] = set()
+        self._seen_execution_track_execution_request_ids: set[str] = set()
+        self._inflight_execution_track_execution_request_ids: set[str] = set()
+        self._execution_track_execution_recovery_poll_enabled = False
         self._execution_track_preflight_poll_enabled = False
         self._seen_shortcut_proof_request_ids: set[str] = set()
         self._seen_shortcut_proof_recovery_ids: set[str] = set()
@@ -352,6 +358,53 @@ class CompanionTransport:
         if not isinstance(result, dict):
             raise ValueError("Execution-track preflight result must be an object")
         self.execution_track_preflight_results.put(deepcopy(result))
+
+    def submit_execution_track_execution_progress(self, progress: dict[str, Any]) -> None:
+        """Queue one durable v2 execution-track progress record."""
+        if not isinstance(progress, dict):
+            raise ValueError("Execution-track progress must be an object")
+        self.execution_track_execution_progress.put(deepcopy(progress))
+
+    def submit_execution_track_execution_result(self, result: dict[str, Any]) -> None:
+        """Queue one durable v2 execution-track terminal result."""
+        if not isinstance(result, dict):
+            raise ValueError("Execution-track result must be an object")
+        self.execution_track_execution_results.put(deepcopy(result))
+
+    def submit_execution_track_execution_recovery_ack(self, ack: dict[str, Any]) -> None:
+        """Queue one durable read-only execution-track recovery acknowledgement."""
+        if not isinstance(ack, dict):
+            raise ValueError("Execution-track recovery acknowledgement must be an object")
+        self.execution_track_execution_recovery_acks.put(deepcopy(ack))
+
+    def acknowledge_execution_track_execution_delivery(
+        self, request_id: str, *, persisted: bool
+    ) -> None:
+        """Move delivery dedupe past the main-thread durable persistence boundary."""
+        validated = self._validated_required_uuid(
+            request_id, "Execution-track execution request id"
+        )
+        self.control.put(
+            {
+                "kind": "execution_track_execution_delivery_persisted"
+                if persisted
+                else "execution_track_execution_delivery_retry",
+                "requestId": validated,
+            }
+        )
+
+    def enable_execution_track_execution_recovery_poll(self) -> None:
+        self.control.put({"kind": "execution_track_execution_recovery_poll_enabled"})
+
+    def _apply_execution_track_execution_delivery_ack(
+        self, request_id: str, *, persisted: bool
+    ) -> None:
+        self._inflight_execution_track_execution_request_ids.discard(request_id)
+        if not persisted:
+            return
+        if len(self._seen_execution_track_execution_request_ids) >= 256:
+            self._seen_execution_track_execution_request_ids.pop()
+        self._seen_execution_track_execution_request_ids.add(request_id)
 
     def request_execution_track_preflight_status(self, request_id: str) -> None:
         """Queue an authenticated status lookup for one immutable request."""
@@ -697,6 +750,12 @@ class CompanionTransport:
             or path == "/api/v1/companion/execution-track-preflight/poll"
             or path.startswith("/api/v1/companion/execution-track-preflight/poll?")
             or path == "/api/v1/companion/execution-track-preflight/result"
+            or path.startswith("/api/v1/companion/execution-track-execution?")
+            or path == "/api/v1/companion/execution-track-execution/progress"
+            or path == "/api/v1/companion/execution-track-execution/managed-start"
+            or path == "/api/v1/companion/execution-track-execution/result"
+            or path.startswith("/api/v1/companion/execution-track-execution/recovery?")
+            or path == "/api/v1/companion/execution-track-execution/recovery"
             or path.startswith("/api/v1/companion/shortcut-proof?")
             or path == "/api/v1/companion/shortcut-proof-progress"
             or path == "/api/v1/companion/shortcut-proof-result"
@@ -1079,6 +1138,53 @@ class CompanionTransport:
             and self._execution_track_preflight_poll_enabled
         ):
             self._poll_execution_track_preflight()
+        if session.negotiated_guide_protocol_version == "1.6.0":
+            self._poll_execution_track_execution()
+            if self._execution_track_execution_recovery_poll_enabled:
+                self._poll_execution_track_execution_recovery()
+
+    def _poll_execution_track_execution(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/execution-track-execution?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Execution-track execution poll")
+        delivery = response["request"]
+        if delivery is None:
+            return
+        if not isinstance(delivery, dict):
+            raise ValueError("Execution-track execution delivery must be an object or null")
+        binding = delivery.get("binding")
+        request_id = binding.get("requestId") if isinstance(binding, dict) else None
+        self._validated_required_uuid(request_id, "Execution-track execution request id")
+        if (
+            request_id in self._seen_execution_track_execution_request_ids
+            or request_id in self._inflight_execution_track_execution_request_ids
+        ):
+            return
+        self._inflight_execution_track_execution_request_ids.add(request_id)
+        self.incoming.put(
+            {"kind": "execution_track_execution_delivery", "request": deepcopy(delivery)}
+        )
+
+    def _poll_execution_track_execution_recovery(self) -> None:
+        response = self._request_json(
+            "GET",
+            "/api/v1/companion/execution-track-execution/recovery?"
+            + urlencode({"adapterId": "blender", "instanceId": self._instance_id}),
+            abort_on_stop=True,
+        )
+        self._validate_exact_keys(response, {"request"}, "Execution-track recovery poll")
+        request = response["request"]
+        if request is None:
+            return
+        if not isinstance(request, dict):
+            raise ValueError("Execution-track recovery request must be an object or null")
+        self.incoming.put(
+            {"kind": "execution_track_execution_recovery_request", "request": deepcopy(request)}
+        )
 
     def _poll_execution_track_preflight(self) -> None:
         response = self._request_json(
@@ -3622,6 +3728,10 @@ class CompanionTransport:
                 "planContentSha256",
                 "executionId",
                 "stepId",
+                "expectedPhase",
+                "expectedCompletedStepIds",
+                "expectedReceiptStepIds",
+                "expectedCheckpoint",
                 "expectedObservation",
                 "requestedAt",
             },
@@ -3670,6 +3780,61 @@ class CompanionTransport:
             raise ValueError("Replay current-state plan revision must be positive")
         if not isinstance(value["stepId"], str) or not value["stepId"]:
             raise ValueError("Replay current-state step id must be non-empty text")
+        if value["expectedPhase"] not in {"running", "completed"}:
+            raise ValueError(
+                "Replay current-state expected phase must be running or completed"
+            )
+        completed_step_ids = value["expectedCompletedStepIds"]
+        receipt_step_ids = value["expectedReceiptStepIds"]
+        for step_ids, label in (
+            (completed_step_ids, "completed-step prefix"),
+            (receipt_step_ids, "receipt-step prefix"),
+        ):
+            if (
+                not isinstance(step_ids, list)
+                or not step_ids
+                or any(not isinstance(step_id, str) or not step_id for step_id in step_ids)
+                or len(set(step_ids)) != len(step_ids)
+                or step_ids[-1] != value["stepId"]
+            ):
+                raise ValueError(
+                    f"Replay current-state expected {label} must be unique and end with stepId"
+                )
+        previous_receipt_index = -1
+        for step_id in receipt_step_ids:
+            try:
+                previous_receipt_index = completed_step_ids.index(
+                    step_id,
+                    previous_receipt_index + 1,
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "Replay current-state receipt prefix must preserve completed-step order"
+                ) from error
+        expected_checkpoint = value["expectedCheckpoint"]
+        if not isinstance(expected_checkpoint, dict):
+            raise ValueError("Replay current-state expected checkpoint must be an object")
+        self._validate_exact_keys(
+            expected_checkpoint,
+            {"checkpointId", "operation", "contentSha256"},
+            "Replay current-state expected checkpoint",
+        )
+        self._validated_uuid(
+            expected_checkpoint["checkpointId"],
+            "Expected checkpoint id",
+        )
+        if expected_checkpoint["operation"] not in {"next", "recheck"}:
+            raise ValueError(
+                "Replay current-state expected checkpoint operation must be next or recheck"
+            )
+        if (
+            not isinstance(expected_checkpoint["contentSha256"], str)
+            or CONTENT_SHA256_PATTERN.fullmatch(expected_checkpoint["contentSha256"])
+            is None
+        ):
+            raise ValueError(
+                "Replay current-state expected checkpoint SHA-256 must be 64 lowercase hex characters"
+            )
         expected_observation = value["expectedObservation"]
         if not isinstance(expected_observation, dict):
             raise ValueError("Replay current-state expected observation must be an object")
@@ -3891,6 +4056,10 @@ class CompanionTransport:
         pending_execution_track_preflight_create: dict[str, Any] | None = None
         pending_execution_track_preflight_status_request: str | None = None
         pending_execution_track_preflight_result: dict[str, Any] | None = None
+        pending_execution_track_execution_progress: dict[str, Any] | None = None
+        pending_execution_track_execution_result: dict[str, Any] | None = None
+        pending_execution_track_execution_recovery_ack: dict[str, Any] | None = None
+        stale_execution_track_execution_recovery_ack: dict[str, Any] | None = None
         pending_shortcut_progress: dict[str, Any] | None = None
         pending_shortcut_result: dict[str, Any] | None = None
         pending_shortcut_recovery_ack: dict[str, Any] | None = None
@@ -3912,6 +4081,7 @@ class CompanionTransport:
         initial_plan_run_signature: str | None = None
         shortcut_reporting_blocked: set[str] = set()
         menu_control_reporting_blocked: set[str] = set()
+        execution_track_reporting_blocked: set[str] = set()
         downgraded_preflight_identities: set[str] = set()
         refresh_replan_providers = True
         refresh_dialogue_providers = False
@@ -3928,6 +4098,9 @@ class CompanionTransport:
             or pending_execution_track_preflight_create is not None
             or pending_execution_track_preflight_status_request is not None
             or pending_execution_track_preflight_result is not None
+            or pending_execution_track_execution_progress is not None
+            or pending_execution_track_execution_result is not None
+            or pending_execution_track_execution_recovery_ack is not None
             or pending_shortcut_progress is not None
             or pending_shortcut_result is not None
             or pending_shortcut_recovery_ack is not None
@@ -3944,6 +4117,9 @@ class CompanionTransport:
             or not self.execution_track_preflight_creates.empty()
             or not self.execution_track_preflight_status_requests.empty()
             or not self.execution_track_preflight_results.empty()
+            or not self.execution_track_execution_progress.empty()
+            or not self.execution_track_execution_results.empty()
+            or not self.execution_track_execution_recovery_acks.empty()
             or not self.shortcut_proof_progress.empty()
             or not self.shortcut_proof_results.empty()
             or not self.shortcut_proof_recovery_acks.empty()
@@ -4012,6 +4188,21 @@ class CompanionTransport:
                         refresh_dialogue_providers = True
                     elif control.get("kind") == "refresh_initial_plan_providers":
                         refresh_initial_plan_providers = True
+                    elif control.get("kind") in {
+                        "execution_track_execution_delivery_persisted",
+                        "execution_track_execution_delivery_retry",
+                    }:
+                        request_id = control.get("requestId")
+                        if isinstance(request_id, str):
+                            self._apply_execution_track_execution_delivery_ack(
+                                request_id,
+                                persisted=control["kind"].endswith("_persisted"),
+                            )
+                    elif (
+                        control.get("kind")
+                        == "execution_track_execution_recovery_poll_enabled"
+                    ):
+                        self._execution_track_execution_recovery_poll_enabled = True
                 if refresh_replan_providers and not self._stop.is_set():
                     try:
                         providers = self._request_json(
@@ -4647,6 +4838,199 @@ class CompanionTransport:
                             }
                         )
                     pending_execution_track_preflight_result = None
+                    request_succeeded = True
+                if pending_execution_track_execution_progress is None:
+                    try:
+                        pending_execution_track_execution_progress = (
+                            self.execution_track_execution_progress.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_execution_progress is not None:
+                    request_id = pending_execution_track_execution_progress.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/execution-track-execution/progress",
+                            pending_execution_track_execution_progress,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Execution-track progress ack"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge execution-track progress")
+                    except HTTPError as error:
+                        if not 400 <= error.code < 500:
+                            raise
+                        if isinstance(request_id, str):
+                            execution_track_reporting_blocked.add(request_id)
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_execution_progress_rejected",
+                                "requestId": request_id,
+                                "message": (
+                                    "Runtime permanently rejected execution-track baseline "
+                                    f"progress (HTTP {error.code})"
+                                ),
+                            }
+                        )
+                    else:
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_execution_progress_acknowledged",
+                                "requestId": request_id,
+                                "result": response["result"],
+                            }
+                        )
+                    pending_execution_track_execution_progress = None
+                    request_succeeded = True
+                if pending_execution_track_execution_result is None:
+                    try:
+                        pending_execution_track_execution_result = (
+                            self.execution_track_execution_results.get_nowait()
+                        )
+                    except Empty:
+                        pass
+                if pending_execution_track_execution_result is not None:
+                    request_id = pending_execution_track_execution_result.get("requestId")
+                    if request_id in execution_track_reporting_blocked:
+                        pending_execution_track_execution_result = None
+                        request_succeeded = True
+                    else:
+                        try:
+                            response = self._request_json(
+                                "POST",
+                                "/api/v1/companion/execution-track-execution/result",
+                                pending_execution_track_execution_result,
+                            )
+                            self._validate_exact_keys(
+                                response, {"result"}, "Execution-track result ack"
+                            )
+                            if response["result"] not in {"accepted", "duplicate"}:
+                                raise ValueError("Runtime did not acknowledge execution-track result")
+                        except HTTPError as error:
+                            runtime_payload = getattr(error, "runtime_payload", None)
+                            if (
+                                error.code == 409
+                                and isinstance(runtime_payload, dict)
+                                and runtime_payload.get("retryable") is True
+                            ):
+                                raise
+                            if not 400 <= error.code < 500:
+                                raise
+                            self.incoming.put(
+                                {
+                                    "kind": "execution_track_execution_result_rejected",
+                                    "requestId": request_id,
+                                    "message": (
+                                        "Runtime permanently rejected execution-track result "
+                                        f"(HTTP {error.code})"
+                                    ),
+                                }
+                            )
+                            pending_execution_track_execution_result = None
+                        else:
+                            self.incoming.put(
+                                {
+                                    "kind": "execution_track_execution_result_acknowledged",
+                                    "requestId": request_id,
+                                    "result": response["result"],
+                                }
+                            )
+                            pending_execution_track_execution_result = None
+                        request_succeeded = True
+                if pending_execution_track_execution_recovery_ack is None:
+                    while True:
+                        try:
+                            candidate_recovery_ack = (
+                                self.execution_track_execution_recovery_acks.get_nowait()
+                            )
+                        except Empty:
+                            break
+                        stale_recovery_id = (
+                            stale_execution_track_execution_recovery_ack.get("recoveryId")
+                            if isinstance(
+                                stale_execution_track_execution_recovery_ack, dict
+                            )
+                            else None
+                        )
+                        stale_request_id = (
+                            stale_execution_track_execution_recovery_ack.get("requestId")
+                            if isinstance(
+                                stale_execution_track_execution_recovery_ack, dict
+                            )
+                            else None
+                        )
+                        if (
+                            stale_execution_track_execution_recovery_ack is not None
+                            and (
+                                candidate_recovery_ack.get("requestId")
+                                != stale_request_id
+                                or candidate_recovery_ack.get("recoveryId")
+                                == stale_recovery_id
+                            )
+                        ):
+                            continue
+                        pending_execution_track_execution_recovery_ack = (
+                            candidate_recovery_ack
+                        )
+                        stale_execution_track_execution_recovery_ack = None
+                        break
+                if pending_execution_track_execution_recovery_ack is not None:
+                    request_id = pending_execution_track_execution_recovery_ack.get("requestId")
+                    try:
+                        response = self._request_json(
+                            "POST",
+                            "/api/v1/companion/execution-track-execution/recovery",
+                            pending_execution_track_execution_recovery_ack,
+                        )
+                        self._validate_exact_keys(
+                            response, {"result"}, "Execution-track recovery ack"
+                        )
+                        if response["result"] not in {"accepted", "duplicate"}:
+                            raise ValueError("Runtime did not acknowledge execution-track recovery")
+                    except HTTPError as error:
+                        runtime_code = self._runtime_error_code(
+                            getattr(error, "runtime_payload", {})
+                        )
+                        rotated_authority_codes = {
+                            "lease_not_current",
+                            "execution_track_execution_recovery_state_not_current",
+                            "execution_track_execution_recovery_live_authority",
+                            "execution_track_execution_recovery_ack_challenge",
+                        }
+                        if error.code != 409 or runtime_code not in rotated_authority_codes:
+                            raise
+                        stale_execution_track_execution_recovery_ack = (
+                            pending_execution_track_execution_recovery_ack
+                        )
+                        pending_execution_track_execution_recovery_ack = None
+                        self._execution_track_execution_recovery_poll_enabled = True
+                        self.incoming.put(
+                            {
+                                "kind": (
+                                    "execution_track_execution_recovery_ack_"
+                                    "supersession_required"
+                                ),
+                                "requestId": request_id,
+                                "recoveryId": (
+                                    stale_execution_track_execution_recovery_ack.get(
+                                        "recoveryId"
+                                    )
+                                ),
+                                "runtimeCode": runtime_code,
+                            }
+                        )
+                    else:
+                        self._execution_track_execution_recovery_poll_enabled = False
+                        self.incoming.put(
+                            {
+                                "kind": "execution_track_execution_recovery_acknowledged",
+                                "requestId": request_id,
+                                "result": response["result"],
+                            }
+                        )
+                        pending_execution_track_execution_recovery_ack = None
                     request_succeeded = True
                 if pending_menu_control_progress is None:
                     try:

@@ -118,6 +118,7 @@ class CompanionController:
         self.execution_track_preflight_request: dict[str, Any] | None = None
         self.execution_track_preflight_status: dict[str, Any] | None = None
         self.execution_track_preflight_message = ""
+        self.execution_track_execution_message = ""
         self._artifact_attestation_execution_id: str | None = None
         self._artifact_attestation: dict[str, Any] | None = None
         self._shortcut_proof_driver: Any | None = None
@@ -2532,6 +2533,258 @@ class CompanionController:
             self.error = error_message
         transport.submit_execution_track_preflight_result(result)
 
+    def _handle_execution_track_execution_delivery(self, delivery: Any) -> None:
+        """Persist and submit a v2 baseline-attested, no-mutation terminal pair."""
+        transport = self._transport
+        if transport is None:
+            return
+        from ..infrastructure.execution_track_execution import (
+            EXECUTOR_GAP,
+            build_fail_closed_outbox,
+            load_outbox,
+            persist_outbox,
+        )
+
+        request_id = None
+        try:
+            binding = delivery.get("binding") if isinstance(delivery, dict) else None
+            request_id = binding.get("requestId") if isinstance(binding, dict) else None
+            existing = load_outbox(bpy.context.scene)
+            if existing is not None:
+                if existing["result"].get("requestId") != request_id:
+                    raise RuntimeError(
+                        "another durable execution-track result awaits acknowledgement"
+                    )
+                outbox = existing
+            else:
+                outbox = build_fail_closed_outbox(
+                    delivery,
+                    instance_id=self.instance_id,
+                    last_report=self.last_report,
+                    current_lease=transport.current_document_lease,
+                )
+                persist_outbox(bpy.context.scene, outbox)
+            transport.acknowledge_execution_track_execution_delivery(
+                request_id, persisted=True
+            )
+            transport.submit_execution_track_execution_progress(outbox["progress"])
+            transport.submit_execution_track_execution_result(outbox["result"])
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            if isinstance(request_id, str):
+                transport.acknowledge_execution_track_execution_delivery(
+                    request_id, persisted=False
+                )
+            self.execution_track_execution_message = f"Execution-track failed closed: {error}"
+            self.error = self.execution_track_execution_message
+            self.status = "Execution-track recovery required"
+            return
+        self.execution_track_execution_message = EXECUTOR_GAP
+        self.error = EXECUTOR_GAP
+        self.status = "Execution-track stopped before mutation"
+
+    def _handle_execution_track_execution_recovery(self, request: Any) -> None:
+        transport = self._transport
+        if transport is None:
+            return
+        from ..infrastructure.execution_track_execution import (
+            build_baseline_terminal_recovery_ack,
+            build_managed_repair_recovery_ack,
+            build_persisted_failed_managed_recovery_ack,
+            canonical_sha256,
+            _identity_hashes,
+            _scene_snapshot,
+            compute_scene_fingerprint_sha256,
+            load_outbox,
+            persist_recovery_ack,
+            _validate_managed_repair_request,
+        )
+
+        try:
+            outbox = load_outbox(bpy.context.scene)
+            if outbox is None:
+                raise RuntimeError("durable execution-track terminal outbox is unavailable")
+            existing = outbox.get("recoveryAck")
+            recovery_id = request.get("recoveryId") if isinstance(request, dict) else None
+            if isinstance(existing, dict) and existing.get("recoveryId") == recovery_id:
+                ack = existing
+            elif request.get("source") == "failed_managed_repair":
+                current_lease = transport.current_document_lease
+                _progress, result, _marker = _validate_managed_repair_request(
+                    request, outbox, current_lease
+                )
+                failed_report = result["managedReport"]
+                failed_checkpoint = result["managedCheckpoint"]
+                from .. import get_session
+                from ..infrastructure.native_history import (
+                    cancel_native_history,
+                    commit_native_history,
+                    native_undo_checkpoint_attestation,
+                    prepare_native_history,
+                )
+
+                session = get_session()
+                current_checkpoint = native_undo_checkpoint_attestation(session)
+                binding = request["acceptedProgress"]["binding"]
+                authorized = binding["authorizedStartState"]
+                failed_completed = authorized["completedStepIds"]
+                recovered_completed = [*failed_completed, result["leafId"]]
+                expected_receipts = [
+                    *authorized["receiptStepIds"],
+                    result["leafId"],
+                ]
+                checkpoint_session = (
+                    current_checkpoint.get("session", {})
+                    if isinstance(current_checkpoint, dict)
+                    else {}
+                )
+                common_checkpoint_matches = (
+                    checkpoint_session.get("plan")
+                    == {
+                        "id": binding["plan"]["id"],
+                        "revision": binding["plan"]["revision"],
+                    }
+                    and checkpoint_session.get("planContentSha256")
+                    == binding["plan"]["contentSha256"]
+                    and checkpoint_session.get("executionId") == result["executionId"]
+                    and checkpoint_session.get("activeStepId") == result["leafId"]
+                    and checkpoint_session.get("receiptStepIds") == expected_receipts
+                    and getattr(session.active_step, "id", None) == result["leafId"]
+                )
+                failed_checkpoint_current = (
+                    common_checkpoint_matches
+                    and current_checkpoint.get("checkpointId")
+                    == failed_checkpoint["checkpointId"]
+                    and canonical_sha256(current_checkpoint)
+                    == failed_checkpoint["contentSha256"]
+                    and checkpoint_session.get("completedStepIds") == failed_completed
+                    and list(session.completed_step_ids) == failed_completed
+                    and getattr(session.observation_gate, "blocking", False)
+                )
+                recovered_checkpoint_current = (
+                    common_checkpoint_matches
+                    and current_checkpoint.get("operation") == "recheck"
+                    and current_checkpoint.get("previousCheckpointId")
+                    == failed_checkpoint["checkpointId"]
+                    and checkpoint_session.get("completedStepIds") == recovered_completed
+                    and list(session.completed_step_ids) == recovered_completed
+                    and getattr(session.observation_gate, "status", None) == "recovered"
+                )
+                if not failed_checkpoint_current and not recovered_checkpoint_current:
+                    raise RuntimeError(
+                        "live session does not retain the exact failed-managed checkpoint"
+                    )
+                prepared = False
+                committed = False
+                try:
+                    if failed_checkpoint_current:
+                        prepare_native_history(session, bpy.context.scene, "recheck")
+                        prepared = True
+                        step = session.recheck_observations()
+                        gate = session.observation_gate
+                        if gate is None or gate.status != "recovered":
+                            raise RuntimeError("managed repair observation did not recover")
+                        commit_native_history(session)
+                        committed = True
+                        current_checkpoint = native_undo_checkpoint_attestation(session)
+                    else:
+                        step = session.active_step
+                        gate = session.observation_gate
+                        _observed_step, observations = (
+                            session.evaluate_current_step_observations(result["leafId"])
+                        )
+                        if not observations or any(
+                            observation.get("satisfied") is not True
+                            for observation in observations
+                        ):
+                            raise RuntimeError(
+                                "managed repair strong observation is no longer satisfied"
+                            )
+                    if (
+                        not isinstance(current_checkpoint, dict)
+                        or current_checkpoint.get("operation") != "recheck"
+                        or current_checkpoint.get("previousCheckpointId")
+                        != failed_checkpoint["checkpointId"]
+                    ):
+                        raise RuntimeError("managed repair recheck checkpoint is unavailable")
+                    snapshot = _scene_snapshot()
+                    identity = _identity_hashes(snapshot)
+                    scene_fingerprint = compute_scene_fingerprint_sha256(snapshot)
+                    observed_at = datetime.now(timezone.utc).isoformat().replace(
+                        "+00:00", "Z"
+                    )
+                    checkpoint_id = current_checkpoint["checkpointId"]
+                    report_id = str(uuid.uuid4())
+                    report_sequence = failed_report["sequence"] + 1
+                    self._sequence = failed_report["sequence"]
+                    details_content = {
+                        "evidenceClass": "managed_repair_strong_observation",
+                        "observationIndex": result["failedObservation"]["observationIndex"]
+                        + 1,
+                        "reportId": report_id,
+                        "reportSequence": report_sequence,
+                        "checkpointId": checkpoint_id,
+                        "sceneFingerprintSha256": scene_fingerprint,
+                        **identity,
+                        "observedAt": observed_at,
+                    }
+                    observation = {
+                        "kind": result["failedObservation"]["kind"],
+                        "satisfied": True,
+                        "details": {
+                            **details_content,
+                            "contentSha256": canonical_sha256(details_content),
+                        },
+                    }
+                    recovered_report = self.report(
+                        "observation_recovered",
+                        step=step,
+                        observations_override=[observation],
+                        observation_gate_override=gate,
+                        report_id_override=report_id,
+                        submit=False,
+                    )
+                except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                    if prepared and not committed:
+                        cancel_native_history()
+                    raise
+                ack = build_managed_repair_recovery_ack(
+                    request,
+                    outbox=outbox,
+                    current_lease=current_lease,
+                    recovered_report=recovered_report,
+                )
+                outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
+            elif outbox.get("result", {}).get("status") == "failed_managed":
+                ack = build_persisted_failed_managed_recovery_ack(
+                    request,
+                    outbox=outbox,
+                    current_lease=transport.current_document_lease,
+                )
+                outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
+            else:
+                ack = build_baseline_terminal_recovery_ack(
+                    request,
+                    outbox=outbox,
+                    current_lease=transport.current_document_lease,
+                )
+                outbox = persist_recovery_ack(bpy.context.scene, outbox, ack)
+            transport.submit_execution_track_execution_recovery_ack(ack)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+            self.error = f"Execution-track recovery failed closed: {error}"
+            self.status = "Execution-track recovery required"
+            return
+        self.error = ""
+        self.status = "Execution-track baseline recovery submitted"
+
+    def _resubmit_execution_track_execution_outbox(self) -> bool:
+        """Replay the exact Scene outbox after a worker/plugin restart."""
+        transport = self._transport
+        if transport is None or getattr(transport, "session_snapshot", None) is None:
+            return False
+        from ..infrastructure.execution_track_execution import resubmit_outbox
+
+        return resubmit_outbox(transport, bpy.context.scene)
+
     def _execution_track_preflight_result_identity(
         self, delivery: Any
     ) -> dict[str, Any] | None:
@@ -4319,6 +4572,94 @@ class CompanionController:
                         continue
                 if message.get("kind") == "action_execute_request":
                     self._handle_action_execute_request(message.get("request"))
+                elif message.get("kind") == "execution_track_execution_delivery":
+                    self._handle_execution_track_execution_delivery(message.get("request"))
+                elif message.get("kind") == "execution_track_execution_recovery_request":
+                    self._handle_execution_track_execution_recovery(message.get("request"))
+                elif message.get("kind") == "execution_track_execution_result_acknowledged":
+                    from ..infrastructure.execution_track_execution import (
+                        acknowledge_outbox,
+                        load_outbox,
+                    )
+
+                    request_id = message.get("requestId")
+                    failed_managed = False
+                    if isinstance(request_id, str):
+                        durable = load_outbox(bpy.context.scene)
+                        failed_managed = (
+                            isinstance(durable, dict)
+                            and durable.get("result", {}).get("status") == "failed_managed"
+                        )
+                        if not failed_managed:
+                            acknowledge_outbox(bpy.context.scene, request_id)
+                        else:
+                            transport = self._transport
+                            if transport is not None:
+                                transport.enable_execution_track_execution_recovery_poll()
+                    self.status = (
+                        "Execution-track failed-managed evidence retained for recovery"
+                        if isinstance(request_id, str) and failed_managed
+                        else "Execution-track request safely terminated"
+                    )
+                elif (
+                    message.get("kind")
+                    == "execution_track_execution_recovery_acknowledged"
+                ):
+                    from ..infrastructure.execution_track_execution import (
+                        acknowledge_outbox,
+                        load_outbox,
+                        retain_failed_managed_terminal,
+                    )
+
+                    request_id = message.get("requestId")
+                    retained = False
+                    if isinstance(request_id, str):
+                        try:
+                            durable = load_outbox(bpy.context.scene)
+                            recovered_report = (
+                                durable.get("recoveredReport")
+                                if isinstance(durable, dict)
+                                else None
+                            )
+                            retained = retain_failed_managed_terminal(
+                                bpy.context.scene, request_id
+                            )
+                            if not retained:
+                                acknowledge_outbox(bpy.context.scene, request_id)
+                                if isinstance(recovered_report, dict):
+                                    self.last_report = deepcopy(recovered_report)
+                                    self._sequence = max(
+                                        self._sequence,
+                                        int(recovered_report.get("sequence", 0)),
+                                    )
+                            else:
+                                transport = self._transport
+                                if transport is not None:
+                                    transport.enable_execution_track_execution_recovery_poll()
+                        except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+                            self.error = (
+                                "Execution-track recovery acknowledgement persistence "
+                                f"failed closed: {error}"
+                            )
+                            self.status = "Execution-track recovery required"
+                            try:
+                                self._resubmit_execution_track_execution_outbox()
+                            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                                pass
+                            continue
+                    self.error = ""
+                    self.status = (
+                        "Execution-track failed-managed state retained for repair"
+                        if isinstance(request_id, str) and retained
+                        else "Execution-track recovery reconciled"
+                    )
+                elif message.get("kind") in {
+                    "execution_track_execution_progress_rejected",
+                    "execution_track_execution_result_rejected",
+                    "execution_track_execution_recovery_rejected",
+                }:
+                    self.error = str(message.get("message") or "Execution-track report rejected")
+                    self.status = "Execution-track recovery required"
                 elif message.get("kind") == "execution_track_preflight_delivery":
                     self._handle_execution_track_preflight_delivery(
                         message.get("request")
@@ -4811,19 +5152,23 @@ class CompanionController:
                 elif message.get("kind") == "session_established":
                     self.error = ""
                     outbox_error: str | None = None
+                    execution_outbox_pending = False
                     try:
                         self._resubmit_menu_control_terminal_outbox(
                             message.get("leaseId")
                         )
+                        execution_outbox_pending = (
+                            self._resubmit_execution_track_execution_outbox()
+                        )
                     except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
                         outbox_error = (
-                            "Menu-control terminal outbox resubmission failed closed: "
+                            "Durable Companion outbox resubmission failed closed: "
                             f"{error}"
                         )
                     session = get_session()
                     if outbox_error is not None:
                         self.error = outbox_error
-                        self.status = "Menu-control proof recovery required"
+                        self.status = "Durable Companion outbox recovery required"
                     elif self.proposal_session is not None:
                         self.status = (
                             f"Plan proposal {self.proposal_session.plan_id} "
@@ -4836,7 +5181,8 @@ class CompanionController:
                             and session.revision is not None
                             else "Connected"
                         )
-                    self.report("connected")
+                    if outbox_error is None and not execution_outbox_pending:
+                        self.report("connected")
                 elif message.get("kind") == "error":
                     self.error = str(message.get("message", "Runtime connection error"))
                     self.status = "Connection error"
@@ -4892,6 +5238,8 @@ class CompanionController:
         observations_override: list[dict[str, Any]] | None = None,
         observation_gate_override: ObservationGateState | None = None,
         procedure_replay_current_state_request: dict[str, Any] | None = None,
+        report_id_override: str | None = None,
+        submit: bool = True,
     ) -> dict[str, Any]:
         from .. import get_session
 
@@ -4939,7 +5287,7 @@ class CompanionController:
                 )
             )
         self._sequence += 1
-        report_id = str(uuid.uuid4())
+        report_id = report_id_override or str(uuid.uuid4())
         if transition == "current_state_rechecked":
             pass
         elif phase == "completed" and session.execution_id is not None:
@@ -5080,7 +5428,7 @@ class CompanionController:
                 report["procedureReplayCurrentStateRequest"] = deepcopy(
                     procedure_replay_current_state_request
                 )
-        if self._transport is not None:
+        if submit and self._transport is not None:
             self._transport.send_report(report)
         self.last_report = report
         return report

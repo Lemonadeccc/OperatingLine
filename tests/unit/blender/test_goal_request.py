@@ -398,6 +398,14 @@ class GoalRequestTransportTests(unittest.TestCase):
             "planContentSha256": "b" * 64,
             "executionId": str(uuid.uuid4()),
             "stepId": "snowman.eye.left",
+            "expectedPhase": "completed",
+            "expectedCompletedStepIds": ["snowman.eye.left"],
+            "expectedReceiptStepIds": ["snowman.eye.left"],
+            "expectedCheckpoint": {
+                "checkpointId": str(uuid.uuid4()),
+                "operation": "next",
+                "contentSha256": "d" * 64,
+            },
             "expectedObservation": {
                 "kind": "uv_sphere_ready",
                 "contentSha256": "c" * 64,
@@ -429,6 +437,8 @@ class GoalRequestTransportTests(unittest.TestCase):
                 return {"request": None}
             if path.startswith("/api/v1/companion/shortcut-proof?"):
                 return {"request": None}
+            if path.startswith("/api/v1/companion/execution-track-execution?"):
+                return {"request": None}
             raise AssertionError(f"Unexpected request: {path}")
 
         transport._request_json = request_json
@@ -450,6 +460,43 @@ class GoalRequestTransportTests(unittest.TestCase):
         )
         with self.assertRaises(Empty):
             transport.incoming.get_nowait()
+
+    def test_replay_current_state_receipts_must_preserve_completed_order(self) -> None:
+        instance_id = str(uuid.uuid4())
+        transport = CompanionTransport(
+            "http://127.0.0.1:43123",
+            "0123456789abcdef",
+            instance_id,
+        )
+        target_step = "target"
+        request = {
+            "formatVersion": "1.0.0",
+            "verificationId": str(uuid.uuid4()),
+            "replayId": str(uuid.uuid4()),
+            "attestationId": str(uuid.uuid4()),
+            "attestationContentSha256": "a" * 64,
+            "target": {"adapterId": "blender", "instanceId": instance_id},
+            "plan": {"id": "snowman", "revision": 1},
+            "planContentSha256": "b" * 64,
+            "executionId": str(uuid.uuid4()),
+            "stepId": target_step,
+            "expectedPhase": "completed",
+            "expectedCompletedStepIds": ["A", "B", target_step],
+            "expectedReceiptStepIds": ["B", "A", target_step],
+            "expectedCheckpoint": {
+                "checkpointId": str(uuid.uuid4()),
+                "operation": "next",
+                "contentSha256": "c" * 64,
+            },
+            "expectedObservation": {
+                "kind": "ready",
+                "contentSha256": "d" * 64,
+            },
+            "requestedAt": "2026-08-22T12:00:00Z",
+        }
+
+        with self.assertRaisesRegex(ValueError, "preserve completed-step order"):
+            transport._validated_replay_current_state_request(request)
 
     def test_action_poll_strictly_validates_and_deduplicates_requests(self) -> None:
         instance_id = str(uuid.uuid4())

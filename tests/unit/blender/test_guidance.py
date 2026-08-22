@@ -767,6 +767,51 @@ class ObservationGateSessionTests(unittest.TestCase):
             domain.load_task_tree_data(retained)
 
 
+class ExecutableStepOrderTests(unittest.TestCase):
+    def test_nested_groups_follow_presentation_path_before_leaf_local_order(self) -> None:
+        leaf_in_first_group = TaskNode(
+            id="leaf.first-group",
+            number="1.1.1",
+            title="First group leaf",
+            order=9,
+            action=ActionSpec("blender", "test.first", {}),
+        )
+        leaf_in_second_group = TaskNode(
+            id="leaf.second-group",
+            number="1.2.1",
+            title="Second group leaf",
+            order=1,
+            action=ActionSpec("blender", "test.second", {}),
+        )
+        root = TaskNode(
+            id="root",
+            number="1",
+            title="Root",
+            order=0,
+            children=(
+                TaskNode(
+                    id="group.first",
+                    number="1.1",
+                    title="First group",
+                    order=1,
+                    children=(leaf_in_first_group,),
+                ),
+                TaskNode(
+                    id="group.second",
+                    number="1.2",
+                    title="Second group",
+                    order=2,
+                    children=(leaf_in_second_group,),
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            [step.id for step in domain.executable_steps(root)],
+            ["leaf.first-group", "leaf.second-group"],
+        )
+
+
 class ProviderHandoffTests(unittest.TestCase):
 
     def test_replan_never_creates_its_own_provider_authority(self) -> None:

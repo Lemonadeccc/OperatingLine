@@ -10012,6 +10012,16 @@ def main() -> None:
             "planContentSha256": session.plan_content_sha256,
             "executionId": execution_id,
             "stepId": ACTION_STEPS[-1]["id"],
+            "expectedPhase": final_report["phase"],
+            "expectedCompletedStepIds": final_report["completedStepIds"],
+            "expectedReceiptStepIds": final_report["nativeUndoCheckpoint"]["session"][
+                "receiptStepIds"
+            ],
+            "expectedCheckpoint": {
+                "checkpointId": final_report["nativeUndoCheckpoint"]["checkpointId"],
+                "operation": final_report["nativeUndoCheckpoint"]["operation"],
+                "contentSha256": "c" * 64,
+            },
             "expectedObservation": {
                 "kind": final_report["observations"][0]["kind"],
                 "contentSha256": "b" * 64,

@@ -5,6 +5,7 @@ import unittest
 import uuid
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timezone
 from importlib import import_module
 from pathlib import Path
 from queue import Empty
@@ -1037,12 +1038,20 @@ class MenuCompanionTransportTests(unittest.TestCase):
         )
         self.transport.submit_menu_control_history_transition(stale_direct_report)
         self.transport.submit_menu_control_proof_recovery_ack(ack)
-        self.transport.start()
-        deadline = __import__("time").monotonic() + 2
-        while not transition_posts and __import__("time").monotonic() < deadline:
-            __import__("time").sleep(0.01)
-        self.transport.stop(flush_timeout=0.5)
-        self.assertTrue(self.transport.wait_stopped(1))
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                value = cls(2026, 8, 22, 10, 30, tzinfo=timezone.utc)
+                return value if tz is not None else value.replace(tzinfo=None)
+
+        with patch.object(transport_module, "datetime", FixedDateTime):
+            self.transport.start()
+            deadline = __import__("time").monotonic() + 2
+            while not transition_posts and __import__("time").monotonic() < deadline:
+                __import__("time").sleep(0.01)
+            self.transport.stop(flush_timeout=0.5)
+            self.assertTrue(self.transport.wait_stopped(1))
 
         self.assertEqual(
             order,

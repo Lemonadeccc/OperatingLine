@@ -384,7 +384,10 @@ def executable_steps(root: TaskNode = SNOWMAN_TASK_TREE) -> tuple[TaskNode, ...]
                 for node in remaining.values()
                 if all(dependency in completed for dependency in node.depends_on)
             ),
-            key=lambda node: (node.order, node.id),
+            key=lambda node: (
+                tuple(int(component) for component in node.number.split(".")),
+                node.id,
+            ),
         )
         if not ready:
             raise ValueError("No executable action step remains")
