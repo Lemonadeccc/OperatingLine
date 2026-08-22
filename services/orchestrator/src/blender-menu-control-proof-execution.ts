@@ -6,14 +6,28 @@ import {
   companionMenuControlProofCreateRequestSchema,
   companionMenuControlProofDeliverySchema,
   companionMenuControlProofExecutionWindowMs,
+  companionMenuControlProofHistoryIdentityMatchesResult,
+  companionMenuControlProofHistoryIdentityMatchesTerminalHistory,
+  companionMenuControlProofHistoryIdentitySchema,
+  companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery,
+  companionMenuControlProofHistoryTransitionReconciliationAckSchema,
+  companionMenuControlProofHistoryTransitionReconciliationDeliverySchema,
+  companionMenuControlProofHistoryTransitionReportMatchesResult,
+  companionMenuControlProofHistoryTransitionReportSchema,
   companionMenuControlProofProgressSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusSchema,
   companionMenuControlProofTerminalReconciliationAckMatchesDelivery,
   companionMenuControlProofTerminalReconciliationAckSchema,
   companionMenuControlProofTerminalReconciliationDeliverySchema,
+  companionMenuControlProofTerminalHistoryIdentity,
+  companionMenuControlProofTerminalHistoryIdentitySchema,
   type CompanionMenuControlProofCreateRequest,
   type CompanionMenuControlProofDelivery,
+  type CompanionMenuControlProofHistoryIdentity,
+  type CompanionMenuControlProofHistoryTransitionReconciliationAck,
+  type CompanionMenuControlProofHistoryTransitionReconciliationDelivery,
+  type CompanionMenuControlProofHistoryTransitionReport,
   type CompanionMenuControlProofProgress,
   type CompanionMenuControlProofResult,
   type CompanionMenuControlProofStatus,
@@ -40,6 +54,8 @@ const menuProofEventTypes = [
   'blender.menu-control-proof.failed-checkpointed',
   'blender.menu-control-proof.recovery-required',
   'blender.menu-control-proof.terminal-reconciled',
+  'blender.menu-control-proof.history-transition-reported',
+  'blender.menu-control-proof.history-transition-reconciled',
 ] as const;
 
 const contentSha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -68,6 +84,21 @@ const storedMenuProofEventSchema = z.strictObject({
   documentAuthoritySha256: contentSha256Schema,
   progressReceiptChainHeads: z.array(contentSha256Schema).max(7),
   terminalReconciliationAck: companionMenuControlProofTerminalReconciliationAckSchema.optional(),
+  historyBoundary: companionMenuControlProofTerminalHistoryIdentitySchema.nullable().default(null),
+  history: companionMenuControlProofHistoryIdentitySchema.nullable().default(null),
+  historyCursor: z.number().int().min(0).max(8).nullable().default(null),
+  historyStatus: z.enum(['history_locked', 'restored']).nullable().default(null),
+  historyLease: companionMenuControlProofDeliverySchema.shape.lease.nullable().default(null),
+  historyTransitionOccurredAt: z.string().min(1).nullable().default(null),
+  historyTransitionReports: z
+    .array(companionMenuControlProofHistoryTransitionReportSchema)
+    .max(32)
+    .default([]),
+  historyTransitionContentSha256s: z.array(contentSha256Schema).max(32).default([]),
+  historyTransitionReconciliationAcks: z
+    .array(companionMenuControlProofHistoryTransitionReconciliationAckSchema)
+    .max(32)
+    .default([]),
 });
 const legacyPhaseSchema = z.enum([
   'queued',
@@ -111,6 +142,19 @@ type StoredMenuProof = z.infer<typeof storedMenuProofEventSchema>;
 type MenuProofPhase = StoredMenuProof['phase'];
 type MenuProofEventType = (typeof menuProofEventTypes)[number];
 
+function historyBoundaryFromResult(result: CompanionMenuControlProofResult) {
+  return result.status === 'succeeded' || result.status === 'failed_checkpointed'
+    ? companionMenuControlProofTerminalHistoryIdentity(result)
+    : null;
+}
+
+function historyMatchesBoundary(
+  history: CompanionMenuControlProofHistoryIdentity,
+  boundary: NonNullable<StoredMenuProof['historyBoundary']>,
+): boolean {
+  return companionMenuControlProofHistoryIdentityMatchesTerminalHistory(history, boundary);
+}
+
 function legacyQuarantineAuthoritySha256(
   kind: 'session' | 'document',
   requestId: string,
@@ -129,7 +173,24 @@ function parseStoredMenuProofEventPayload(payload: unknown): {
   readonly legacy: boolean;
 } {
   const current = storedMenuProofEventSchema.safeParse(payload);
-  if (current.success) return { stored: current.data, legacy: false };
+  if (current.success) {
+    const result = current.data.execution.result;
+    const boundary = result === undefined ? null : historyBoundaryFromResult(result);
+    if (current.data.historyBoundary === null && boundary !== null) {
+      return {
+        stored: storedMenuProofEventSchema.parse({
+          ...current.data,
+          historyBoundary: boundary,
+          historyCursor: boundary.checkpointKind === 'success' ? 8 : null,
+          historyStatus: 'history_locked',
+          historyLease: current.data.execution.lease ?? null,
+          historyTransitionOccurredAt: result?.occurredAt ?? null,
+        }),
+        legacy: false,
+      };
+    }
+    return { stored: current.data, legacy: false };
+  }
   const legacy = legacyStoredMenuProofEventSchema.parse(payload);
   const requestId = legacy.execution.requestId;
   return {
@@ -256,6 +317,13 @@ function isDeliveredNonterminal(stored: StoredMenuProof): boolean {
 }
 
 function retainsTargetLock(stored: StoredMenuProof): boolean {
+  if (
+    (stored.phase === 'succeeded' || stored.phase === 'failed_checkpointed') &&
+    stored.historyStatus === 'restored' &&
+    stored.historyCursor === 0
+  ) {
+    return false;
+  }
   return (
     stored.phase === 'queued' ||
     stored.phase === 'dispatched' ||
@@ -306,11 +374,37 @@ function eventTypeFor(stored: StoredMenuProof): MenuProofEventType {
   return `blender.menu-control-proof.${suffix}` as MenuProofEventType;
 }
 
-function eventIdFor(stored: StoredMenuProof): string {
-  if (stored.terminalReconciliationAck !== undefined) {
-    return `blender-menu-control-proof:${stored.execution.requestId}:terminal-reconciled:${stored.terminalReconciliationAck.recoveryId}`;
+function eventIdFor(eventType: MenuProofEventType, stored: StoredMenuProof): string {
+  const prefix = `blender-menu-control-proof:${stored.execution.requestId}`;
+  if (eventType === 'blender.menu-control-proof.terminal-reconciled') {
+    const ack = stored.terminalReconciliationAck;
+    if (ack === undefined) {
+      throw new Error(
+        `Menu-control proof ${stored.execution.requestId} is missing its terminal ack`,
+      );
+    }
+    return `${prefix}:terminal-reconciled:${ack.recoveryId}`;
   }
-  return `blender-menu-control-proof:${stored.execution.requestId}:${stored.phase}`;
+  if (eventType === 'blender.menu-control-proof.history-transition-reported') {
+    const report = stored.historyTransitionReports.at(-1);
+    if (report === undefined) {
+      throw new Error(
+        `Menu-control proof ${stored.execution.requestId} is missing its history transition report`,
+      );
+    }
+    return `${prefix}:history-transition:${report.transition.transitionId}`;
+  }
+  if (eventType === 'blender.menu-control-proof.history-transition-reconciled') {
+    const ack = stored.historyTransitionReconciliationAcks.at(-1);
+    if (ack === undefined) {
+      throw new Error(
+        `Menu-control proof ${stored.execution.requestId} is missing its history transition ack`,
+      );
+    }
+    return `${prefix}:history-transition-reconciled:${ack.recoveryId}`;
+  }
+  const suffix = eventType.slice('blender.menu-control-proof.'.length).replaceAll('-', '_');
+  return `${prefix}:${suffix}`;
 }
 
 function terminalReceiptChainHeads(result: CompanionMenuControlProofResult): readonly string[] {
@@ -331,8 +425,37 @@ function sameLeaseIdentity(
   );
 }
 
+function sameDocumentLeaseAuthority(
+  left: BlenderMenuControlProofPollInput['lease'],
+  right: BlenderMenuControlProofPollInput['lease'],
+): boolean {
+  return (
+    left.sessionId === right.sessionId &&
+    left.documentIncarnationId === right.documentIncarnationId &&
+    isDeepStrictEqual(left.target, right.target)
+  );
+}
+
+function sameLogicalHistoryTransitionReport(
+  left: CompanionMenuControlProofHistoryTransitionReport,
+  right: CompanionMenuControlProofHistoryTransitionReport,
+): boolean {
+  const dynamicKeys = new Set(['currentLease', 'reportedAt']);
+  const identity = (value: CompanionMenuControlProofHistoryTransitionReport) =>
+    Object.fromEntries(Object.entries(value).filter(([key]) => !dynamicKeys.has(key)));
+  return isDeepStrictEqual(identity(left), identity(right));
+}
+
 function assertPhaseEvidence(stored: StoredMenuProof): void {
-  const { execution, phase, progressReceiptChainHeads } = stored;
+  const {
+    execution,
+    history,
+    historyBoundary,
+    historyCursor,
+    historyStatus,
+    phase,
+    progressReceiptChainHeads,
+  } = stored;
   const expectedStatus = phase.startsWith('progress_') ? 'in_progress' : phase;
   if (execution.status !== expectedStatus) {
     throw new Error(
@@ -410,6 +533,38 @@ function assertPhaseEvidence(stored: StoredMenuProof): void {
       );
     }
   }
+  if (history !== null) {
+    if (
+      historyBoundary === null ||
+      execution.result === undefined ||
+      !historyMatchesBoundary(history, historyBoundary) ||
+      !companionMenuControlProofHistoryIdentityMatchesResult(history, execution.result)
+    ) {
+      throw new Error(`Menu-control proof ${execution.requestId} changed its history identity`);
+    }
+  }
+  if (
+    historyBoundary !== null &&
+    (execution.result === undefined ||
+      !isDeepStrictEqual(historyBoundary, historyBoundaryFromResult(execution.result)) ||
+      stored.historyLease === null ||
+      !isDeepStrictEqual(stored.historyLease.target, execution.target) ||
+      stored.historyTransitionOccurredAt === null ||
+      Date.parse(stored.historyTransitionOccurredAt) < Date.parse(execution.result.occurredAt))
+  ) {
+    throw new Error(`Menu-control proof ${execution.requestId} changed its terminal history`);
+  }
+  if (
+    historyStatus === 'restored'
+      ? historyCursor !== 0
+      : historyStatus === 'history_locked'
+        ? historyBoundary?.checkpointKind === 'success'
+          ? historyCursor === null || historyCursor === 0
+          : historyCursor !== null
+        : historyCursor !== null
+  ) {
+    throw new Error(`Menu-control proof ${execution.requestId} has inconsistent history cursor`);
+  }
 }
 
 function assertStoredTransition(
@@ -420,7 +575,9 @@ function assertStoredTransition(
   assertPhaseEvidence(next);
   if (
     eventType !== eventTypeFor(next) &&
-    eventType !== 'blender.menu-control-proof.terminal-reconciled'
+    eventType !== 'blender.menu-control-proof.terminal-reconciled' &&
+    eventType !== 'blender.menu-control-proof.history-transition-reported' &&
+    eventType !== 'blender.menu-control-proof.history-transition-reconciled'
   ) {
     throw new Error(
       `Menu-control proof ${next.execution.requestId} event type does not match its phase`,
@@ -429,6 +586,104 @@ function assertStoredTransition(
   if (previous === undefined) {
     if (next.phase !== 'queued') {
       throw new Error(`Menu-control proof ${next.execution.requestId} is missing its queued event`);
+    }
+    return;
+  }
+  if (eventType === 'blender.menu-control-proof.history-transition-reported') {
+    const report = next.historyTransitionReports.at(-1);
+    const previousHistory = previous.history;
+    if (
+      report === undefined ||
+      previous.historyBoundary === null ||
+      previous.execution.result === undefined ||
+      (previous.phase !== 'succeeded' && previous.phase !== 'failed_checkpointed') ||
+      next.phase !== previous.phase ||
+      !sameImmutableExecution(previous.execution, next.execution) ||
+      !isDeepStrictEqual(previous.execution.result, next.execution.result) ||
+      !isDeepStrictEqual(previous.terminalReconciliationAck, next.terminalReconciliationAck) ||
+      previous.sessionAuthoritySha256 !== next.sessionAuthoritySha256 ||
+      previous.documentAuthoritySha256 !== next.documentAuthoritySha256 ||
+      !isDeepStrictEqual(previous.historyBoundary, next.historyBoundary) ||
+      (previousHistory !== null && !isDeepStrictEqual(previousHistory, next.history)) ||
+      next.history === null ||
+      !historyMatchesBoundary(next.history, previous.historyBoundary) ||
+      !companionMenuControlProofHistoryTransitionReportMatchesResult(
+        report,
+        previous.execution.result,
+      ) ||
+      report.serverAcceptedCursor !== previous.historyCursor ||
+      report.serverAcceptedStatus !== previous.historyStatus ||
+      next.historyCursor !== report.transition.toCursor ||
+      next.historyStatus !== report.transition.status ||
+      previous.historyLease === null ||
+      !isDeepStrictEqual(next.historyLease, report.currentLease) ||
+      previous.historyTransitionOccurredAt === null ||
+      next.historyTransitionOccurredAt !== report.transition.occurredAt ||
+      next.execution.updatedAt !== report.reportedAt ||
+      !isDeepStrictEqual(
+        next.historyTransitionReports,
+        [...previous.historyTransitionReports, report].slice(-32),
+      ) ||
+      !isDeepStrictEqual(
+        next.historyTransitionReconciliationAcks,
+        previous.historyTransitionReconciliationAcks,
+      ) ||
+      !isDeepStrictEqual(
+        next.historyTransitionContentSha256s,
+        [...previous.historyTransitionContentSha256s, report.transitionContentSha256].slice(-32),
+      ) ||
+      !isDeepStrictEqual(next.progressReceiptChainHeads, previous.progressReceiptChainHeads)
+    ) {
+      throw new Error(
+        `Menu-control proof ${next.execution.requestId} has invalid history transition evidence`,
+      );
+    }
+    return;
+  }
+  if (eventType === 'blender.menu-control-proof.history-transition-reconciled') {
+    const ack = next.historyTransitionReconciliationAcks.at(-1);
+    if (
+      ack === undefined ||
+      previous.historyBoundary === null ||
+      previous.execution.result === undefined ||
+      (previous.phase !== 'succeeded' && previous.phase !== 'failed_checkpointed') ||
+      next.phase !== previous.phase ||
+      !sameImmutableExecution(previous.execution, next.execution) ||
+      !isDeepStrictEqual(previous.execution.result, next.execution.result) ||
+      !isDeepStrictEqual(previous.terminalReconciliationAck, next.terminalReconciliationAck) ||
+      previous.sessionAuthoritySha256 !== next.sessionAuthoritySha256 ||
+      previous.documentAuthoritySha256 !== next.documentAuthoritySha256 ||
+      !isDeepStrictEqual(previous.historyBoundary, next.historyBoundary) ||
+      (previous.history !== null && !isDeepStrictEqual(previous.history, next.history)) ||
+      next.history === null ||
+      !historyMatchesBoundary(next.history, previous.historyBoundary) ||
+      ack.serverAcceptedCursor !== previous.historyCursor ||
+      ack.serverAcceptedStatus !== previous.historyStatus ||
+      next.historyCursor !== ack.currentCursor ||
+      next.historyStatus !== ack.currentStatus ||
+      previous.historyLease === null ||
+      next.historyLease === null ||
+      !sameDocumentLeaseAuthority(previous.historyLease, next.historyLease) ||
+      previous.historyLease.leaseId === next.historyLease.leaseId ||
+      Date.parse(next.historyLease.expiresAt) <= Date.parse(ack.occurredAt) ||
+      previous.historyTransitionOccurredAt === null ||
+      next.historyTransitionOccurredAt !==
+        (ack.transitions.at(-1)?.occurredAt ?? previous.historyTransitionOccurredAt) ||
+      next.execution.updatedAt !== ack.occurredAt ||
+      !isDeepStrictEqual(
+        next.historyTransitionReconciliationAcks,
+        [...previous.historyTransitionReconciliationAcks, ack].slice(-32),
+      ) ||
+      !isDeepStrictEqual(next.historyTransitionReports, previous.historyTransitionReports) ||
+      !isDeepStrictEqual(
+        next.historyTransitionContentSha256s,
+        [...previous.historyTransitionContentSha256s, ...ack.transitionContentSha256s].slice(-32),
+      ) ||
+      !isDeepStrictEqual(next.progressReceiptChainHeads, previous.progressReceiptChainHeads)
+    ) {
+      throw new Error(
+        `Menu-control proof ${next.execution.requestId} has invalid reconciled history evidence`,
+      );
     }
     return;
   }
@@ -537,15 +792,26 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       readonly documentAuthoritySha256: string;
     }
   >();
+  const pendingHistoryTransitionReconciliations = new Map<
+    string,
+    {
+      readonly delivery: CompanionMenuControlProofHistoryTransitionReconciliationDelivery;
+      readonly documentAuthoritySha256: string;
+    }
+  >();
 
   for (const event of options.database.listExecutionEventsByTypes(menuProofEventTypes)) {
     const { stored: parsed, legacy } = parseStoredMenuProofEventPayload(event.payload);
-    if (event.id !== eventIdFor(parsed) || event.createdAt !== parsed.execution.updatedAt) {
+    const eventType = z.enum(menuProofEventTypes).parse(event.eventType);
+    assertStoredTransition(executions.get(parsed.execution.requestId), parsed, eventType);
+    if (
+      event.id !== eventIdFor(eventType, parsed) ||
+      event.createdAt !== parsed.execution.updatedAt
+    ) {
       throw new Error(
         `Menu-control proof ${parsed.execution.requestId} has inconsistent persisted event metadata`,
       );
     }
-    assertStoredTransition(executions.get(parsed.execution.requestId), parsed, event.eventType);
     executions.set(parsed.execution.requestId, parsed);
     latestPayloadWasLegacy.set(parsed.execution.requestId, legacy);
   }
@@ -554,7 +820,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     const stored = storedMenuProofEventSchema.parse(value);
     assertStoredTransition(executions.get(stored.execution.requestId), stored, eventType);
     options.database.appendEvent({
-      id: eventIdFor(stored),
+      id: eventIdFor(eventType, stored),
       eventType,
       payload: stored,
       createdAt: stored.execution.updatedAt,
@@ -713,6 +979,15 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       documentAuthoritySha256: documentAuthority,
       progressReceiptChainHeads: [],
       terminalReconciliationAck: undefined,
+      historyBoundary: null,
+      history: null,
+      historyCursor: null,
+      historyStatus: null,
+      historyLease: null,
+      historyTransitionOccurredAt: null,
+      historyTransitionReports: [],
+      historyTransitionContentSha256s: [],
+      historyTransitionReconciliationAcks: [],
     });
   };
 
@@ -839,11 +1114,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       input.target.instanceId,
     );
     if (externalOwner !== undefined && externalOwner !== null) {
-      throw new BlenderMenuControlProofExecutionError(
-        'menu_control_proof_history_locked',
-        409,
-        `Executor ${externalOwner} owns the target native-history lock`,
-      );
+      return null;
     }
     const delivery = companionMenuControlProofDeliverySchema.parse({
       ...deliveryIdentity(pending.execution),
@@ -873,9 +1144,6 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     const recoveryRequestedAt = now();
     const candidate = [...executions.values()]
       .filter((stored) => {
-        const lockedTerminal =
-          (stored.phase === 'succeeded' || stored.phase === 'failed_checkpointed') &&
-          stored.execution.result !== undefined;
         return (
           stored.execution.deliveryId !== undefined &&
           stored.execution.lease !== undefined &&
@@ -885,8 +1153,7 @@ export function createBlenderMenuControlProofExecutionCoordinator(
           stored.execution.lease.leaseId !== input.lease.leaseId &&
           (stored.phase === 'dispatched' ||
             stored.phase.startsWith('progress_') ||
-            stored.phase === 'recovery_pending' ||
-            lockedTerminal)
+            stored.phase === 'recovery_pending')
         );
       })
       .sort(
@@ -935,6 +1202,197 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return delivery;
   };
 
+  const pollHistoryTransitionReconciliation = (
+    input: BlenderMenuControlProofPollInput,
+  ): CompanionMenuControlProofHistoryTransitionReconciliationDelivery | null => {
+    const documentAuthority = contentSha256Schema.parse(input.documentAuthoritySha256);
+    const recoveryRequestedAt = now();
+    const latest = [...executions.values()]
+      .filter(
+        (stored) =>
+          stored.documentAuthoritySha256 === documentAuthority &&
+          isDeepStrictEqual(stored.execution.target, input.target) &&
+          stored.phase !== 'pre_dispatch_authority_expired',
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(right.execution.requestedAt) - Date.parse(left.execution.requestedAt) ||
+          right.execution.requestId.localeCompare(left.execution.requestId),
+      )[0];
+    const candidate =
+      latest !== undefined &&
+      latest.historyBoundary !== null &&
+      latest.historyStatus !== null &&
+      latest.execution.result !== undefined &&
+      (latest.phase === 'succeeded' || latest.phase === 'failed_checkpointed') &&
+      latest.historyLease !== null &&
+      latest.historyLease.leaseId !== input.lease.leaseId
+        ? latest
+        : undefined;
+    if (candidate === undefined || candidate.historyBoundary === null) return null;
+    if (candidate.historyStatus === 'restored' && candidate.historyCursor === 0) return null;
+    const externalOwner = options.externalHistoryLockOwner?.(
+      input.target.adapterId,
+      input.target.instanceId,
+    );
+    if (externalOwner !== undefined && externalOwner !== null) return null;
+    if (
+      !isDeepStrictEqual(input.lease.target, input.target) ||
+      candidate.historyLease === null ||
+      !sameDocumentLeaseAuthority(input.lease, candidate.historyLease) ||
+      Date.parse(recoveryRequestedAt) < Date.parse(candidate.execution.updatedAt) ||
+      Date.parse(input.lease.expiresAt) <= Date.parse(recoveryRequestedAt)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_reconciliation_authority_mismatch',
+        409,
+        'History reconciliation requires a current rotated lease for the retained document',
+      );
+    }
+    const existing = pendingHistoryTransitionReconciliations.get(candidate.execution.requestId);
+    if (
+      existing !== undefined &&
+      existing.documentAuthoritySha256 === documentAuthority &&
+      sameLeaseIdentity(existing.delivery.replacementLease, input.lease)
+    ) {
+      return existing.delivery;
+    }
+    const delivery = companionMenuControlProofHistoryTransitionReconciliationDeliverySchema.parse({
+      ...deliveryIdentity(candidate.execution),
+      kind: 'native_history_transition_reconcile',
+      recoveryId: createId(),
+      replacementLease: input.lease,
+      history: candidate.historyBoundary,
+      serverAcceptedCursor: candidate.historyCursor,
+      serverAcceptedStatus: candidate.historyStatus,
+      acknowledgedTransitionContentSha256s: candidate.historyTransitionContentSha256s,
+      expectedMarkerContentSha256: candidate.historyBoundary.terminalMarkerContentSha256,
+      recoveryRequestedAt,
+    });
+    pendingHistoryTransitionReconciliations.set(candidate.execution.requestId, {
+      delivery,
+      documentAuthoritySha256: documentAuthority,
+    });
+    return delivery;
+  };
+
+  const reconcileHistoryTransitions = (
+    input: CompanionMenuControlProofHistoryTransitionReconciliationAck,
+    authority: BlenderMenuControlProofPollInput,
+  ): 'accepted' | 'duplicate' => {
+    const ack = companionMenuControlProofHistoryTransitionReconciliationAckSchema.parse(input);
+    const documentAuthority = contentSha256Schema.parse(authority.documentAuthoritySha256);
+    const stored = executions.get(ack.requestId);
+    if (stored === undefined) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_not_found',
+        404,
+        'The menu-control proof retained history was not found',
+      );
+    }
+    const lastAck = stored.historyTransitionReconciliationAcks.at(-1);
+    const receivedAt = now();
+    if (
+      stored.documentAuthoritySha256 === documentAuthority &&
+      stored.historyLease !== null &&
+      sameDocumentLeaseAuthority(authority.lease, stored.historyLease) &&
+      isDeepStrictEqual(authority.target, stored.execution.target) &&
+      lastAck !== undefined &&
+      isDeepStrictEqual(lastAck, ack) &&
+      Date.parse(ack.occurredAt) <= Date.parse(receivedAt) &&
+      Date.parse(authority.lease.expiresAt) > Date.parse(receivedAt)
+    ) {
+      return 'duplicate';
+    }
+    const pending = pendingHistoryTransitionReconciliations.get(stored.execution.requestId);
+    if (
+      pending === undefined ||
+      pending.documentAuthoritySha256 !== documentAuthority ||
+      stored.documentAuthoritySha256 !== documentAuthority ||
+      !isDeepStrictEqual(authority.target, stored.execution.target) ||
+      !sameLeaseIdentity(pending.delivery.replacementLease, authority.lease) ||
+      ack.recoveryId !== pending.delivery.recoveryId
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_reconciliation_challenge_stale',
+        409,
+        'The history reconciliation challenge is missing, replaced, or no longer current; poll again',
+      );
+    }
+    if (
+      stored.historyBoundary === null ||
+      !companionMenuControlProofHistoryTransitionReconciliationAckMatchesDelivery(
+        ack,
+        pending.delivery,
+      ) ||
+      !historyMatchesBoundary(ack.history, stored.historyBoundary) ||
+      (stored.history !== null && !isDeepStrictEqual(stored.history, ack.history))
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_reconciliation_identity_mismatch',
+        409,
+        'The reconciled history outbox changed its checkpoint, document, or lease identity',
+      );
+    }
+    if (
+      ack.serverAcceptedCursor !== stored.historyCursor ||
+      ack.serverAcceptedStatus !== stored.historyStatus ||
+      stored.historyTransitionOccurredAt === null ||
+      Date.parse(ack.occurredAt) < Date.parse(stored.execution.updatedAt) ||
+      Date.parse(ack.occurredAt) > Date.parse(receivedAt) ||
+      (ack.transitions[0] !== undefined &&
+        Date.parse(ack.transitions[0].occurredAt) <= Date.parse(stored.historyTransitionOccurredAt))
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_transition_conflict',
+        409,
+        'The transition outbox does not strictly continue the server-accepted cursor',
+      );
+    }
+    if (stored.historyStatus === 'restored' && ack.currentStatus === 'history_locked') {
+      const internalOwner = [...executions.values()].find(
+        (candidate) =>
+          candidate.execution.requestId !== stored.execution.requestId &&
+          isDeepStrictEqual(candidate.execution.target, stored.execution.target) &&
+          retainsTargetLock(candidate),
+      );
+      const externalOwner = options.externalHistoryLockOwner?.(
+        stored.execution.target.adapterId,
+        stored.execution.target.instanceId,
+      );
+      if (internalOwner !== undefined || (externalOwner !== undefined && externalOwner !== null)) {
+        throw new BlenderMenuControlProofExecutionError(
+          'menu_control_proof_history_relock_conflict',
+          409,
+          `Executor ${internalOwner?.execution.requestId ?? externalOwner} acquired the target while menu history was restored`,
+        );
+      }
+    }
+    append('blender.menu-control-proof.history-transition-reconciled', {
+      ...stored,
+      history: ack.history,
+      historyCursor: ack.currentCursor,
+      historyStatus: ack.currentStatus,
+      historyLease: authority.lease,
+      historyTransitionOccurredAt:
+        ack.transitions.at(-1)?.occurredAt ?? stored.historyTransitionOccurredAt,
+      historyTransitionContentSha256s: [
+        ...stored.historyTransitionContentSha256s,
+        ...ack.transitionContentSha256s,
+      ].slice(-32),
+      historyTransitionReconciliationAcks: [
+        ...stored.historyTransitionReconciliationAcks,
+        ack,
+      ].slice(-32),
+      execution: companionMenuControlProofStatusSchema.parse({
+        ...stored.execution,
+        updatedAt: ack.occurredAt,
+      }),
+    });
+    pendingHistoryTransitionReconciliations.delete(stored.execution.requestId);
+    return 'accepted';
+  };
+
   const reconcileTerminal = (
     input: CompanionMenuControlProofTerminalReconciliationAck,
     authority: BlenderMenuControlProofPollInput,
@@ -949,11 +1407,18 @@ export function createBlenderMenuControlProofExecutionCoordinator(
         'The menu-control proof request was not found',
       );
     }
+    const receivedAt = now();
+    const acceptedLease = stored.historyLease ?? stored.execution.lease ?? null;
     if (
       stored.terminalReconciliationAck !== undefined &&
       stored.documentAuthoritySha256 === documentAuthority &&
+      acceptedLease !== null &&
+      sameDocumentLeaseAuthority(authority.lease, acceptedLease) &&
+      isDeepStrictEqual(authority.target, stored.execution.target) &&
       isDeepStrictEqual(stored.terminalReconciliationAck, ack) &&
-      isDeepStrictEqual(stored.execution.result, ack.result)
+      isDeepStrictEqual(stored.execution.result, ack.result) &&
+      Date.parse(ack.occurredAt) <= Date.parse(receivedAt) &&
+      Date.parse(authority.lease.expiresAt) > Date.parse(receivedAt)
     ) {
       return 'duplicate';
     }
@@ -964,8 +1429,15 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       stored.documentAuthoritySha256 !== documentAuthority ||
       !sameLeaseIdentity(pending.delivery.replacementLease, authority.lease) ||
       !isDeepStrictEqual(authority.target, stored.execution.target) ||
-      !companionMenuControlProofTerminalReconciliationAckMatchesDelivery(ack, pending.delivery)
+      ack.recoveryId !== pending.delivery.recoveryId
     ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_terminal_reconciliation_challenge_stale',
+        409,
+        'The terminal reconciliation challenge is missing, replaced, or no longer current; poll again',
+      );
+    }
+    if (!companionMenuControlProofTerminalReconciliationAckMatchesDelivery(ack, pending.delivery)) {
       throw new BlenderMenuControlProofExecutionError(
         'menu_control_proof_terminal_reconciliation_identity_mismatch',
         409,
@@ -1022,6 +1494,11 @@ export function createBlenderMenuControlProofExecutionCoordinator(
       phase: ack.result.status,
       progressReceiptChainHeads: [...terminalHeads],
       terminalReconciliationAck: ack,
+      historyBoundary: historyBoundaryFromResult(ack.result),
+      historyCursor: ack.result.status === 'succeeded' ? 8 : null,
+      historyStatus: 'history_locked',
+      historyLease: stored.execution.lease ?? null,
+      historyTransitionOccurredAt: ack.result.occurredAt,
       execution: companionMenuControlProofStatusSchema.parse({
         ...stored.execution,
         status: ack.result.status,
@@ -1124,6 +1601,122 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     return 'accepted';
   };
 
+  const reportHistoryTransition = (
+    input: CompanionMenuControlProofHistoryTransitionReport,
+    documentAuthoritySha256: string,
+  ): 'accepted' | 'duplicate' => {
+    const report = companionMenuControlProofHistoryTransitionReportSchema.parse(input);
+    const documentAuthority = contentSha256Schema.parse(documentAuthoritySha256);
+    const stored = executions.get(report.requestId);
+    if (stored === undefined) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_not_found',
+        404,
+        'The menu-control proof request was not found',
+      );
+    }
+    const acceptedReport = stored.historyTransitionReports.find(
+      (candidate) =>
+        candidate.transitionContentSha256 === report.transitionContentSha256 &&
+        sameLogicalHistoryTransitionReport(candidate, report),
+    );
+    const receivedAt = now();
+    if (
+      stored.documentAuthoritySha256 === documentAuthority &&
+      stored.historyLease !== null &&
+      sameDocumentLeaseAuthority(report.currentLease, stored.historyLease) &&
+      isDeepStrictEqual(report.target, stored.execution.target) &&
+      acceptedReport !== undefined &&
+      Date.parse(report.reportedAt) >= Date.parse(stored.execution.updatedAt) &&
+      Date.parse(report.reportedAt) <= Date.parse(receivedAt) &&
+      Date.parse(report.currentLease.expiresAt) > Date.parse(receivedAt)
+    ) {
+      return 'duplicate';
+    }
+    if (
+      stored.documentAuthoritySha256 !== documentAuthority ||
+      stored.historyLease === null ||
+      !sameDocumentLeaseAuthority(report.currentLease, stored.historyLease) ||
+      !isDeepStrictEqual(report.target, stored.execution.target)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_transition_authority_mismatch',
+        409,
+        'The history transition does not belong to the accepted document lease',
+      );
+    }
+    if (
+      stored.historyBoundary === null ||
+      stored.execution.result === undefined ||
+      (stored.phase !== 'succeeded' && stored.phase !== 'failed_checkpointed') ||
+      !companionMenuControlProofHistoryTransitionReportMatchesResult(
+        report,
+        stored.execution.result,
+      ) ||
+      !historyMatchesBoundary(report.history, stored.historyBoundary)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_transition_identity_mismatch',
+        409,
+        'The history transition changed the retained terminal checkpoint identity',
+      );
+    }
+    if (
+      report.serverAcceptedCursor !== stored.historyCursor ||
+      report.serverAcceptedStatus !== stored.historyStatus ||
+      (stored.history !== null && !isDeepStrictEqual(stored.history, report.history)) ||
+      stored.historyTransitionOccurredAt === null ||
+      Date.parse(report.transition.occurredAt) <= Date.parse(stored.historyTransitionOccurredAt) ||
+      Date.parse(report.reportedAt) < Date.parse(report.transition.occurredAt) ||
+      Date.parse(report.reportedAt) < Date.parse(stored.execution.updatedAt) ||
+      Date.parse(report.reportedAt) > Date.parse(receivedAt) ||
+      Date.parse(report.currentLease.expiresAt) <= Date.parse(report.reportedAt)
+    ) {
+      throw new BlenderMenuControlProofExecutionError(
+        'menu_control_proof_history_transition_conflict',
+        409,
+        'History transitions must strictly continue the exact accepted native cursor',
+      );
+    }
+    if (stored.historyStatus === 'restored' && report.transition.status === 'history_locked') {
+      const internalOwner = [...executions.values()].find(
+        (candidate) =>
+          candidate.execution.requestId !== stored.execution.requestId &&
+          isDeepStrictEqual(candidate.execution.target, stored.execution.target) &&
+          retainsTargetLock(candidate),
+      );
+      const externalOwner = options.externalHistoryLockOwner?.(
+        stored.execution.target.adapterId,
+        stored.execution.target.instanceId,
+      );
+      if (internalOwner !== undefined || (externalOwner !== undefined && externalOwner !== null)) {
+        throw new BlenderMenuControlProofExecutionError(
+          'menu_control_proof_history_relock_conflict',
+          409,
+          `Executor ${internalOwner?.execution.requestId ?? externalOwner} acquired the target while menu history was restored`,
+        );
+      }
+    }
+    append('blender.menu-control-proof.history-transition-reported', {
+      ...stored,
+      history: report.history,
+      historyCursor: report.transition.toCursor,
+      historyStatus: report.transition.status,
+      historyLease: report.currentLease,
+      historyTransitionOccurredAt: report.transition.occurredAt,
+      historyTransitionReports: [...stored.historyTransitionReports, report].slice(-32),
+      historyTransitionContentSha256s: [
+        ...stored.historyTransitionContentSha256s,
+        report.transitionContentSha256,
+      ].slice(-32),
+      execution: companionMenuControlProofStatusSchema.parse({
+        ...stored.execution,
+        updatedAt: report.reportedAt,
+      }),
+    });
+    return 'accepted';
+  };
+
   const complete = (
     input: CompanionMenuControlProofResult,
     documentAuthoritySha256: string,
@@ -1202,6 +1795,20 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     append(eventTypeFor({ ...stored, phase: result.status }) as MenuProofEventType, {
       ...stored,
       phase: result.status,
+      historyBoundary: historyBoundaryFromResult(result),
+      historyCursor: result.status === 'succeeded' ? 8 : null,
+      historyStatus:
+        result.status === 'succeeded' || result.status === 'failed_checkpointed'
+          ? 'history_locked'
+          : null,
+      historyLease:
+        result.status === 'succeeded' || result.status === 'failed_checkpointed'
+          ? (stored.execution.lease ?? null)
+          : null,
+      historyTransitionOccurredAt:
+        result.status === 'succeeded' || result.status === 'failed_checkpointed'
+          ? result.occurredAt
+          : null,
       execution: companionMenuControlProofStatusSchema.parse({
         ...stored.execution,
         status: result.status,
@@ -1219,10 +1826,13 @@ export function createBlenderMenuControlProofExecutionCoordinator(
     queue,
     reconcileSessionAuthority,
     poll,
+    pollHistoryTransitionReconciliation,
     pollTerminalReconciliation,
     progress,
+    reportHistoryTransition,
     complete,
     reconcileTerminal,
+    reconcileHistoryTransitions,
     ownsTarget,
   };
 }

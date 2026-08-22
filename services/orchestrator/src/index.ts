@@ -27,16 +27,17 @@ import {
   companionActionPollRequestSchema,
   companionActionResultAckSchema,
   companionMenuControlProofCreateRequestSchema,
+  companionMenuControlProofHistoryTransitionReportSchema,
   companionMenuControlProofPollDeliverySchema,
   companionMenuControlProofPollRequestSchema,
   companionMenuControlProofProgressAckSchema,
   companionMenuControlProofProgressSchema,
   companionMenuControlProofRecoveryAckResponseSchema,
+  companionMenuControlProofRecoveryRequestSchema,
   companionMenuControlProofResultAckSchema,
   companionMenuControlProofResultSchema,
   companionMenuControlProofStatusRequestSchema,
   companionMenuControlProofStatusSchema,
-  companionMenuControlProofTerminalReconciliationAckSchema,
   companionShortcutProofCreateRequestSchema,
   companionShortcutProofPollDeliverySchema,
   companionShortcutProofPollRequestSchema,
@@ -2938,28 +2939,56 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
     };
 
     const compoundHistoryLockOwner = createPokeCompoundHistoryLockOwnerReader(database);
+    const executionCoordinatorRefs: {
+      action: ReturnType<typeof createBlenderActionExecutionCoordinator> | null;
+      shortcut: ReturnType<typeof createBlenderShortcutProofExecutionCoordinator> | null;
+      menuControl: ReturnType<typeof createBlenderMenuControlProofExecutionCoordinator> | null;
+    } = { action: null, shortcut: null, menuControl: null };
+    const externalTargetLockOwner = (
+      excluding: 'action' | 'shortcut' | 'menu-control',
+      adapterId: 'blender',
+      instanceId: string,
+    ): string | null => {
+      const compoundOwner = compoundHistoryLockOwner(adapterId, instanceId);
+      if (compoundOwner !== null) return compoundOwner;
+      if (
+        excluding !== 'action' &&
+        executionCoordinatorRefs.action?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.action';
+      }
+      if (
+        excluding !== 'shortcut' &&
+        executionCoordinatorRefs.shortcut?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.shortcut-proof';
+      }
+      if (
+        excluding !== 'menu-control' &&
+        executionCoordinatorRefs.menuControl?.ownsTarget(adapterId, instanceId) === true
+      ) {
+        return 'blender.menu-control-proof';
+      }
+      return null;
+    };
     const actionExecutionCoordinator = createBlenderActionExecutionCoordinator({
       database,
-      externalHistoryLockOwner: compoundHistoryLockOwner,
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('action', adapterId, instanceId),
     });
+    executionCoordinatorRefs.action = actionExecutionCoordinator;
     const shortcutProofExecutionCoordinator = createBlenderShortcutProofExecutionCoordinator({
       database,
-      externalHistoryLockOwner: compoundHistoryLockOwner,
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('shortcut', adapterId, instanceId),
     });
+    executionCoordinatorRefs.shortcut = shortcutProofExecutionCoordinator;
     const menuControlProofExecutionCoordinator = createBlenderMenuControlProofExecutionCoordinator({
       database,
-      externalHistoryLockOwner: (adapterId, instanceId) => {
-        const compoundOwner = compoundHistoryLockOwner(adapterId, instanceId);
-        if (compoundOwner !== null) return compoundOwner;
-        if (actionExecutionCoordinator.ownsTarget(adapterId, instanceId)) {
-          return 'blender.action';
-        }
-        if (shortcutProofExecutionCoordinator.ownsTarget(adapterId, instanceId)) {
-          return 'blender.shortcut-proof';
-        }
-        return null;
-      },
+      externalHistoryLockOwner: (adapterId, instanceId) =>
+        externalTargetLockOwner('menu-control', adapterId, instanceId),
     });
+    executionCoordinatorRefs.menuControl = menuControlProofExecutionCoordinator;
 
     const menuControlProofExecutionRejected = (
       message: string,
@@ -8529,11 +8558,18 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             expiresAt: session.lease.expiresAt,
           },
         };
-        const recovery = menuControlProofExecutionCoordinator.pollTerminalReconciliation(authority);
+        const historyRecovery =
+          menuControlProofExecutionCoordinator.pollHistoryTransitionReconciliation(authority);
+        const terminalRecovery =
+          historyRecovery === null
+            ? menuControlProofExecutionCoordinator.pollTerminalReconciliation(authority)
+            : null;
         const delivery =
-          recovery === null ? menuControlProofExecutionCoordinator.poll(authority) : null;
+          historyRecovery === null && terminalRecovery === null
+            ? menuControlProofExecutionCoordinator.poll(authority)
+            : null;
         return companionMenuControlProofPollDeliverySchema.parse({
-          request: recovery ?? delivery,
+          request: historyRecovery ?? terminalRecovery ?? delivery,
         });
       } catch (error) {
         if (error instanceof CompanionLeaseError) {
@@ -8631,15 +8667,71 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         throw error;
       }
     });
+    runtimeApp.post(
+      '/api/v1/companion/menu-control-proof-history-transition',
+      async (request, reply) => {
+        const parsedReport = companionMenuControlProofHistoryTransitionReportSchema.safeParse(
+          request.body,
+        );
+        if (!parsedReport.success) {
+          return reply.code(400).send({
+            error: 'invalid_menu_control_proof_history_transition',
+            message:
+              'Menu-control proof native history transition violates the strict public contract',
+          });
+        }
+        const leaseHeader = request.headers['x-operatingline-companion-lease'];
+        if (typeof leaseHeader !== 'string') {
+          return reply.code(409).send({
+            error: 'companion_lease_required',
+            message:
+              'Menu-control proof native history transitions require a negotiated Companion lease',
+          });
+        }
+        try {
+          const session = companionLeaseManager.authorizeDocumentSession(
+            leaseHeader,
+            parsedReport.data.target.adapterId,
+            parsedReport.data.target.instanceId,
+          );
+          if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
+            return reply.code(409).send({
+              error: 'menu_control_proof_protocol_unsupported',
+              message:
+                'Menu-control proof history transitions require Companion session 1.1 and Guide protocol 1.5 native Undo evidence',
+            });
+          }
+          requireExactMenuDeliveryLease(session, parsedReport.data.currentLease);
+          if (parsedReport.data.currentLease.leaseId !== session.lease.leaseId) {
+            return menuControlProofExecutionRejected(
+              'Menu-control history transition does not use the current document lease',
+              409,
+              'menu_control_proof_history_transition_lease_not_current',
+            );
+          }
+          const result = menuControlProofExecutionCoordinator.reportHistoryTransition(
+            parsedReport.data,
+            menuDocumentAuthorityFor(session),
+          );
+          return companionMenuControlProofRecoveryAckResponseSchema.parse({ result });
+        } catch (error) {
+          if (error instanceof CompanionLeaseError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          if (error instanceof BlenderMenuControlProofExecutionError) {
+            return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+          }
+          throw error;
+        }
+      },
+    );
     runtimeApp.post('/api/v1/companion/menu-control-proof-recovery', async (request, reply) => {
-      const parsedAck = companionMenuControlProofTerminalReconciliationAckSchema.safeParse(
-        request.body,
-      );
+      const parsedAck = companionMenuControlProofRecoveryRequestSchema.safeParse(request.body);
       if (!parsedAck.success) {
         return reply.code(400).send({
           error: 'invalid_menu_control_proof_recovery_ack',
           message:
-            'Menu-control proof terminal reconciliation acknowledgement violates the strict public contract',
+            'Menu-control proof recovery acknowledgement violates the strict public contract',
         });
       }
       const leaseHeader = request.headers['x-operatingline-companion-lease'];
@@ -8650,10 +8742,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
         });
       }
       try {
+        const recoveryTarget =
+          parsedAck.data.kind === 'native_terminal_reconcile'
+            ? parsedAck.data.result.target
+            : parsedAck.data.target;
         const session = companionLeaseManager.authorizeDocumentSession(
           leaseHeader,
-          parsedAck.data.result.target.adapterId,
-          parsedAck.data.result.target.instanceId,
+          recoveryTarget.adapterId,
+          recoveryTarget.instanceId,
         );
         if (session.lease.negotiatedGuideProtocolVersion !== '1.5.0') {
           return reply.code(409).send({
@@ -8666,7 +8762,7 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
           adapterId: 'blender' as const,
           instanceId: session.hello.instanceId,
         };
-        const result = menuControlProofExecutionCoordinator.reconcileTerminal(parsedAck.data, {
+        const authority = {
           target,
           documentAuthoritySha256: menuDocumentAuthorityFor(session),
           lease: {
@@ -8676,7 +8772,14 @@ export async function startRuntime(options: StartRuntimeOptions): Promise<Runnin
             documentIncarnationId: session.hello.documentIncarnationId,
             expiresAt: session.lease.expiresAt,
           },
-        });
+        };
+        const result =
+          parsedAck.data.kind === 'native_terminal_reconcile'
+            ? menuControlProofExecutionCoordinator.reconcileTerminal(parsedAck.data, authority)
+            : menuControlProofExecutionCoordinator.reconcileHistoryTransitions(
+                parsedAck.data,
+                authority,
+              );
         return companionMenuControlProofRecoveryAckResponseSchema.parse({ result });
       } catch (error) {
         if (error instanceof CompanionLeaseError) {

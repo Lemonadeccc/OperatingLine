@@ -314,10 +314,10 @@ function receipts(delivery: ReturnType<typeof dispatch>) {
   return operationIds.map((operationId, index) => {
     const content = {
       receiptId: `${index + 1}0000000-0000-4000-8000-000000000000`,
-      proofId: ids.proof,
-      requestId: ids.request,
+      proofId: delivery.proofId,
+      requestId: delivery.requestId,
       deliveryId: delivery.deliveryId,
-      bindingContentSha256: binding().integrity.contentSha256,
+      bindingContentSha256: delivery.bindingContentSha256,
       operationId,
       order: index + 1,
       previousReceiptContentSha256,
@@ -495,6 +495,86 @@ function failureResult(
   } as const;
 }
 
+const historyStageNames = [
+  'baseline',
+  'sphere_created',
+  'location_x',
+  'location_y',
+  'location_z',
+  'scale_x',
+  'scale_y',
+  'scale_z',
+  'renamed_final',
+] as const;
+
+function historyIdentityFor(
+  result: ReturnType<typeof successfulResult> | ReturnType<typeof failureResult>,
+) {
+  const terminal = result.terminalEvidence;
+  const succeeded = terminal.kind === 'succeeded_locked';
+  const checkpoint = succeeded
+    ? terminal.nativeUndoCheckpoint
+    : terminal.kind === 'failed_checkpointed'
+      ? terminal.checkpoint
+      : null;
+  if (checkpoint === null) throw new Error('A retained history identity requires a checkpoint');
+  const successFingerprints = [
+    hash('b'),
+    hash('1'),
+    hash('2'),
+    hash('3'),
+    hash('4'),
+    hash('5'),
+    hash('6'),
+    hash('7'),
+    hash('a'),
+  ] as const;
+  return {
+    checkpointId: checkpoint.checkpointId,
+    undoLockId: checkpoint.undoLockId,
+    checkpointKind: succeeded ? ('success' as const) : ('failure' as const),
+    stageFingerprints: succeeded
+      ? successFingerprints
+      : ([
+          hash('b'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+          hash('c'),
+        ] as const),
+    terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(result),
+    terminalMarkerContentSha256:
+      computeCompanionMenuControlProofTerminalMarkerContentSha256(result),
+  } as const;
+}
+
+function transitionAt(
+  history: ReturnType<typeof historyIdentityFor>,
+  index: number,
+  direction: 'undo' | 'redo',
+  fromCursor: number | null,
+  toCursor: number | null,
+) {
+  const fingerprintIndex = toCursor === null ? 1 : toCursor;
+  const content = {
+    transitionId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+    checkpointId: history.checkpointId,
+    undoLockId: history.undoLockId,
+    direction,
+    fromCursor,
+    toCursor,
+    stage: toCursor === null ? ('failure_checkpoint' as const) : historyStageNames[toCursor]!,
+    status: toCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+    sceneFingerprintSha256: history.stageFingerprints[fingerprintIndex]!,
+    occurredAt: new Date(Date.parse('2026-08-22T02:01:11Z') + index * 1_000).toISOString(),
+  } as const;
+  return content;
+}
+
 function activeDatabase(progressCount = 0) {
   const database = createEventDatabase();
   const coordinator = createBlenderMenuControlProofExecutionCoordinator({
@@ -535,10 +615,12 @@ describe('Blender menu-control proof execution coordinator', () => {
     const database = createEventDatabase();
     let serverNow = '2026-08-22T10:00:04+08:00';
     let generatedId = ids.delivery as string;
+    let externalOwner: string | null = null;
     const coordinator = createBlenderMenuControlProofExecutionCoordinator({
       database,
       now: () => serverNow,
       createId: () => generatedId,
+      externalHistoryLockOwner: () => externalOwner,
     });
     coordinator.queue(queuedStatus(), fingerprint);
     const original = coordinator.poll({
@@ -565,57 +647,51 @@ describe('Blender menu-control proof execution coordinator', () => {
       documentAuthoritySha256: fingerprint,
       lease: replacementLease,
     };
-    const challenge = coordinator.pollTerminalReconciliation(authority)!;
+    expect(coordinator.pollTerminalReconciliation(authority)).toBeNull();
+    externalOwner = 'blender.action';
+    expect(coordinator.pollHistoryTransitionReconciliation(authority)).toBeNull();
+    externalOwner = 'blender.shortcut-proof';
+    expect(coordinator.pollHistoryTransitionReconciliation(authority)).toBeNull();
+    externalOwner = null;
+    const challenge = coordinator.pollHistoryTransitionReconciliation(authority)!;
     expect(challenge).toMatchObject({
-      kind: 'native_terminal_reconcile',
+      kind: 'native_history_transition_reconcile',
       lease: original.lease,
       replacementLease,
-      acknowledgedProgressReceiptChainHeads: receipts(original).map(
-        (receipt) => receipt.contentSha256,
-      ),
+      serverAcceptedCursor: 8,
+      serverAcceptedStatus: 'history_locked',
+      acknowledgedTransitionContentSha256s: [],
     });
-    expect(coordinator.pollTerminalReconciliation(authority)).toEqual(challenge);
+    expect(coordinator.pollHistoryTransitionReconciliation(authority)).toEqual(challenge);
     const renewedAuthority = {
       ...authority,
       lease: { ...replacementLease, expiresAt: '2026-08-22T10:08:30+08:00' },
     };
-    expect(coordinator.pollTerminalReconciliation(renewedAuthority)).toEqual(challenge);
+    expect(coordinator.pollHistoryTransitionReconciliation(renewedAuthority)).toEqual(challenge);
+    const history = historyIdentityFor(terminal);
     const ack = {
-      kind: 'native_terminal_reconcile' as const,
+      ...original,
+      kind: 'native_history_transition_reconcile' as const,
       recoveryId: challenge.recoveryId,
-      result: terminal,
-      terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(terminal),
-      expectedMarkerContentSha256:
-        computeCompanionMenuControlProofTerminalMarkerContentSha256(terminal),
-      currentSceneFingerprintSha256:
-        terminal.terminalEvidence.nativeUndoCheckpoint.finalSceneFingerprintSha256,
+      history,
+      serverAcceptedCursor: 8,
+      serverAcceptedStatus: 'history_locked' as const,
+      transitions: [],
+      transitionContentSha256s: [],
+      terminalResultContentSha256: history.terminalResultContentSha256,
+      expectedMarkerContentSha256: challenge.expectedMarkerContentSha256,
+      currentCursor: 8,
+      currentStatus: 'history_locked' as const,
+      currentSceneFingerprintSha256: history.stageFingerprints[8],
       occurredAt: '2026-08-22T10:01:12+08:00',
     };
-    expect(coordinator.reconcileTerminal(ack, renewedAuthority)).toBe('accepted');
-    expect(coordinator.reconcileTerminal(ack, renewedAuthority)).toBe('duplicate');
+    serverNow = ack.occurredAt;
+    expect(coordinator.reconcileHistoryTransitions(ack, renewedAuthority)).toBe('accepted');
+    expect(coordinator.reconcileHistoryTransitions(ack, renewedAuthority)).toBe('duplicate');
     expect(database.events.at(-1)?.eventType).toBe(
-      'blender.menu-control-proof.terminal-reconciled',
+      'blender.menu-control-proof.history-transition-reconciled',
     );
-    const terminalEventCount = database.events.length;
-
-    generatedId = '97531864-9753-4753-8753-975318649753';
-    serverNow = '2026-08-22T10:10:00+08:00';
     expect(coordinator.complete(terminal, fingerprint)).toBe('duplicate');
-    const retryAuthority = {
-      ...authority,
-      lease: lease({
-        leaseId: '86429753-8642-4642-8642-864297538642',
-        expiresAt: '2026-08-22T10:20:00+08:00',
-      }),
-    };
-    const retryChallenge = coordinator.pollTerminalReconciliation(retryAuthority)!;
-    const retryAck = {
-      ...ack,
-      recoveryId: retryChallenge.recoveryId,
-      occurredAt: '2026-08-22T10:10:01+08:00',
-    };
-    expect(coordinator.reconcileTerminal(retryAck, retryAuthority)).toBe('duplicate');
-    expect(database.events).toHaveLength(terminalEventCount);
     expect(
       createBlenderMenuControlProofExecutionCoordinator({ database }).get(ids.request)?.status,
     ).toBe('succeeded');
@@ -693,13 +769,72 @@ describe('Blender menu-control proof execution coordinator', () => {
           : hash('0'),
       occurredAt: '2026-08-22T10:01:12+08:00',
     };
-    expect(() => coordinator.reconcileTerminal(ack, foreignAuthority)).toThrowError(
+    expect(() =>
+      coordinator.reconcileTerminal({ ...ack, occurredAt: '2026-08-22T10:01:10+08:00' }, authority),
+    ).toThrowError(
       expect.objectContaining({
         code: 'menu_control_proof_terminal_reconciliation_identity_mismatch',
       }),
     );
+    expect(() => coordinator.reconcileTerminal(ack, foreignAuthority)).toThrowError(
+      expect.objectContaining({
+        code: 'menu_control_proof_terminal_reconciliation_challenge_stale',
+      }),
+    );
     expect(coordinator.reconcileTerminal(ack, authority)).toBe('accepted');
     expect(coordinator.get(ids.request)?.status).toBe('failed_checkpointed');
+    const history = historyIdentityFor(terminal);
+    const transition = transitionAt(history, 0, 'undo', null, 0);
+    serverNow = ack.occurredAt;
+    expect(
+      coordinator.reportHistoryTransition(
+        {
+          ...original,
+          kind: 'native_history_transition' as const,
+          currentLease: authority.lease,
+          history,
+          serverAcceptedCursor: null,
+          serverAcceptedStatus: 'history_locked' as const,
+          transition,
+          transitionContentSha256: computeProtocolCanonicalJsonSha256(transition),
+          reportedAt: ack.occurredAt,
+        },
+        fingerprint,
+      ),
+    ).toBe('accepted');
+    const fixedClockEvents = database.events.slice(-2);
+    expect(fixedClockEvents.map((event) => event.eventType)).toEqual([
+      'blender.menu-control-proof.terminal-reconciled',
+      'blender.menu-control-proof.history-transition-reported',
+    ]);
+    expect(fixedClockEvents.map((event) => event.id)).toEqual([
+      `blender-menu-control-proof:${ids.request}:terminal-reconciled:${challenge.recoveryId}`,
+      `blender-menu-control-proof:${ids.request}:history-transition:${transition.transitionId}`,
+    ]);
+    const acceptedEventCount = database.events.length;
+    serverNow = '2026-08-22T10:01:13+08:00';
+    coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+    });
+    expect(coordinator.get(ids.request)?.status).toBe('failed_checkpointed');
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+    const rotatedRetryAuthority = {
+      ...authority,
+      lease: lease({
+        leaseId: '86429753-8642-4642-8642-864297538642',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+    };
+    expect(coordinator.reconcileTerminal(ack, rotatedRetryAuthority)).toBe('duplicate');
+    expect(database.events).toHaveLength(acceptedEventCount);
+    expect(() =>
+      coordinator.reconcileTerminal(
+        { ...ack, currentSceneFingerprintSha256: hash('e') },
+        rotatedRetryAuthority,
+      ),
+    ).toThrow();
+    expect(database.events).toHaveLength(acceptedEventCount);
   });
 
   it('does not reconcile unlocked terminal outcomes', () => {
@@ -761,6 +896,522 @@ describe('Blender menu-control proof execution coordinator', () => {
     ).toBe(true);
   });
 
+  it('accepts only adjacent menu history Undo and Redo reports and unlocks exactly at baseline', () => {
+    const database = createEventDatabase();
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    let coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => ids.delivery,
+    });
+    coordinator.queue(queuedStatus(), fingerprint);
+    const delivery = coordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    for (let count = 1; count <= 7; count += 1) {
+      serverNow = progressFor(delivery, count).occurredAt;
+      coordinator.progress(progressFor(delivery, count), fingerprint);
+    }
+    const terminal = successfulResult(delivery);
+    serverNow = terminal.occurredAt;
+    coordinator.complete(terminal, fingerprint);
+    const history = historyIdentityFor(terminal);
+    const currentHistoryLease = lease({
+      leaseId: '13572468-1357-4357-8357-135724681357',
+      expiresAt: '2026-08-22T10:20:00+08:00',
+    });
+
+    const report = (transition: ReturnType<typeof transitionAt>) => ({
+      ...delivery,
+      kind: 'native_history_transition' as const,
+      currentLease: currentHistoryLease,
+      history,
+      serverAcceptedCursor: transition.fromCursor,
+      serverAcceptedStatus:
+        transition.fromCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+      transition,
+      transitionContentSha256: computeProtocolCanonicalJsonSha256(transition),
+      reportedAt: transition.occurredAt,
+    });
+
+    const first = report(transitionAt(history, 0, 'undo', 8, 7));
+    serverNow = first.reportedAt;
+    expect(coordinator.reportHistoryTransition(first, fingerprint)).toBe('accepted');
+    expect(coordinator.reportHistoryTransition(first, fingerprint)).toBe('duplicate');
+    const eventCountAfterFirst = database.events.length;
+    coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => ids.delivery,
+    });
+    const rotatedAckLossRetry = {
+      ...first,
+      currentLease: lease({
+        leaseId: '24681357-2468-4468-8468-246813572468',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+      reportedAt: '2026-08-22T10:01:12+08:00',
+    };
+    serverNow = rotatedAckLossRetry.reportedAt;
+    expect(coordinator.reportHistoryTransition(rotatedAckLossRetry, fingerprint)).toBe('duplicate');
+    expect(database.events).toHaveLength(eventCountAfterFirst);
+    expect(() =>
+      coordinator.reportHistoryTransition(
+        { ...rotatedAckLossRetry, transitionContentSha256: hash('e') },
+        fingerprint,
+      ),
+    ).toThrow();
+    expect(() =>
+      coordinator.reportHistoryTransition(
+        { ...rotatedAckLossRetry, proposalRecordContentSha256: hash('e') },
+        fingerprint,
+      ),
+    ).toThrow();
+    expect(() =>
+      coordinator.reportHistoryTransition(
+        {
+          ...report(transitionAt(history, 1, 'undo', 7, 6)),
+          history: { ...history, terminalMarkerContentSha256: hash('e') },
+        },
+        fingerprint,
+      ),
+    ).toThrow();
+    expect(() =>
+      coordinator.reportHistoryTransition(
+        report(transitionAt(history, 1, 'undo', 7, 5)),
+        fingerprint,
+      ),
+    ).toThrow();
+
+    let cursor = 7;
+    for (let index = 1; index < 8; index += 1) {
+      const next = report(transitionAt(history, index, 'undo', cursor, cursor - 1));
+      serverNow = next.reportedAt;
+      expect(coordinator.reportHistoryTransition(next, fingerprint)).toBe('accepted');
+      if (index === 1) {
+        const eventCount = database.events.length;
+        const rotatedOldReportRetry = {
+          ...first,
+          currentLease: rotatedAckLossRetry.currentLease,
+          reportedAt: next.reportedAt,
+        };
+        expect(coordinator.reportHistoryTransition(rotatedOldReportRetry, fingerprint)).toBe(
+          'duplicate',
+        );
+        expect(database.events).toHaveLength(eventCount);
+      }
+      cursor -= 1;
+    }
+    expect(cursor).toBe(0);
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+
+    for (let index = 8; index < 16; index += 1) {
+      const next = report(transitionAt(history, index, 'redo', cursor, cursor + 1));
+      serverNow = next.reportedAt;
+      expect(coordinator.reportHistoryTransition(next, fingerprint)).toBe('accepted');
+      cursor += 1;
+    }
+    expect(cursor).toBe(8);
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(true);
+
+    for (let index = 16; index < 33; index += 1) {
+      const undoing = (index - 16) % 16 < 8;
+      const nextCursor = cursor + (undoing ? -1 : 1);
+      const next = report(
+        transitionAt(history, index, undoing ? 'undo' : 'redo', cursor, nextCursor),
+      );
+      serverNow = next.reportedAt;
+      expect(coordinator.reportHistoryTransition(next, fingerprint)).toBe('accepted');
+      cursor = nextCursor;
+    }
+    expect(cursor).toBe(7);
+    expect(
+      createBlenderMenuControlProofExecutionCoordinator({ database }).ownsTarget(
+        'blender',
+        ids.instance,
+      ),
+    ).toBe(true);
+  }, 15_000);
+
+  it('fails closed when a current history challenge carries conflicting retained stage evidence', () => {
+    const database = createEventDatabase();
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    let generatedId = ids.delivery as string;
+    let coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    coordinator.queue(queuedStatus(), fingerprint);
+    const delivery = coordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    for (let count = 1; count <= 7; count += 1) {
+      serverNow = progressFor(delivery, count).occurredAt;
+      coordinator.progress(progressFor(delivery, count), fingerprint);
+    }
+    const terminal = successfulResult(delivery);
+    serverNow = terminal.occurredAt;
+    coordinator.complete(terminal, fingerprint);
+    const history = historyIdentityFor(terminal);
+    const currentHistoryLease = lease({
+      leaseId: '13572468-1357-4357-8357-135724681357',
+      expiresAt: '2026-08-22T10:20:00+08:00',
+    });
+    const first = transitionAt(history, 0, 'undo', 8, 7);
+    serverNow = first.occurredAt;
+    coordinator.reportHistoryTransition(
+      {
+        ...delivery,
+        kind: 'native_history_transition',
+        currentLease: currentHistoryLease,
+        history,
+        serverAcceptedCursor: 8,
+        serverAcceptedStatus: 'history_locked',
+        transition: first,
+        transitionContentSha256: computeProtocolCanonicalJsonSha256(first),
+        reportedAt: first.occurredAt,
+      },
+      fingerprint,
+    );
+
+    serverNow = '2026-08-22T10:01:12+08:00';
+    generatedId = '24681357-2468-4468-8468-246813572468';
+    coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    const authority = {
+      target: delivery.target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease({
+        leaseId: '86429753-8642-4642-8642-864297538642',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+    };
+    const challenge = coordinator.pollHistoryTransitionReconciliation(authority)!;
+    const conflictingHistory = {
+      ...history,
+      stageFingerprints: history.stageFingerprints.map((value, index) =>
+        index === 4 ? hash('e') : value,
+      ) as typeof history.stageFingerprints,
+    };
+    const second = transitionAt(conflictingHistory, 1, 'undo', 7, 6);
+    serverNow = '2026-08-22T10:01:13+08:00';
+    expect(() =>
+      coordinator.reconcileHistoryTransitions(
+        {
+          ...delivery,
+          kind: 'native_history_transition_reconcile',
+          recoveryId: challenge.recoveryId,
+          history: conflictingHistory,
+          serverAcceptedCursor: 7,
+          serverAcceptedStatus: 'history_locked',
+          transitions: [second],
+          transitionContentSha256s: [computeProtocolCanonicalJsonSha256(second)],
+          terminalResultContentSha256: history.terminalResultContentSha256,
+          expectedMarkerContentSha256: history.terminalMarkerContentSha256,
+          currentCursor: 6,
+          currentStatus: 'history_locked',
+          currentSceneFingerprintSha256: conflictingHistory.stageFingerprints[6],
+          occurredAt: serverNow,
+        },
+        authority,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'menu_control_proof_history_reconciliation_identity_mismatch',
+      }),
+    );
+  });
+
+  it('deduplicates a lost history reconciliation response after restart and lease rotation', () => {
+    const database = createEventDatabase();
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    let generatedId = ids.delivery as string;
+    let coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    coordinator.queue(queuedStatus(), fingerprint);
+    const delivery = coordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    for (let count = 1; count <= 7; count += 1) {
+      serverNow = progressFor(delivery, count).occurredAt;
+      coordinator.progress(progressFor(delivery, count), fingerprint);
+    }
+    const terminal = successfulResult(delivery);
+    serverNow = terminal.occurredAt;
+    coordinator.complete(terminal, fingerprint);
+
+    serverNow = '2026-08-22T10:01:11+08:00';
+    generatedId = '13572468-1357-4357-8357-135724681357';
+    coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    const authority = {
+      target: delivery.target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease({
+        leaseId: '24681357-2468-4468-8468-246813572468',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+    };
+    const challenge = coordinator.pollHistoryTransitionReconciliation(authority)!;
+    const history = historyIdentityFor(terminal);
+    const transitions = Array.from({ length: 8 }, (_, index) =>
+      transitionAt(history, index, 'undo', 8 - index, 7 - index),
+    );
+    expect(transitions.at(-1)).toMatchObject({
+      direction: 'undo',
+      fromCursor: 1,
+      toCursor: 0,
+      status: 'restored',
+    });
+    serverNow = '2026-08-22T10:01:20+08:00';
+    const ack = {
+      ...delivery,
+      kind: 'native_history_transition_reconcile' as const,
+      recoveryId: challenge.recoveryId,
+      transitions,
+      history,
+      serverAcceptedCursor: challenge.serverAcceptedCursor,
+      serverAcceptedStatus: challenge.serverAcceptedStatus,
+      transitionContentSha256s: transitions.map((transition) =>
+        computeProtocolCanonicalJsonSha256(transition),
+      ),
+      terminalResultContentSha256: history.terminalResultContentSha256,
+      expectedMarkerContentSha256: challenge.expectedMarkerContentSha256,
+      currentCursor: 0,
+      currentStatus: 'restored' as const,
+      currentSceneFingerprintSha256: history.stageFingerprints[0],
+      occurredAt: serverNow,
+    };
+    expect(() =>
+      coordinator.reconcileHistoryTransitions(
+        {
+          ...ack,
+          lease: { ...ack.lease, expiresAt: '2026-08-22T10:06:00+08:00' },
+        },
+        authority,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'menu_control_proof_history_reconciliation_identity_mismatch',
+      }),
+    );
+    expect(coordinator.reconcileHistoryTransitions(ack, authority)).toBe('accepted');
+    expect(database.events.at(-1)).toMatchObject({
+      eventType: 'blender.menu-control-proof.history-transition-reconciled',
+      payload: {
+        historyCursor: 0,
+        historyStatus: 'restored',
+      },
+    });
+    expect(coordinator.reconcileHistoryTransitions(ack, authority)).toBe('duplicate');
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+    expect(coordinator.pollHistoryTransitionReconciliation(authority)).toBeNull();
+    const restarted = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => '2026-08-22T10:01:21+08:00',
+    });
+    expect(restarted.pollHistoryTransitionReconciliation(authority)).toBeNull();
+    const acceptedEventCount = database.events.length;
+    const rotatedRetryAuthority = {
+      ...authority,
+      lease: lease({
+        leaseId: '86429753-8642-4642-8642-864297538642',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+    };
+    expect(restarted.pollHistoryTransitionReconciliation(rotatedRetryAuthority)).toBeNull();
+    expect(restarted.reconcileHistoryTransitions(ack, rotatedRetryAuthority)).toBe('duplicate');
+    expect(database.events).toHaveLength(acceptedEventCount);
+    expect(database.events.at(-1)).toMatchObject({
+      eventType: 'blender.menu-control-proof.history-transition-reconciled',
+      payload: {
+        historyCursor: 0,
+        historyStatus: 'restored',
+      },
+    });
+    expect(() =>
+      restarted.reconcileHistoryTransitions(
+        { ...ack, occurredAt: '2026-08-22T10:01:20.500+08:00' },
+        rotatedRetryAuthority,
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'menu_control_proof_history_reconciliation_challenge_stale',
+      }),
+    );
+    expect(database.events).toHaveLength(acceptedEventCount);
+    expect(restarted.ownsTarget('blender', ids.instance)).toBe(false);
+  });
+
+  it('recovers only the latest proof for a document target after an older proof was restored', () => {
+    const database = createEventDatabase();
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    let generatedId = ids.delivery as string;
+    let coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    coordinator.queue(queuedStatus(), fingerprint);
+    const firstDelivery = coordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    for (let count = 1; count <= 7; count += 1) {
+      serverNow = progressFor(firstDelivery, count).occurredAt;
+      coordinator.progress(progressFor(firstDelivery, count), fingerprint);
+    }
+    const firstTerminal = successfulResult(firstDelivery);
+    serverNow = firstTerminal.occurredAt;
+    coordinator.complete(firstTerminal, fingerprint);
+    const firstHistory = historyIdentityFor(firstTerminal);
+    const firstLease = lease({ expiresAt: '2026-08-22T10:20:00+08:00' });
+    for (let index = 0; index < 8; index += 1) {
+      const transition = transitionAt(firstHistory, index, 'undo', 8 - index, 7 - index);
+      const report = {
+        ...firstDelivery,
+        kind: 'native_history_transition' as const,
+        currentLease: firstLease,
+        history: firstHistory,
+        serverAcceptedCursor: transition.fromCursor,
+        serverAcceptedStatus: 'history_locked' as const,
+        transition,
+        transitionContentSha256: computeProtocolCanonicalJsonSha256(transition),
+        reportedAt: transition.occurredAt,
+      };
+      serverNow = report.reportedAt;
+      coordinator.reportHistoryTransition(report, fingerprint);
+    }
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+
+    const secondStatus = structuredClone(distinctQueuedStatus()) as ReturnType<
+      typeof distinctQueuedStatus
+    > & { requestedAt: string; updatedAt: string };
+    secondStatus.requestedAt = '2026-08-22T10:00:03.500+08:00';
+    secondStatus.updatedAt = secondStatus.requestedAt;
+    coordinator.queue(secondStatus, fingerprint);
+    generatedId = '45444444-4444-4444-8444-444444444444';
+    serverNow = '2026-08-22T10:00:04+08:00';
+    const secondDelivery = coordinator.poll({
+      target: secondStatus.target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    expect(secondDelivery.requestId).toBe(secondStatus.requestId);
+    for (let count = 1; count <= 7; count += 1) {
+      serverNow = progressFor(secondDelivery, count).occurredAt;
+      coordinator.progress(progressFor(secondDelivery, count), fingerprint);
+    }
+    const secondTerminal = successfulResult(secondDelivery);
+    serverNow = secondTerminal.occurredAt;
+    coordinator.complete(secondTerminal, fingerprint);
+
+    generatedId = '97531864-9753-4753-8753-975318649753';
+    serverNow = '2026-08-22T10:02:00+08:00';
+    coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => generatedId,
+    });
+    const rotatedAuthority = {
+      target: secondStatus.target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease({
+        leaseId: '86429753-8642-4642-8642-864297538642',
+        expiresAt: '2026-08-22T10:20:00+08:00',
+      }),
+    };
+    const challenge = coordinator.pollHistoryTransitionReconciliation(rotatedAuthority)!;
+    expect(challenge.requestId).toBe(secondStatus.requestId);
+
+    const oldRedo = transitionAt(firstHistory, 8, 'redo', 0, 1);
+    expect(() =>
+      coordinator.reportHistoryTransition(
+        {
+          ...firstDelivery,
+          kind: 'native_history_transition' as const,
+          currentLease: rotatedAuthority.lease,
+          history: firstHistory,
+          serverAcceptedCursor: 0,
+          serverAcceptedStatus: 'restored' as const,
+          transition: oldRedo,
+          transitionContentSha256: computeProtocolCanonicalJsonSha256(oldRedo),
+          reportedAt: serverNow,
+        },
+        fingerprint,
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'menu_control_proof_history_relock_conflict' }));
+  });
+
+  it('tracks failed checkpoints only across the native null-to-zero boundary', () => {
+    const database = createEventDatabase();
+    let serverNow = '2026-08-22T10:00:04+08:00';
+    let externalOwner: string | null = null;
+    const coordinator = createBlenderMenuControlProofExecutionCoordinator({
+      database,
+      now: () => serverNow,
+      createId: () => ids.delivery,
+      externalHistoryLockOwner: () => externalOwner,
+    });
+    coordinator.queue(queuedStatus(), fingerprint);
+    const delivery = coordinator.poll({
+      target: queuedStatus().target,
+      documentAuthoritySha256: fingerprint,
+      lease: lease(),
+    })!;
+    for (let count = 1; count <= 4; count += 1) {
+      serverNow = progressFor(delivery, count).occurredAt;
+      coordinator.progress(progressFor(delivery, count), fingerprint);
+    }
+    const terminal = failureResult(delivery, 'failed_checkpointed', 4);
+    serverNow = terminal.occurredAt;
+    coordinator.complete(terminal, fingerprint);
+    const history = historyIdentityFor(terminal);
+    const createReport = (transition: ReturnType<typeof transitionAt>) => ({
+      ...delivery,
+      kind: 'native_history_transition' as const,
+      currentLease: lease({ expiresAt: '2026-08-22T10:20:00+08:00' }),
+      history,
+      serverAcceptedCursor: transition.fromCursor,
+      serverAcceptedStatus:
+        transition.fromCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+      transition,
+      transitionContentSha256: computeProtocolCanonicalJsonSha256(transition),
+      reportedAt: transition.occurredAt,
+    });
+    const undo = createReport(transitionAt(history, 0, 'undo', null, 0));
+    serverNow = undo.reportedAt;
+    expect(coordinator.reportHistoryTransition(undo, fingerprint)).toBe('accepted');
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+    const redo = createReport(transitionAt(history, 1, 'redo', 0, null));
+    serverNow = redo.reportedAt;
+    externalOwner = 'shortcut-proof';
+    expect(() => coordinator.reportHistoryTransition(redo, fingerprint)).toThrowError(
+      expect.objectContaining({ code: 'menu_control_proof_history_relock_conflict' }),
+    );
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(false);
+    externalOwner = null;
+    expect(coordinator.reportHistoryTransition(redo, fingerprint)).toBe('accepted');
+    expect(coordinator.ownsTarget('blender', ids.instance)).toBe(true);
+  });
+
   it('rejects conflicting progress, wrong session/lease identity, and external locks', () => {
     const database = createEventDatabase();
     let serverNow = '2026-08-22T10:00:04+08:00';
@@ -820,6 +1471,25 @@ describe('Blender menu-control proof execution coordinator', () => {
     expect(() => locked.queue(queuedStatus(), fingerprint)).toThrowError(
       expect.objectContaining({ code: 'menu_control_proof_history_locked' }),
     );
+
+    let dispatchOwner: string | null = null;
+    const dispatchLocked = createBlenderMenuControlProofExecutionCoordinator({
+      database: createEventDatabase(),
+      now: () => serverNow,
+      createId: () => ids.delivery,
+      externalHistoryLockOwner: () => dispatchOwner,
+    });
+    dispatchLocked.queue(queuedStatus(), fingerprint);
+    dispatchOwner = 'shortcut-proof';
+    expect(
+      dispatchLocked.poll({
+        target: queuedStatus().target,
+        documentAuthoritySha256: fingerprint,
+        lease: lease(),
+      }),
+    ).toBeNull();
+    expect(dispatchLocked.get(ids.request)?.status).toBe('queued');
+
     expect(() =>
       coordinator.findForCreate({
         formatVersion: '1.0.0',

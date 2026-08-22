@@ -529,6 +529,27 @@ describe('Blender shortcut proof execution coordinator', () => {
     );
     expect(database.events).toHaveLength(0);
   });
+
+  it('rechecks the external history lock before dispatching an already queued proof', () => {
+    const database = createEventDatabase();
+    const queued = queuedProof();
+    let externalOwner: string | null = null;
+    const coordinator = createBlenderShortcutProofExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: () => externalOwner,
+    });
+    const fingerprint = '1'.repeat(64);
+
+    coordinator.queue(queued, fingerprint);
+    externalOwner = 'blender.menu-control-proof';
+    expect(coordinator.poll('blender', queued.target.instanceId, fingerprint)).toBeNull();
+    expect(coordinator.get(queued.requestId)).toMatchObject({ status: 'queued' });
+
+    externalOwner = null;
+    expect(coordinator.poll('blender', queued.target.instanceId, fingerprint)).toMatchObject({
+      requestId: queued.requestId,
+    });
+  });
   it('persists the exact four-operation chain before one authoritative success event', () => {
     const database = createEventDatabase();
     const ids = [randomUUID()];

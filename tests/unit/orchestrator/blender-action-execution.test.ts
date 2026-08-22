@@ -101,6 +101,27 @@ describe('Blender action execution coordinator', () => {
     expect(database.events).toHaveLength(0);
   });
 
+  it('rechecks the external history lock before dispatching an already queued action', () => {
+    const database = createEventDatabase();
+    const queued = queuedExecution();
+    let externalOwner: string | null = null;
+    const coordinator = createBlenderActionExecutionCoordinator({
+      database,
+      externalHistoryLockOwner: () => externalOwner,
+    });
+    const fingerprint = '1'.repeat(64);
+
+    coordinator.queue(queued, fingerprint);
+    externalOwner = 'blender.menu-control-proof';
+    expect(coordinator.poll('blender', queued.target.instanceId, fingerprint)).toBeNull();
+    expect(coordinator.get(queued.requestId)).toMatchObject({ status: 'queued' });
+
+    externalOwner = null;
+    expect(coordinator.poll('blender', queued.target.instanceId, fingerprint)).toMatchObject({
+      requestId: queued.requestId,
+    });
+  });
+
   it('persists an at-most-once queue, dispatch, and terminal result', async () => {
     const database = createEventDatabase();
     const times = ['2026-08-20T10:00:01Z', '2026-08-20T10:00:02Z'];

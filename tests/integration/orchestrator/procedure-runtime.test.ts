@@ -29,8 +29,11 @@ import {
   companionMenuControlProofStatusSchema,
   companionShortcutProofPollDeliverySchema,
   companionShortcutProofStatusSchema,
+  computeCompanionMenuControlProofHistoryTransitionContentSha256,
   computeCompanionShortcutProofResultContentSha256,
   computeCompanionMenuControlProofOperationReceiptContentSha256,
+  computeCompanionMenuControlProofResultContentSha256,
+  computeCompanionMenuControlProofTerminalMarkerContentSha256,
   computeCompanionShortcutProofTerminalMarkerContentSha256,
   computeProcedureShortcutProofAttestationContentSha256,
   computeProcedureShortcutProofNativeObservationContentSha256,
@@ -8296,12 +8299,12 @@ describe('procedure compilation runtime', () => {
       await runtime.stop();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('accepts all seven public menu-control progress prefixes and succeeded_locked evidence', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-success-'));
     const databasePath = join(directory, 'state.db');
-    const runtime = await startRuntime({
+    let runtime = await startRuntime({
       databasePath,
       accessToken,
       actionCatalogs: blenderActionCatalogs,
@@ -8529,11 +8532,355 @@ describe('procedure compilation runtime', () => {
       );
       expect(competing.result?.isError).toBe(true);
       expect(competing.result?.content?.[0]?.text).toContain('menu_control_proof_in_progress');
+
+      const checkpoint = succeeded.terminalEvidence.nativeUndoCheckpoint;
+      const stageNames = [
+        'baseline',
+        'sphere_created',
+        'location_x',
+        'location_y',
+        'location_z',
+        'scale_x',
+        'scale_y',
+        'scale_z',
+        'renamed_final',
+      ] as const;
+      const stageFingerprints = [
+        checkpoint.baselineSceneFingerprintSha256,
+        protocolSha256('menu-proof-stage-sphere'),
+        protocolSha256('menu-proof-stage-location-x'),
+        protocolSha256('menu-proof-stage-location-y'),
+        protocolSha256('menu-proof-stage-location-z'),
+        protocolSha256('menu-proof-stage-scale-x'),
+        protocolSha256('menu-proof-stage-scale-y'),
+        protocolSha256('menu-proof-stage-scale-z'),
+        checkpoint.finalSceneFingerprintSha256,
+      ] as const;
+      const history = {
+        checkpointId: checkpoint.checkpointId,
+        undoLockId: checkpoint.undoLockId,
+        checkpointKind: 'success' as const,
+        stageFingerprints,
+        terminalResultContentSha256: computeCompanionMenuControlProofResultContentSha256(succeeded),
+        terminalMarkerContentSha256:
+          computeCompanionMenuControlProofTerminalMarkerContentSha256(succeeded),
+      };
+      const transitionAt = async (
+        direction: 'undo' | 'redo',
+        fromCursor: number,
+        toCursor: number,
+        after: string,
+      ) => {
+        await waitUntilAfter(after);
+        return {
+          transitionId: randomUUID(),
+          checkpointId: history.checkpointId,
+          undoLockId: history.undoLockId,
+          direction,
+          fromCursor,
+          toCursor,
+          stage: stageNames[toCursor]!,
+          status: toCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+          sceneFingerprintSha256: stageFingerprints[toCursor]!,
+          occurredAt: new Date().toISOString(),
+        };
+      };
+
+      await waitUntilAfter(succeeded.occurredAt);
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+      const replacementAResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(prepared.hello),
+      });
+      expect(replacementAResponse.status).toBe(200);
+      const replacementA = (await replacementAResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      const replacementAHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': replacementA.leaseId,
+      };
+      const historyPollUrl = new URL('/api/v1/companion/menu-control-proof', runtime.baseUrl);
+      historyPollUrl.searchParams.set('adapterId', 'blender');
+      historyPollUrl.searchParams.set('instanceId', targetInstanceId);
+      const emptyChallengeResponse = await fetch(historyPollUrl, {
+        headers: replacementAHeaders,
+      });
+      expect(emptyChallengeResponse.status).toBe(200);
+      const emptyChallenge = companionMenuControlProofPollDeliverySchema.parse(
+        await emptyChallengeResponse.json(),
+      ).request;
+      if (
+        emptyChallenge === null ||
+        emptyChallenge.kind !== 'native_history_transition_reconcile'
+      ) {
+        throw new Error('Expected menu-control history reconciliation after Runtime restart');
+      }
+      expect(emptyChallenge).toMatchObject({
+        serverAcceptedCursor: 8,
+        serverAcceptedStatus: 'history_locked',
+        acknowledgedTransitionContentSha256s: [],
+      });
+      await waitUntilAfter(emptyChallenge.recoveryRequestedAt);
+      const emptyAck = {
+        ...delivery,
+        kind: 'native_history_transition_reconcile' as const,
+        recoveryId: emptyChallenge.recoveryId,
+        history,
+        serverAcceptedCursor: 8,
+        serverAcceptedStatus: 'history_locked' as const,
+        transitions: [],
+        transitionContentSha256s: [],
+        terminalResultContentSha256: history.terminalResultContentSha256,
+        expectedMarkerContentSha256: history.terminalMarkerContentSha256,
+        currentCursor: 8,
+        currentStatus: 'history_locked' as const,
+        currentSceneFingerprintSha256: stageFingerprints[8],
+        occurredAt: new Date().toISOString(),
+      };
+      const emptyAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-recovery`,
+        { method: 'POST', headers: replacementAHeaders, body: JSON.stringify(emptyAck) },
+      );
+      expect(emptyAckResponse.status).toBe(200);
+      await expect(emptyAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+
+      await waitUntilAfter(emptyAck.occurredAt);
+      const replacementBResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(prepared.hello),
+      });
+      expect(replacementBResponse.status).toBe(200);
+      const replacementB = (await replacementBResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      const replacementBHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': replacementB.leaseId,
+      };
+      const batchChallengeResponse = await fetch(historyPollUrl, {
+        headers: replacementBHeaders,
+      });
+      const batchChallenge = companionMenuControlProofPollDeliverySchema.parse(
+        await batchChallengeResponse.json(),
+      ).request;
+      if (
+        batchChallenge === null ||
+        batchChallenge.kind !== 'native_history_transition_reconcile'
+      ) {
+        throw new Error('Expected rotated-lease menu history reconciliation');
+      }
+      const undoEightToSeven = await transitionAt('undo', 8, 7, batchChallenge.recoveryRequestedAt);
+      const undoEightToSevenSha256 =
+        computeCompanionMenuControlProofHistoryTransitionContentSha256(undoEightToSeven);
+      const batchAck = {
+        ...delivery,
+        kind: 'native_history_transition_reconcile' as const,
+        recoveryId: batchChallenge.recoveryId,
+        history,
+        serverAcceptedCursor: 8,
+        serverAcceptedStatus: 'history_locked' as const,
+        transitions: [undoEightToSeven],
+        transitionContentSha256s: [undoEightToSevenSha256],
+        terminalResultContentSha256: history.terminalResultContentSha256,
+        expectedMarkerContentSha256: history.terminalMarkerContentSha256,
+        currentCursor: 7,
+        currentStatus: 'history_locked' as const,
+        currentSceneFingerprintSha256: stageFingerprints[7],
+        occurredAt: new Date().toISOString(),
+      };
+      const batchAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-recovery`,
+        { method: 'POST', headers: replacementBHeaders, body: JSON.stringify(batchAck) },
+      );
+      expect(batchAckResponse.status).toBe(200);
+      await expect(batchAckResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const duplicateBatchAckResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-recovery`,
+        { method: 'POST', headers: replacementBHeaders, body: JSON.stringify(batchAck) },
+      );
+      expect(duplicateBatchAckResponse.status).toBe(200);
+      await expect(duplicateBatchAckResponse.json()).resolves.toEqual({ result: 'duplicate' });
+
+      const makeReport = (
+        currentLease: typeof emptyChallenge.replacementLease,
+        serverAcceptedCursor: number,
+        transition: Awaited<ReturnType<typeof transitionAt>>,
+      ) => ({
+        ...delivery,
+        kind: 'native_history_transition' as const,
+        currentLease,
+        history,
+        serverAcceptedCursor,
+        serverAcceptedStatus:
+          serverAcceptedCursor === 0 ? ('restored' as const) : ('history_locked' as const),
+        transition,
+        transitionContentSha256:
+          computeCompanionMenuControlProofHistoryTransitionContentSha256(transition),
+        reportedAt: new Date().toISOString(),
+      });
+      let acceptedCursor = 7;
+      let acceptedAt = batchAck.occurredAt;
+      const undoSevenToSix = await transitionAt('undo', 7, 6, acceptedAt);
+      const firstReport = makeReport(batchChallenge.replacementLease, 7, undoSevenToSix);
+      const firstReportResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementBHeaders, body: JSON.stringify(firstReport) },
+      );
+      expect(firstReportResponse.status).toBe(200);
+      await expect(firstReportResponse.json()).resolves.toEqual({ result: 'accepted' });
+      const duplicateFirstReportResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementBHeaders, body: JSON.stringify(firstReport) },
+      );
+      expect(duplicateFirstReportResponse.status).toBe(200);
+      await expect(duplicateFirstReportResponse.json()).resolves.toEqual({ result: 'duplicate' });
+      const missingLeaseReportResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers, body: JSON.stringify(firstReport) },
+      );
+      expect(missingLeaseReportResponse.status).toBe(409);
+      await expect(missingLeaseReportResponse.json()).resolves.toMatchObject({
+        error: 'companion_lease_required',
+      });
+      acceptedCursor = 6;
+      acceptedAt = firstReport.reportedAt;
+
+      const undoSixToFive = await transitionAt('undo', 6, 5, acceptedAt);
+      const staleLeaseReport = makeReport(batchChallenge.replacementLease, 6, undoSixToFive);
+      const replacementCResponse = await fetch(`${runtime.baseUrl}/api/v1/companion/session`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(prepared.hello),
+      });
+      expect(replacementCResponse.status).toBe(200);
+      const replacementC = (await replacementCResponse.json()) as {
+        leaseId: string;
+        expiresAt: string;
+      };
+      const replacementCHeaders = {
+        ...headers,
+        'x-operatingline-companion-lease': replacementC.leaseId,
+      };
+      const wrongCurrentLeaseResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementCHeaders, body: JSON.stringify(staleLeaseReport) },
+      );
+      expect(wrongCurrentLeaseResponse.status).toBe(409);
+      const currentLeaseC = {
+        ...batchChallenge.replacementLease,
+        leaseId: replacementC.leaseId,
+        expiresAt: replacementC.expiresAt,
+      };
+      const currentReport = makeReport(currentLeaseC, 6, undoSixToFive);
+      currentReport.reportedAt = new Date().toISOString();
+      const currentReportResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementCHeaders, body: JSON.stringify(currentReport) },
+      );
+      expect(currentReportResponse.status).toBe(200);
+      acceptedCursor = 5;
+      acceptedAt = currentReport.reportedAt;
+
+      const skipped = await transitionAt('undo', 5, 3, acceptedAt);
+      const skippedResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        {
+          method: 'POST',
+          headers: replacementCHeaders,
+          body: JSON.stringify(makeReport(currentLeaseC, 5, skipped)),
+        },
+      );
+      expect(skippedResponse.status).toBe(400);
+      const wrongFingerprint = {
+        ...(await transitionAt('undo', 5, 4, acceptedAt)),
+        sceneFingerprintSha256: stageFingerprints[3],
+      };
+      const wrongFingerprintResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        {
+          method: 'POST',
+          headers: replacementCHeaders,
+          body: JSON.stringify(makeReport(currentLeaseC, 5, wrongFingerprint)),
+        },
+      );
+      expect(wrongFingerprintResponse.status).toBe(400);
+
+      while (acceptedCursor > 0) {
+        const transition = await transitionAt(
+          'undo',
+          acceptedCursor,
+          acceptedCursor - 1,
+          acceptedAt,
+        );
+        const report = makeReport(currentLeaseC, acceptedCursor, transition);
+        const response = await fetch(
+          `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+          { method: 'POST', headers: replacementCHeaders, body: JSON.stringify(report) },
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        acceptedCursor -= 1;
+        acceptedAt = report.reportedAt;
+      }
+
+      const redo = await transitionAt('redo', 0, 1, acceptedAt);
+      const redoReport = makeReport(currentLeaseC, 0, redo);
+      const redoResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementCHeaders, body: JSON.stringify(redoReport) },
+      );
+      expect(redoResponse.status).toBe(200);
+      const relockedCompeting = await callMcpTool(
+        runtime,
+        9_104,
+        'operatingline.blender.menu-control-proof.execute',
+        { ...request, requestId: randomUUID() },
+      );
+      expect(relockedCompeting.result?.isError).toBe(true);
+      expect(relockedCompeting.result?.content?.[0]?.text).toContain(
+        'menu_control_proof_in_progress',
+      );
+
+      const finalUndo = await transitionAt('undo', 1, 0, redoReport.reportedAt);
+      const finalUndoReport = makeReport(currentLeaseC, 1, finalUndo);
+      const finalUndoResponse = await fetch(
+        `${runtime.baseUrl}/api/v1/companion/menu-control-proof-history-transition`,
+        { method: 'POST', headers: replacementCHeaders, body: JSON.stringify(finalUndoReport) },
+      );
+      expect(finalUndoResponse.status).toBe(200);
+      const unlockedRequest = { ...request, requestId: randomUUID() };
+      const unlockedQueued = await callMcpTool(
+        runtime,
+        9_105,
+        'operatingline.blender.menu-control-proof.execute',
+        unlockedRequest,
+      );
+      expect(unlockedQueued.result?.isError, unlockedQueued.result?.content?.[0]?.text).not.toBe(
+        true,
+      );
+      const unlockedDeliveryResponse = await fetch(historyPollUrl, {
+        headers: replacementCHeaders,
+      });
+      expect(unlockedDeliveryResponse.status).toBe(200);
+      const unlockedDelivery = companionMenuControlProofPollDeliverySchema.parse(
+        await unlockedDeliveryResponse.json(),
+      ).request;
+      expect(unlockedDelivery).toMatchObject({ requestId: unlockedRequest.requestId });
     } finally {
       await runtime.stop();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('rejects legacy Companion menu-control execution before it can be queued', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'operatingline-menu-control-legacy-'));

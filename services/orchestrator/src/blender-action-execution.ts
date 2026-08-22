@@ -374,6 +374,8 @@ export function createBlenderActionExecutionCoordinator(
           left.execution.requestId.localeCompare(right.execution.requestId),
       )[0];
     if (pending === undefined) return null;
+    const externalOwner = options.externalHistoryLockOwner?.(adapterId, instanceId);
+    if (externalOwner !== undefined && externalOwner !== null) return null;
     const dispatchedAt = now();
     const delivery = companionActionExecutionDeliverySchema.parse({
       formatVersion: pending.execution.formatVersion,

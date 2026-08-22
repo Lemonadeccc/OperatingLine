@@ -996,6 +996,8 @@ export function createBlenderShortcutProofExecutionCoordinator(
           left.execution.requestId.localeCompare(right.execution.requestId),
       )[0];
     if (pending === undefined) return null;
+    const externalOwner = options.externalHistoryLockOwner?.(adapterId, instanceId);
+    if (externalOwner !== undefined && externalOwner !== null) return null;
     const dispatchedAt = now();
     if (pending.sessionFingerprintSha256 !== fingerprint) {
       append('blender.shortcut-proof.recovery-required', {
