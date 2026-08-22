@@ -4,7 +4,15 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  authoritySignedContent,
+  computeHumanEvalReleasedManifestContentSha256,
+  computeProtocolCanonicalJsonSha256,
+  humanEvalReleasedManifestSchema,
+  humanEvalReleaseRequestSchema,
+  humanEvalReleaseResponseSchema,
   humanEvalReleaseCandidateManifestSchema,
+  type DatasetReleaseAuthorization,
+  type HumanEvalReleasedManifest,
   type HumanEvalReleaseCandidateManifest,
 } from '@operatingline/protocol';
 
@@ -151,6 +159,72 @@ function buildCandidate(): HumanEvalReleaseCandidateManifest {
   };
 }
 
+function buildReleasedManifest(): HumanEvalReleasedManifest {
+  const releaseCandidate = buildCandidate();
+  const authorization: DatasetReleaseAuthorization = {
+    formatVersion: '1.0.0',
+    canonicalization: 'operatingline-authority-json-v1',
+    kind: 'DatasetReleaseAuthorization',
+    authorityId: '30000000-0000-4000-8000-000000000001',
+    issuer: 'release.operator',
+    notBefore: '2026-08-23T00:00:00.000Z',
+    expiresAt: '2026-08-24T00:00:00.000Z',
+    releaseCandidateManifestSha256: releaseCandidate.integrity.contentSha256,
+    audience: 'organization',
+    license: releaseCandidate.suite.licenseId,
+    redactionDecisionSha256: hash('c'),
+    releaseScope: 'Internal research release',
+    signature: {
+      signerId: 'release.operator',
+      keyId: 'release-key-1',
+      algorithm: 'ed25519',
+      signature: 'A'.repeat(86),
+      signedAt: '2026-08-23T00:00:00.000Z',
+    },
+  };
+  const authorizationContentSha256 = computeProtocolCanonicalJsonSha256(
+    authoritySignedContent(authorization),
+  );
+  const validationReceipt = {
+    formatVersion: '1.0.0' as const,
+    receiptId: '40000000-0000-4000-8000-000000000001',
+    authorityKind: 'DatasetReleaseAuthorization' as const,
+    authorityId: authorization.authorityId,
+    authorityContentSha256: authorizationContentSha256,
+    signerId: authorization.signature.signerId,
+    keyId: authorization.signature.keyId,
+    registryVersion: 'registry-v1',
+    validatedAt: '2026-08-23T00:01:00.000Z',
+    revocationLogHeadSha256: hash('d'),
+    targetSha256: releaseCandidate.integrity.contentSha256,
+    sideEffect: 'dataset_release' as const,
+  };
+  const manifest = {
+    formatVersion: '1.0.0' as const,
+    kind: 'human_eval_released_manifest' as const,
+    operationId: '50000000-0000-4000-8000-000000000001',
+    releaseCandidate,
+    authorization,
+    authorizationContentSha256,
+    validationReceipt,
+    validationReceiptSha256: computeProtocolCanonicalJsonSha256(validationReceipt),
+    release: {
+      audience: authorization.audience,
+      license: authorization.license,
+      redactionDecisionSha256: authorization.redactionDecisionSha256,
+      releaseScope: authorization.releaseScope,
+    },
+    dataHandling: { trainingUse: 'not_authorized' as const },
+    integrity: {
+      algorithm: 'sha256' as const,
+      canonicalization: 'operatingline-json-value-v1' as const,
+      contentSha256: hash('0'),
+    },
+  } satisfies HumanEvalReleasedManifest;
+  manifest.integrity.contentSha256 = computeHumanEvalReleasedManifestContentSha256(manifest);
+  return humanEvalReleasedManifestSchema.parse(manifest);
+}
+
 async function expectPublicSchema(...cases: readonly PublicJsonSchemaCase[]): Promise<void> {
   const schema = JSON.parse(
     readFileSync(
@@ -252,5 +326,199 @@ describe('Human Eval release candidate manifest contract', () => {
         },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('authorized Human Eval final release contract', () => {
+  it('leaves candidate content-integrity proof to the eval-kit validator', () => {
+    const releasedManifest = buildReleasedManifest();
+    const structurallyBoundButUnverified = {
+      formatVersion: '1.0.0',
+      operationId: releasedManifest.operationId,
+      releaseCandidate: {
+        ...releasedManifest.releaseCandidate,
+        suite: { ...releasedManifest.releaseCandidate.suite, suiteId: 'changed.without.resealing' },
+      },
+      authorization: releasedManifest.authorization,
+    };
+
+    // The protocol can bind the declared candidate hash but cannot recompute the legacy
+    // operatingline-json-sort-v1 digest. The coordinator must call the eval-kit validator first.
+    expect(humanEvalReleaseRequestSchema.safeParse(structurallyBoundButUnverified).success).toBe(
+      true,
+    );
+  });
+
+  it('binds one explicit operation to a complete authorization and live validation receipt', async () => {
+    const releasedManifest = buildReleasedManifest();
+    const request = {
+      formatVersion: '1.0.0',
+      operationId: releasedManifest.operationId,
+      releaseCandidate: releasedManifest.releaseCandidate,
+      authorization: releasedManifest.authorization,
+    };
+    const response = {
+      formatVersion: '1.0.0',
+      operationId: releasedManifest.operationId,
+      status: 'created',
+      releasedManifestSha256: releasedManifest.integrity.contentSha256,
+      releasedManifest,
+    };
+
+    expect(humanEvalReleaseRequestSchema.parse(request)).toEqual(request);
+    expect(humanEvalReleasedManifestSchema.parse(releasedManifest)).toEqual(releasedManifest);
+    expect(humanEvalReleaseResponseSchema.parse(response)).toEqual(response);
+    expect(
+      humanEvalReleaseResponseSchema.safeParse({
+        ...response,
+        status: 'already_completed',
+      }).success,
+    ).toBe(true);
+    expect(
+      humanEvalReleaseResponseSchema.safeParse({
+        ...response,
+        releasedManifestSha256: hash('e'),
+      }).success,
+    ).toBe(false);
+
+    const schema = JSON.parse(
+      readFileSync(resolve('protocol/schemas/v1/human-eval-released-manifest.schema.json'), 'utf8'),
+    ) as object;
+    await validatePublicJsonSchemaCases(schema, [
+      { value: releasedManifest, accepted: true },
+      {
+        value: {
+          ...releasedManifest,
+          dataHandling: { trainingUse: 'authorized' },
+        },
+        accepted: false,
+      },
+      { value: { ...releasedManifest, trainingUseAuthorization: {} }, accepted: false },
+    ]);
+    await validatePublicJsonSchemaCases(
+      JSON.parse(
+        readFileSync(resolve('protocol/schemas/v1/human-eval-release-request.schema.json'), 'utf8'),
+      ) as object,
+      [
+        { value: request, accepted: true },
+        {
+          value: { ...request, validationReceipt: releasedManifest.validationReceipt },
+          accepted: false,
+        },
+      ],
+    );
+    await validatePublicJsonSchemaCases(
+      JSON.parse(
+        readFileSync(
+          resolve('protocol/schemas/v1/human-eval-release-response.schema.json'),
+          'utf8',
+        ),
+      ) as object,
+      [
+        { value: response, accepted: true },
+        { value: { ...response, status: 'already_completed' }, accepted: true },
+        { value: { ...response, status: 'released' }, accepted: false },
+      ],
+    );
+  });
+
+  it.each([
+    [
+      'candidate target',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        authorization: {
+          ...manifest.authorization,
+          releaseCandidateManifestSha256: hash('e'),
+        },
+      }),
+    ],
+    [
+      'authorization content hash',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        authorizationContentSha256: hash('e'),
+      }),
+    ],
+    [
+      'receipt signer',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: { ...manifest.validationReceipt, signerId: 'other.signer' },
+      }),
+    ],
+    [
+      'receipt key',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: { ...manifest.validationReceipt, keyId: 'other-key' },
+      }),
+    ],
+    [
+      'receipt target',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: { ...manifest.validationReceipt, targetSha256: hash('e') },
+      }),
+    ],
+    [
+      'receipt side effect',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: { ...manifest.validationReceipt, sideEffect: 'training_export' },
+      }),
+    ],
+    [
+      'receipt validity window',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: {
+          ...manifest.validationReceipt,
+          validatedAt: '2026-08-25T00:00:00.000Z',
+        },
+      }),
+    ],
+    [
+      'receipt at the exclusive expiry boundary',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceipt: {
+          ...manifest.validationReceipt,
+          validatedAt: manifest.authorization.expiresAt,
+        },
+      }),
+    ],
+    [
+      'receipt hash',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        validationReceiptSha256: hash('e'),
+      }),
+    ],
+    [
+      'release projection',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        release: { ...manifest.release, releaseScope: 'A different release' },
+      }),
+    ],
+    [
+      'training use',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        dataHandling: { trainingUse: 'authorized' },
+      }),
+    ],
+    [
+      'manifest integrity',
+      (manifest: HumanEvalReleasedManifest) => ({
+        ...manifest,
+        integrity: { ...manifest.integrity, contentSha256: hash('e') },
+      }),
+    ],
+  ])('rejects a mismatched %s', (_label, mutate) => {
+    expect(humanEvalReleasedManifestSchema.safeParse(mutate(buildReleasedManifest())).success).toBe(
+      false,
+    );
   });
 });

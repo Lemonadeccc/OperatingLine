@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   blenderExecutionDecisionReceiptSchema,
   blenderHistoryTransitionDecisionReceiptSchema,
+  decisionLifecycleEventSchema,
   localExecutionDecisionReceiptSchema,
   trainingRunDecisionReceiptSchema,
 } from '@operatingline/protocol';
@@ -127,5 +128,35 @@ describe('local execution decision receipts', () => {
         trainingUseValidationReceipt: { ...receipt, authorityKind: 'DatasetReleaseAuthorization' },
       }).success,
     ).toBe(false);
+  });
+
+  it('records dataset release authorization consumption and final manifest completion', () => {
+    const operationId = randomUUID();
+    const credentialId = randomUUID();
+    expect(
+      decisionLifecycleEventSchema.parse({
+        formatVersion: '1.0.0',
+        eventId: randomUUID(),
+        sequence: 4,
+        kind: 'dataset_release_authorization_consumed',
+        credentialId,
+        singleUseKeySha256: hash,
+        operationId,
+        bindingSha256: hash,
+        consumedAt: '2026-08-23T00:01:00.000Z',
+      }).kind,
+    ).toBe('dataset_release_authorization_consumed');
+    expect(
+      decisionLifecycleEventSchema.parse({
+        formatVersion: '1.0.0',
+        eventId: randomUUID(),
+        sequence: 5,
+        kind: 'dataset_release_completed',
+        credentialId,
+        operationId,
+        durableReceiptSha256: hash,
+        completedAt: '2026-08-23T00:01:01.000Z',
+      }).kind,
+    ).toBe('dataset_release_completed');
   });
 });

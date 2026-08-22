@@ -80,6 +80,23 @@ describe('public authority and decision JSON schemas', () => {
     await validatePublicJsonSchemaCases(readSchema('decision-lifecycle-event.schema.json'), [
       { value: event, accepted: true },
       {
+        value: { ...event, kind: 'dataset_release_authorization_consumed' },
+        accepted: true,
+      },
+      {
+        value: {
+          formatVersion: '1.0.0',
+          eventId: randomUUID(),
+          sequence: 1,
+          kind: 'dataset_release_completed',
+          credentialId: event.credentialId,
+          operationId: event.operationId,
+          durableReceiptSha256: hash,
+          completedAt: '2026-08-21T00:00:02.000Z',
+        },
+        accepted: true,
+      },
+      {
         value: Object.fromEntries(
           Object.entries(event).filter(([key]) => key !== 'singleUseKeySha256'),
         ),

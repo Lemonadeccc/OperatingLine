@@ -1,6 +1,15 @@
 import { z } from 'zod';
 
 import {
+  authoritySignedContent,
+  authorityValidationReceiptSchema,
+  datasetReleaseAuthorizationSchema,
+} from './authority.js';
+import {
+  computeProtocolCanonicalJsonSha256,
+  protocolJsonValueCanonicalization,
+} from './canonical-json-value.js';
+import {
   evalArtifactReferenceSchema,
   evalContentSha256Schema,
   humanEvalFormatVersionSchema,
@@ -544,3 +553,224 @@ export const humanEvalReleaseCandidateManifestSchema = z
 export type HumanEvalReleaseCandidateManifest = z.infer<
   typeof humanEvalReleaseCandidateManifestSchema
 >;
+
+const humanEvalReleasedManifestIntegritySchema = z.strictObject({
+  algorithm: z.literal('sha256'),
+  canonicalization: z.literal(protocolJsonValueCanonicalization),
+  contentSha256: evalContentSha256Schema,
+});
+
+const humanEvalReleaseProjectionSchema = z.strictObject({
+  audience: datasetReleaseAuthorizationSchema.shape.audience,
+  license: datasetReleaseAuthorizationSchema.shape.license,
+  redactionDecisionSha256: datasetReleaseAuthorizationSchema.shape.redactionDecisionSha256,
+  releaseScope: datasetReleaseAuthorizationSchema.shape.releaseScope,
+});
+
+const humanEvalReleasedManifestBaseSchema = z.strictObject({
+  formatVersion: humanEvalFormatVersionSchema,
+  kind: z.literal('human_eval_released_manifest'),
+  operationId: z.uuid(),
+  releaseCandidate: humanEvalReleaseCandidateManifestSchema,
+  authorization: datasetReleaseAuthorizationSchema,
+  authorizationContentSha256: evalContentSha256Schema,
+  validationReceipt: authorityValidationReceiptSchema,
+  validationReceiptSha256: evalContentSha256Schema,
+  release: humanEvalReleaseProjectionSchema,
+  dataHandling: z.strictObject({
+    trainingUse: z.literal('not_authorized'),
+  }),
+  integrity: humanEvalReleasedManifestIntegritySchema,
+});
+
+type HumanEvalReleasedManifestBase = z.infer<typeof humanEvalReleasedManifestBaseSchema>;
+
+/** Hashes every final-release field except the integrity envelope itself. */
+export function computeHumanEvalReleasedManifestContentSha256(
+  manifest: HumanEvalReleasedManifestBase,
+): string {
+  return computeProtocolCanonicalJsonSha256(
+    Object.fromEntries(Object.entries(manifest).filter(([key]) => key !== 'integrity')),
+  );
+}
+
+export const humanEvalReleasedManifestSchema = humanEvalReleasedManifestBaseSchema.superRefine(
+  (manifest, context) => {
+    const { authorization, releaseCandidate, validationReceipt } = manifest;
+    const expectedAuthorizationContentSha256 = computeProtocolCanonicalJsonSha256(
+      authoritySignedContent(authorization),
+    );
+    const expectedValidationReceiptSha256 = computeProtocolCanonicalJsonSha256(validationReceipt);
+
+    if (authorization.releaseCandidateManifestSha256 !== releaseCandidate.integrity.contentSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'releaseCandidateManifestSha256'],
+        message: 'Release authorization must bind the exact candidate manifest',
+      });
+    }
+    if (authorization.license !== releaseCandidate.suite.licenseId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'license'],
+        message: 'Release authorization license must match the candidate suite license',
+      });
+    }
+    if (manifest.authorizationContentSha256 !== expectedAuthorizationContentSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorizationContentSha256'],
+        message: 'Authorization content hash must bind the complete signed authorization content',
+      });
+    }
+    if (validationReceipt.authorityKind !== 'DatasetReleaseAuthorization') {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'authorityKind'],
+        message: 'Final release requires a DatasetReleaseAuthorization receipt',
+      });
+    }
+    if (validationReceipt.authorityId !== authorization.authorityId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'authorityId'],
+        message: 'Validation receipt must bind the embedded authorization id',
+      });
+    }
+    if (validationReceipt.signerId !== authorization.signature.signerId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'signerId'],
+        message: 'Validation receipt signer must match the authorization signer',
+      });
+    }
+    if (validationReceipt.keyId !== authorization.signature.keyId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'keyId'],
+        message: 'Validation receipt key must match the authorization key',
+      });
+    }
+    if (validationReceipt.authorityContentSha256 !== expectedAuthorizationContentSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'authorityContentSha256'],
+        message: 'Validation receipt must bind the complete signed authorization content',
+      });
+    }
+    if (
+      validationReceipt.targetSha256 !== authorization.releaseCandidateManifestSha256 ||
+      validationReceipt.targetSha256 !== releaseCandidate.integrity.contentSha256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'targetSha256'],
+        message: 'Validation receipt must target the exact authorized candidate manifest',
+      });
+    }
+    if (validationReceipt.sideEffect !== 'dataset_release') {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'sideEffect'],
+        message: 'Validation receipt must authorize the dataset_release side effect',
+      });
+    }
+    const validatedAt = Date.parse(validationReceipt.validatedAt);
+    if (
+      validatedAt < Date.parse(authorization.notBefore) ||
+      validatedAt >= Date.parse(authorization.expiresAt)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceipt', 'validatedAt'],
+        message: 'Validation receipt must be issued inside the authorization validity window',
+      });
+    }
+    if (
+      manifest.release.audience !== authorization.audience ||
+      manifest.release.license !== authorization.license ||
+      manifest.release.redactionDecisionSha256 !== authorization.redactionDecisionSha256 ||
+      manifest.release.releaseScope !== authorization.releaseScope
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['release'],
+        message: 'Release projection must exactly match the embedded authorization',
+      });
+    }
+    if (manifest.validationReceiptSha256 !== expectedValidationReceiptSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['validationReceiptSha256'],
+        message: 'Validation receipt hash must bind the complete receipt',
+      });
+    }
+    if (
+      manifest.integrity.contentSha256 !== computeHumanEvalReleasedManifestContentSha256(manifest)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['integrity', 'contentSha256'],
+        message: 'Released manifest integrity must bind every final-release field',
+      });
+    }
+  },
+);
+export type HumanEvalReleasedManifest = z.infer<typeof humanEvalReleasedManifestSchema>;
+
+export const humanEvalReleaseRequestSchema = z
+  .strictObject({
+    formatVersion: humanEvalFormatVersionSchema,
+    operationId: z.uuid(),
+    releaseCandidate: humanEvalReleaseCandidateManifestSchema,
+    authorization: datasetReleaseAuthorizationSchema,
+  })
+  .superRefine((request, context) => {
+    // Structural parsing can only bind the authorization to the candidate's declared integrity
+    // hash. The release coordinator must run the eval-kit integrity validator before live
+    // authority verification; this schema does not claim to recompute that legacy JSON hash.
+    if (
+      request.authorization.releaseCandidateManifestSha256 !==
+      request.releaseCandidate.integrity.contentSha256
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'releaseCandidateManifestSha256'],
+        message: 'Release authorization must bind the exact candidate manifest',
+      });
+    }
+    if (request.authorization.license !== request.releaseCandidate.suite.licenseId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authorization', 'license'],
+        message: 'Release authorization license must match the candidate suite license',
+      });
+    }
+  });
+export type HumanEvalReleaseRequest = z.infer<typeof humanEvalReleaseRequestSchema>;
+
+export const humanEvalReleaseResponseSchema = z
+  .strictObject({
+    formatVersion: humanEvalFormatVersionSchema,
+    operationId: z.uuid(),
+    status: z.enum(['created', 'already_completed']),
+    releasedManifestSha256: evalContentSha256Schema,
+    releasedManifest: humanEvalReleasedManifestSchema,
+  })
+  .superRefine((response, context) => {
+    if (response.operationId !== response.releasedManifest.operationId) {
+      context.addIssue({
+        code: 'custom',
+        path: ['releasedManifest', 'operationId'],
+        message: 'Release response must bind the requested operation id',
+      });
+    }
+    if (response.releasedManifestSha256 !== response.releasedManifest.integrity.contentSha256) {
+      context.addIssue({
+        code: 'custom',
+        path: ['releasedManifestSha256'],
+        message: 'Release response hash must bind the exact durable released manifest',
+      });
+    }
+  });
+export type HumanEvalReleaseResponse = z.infer<typeof humanEvalReleaseResponseSchema>;

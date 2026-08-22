@@ -24,7 +24,8 @@
             "provider_authorization_consumed",
             "blender_decision_consumed",
             "blender_history_transition_consumed",
-            "training_decision_consumed"
+            "training_decision_consumed",
+            "dataset_release_authorization_consumed"
           ]
         },
         "credentialId": {
@@ -87,7 +88,8 @@
             "provider_call_completed",
             "blender_execution_completed",
             "blender_history_transition_completed",
-            "training_run_completed"
+            "training_run_completed",
+            "dataset_release_completed"
           ]
         },
         "credentialId": {
