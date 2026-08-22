@@ -65,6 +65,7 @@ def fail(payload: dict[str, object]) -> None:
 
 UVSphereMenuControlProof().start(
     preflight_hook=lambda: True,
+    pre_mutation_hook=lambda: True,
     on_complete=finish,
     on_failure=fail,
 )

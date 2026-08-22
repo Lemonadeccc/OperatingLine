@@ -286,6 +286,7 @@ driver = shortcut_proof.SubdivisionSurfaceF9ShortcutProof(
 )
 driver.start(
     preflight_hook=lambda: True,
+    pre_mutation_hook=lambda: True,
     on_complete=complete,
     on_failure=fail,
 )

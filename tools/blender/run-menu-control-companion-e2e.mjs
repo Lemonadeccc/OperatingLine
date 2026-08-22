@@ -18,7 +18,7 @@ import { requireBlenderBinaries } from './blender-binaries.mjs';
 import { syncBlenderExtensionResources } from './sync-extension-resources.mjs';
 
 const accessToken = 'operatingline-menu-companion-e2e-token';
-const childTimeoutMs = 120_000;
+const childTimeoutMs = 180_000;
 const fixturePath = resolve('tests/e2e/blender/menu_control_companion_round_trip.py');
 const headers = {
   authorization: `Bearer ${accessToken}`,
@@ -214,13 +214,35 @@ async function runOne(blender) {
   let preparePromise;
   let executePromise;
   let restartPromise;
+  let runtimeRestartCount = 0;
   let originalTerminalAccepted = false;
+  let recoveryAckLossInjected = false;
+  let transitionAckLossInjected = false;
+  let transitionAckLossContentSha256;
   let terminalResult;
   const sessions = [];
   const progress = [];
   const ordinaryDeliveries = [];
-  const reconciliationDeliveries = [];
+  const terminalReconciliationDeliveries = [];
+  const historyReconciliationDeliveries = [];
   const recoveryAcks = [];
+  const historyTransitionPosts = [];
+
+  const beginRuntimeRestart = () => {
+    assert.equal(restartPromise, undefined, 'Runtime restart already in progress');
+    runtimeRestartCount += 1;
+    restartPromise = (async () => {
+      await runtime.stop();
+      runtime = await startRuntime({
+        databasePath,
+        accessToken,
+        actionCatalogs: blenderActionCatalogs,
+        interactionCatalogs: blenderInteractionCatalogs,
+      });
+    })().finally(() => {
+      restartPromise = undefined;
+    });
+  };
 
   const proxy = createServer(async (request, response) => {
     try {
@@ -285,7 +307,9 @@ async function runOne(blender) {
         parsedUpstream?.request
       ) {
         if (parsedUpstream.request.kind === 'native_terminal_reconcile') {
-          reconciliationDeliveries.push(parsedUpstream.request);
+          terminalReconciliationDeliveries.push(parsedUpstream.request);
+        } else if (parsedUpstream.request.kind === 'native_history_transition_reconcile') {
+          historyReconciliationDeliveries.push(parsedUpstream.request);
         } else {
           ordinaryDeliveries.push(parsedUpstream.request);
         }
@@ -303,6 +327,32 @@ async function runOne(blender) {
       ) {
         assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
         recoveryAcks.push(parsedBody);
+        if (
+          parsedBody.kind === 'native_history_transition_reconcile' &&
+          !recoveryAckLossInjected &&
+          parsedUpstream.result === 'accepted'
+        ) {
+          recoveryAckLossInjected = true;
+          response.writeHead(503, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ error: 'injected_history_recovery_ack_loss' }));
+          beginRuntimeRestart();
+          return;
+        }
+      }
+      if (
+        request.method === 'POST' &&
+        request.url === '/api/v1/companion/menu-control-proof-history-transition'
+      ) {
+        assert.equal(upstream.ok, true, upstreamBody.toString('utf8'));
+        historyTransitionPosts.push({ report: parsedBody, acknowledgement: parsedUpstream });
+        if (!transitionAckLossInjected && parsedUpstream.result === 'accepted') {
+          transitionAckLossInjected = true;
+          transitionAckLossContentSha256 = parsedBody.transitionContentSha256;
+          response.writeHead(503, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ error: 'injected_history_transition_ack_loss' }));
+          beginRuntimeRestart();
+          return;
+        }
       }
       if (
         request.method === 'POST' &&
@@ -321,17 +371,7 @@ async function runOne(blender) {
         }
         response.writeHead(503, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ error: 'injected_terminal_ack_loss' }));
-        restartPromise = (async () => {
-          await runtime.stop();
-          runtime = await startRuntime({
-            databasePath,
-            accessToken,
-            actionCatalogs: blenderActionCatalogs,
-            interactionCatalogs: blenderInteractionCatalogs,
-          });
-        })().finally(() => {
-          restartPromise = undefined;
-        });
+        beginRuntimeRestart();
         return;
       }
 
@@ -368,7 +408,7 @@ async function runOne(blender) {
       OPERATINGLINE_MENU_COMPANION_RUNTIME_URL: proxyUrl,
       OPERATINGLINE_MENU_COMPANION_ACCESS_TOKEN: accessToken,
       OPERATINGLINE_MENU_COMPANION_RESULT: resultPath,
-      OPERATINGLINE_MENU_COMPANION_TIMEOUT: '100',
+      OPERATINGLINE_MENU_COMPANION_TIMEOUT: '150',
     });
     await preparePromise;
     await executePromise;
@@ -376,9 +416,28 @@ async function runOne(blender) {
     const result = JSON.parse(readFileSync(resultPath, 'utf8'));
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.driverStartCount, 1);
-    assert.equal(result.nativeHistoryCursor, 8);
-    assert.deepEqual(result.objectLocation, [1.25, -2, 0.75]);
-    assert.deepEqual(result.objectScale, [1.5, 1.5, 1.5]);
+    assert.equal(result.nativeHistoryCursor, 0);
+    assert.equal(result.nativeUndoCount, 16);
+    assert.equal(result.nativeRedoCount, 8);
+    assert.equal(result.mutationLocked, false);
+    assert.equal(result.proofObjectExists, false);
+    assert.equal(result.markerExists, false);
+    assert.equal(result.historyCurrentExists, false);
+    assert.equal(result.historyStatus, 'superseded');
+    assert.equal(result.redoInvalidated, true);
+    assert.ok(
+      result.redoAttemptResult.includes('CANCELLED') ||
+        result.redoAttemptResult.includes('FINISHED') ||
+        result.redoAttemptResult.includes('POLL_REJECTED'),
+      `Unexpected native Redo result after supersession: ${result.redoAttemptResult}`,
+    );
+    assert.equal(result.terminalStatus, 'succeeded');
+    assert.deepEqual(result.lockedObjectLocation, [1.25, -2, 0.75]);
+    assert.deepEqual(result.lockedObjectScale, [1.5, 1.5, 1.5]);
+    assert.deepEqual(
+      result.observedCursors,
+      [7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+    );
     assert.equal(ordinaryDeliveries.length, 1, 'Native input delivery must not replay');
     assert.equal(progress.length, 7, 'Expected seven logical progress receipts');
     assert.deepEqual(
@@ -387,15 +446,86 @@ async function runOne(blender) {
     );
     assert.equal(terminalResult.status, 'succeeded');
     assert.equal(terminalResult.terminalEvidence.kind, 'succeeded_locked');
-    assert.ok(sessions.length >= 2, 'Runtime restart must establish a replacement lease');
+    assert.equal(runtimeRestartCount, 3);
+    assert.equal(recoveryAckLossInjected, true);
+    assert.equal(transitionAckLossInjected, true);
+    assert.ok(sessions.length >= 4, 'Each Runtime restart must establish a replacement lease');
+    assert.ok(new Set(sessions.map((session) => session.lease.leaseId)).size >= 4);
     assert.notEqual(sessions[0].lease.leaseId, sessions.at(-1).lease.leaseId);
-    assert.ok(reconciliationDeliveries.length >= 1, 'Expected native terminal reconciliation');
-    assert.equal(recoveryAcks.length, 1);
-    assert.equal(recoveryAcks[0].result.requestId, executionRequestId);
-    assert.equal(recoveryAcks[0].terminalResultContentSha256, result.terminalResultContentSha256);
-    assert.equal(recoveryAcks[0].expectedMarkerContentSha256, result.terminalMarkerContentSha256);
+    assert.equal(terminalReconciliationDeliveries.length, 0);
+    assert.ok(
+      historyReconciliationDeliveries.length >= 3,
+      'Expected history reconciliation after all Runtime restarts',
+    );
+    const historyRecoveryAcks = recoveryAcks.filter(
+      (ack) => ack.kind === 'native_history_transition_reconcile',
+    );
+    assert.ok(historyRecoveryAcks.length >= 3);
+    for (const ack of historyRecoveryAcks) {
+      assert.equal(ack.requestId, executionRequestId);
+      assert.equal(ack.terminalResultContentSha256, result.terminalResultContentSha256);
+      assert.equal(ack.expectedMarkerContentSha256, result.terminalMarkerContentSha256);
+    }
+    assert.equal(typeof transitionAckLossContentSha256, 'string');
+    assert.ok(
+      historyReconciliationDeliveries.some((delivery) =>
+        delivery.acknowledgedTransitionContentSha256s.includes(transitionAckLossContentSha256),
+      ),
+      'Expected recovery discovery to acknowledge the transition committed before ACK loss',
+    );
+    const uniqueTransitions = new Map();
+    for (const post of historyTransitionPosts) {
+      assert.ok(['accepted', 'duplicate'].includes(post.acknowledgement.result));
+      const transitionId = post.report.transition.transitionId;
+      const previous = uniqueTransitions.get(transitionId);
+      if (previous) {
+        assert.equal(
+          previous.transitionContentSha256,
+          post.report.transitionContentSha256,
+          'ACK-loss retry changed the native transition identity',
+        );
+      } else {
+        uniqueTransitions.set(transitionId, post.report);
+      }
+    }
+    assert.equal(uniqueTransitions.size, 24);
+    assert.equal(historyTransitionPosts.length, 24);
+    assert.equal(
+      historyTransitionPosts.filter((post) => post.acknowledgement.result === 'accepted').length,
+      24,
+    );
+    assert.equal(
+      historyTransitionPosts.some((post) => post.acknowledgement.result === 'duplicate'),
+      false,
+      'Recovery discovery must suppress direct retries already accepted by Runtime',
+    );
+    const expectedTransitions = [
+      ...Array.from({ length: 8 }, (_, index) => ({
+        direction: 'undo',
+        fromCursor: 8 - index,
+        toCursor: 7 - index,
+      })),
+      ...Array.from({ length: 8 }, (_, index) => ({
+        direction: 'redo',
+        fromCursor: index,
+        toCursor: index + 1,
+      })),
+      ...Array.from({ length: 8 }, (_, index) => ({
+        direction: 'undo',
+        fromCursor: 8 - index,
+        toCursor: 7 - index,
+      })),
+    ];
+    assert.deepEqual(
+      [...uniqueTransitions.values()].map(({ transition }) => ({
+        direction: transition.direction,
+        fromCursor: transition.fromCursor,
+        toCursor: transition.toCursor,
+      })),
+      expectedTransitions,
+    );
     console.log(
-      `Live menu-control Companion E2E passed ${versionResult}: 7 progress receipts, one native input delivery, ${sessions.length} leases, terminal marker reconciliation without replay`,
+      `Live menu-control Companion E2E passed ${versionResult}: 24 native Undo/Redo transitions, ${sessions.length} leases, three ACK-loss restarts, final baseline unlocked and superseded Redo invalidated without replay`,
     );
   } finally {
     if (proxy.listening) await closeServer(proxy);
